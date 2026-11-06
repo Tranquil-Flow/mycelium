@@ -13,7 +13,8 @@
 //! The last test replays paired probes recorded from the real oracle
 //! (fixtures/m16-coordinator-status-oracle.json), including typed inputs that hold surrogates
 //! as exact code points and deep values whose RecursionError depth was measured from a fresh
-//! top-level interpreter.
+//! top-level interpreter (with the cold and warm traces of the band the port declares), and a
+//! sixth test calls `status()` of a deep placement `node_id` on a default 2 MiB thread.
 use protocol::execution_graph::{self, Graph};
 use runtime::m16_capacity::{PlacementCapacity, PyNumber};
 use runtime::m16_coordinator::{
@@ -1896,7 +1897,8 @@ fn m16_runtime_status_validation_refusals() {
     // budgets, before the finite check and the round trip. Its own kind, code and message. The
     // depth is the oracle's, measured from a fresh top-level CPython 3.14.2 (the fixture's
     // `recursion` record): a top-level field whose value holds `limit` nested containers passes,
-    // one more raises, whatever the containers and the leaf.
+    // one more raises, whatever the containers and the leaf (the oracle's warm boundary; its cold
+    // first-seen-None band, 991-993, is the declared difference the parity test replays).
     let fixture: Value = serde_json::from_str(ORACLE).expect("the fixture");
     let limit = usize::try_from(
         fixture["recursion"]["validator_deepest_accepted"]
@@ -3176,6 +3178,96 @@ fn producer_status(deep: &Value) -> Result<PyJson, StatusError> {
     c.status()
 }
 
+/// An attempt-3 row's leaf (oracle_a3_one.py `LEAVES`).
+fn a3_leaf(input: &Value) -> (PyJson, Value) {
+    match input["leaf"].as_str().expect("a leaf") {
+        "none" => (none(), Value::Null),
+        "int" => (n(0), json!(0)),
+        "str" => (s("leaf"), json!("leaf")),
+        other => panic!("leaf {other}"),
+    }
+}
+
+/// An attempt-3 row's deep value as a Python value: `depth` one-element lists or one-key
+/// `{"a": ..}` dicts around the leaf, inside the row's template (oracle_a3_one.py `TEMPLATES`),
+/// built without recursion.
+fn a3_value(input: &Value) -> PyJson {
+    let depth = usize::try_from(input["depth"].as_u64().expect("a depth")).expect("small");
+    let deep = chain(
+        input["chain"].as_str().expect("a chain"),
+        depth,
+        a3_leaf(input).0,
+    );
+    let secret = || dict(vec![("secret", n(1))]);
+    match input["template"].as_str() {
+        None => deep,
+        Some("secret_key") => dict(vec![("secret", deep)]),
+        Some("secret_sibling") => dict(vec![("a", deep), ("secret", n(1))]),
+        Some("item_before_secret") => list(vec![deep, secret()]),
+        Some("secret_before_item") => list(vec![secret(), deep]),
+        Some(other) => panic!("template {other}"),
+    }
+}
+
+/// The same value as graph JSON (the probe's `graph_text` puts its json.dumps in the graph),
+/// built by moves only (`json!` would serialize each deep value again).
+fn a3_graph_value(input: &Value) -> Value {
+    let one_key = |key: &str, v: Value| {
+        let mut map = serde_json::Map::new();
+        map.insert(key.to_owned(), v);
+        Value::Object(map)
+    };
+    let depth = input["depth"].as_u64().expect("a depth");
+    let dicts = input["chain"] == "dict";
+    let deep = (0..depth).fold(a3_leaf(input).1, |v, _| {
+        if dicts {
+            one_key("a", v)
+        } else {
+            Value::Array(vec![v])
+        }
+    });
+    let secret = || one_key("secret", json!(1));
+    match input["template"].as_str() {
+        None => deep,
+        Some("secret_key") => one_key("secret", deep),
+        Some("secret_sibling") => {
+            let Value::Object(mut map) = one_key("a", deep) else {
+                unreachable!("an object")
+            };
+            map.insert("secret".to_owned(), json!(1));
+            Value::Object(map)
+        }
+        Some("item_before_secret") => Value::Array(vec![deep, secret()]),
+        Some("secret_before_item") => Value::Array(vec![secret(), deep]),
+        Some(other) => panic!("template {other}"),
+    }
+}
+
+/// An attempt-3 producer row's coordinator (oracle_a3_one.py, rig "a2probe"): the linear graph
+/// with the row's value as `deployment_id` or as p0's `node_id`, the fixture's rig, capacities
+/// and config, the real core (as [`producer_status`]).
+fn a3_coordinator(input: &Value) -> M16RuntimeCoordinator {
+    let mut graph = linear_doc();
+    let value = a3_graph_value(input);
+    match input["field"].as_str().expect("a field") {
+        "node_id" => graph["stages"][0]["placements"][0]["node_id"] = value,
+        field => graph[field] = value,
+    }
+    let rig = Rig::standard();
+    M16RuntimeCoordinator::new(rig.inputs(parse(&graph), caps(), factory_config()))
+        .expect("a coordinator")
+}
+
+/// Every run of an oracle trace gave the same outcome.
+fn assert_three_runs(label: &str, trace: &Value) {
+    assert!(
+        trace
+            .as_array()
+            .is_some_and(|runs| runs.len() == 3 && runs.iter().all(|run| run == &trace[0])),
+        "{label}: three equal runs {trace}"
+    );
+}
+
 /// Runs one new paired case, recording its label when an assertion in it fails.
 fn paired(failures: &mut Vec<String>, label: &str, case: impl FnOnce()) {
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(case)).is_err() {
@@ -3342,11 +3434,43 @@ fn m16_coordinator_status_python_value_domain_parity() {
     );
     let recursion_cases = recursion["cases"].as_array().expect("recursion cases");
     let producer = recursion["producer"].as_array().expect("producer cases");
+    // Attempt 3 (rv-l1b-m16-coordinator-status-a2 F2a; Moonweaver ruling, retro 3): CPython's
+    // boundary also follows its isinstance caches. In a fresh interpreter whose validation
+    // meets None for the first time in the deep walk (the reviewer's construction: an empty
+    // coordinator's real status, None inside `claim_boundary`), the oracle raises from depth
+    // 991 (cold); after one shallow None validation (warm) it accepts through 993 and raises
+    // from 994, as it does for int and str leaves either way. The port keeps the one warm
+    // boundary: every row matches its warm trace exactly, and a row whose cold trace differs is
+    // a declared difference inside the cold band. On the producer path (`status()` from a fresh
+    // top level) the cold trace raises from 989 and the warm one from 992 (the caller's frames);
+    // the port accepts through 993, each such row declared inside the producer band. Both bands
+    // end at the port's boundary; 994 and deeper raise on every path.
+    let a3 = &recursion["a3"];
+    assert_eq!(a3["python"], "3.14.2");
+    assert_eq!(a3["recursion_limit"], 1000);
+    assert_eq!(a3["runs_per_spec"], 3);
+    let band_of = |key: &str| {
+        let ends = &a3["declared_bands"][key];
+        (
+            ends[0].as_u64().expect("a band"),
+            ends[1].as_u64().expect("a band"),
+        )
+    };
+    let cold_band = band_of("validator_cold");
+    let producer_band = band_of("producer");
+    assert_eq!((cold_band.1, producer_band), (limit, band));
+    let cold_base = PyText::parse(
+        a3["reviewer_base_text"]
+            .as_str()
+            .expect("the reviewer's base"),
+    );
+    let validator_rows = a3["validator_band"].as_array().expect("validator rows");
+    let producer_rows = a3["producer_band"].as_array().expect("producer rows");
     // The test's own deep helpers (to_value and the core's canonical writer, one call per level
     // with debug-build frames) need more than the default test stack, so the deep cases run on
     // a larger one; the port's bounded walk on the default stack is
     // m16_runtime_status_validation_refusals.
-    let (deep_failures, declared) = std::thread::scope(|scope| {
+    let (deep_failures, declared, a3_declared) = std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(DEEP_CASE_STACK_BYTES)
             .spawn_scoped(scope, || {
@@ -3393,7 +3517,87 @@ fn m16_coordinator_status_python_value_domain_parity() {
                         }
                     });
                 }
-                (failures, declared)
+                let mut a3_declared = (0u64, 0u64);
+                for row in validator_rows {
+                    let label = format!("recursion a3 {}", row["name"]);
+                    let depth = row["input"]["depth"].as_u64().expect("a depth");
+                    let warm = row.get("warm").unwrap_or(&row["cold"]);
+                    let declared = warm != &row["cold"];
+                    if declared {
+                        a3_declared.0 += 1;
+                    }
+                    let input = with(&cold_base, "claim_boundary", a3_value(&row["input"]));
+                    paired(&mut failures, &label, || {
+                        assert_three_runs(&label, &row["cold"]);
+                        assert_three_runs(&label, warm);
+                        if declared {
+                            // The declared difference: the cold oracle raised, the warm one
+                            // accepted, inside the cold band.
+                            assert!(
+                                (cold_band.0..=cold_band.1).contains(&depth),
+                                "{label}: outside the cold band"
+                            );
+                            assert_eq!(row["cold"][0], "RecursionError", "{label}");
+                            assert_eq!(warm[0], "accepted", "{label}");
+                        }
+                        match validate_m16_runtime_status(&input) {
+                            Ok(doc) => {
+                                assert_eq!(warm[0], "accepted", "{label}: the oracle raised");
+                                assert_deep_document(&label, &row["result"], &doc);
+                            }
+                            Err(error) => {
+                                assert_ne!(warm[0], "accepted", "{label}: the oracle accepted");
+                                assert_status_error(
+                                    &label,
+                                    &row["error"],
+                                    &StatusError::Validation(error),
+                                );
+                            }
+                        }
+                    });
+                }
+                for row in producer_rows {
+                    let label = format!("recursion a3 {}", row["name"]);
+                    let depth = row["input"]["field_depth"].as_u64().expect("a depth");
+                    let cold_raised = row["cold"][0] != "accepted";
+                    let warm_accepted = row["warm"][0] == "accepted";
+                    let result = a3_coordinator(&row["input"]).status();
+                    if result.is_ok() && cold_raised {
+                        a3_declared.1 += 1;
+                    }
+                    paired(&mut failures, &label, || {
+                        assert_three_runs(&label, &row["cold"]);
+                        assert_three_runs(&label, &row["warm"]);
+                        match result {
+                            // The declared difference: the port accepts, the oracle's producer
+                            // path raised cold (and warm too past its caller's frames).
+                            Ok(doc) if cold_raised => {
+                                assert!(
+                                    (producer_band.0..=producer_band.1).contains(&depth),
+                                    "{label}: accepted outside the producer band"
+                                );
+                                assert_python_error(
+                                    &label,
+                                    &row["error"],
+                                    "RecursionError",
+                                    "maximum recursion depth exceeded",
+                                );
+                                if warm_accepted {
+                                    assert_deep_document(&label, &row["result"], &doc);
+                                }
+                            }
+                            Ok(doc) => assert_deep_document(&label, &row["result"], &doc),
+                            Err(error) => {
+                                assert!(
+                                    cold_raised && !warm_accepted,
+                                    "{label}: refused where the oracle accepts"
+                                );
+                                assert_status_error(&label, &row["error"], &error);
+                            }
+                        }
+                    });
+                }
+                (failures, declared, a3_declared)
             })
             .expect("a deep-case thread")
             .join()
@@ -3447,4 +3651,96 @@ fn m16_coordinator_status_python_value_domain_parity() {
         )
     );
     assert_eq!((attempt2, declared), ((33, 10, 3, 12, 34, 14), 5));
+    // Attempt 3: 22 validator rows (6 declared: cold None at 991, 992 and 993 in list and dict
+    // chains) and 44 producer rows (24 declared, all inside 989-993).
+    assert_eq!(
+        (validator_rows.len(), producer_rows.len(), a3_declared),
+        (22, 44, (6, 24))
+    );
+}
+
+/// std's default stack for a spawned thread (2 MiB), the one size on which the deep-placement
+/// regression calls `status()`.
+const DEFAULT_THREAD_STACK_BYTES: usize = 2_097_152;
+/// Set in the child process the deep-placement regression re-runs itself in.
+const DEEP_PLACEMENT_CHILD: &str = "M16_STATUS_DEEP_PLACEMENT_CHILD";
+
+/// rv-l1b-m16-coordinator-status-a2 F2b: `status()` of a coordinator whose graph holds a deep
+/// placement `node_id` (and the deep `deployment_id` controls) on a default 2 MiB thread. The
+/// graph is parsed and the coordinator built on a large setup thread; only `status()` runs on
+/// the small one, its outcome is compared there after with the oracle's (`recursion.a3.placement`,
+/// three fresh top-level runs each: RecursionError for node_id dict 2000/5000 and list 5000,
+/// accepted at depth 100, and a private key above the deep value refused first). A native stack
+/// overflow aborts the whole process, so the rows run in a child process (this test, re-run
+/// alone) and its clean exit is asserted here.
+#[test]
+fn m16_coordinator_status_deep_placement_default_stack() {
+    let oracle: Value = serde_json::from_str(ORACLE).expect("the fixture");
+    let rows = oracle["recursion"]["a3"]["placement"]
+        .as_array()
+        .expect("placement rows");
+    let matched = format!("deep placement rows matched: {}", rows.len());
+    if std::env::var_os(DEEP_PLACEMENT_CHILD).is_some() {
+        let failures = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(DEEP_CASE_STACK_BYTES)
+                .spawn_scoped(scope, || {
+                    let mut failures: Vec<String> = Vec::new();
+                    for row in rows {
+                        let label = format!("placement {}", row["name"]);
+                        let c = a3_coordinator(&row["input"]);
+                        paired(&mut failures, &label, || {
+                            assert_three_runs(&label, &row["cold"]);
+                            let result = std::thread::scope(|small| {
+                                std::thread::Builder::new()
+                                    .name("status-only-2MiB".into())
+                                    .stack_size(DEFAULT_THREAD_STACK_BYTES)
+                                    .spawn_scoped(small, || c.status())
+                                    .expect("a default-size thread")
+                                    .join()
+                                    .expect("status returned")
+                            });
+                            match result {
+                                Ok(doc) => {
+                                    assert_eq!(
+                                        row["cold"][0], "accepted",
+                                        "{label}: oracle raised"
+                                    );
+                                    assert_deep_document(&label, &row["result"], &doc);
+                                }
+                                Err(error) => assert_status_error(&label, &row["error"], &error),
+                            }
+                        });
+                        println!("{label} returned");
+                    }
+                    failures
+                })
+                .expect("a setup thread")
+                .join()
+                .expect("the rows ran")
+        });
+        assert_eq!(failures, Vec::<String>::new(), "rows unlike the oracle");
+        println!("{matched}");
+        return;
+    }
+    let child = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        .args([
+            "--exact",
+            "m16_coordinator_status_deep_placement_default_stack",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(DEEP_PLACEMENT_CHILD, "1")
+        .output()
+        .expect("the child ran");
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    let stderr = String::from_utf8_lossy(&child.stderr);
+    assert!(
+        child.status.success(),
+        "the child did not exit cleanly ({}):\n{stdout}\n{stderr}",
+        child.status
+    );
+    assert!(stdout.contains(&matched), "{stdout}");
+    assert_eq!(rows.len(), 11);
 }

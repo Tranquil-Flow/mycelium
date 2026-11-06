@@ -26189,6 +26189,1850 @@
      "type": "RecursionError"
     }
    }
-  ]
+  ],
+  "a3": {
+   "finding": "rv-l1b-m16-coordinator-status-a2 F2a (cold first-seen-type band) and F2b (deep placement node_id on the default 2 MiB stack)",
+   "ruling": "Moonweaver retro 3 (2026-11-06): the port keeps the one fixed 993 boundary (the oracle's warm, steady-state result); the band where a cold first-seen-type run raises and a warm run accepts is a reviewed declared difference",
+   "measurement_script": "$MYCELIUM_PROGRAM_ROOT/status/moonweaver/workers/l1b-m16-coordinator-status-a3/evidence/oracle_a3_measure.py (oracle_a3_one.py once per spec and run in a fresh /opt/homebrew/bin/python3.14 -B, the call at module top level; every run in oracle_a3_measure.jsonl, per-spec outcomes in oracle_a3_summary.json)",
+   "merge_script": "$MYCELIUM_PROGRAM_ROOT/status/moonweaver/workers/l1b-m16-coordinator-status-a3/evidence/fixture_a3_merge.py",
+   "python": "3.14.2",
+   "recursion_limit": 1000,
+   "runs_per_spec": 3,
+   "spec_count": 255,
+   "reviewer_base_text": "{\"batch_state\":{\"continuous_batching\":false,\"maximum_runtime_batch_size\":20,\"mode\":\"concurrent_request_sequential_stage_dispatch\",\"observed_batches\":[],\"pipeline_overlap\":false},\"claim_boundary\":\"bounded admission, immutable paths, QoS queue, and cleanup; physical microbatch and pipeline overlap unclaimed until observed\",\"deployment_epoch\":1,\"deployment_id\":\"deployment-m16\",\"generated_at_monotonic_s\":100.0,\"graph_digest\":\"sha256:c127d544ac21f5ec2edb32a2c22681e15d8f576aed4f1f8089b9c3b4b44b68cd\",\"incidents\":[],\"performance_budgets\":[],\"placements\":[{\"active_reservations\":0,\"free_kv_bytes\":1000000000000,\"free_memory_bytes\":1000000000000,\"free_workspace_bytes\":1000000000000,\"kv_capacity_bytes\":1000000000000,\"maximum_reservations\":64,\"memory_capacity_bytes\":1000000000000,\"node_id\":\"node-a\",\"placement_id\":\"p0\",\"reserved_kv_bytes\":0,\"reserved_memory_bytes\":0,\"reserved_workspace_bytes\":0,\"workspace_capacity_bytes\":1000000000000},{\"active_reservations\":0,\"free_kv_bytes\":1000000000000,\"free_memory_bytes\":1000000000000,\"free_workspace_bytes\":1000000000000,\"kv_capacity_bytes\":1000000000000,\"maximum_reservations\":64,\"memory_capacity_bytes\":1000000000000,\"node_id\":\"node-b\",\"placement_id\":\"p1\",\"reserved_kv_bytes\":0,\"reserved_memory_bytes\":0,\"reserved_workspace_bytes\":0,\"workspace_capacity_bytes\":1000000000000}],\"protocol\":\"mycelium.concurrent_request_runtime.v1\",\"queue\":{\"active_request_ids\":[],\"batch_depth\":0,\"depth\":0,\"interactive_depth\":0,\"maximum_active_requests\":1,\"maximum_bytes\":268435456,\"maximum_items\":1024,\"queued_bytes\":0},\"requests\":[],\"topology_version\":1}",
+   "declared_bands": {
+    "validator_cold": [
+     991,
+     993
+    ],
+    "producer": [
+     989,
+     993
+    ]
+   },
+   "validator_band": [
+    {
+     "name": "validator_list_none_990",
+     "input": {
+      "chain": "list",
+      "depth": 990,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "8018090b8d47024ec2646ebed01afcdde46e34c1641c0dc63f3b92f70299bc8a"
+     }
+    },
+    {
+     "name": "validator_list_none_991",
+     "input": {
+      "chain": "list",
+      "depth": 991,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "384af711c88f9a6e158a7b6b01f8a54303adc435bfb902673822cc59f78c96d9"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_list_none_992",
+     "input": {
+      "chain": "list",
+      "depth": 992,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "8d8aaf2a75a20e37a6938c33ea188ccda77306db03594282aea9b970e7297eb7"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_list_none_993",
+     "input": {
+      "chain": "list",
+      "depth": 993,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "f31c27aa22a0b3befd98d7242b0532ecfff6f9635f3aef438d9c5e0b3e2b099b"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_list_none_994",
+     "input": {
+      "chain": "list",
+      "depth": 994,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_list_int_993",
+     "input": {
+      "chain": "list",
+      "depth": 993,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "2874392a406192b05b5e27ea57c97d173de82867af047af3db034d8c98a9a92b"
+     }
+    },
+    {
+     "name": "validator_list_int_994",
+     "input": {
+      "chain": "list",
+      "depth": 994,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_list_str_993",
+     "input": {
+      "chain": "list",
+      "depth": 993,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ee8a3d425d0b0e3a2767aee079bbcd4c3fbf57022ea190e417782b83f5f4c4ec"
+     }
+    },
+    {
+     "name": "validator_list_str_994",
+     "input": {
+      "chain": "list",
+      "depth": 994,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_none_990",
+     "input": {
+      "chain": "dict",
+      "depth": 990,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "033ef16feb03919940de897a69486a878348c0d958370159be861cbee8555e11"
+     }
+    },
+    {
+     "name": "validator_dict_none_991",
+     "input": {
+      "chain": "dict",
+      "depth": 991,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "0c083ba158615d6bfd5cefa4865d2cf8bb790432e07b773a4aeefe40e4a58be5"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_none_992",
+     "input": {
+      "chain": "dict",
+      "depth": 992,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "a955c39fcd8539c2a8bafd9aba364b75dfeeb402d2896b260e51a12d112ecfd5"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_none_993",
+     "input": {
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ce8dce9e7e0d7c84f952e1a7ae9fe44e3e42239ef9c834df1bf15b3f35b5542c"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_none_994",
+     "input": {
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_int_993",
+     "input": {
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "af0cb8723a45a290808da50a15cbabb374a9eae3f6b26fe9e640b93f162add80"
+     }
+    },
+    {
+     "name": "validator_dict_int_994",
+     "input": {
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_dict_str_993",
+     "input": {
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "02ff3b0e5001962a124cabd2e9f8678dde852062931c26be2d7181fab717375a"
+     }
+    },
+    {
+     "name": "validator_dict_str_994",
+     "input": {
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_secret_key_1100",
+     "input": {
+      "chain": "list",
+      "depth": 1100,
+      "leaf": "int",
+      "template": "secret_key"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    },
+    {
+     "name": "validator_secret_sibling_1100",
+     "input": {
+      "chain": "list",
+      "depth": 1100,
+      "leaf": "int",
+      "template": "secret_sibling"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    },
+    {
+     "name": "validator_item_before_secret_1100",
+     "input": {
+      "chain": "list",
+      "depth": 1100,
+      "leaf": "int",
+      "template": "item_before_secret"
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "validator_secret_before_item_1100",
+     "input": {
+      "chain": "list",
+      "depth": 1100,
+      "leaf": "int",
+      "template": "secret_before_item"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    }
+   ],
+   "producer_band": [
+    {
+     "name": "producer_deployment_id_list_none_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "list",
+      "depth": 988,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "e04b185c6c66150821801863a10061315a6dd8c98967c07ce7ace575c8696d75"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_none_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "list",
+      "depth": 989,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "0db1f8953e134e0b8f39075b4cd238787d1b438fec94a1a1d1d511e5116317fd"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_none_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "list",
+      "depth": 991,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "81c23252b3e1d04e77325ea95dfdd8a44de39d0146193617b4f09c1470f14295"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_none_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "list",
+      "depth": 992,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_none_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "list",
+      "depth": 993,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_none_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "list",
+      "depth": 994,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "list",
+      "depth": 988,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ddbb6c8dab0728c90c34fd9c5f4143217f15cac05ecc6c26e02e5b1f14571555"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "list",
+      "depth": 989,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "917f8c0ebf009a2063d88fc0360a8e67951406cea047e2db13dd2d466c23aba6"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "list",
+      "depth": 991,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "aaa3f05653cecb442d0d4ac980d351480dcb78331b886fae4851038104b77da6"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "list",
+      "depth": 992,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "list",
+      "depth": 993,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_int_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "list",
+      "depth": 994,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "list",
+      "depth": 988,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "4516efad79ebd80d4666f628c61e602e915de620da4c10fad21f124317b0969d"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "list",
+      "depth": 989,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "f00cac0f0b1fa033c111a9cf387729cf9b5dd241c16c0ded1258c6fa5b5ae6e7"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "list",
+      "depth": 991,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "9125bfa618bb025683c486d957ea30da68c6e71166dc1a499e5e6bcaf757db5c"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "list",
+      "depth": 992,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "list",
+      "depth": 993,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_list_str_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "list",
+      "depth": 994,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_list_int_989",
+     "input": {
+      "field": "node_id",
+      "field_depth": 991,
+      "chain": "list",
+      "depth": 989,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "7e4ad7af15796e3e26a8667ed10ebe203331c1f45a7a533296a231eca3c488da"
+     }
+    },
+    {
+     "name": "producer_node_id_list_int_990",
+     "input": {
+      "field": "node_id",
+      "field_depth": 992,
+      "chain": "list",
+      "depth": 990,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_list_int_991",
+     "input": {
+      "field": "node_id",
+      "field_depth": 993,
+      "chain": "list",
+      "depth": 991,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_list_int_992",
+     "input": {
+      "field": "node_id",
+      "field_depth": 994,
+      "chain": "list",
+      "depth": 992,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "dict",
+      "depth": 988,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ee45460ea48d569fe59e4b9f73543fe5940665c9a436b801834ffa1087e8f6be"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "dict",
+      "depth": 989,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "dc70ab6e295e9e93b76bf7bc96c39a6246f57006867ce288c099e9e25bbab0ba"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "dict",
+      "depth": 991,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ed13fbac74513aea0664436b7ee335089253948da81e93fb940c3f2e43a53e8d"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "dict",
+      "depth": 992,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_none_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "none",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "dict",
+      "depth": 988,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "b10bef201e814f7d23462edf7daebe8b88f7ea735167bf6aeeebdd5e35cca5f6"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "dict",
+      "depth": 989,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "b11729cf171d23c82cc2a903335f9bd02db6ededada961c3a1ac20a29cbd4e56"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "dict",
+      "depth": 991,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "61d593fb25da6ffdf5822d93a6765a0e02fadf960c8e73dfd276f8a4804cd662"
+     },
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "dict",
+      "depth": 992,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_int_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_988",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 988,
+      "chain": "dict",
+      "depth": 988,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "3f9cfbc1db86aeb640968d5199ad14e84f44cf0a1202c6c0f937c4a0346a727b"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_989",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 989,
+      "chain": "dict",
+      "depth": 989,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ffda92078755c2f8499ab0620487e0517c0751b3497c110132af579641de3a00"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_991",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 991,
+      "chain": "dict",
+      "depth": 991,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "821ab82d59e75a9e6ccb3145e19ca56210024c344590242df38e957e0c09190e"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_992",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 992,
+      "chain": "dict",
+      "depth": 992,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_993",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 993,
+      "chain": "dict",
+      "depth": 993,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_deployment_id_dict_str_994",
+     "input": {
+      "field": "deployment_id",
+      "field_depth": 994,
+      "chain": "dict",
+      "depth": 994,
+      "leaf": "str",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_dict_int_989",
+     "input": {
+      "field": "node_id",
+      "field_depth": 991,
+      "chain": "dict",
+      "depth": 989,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "warm": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "c6fe09f73b2e167ad3760a4f734fdebd85096fb3ea910d5040afbbfc8ded2d11"
+     }
+    },
+    {
+     "name": "producer_node_id_dict_int_990",
+     "input": {
+      "field": "node_id",
+      "field_depth": 992,
+      "chain": "dict",
+      "depth": 990,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_dict_int_991",
+     "input": {
+      "field": "node_id",
+      "field_depth": 993,
+      "chain": "dict",
+      "depth": 991,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "producer_node_id_dict_int_992",
+     "input": {
+      "field": "node_id",
+      "field_depth": 994,
+      "chain": "dict",
+      "depth": 992,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "warm": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    }
+   ],
+   "placement": [
+    {
+     "name": "placement_node_id_dict_2000",
+     "input": {
+      "field": "node_id",
+      "chain": "dict",
+      "depth": 2000,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_node_id_dict_5000",
+     "input": {
+      "field": "node_id",
+      "chain": "dict",
+      "depth": 5000,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_node_id_list_5000",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_node_id_list_100",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 100,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "17eb4ed3873b97247a20710ab425d909991f90d0b2179cd601acfc35df8d5d79"
+     }
+    },
+    {
+     "name": "placement_node_id_dict_100",
+     "input": {
+      "field": "node_id",
+      "chain": "dict",
+      "depth": 100,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "accepted",
+      "accepted",
+      "accepted"
+     ],
+     "result": {
+      "canonical_sha256": "ecdae5f3cea43f9a2185e7f1369d3430a9ee18ad249b91831a6a16abef5d35d0"
+     }
+    },
+    {
+     "name": "placement_deployment_id_list_5000",
+     "input": {
+      "field": "deployment_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_deployment_id_dict_5000",
+     "input": {
+      "field": "deployment_id",
+      "chain": "dict",
+      "depth": 5000,
+      "leaf": "int",
+      "template": null
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_node_id_list_5000_secret_key",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": "secret_key"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    },
+    {
+     "name": "placement_node_id_list_5000_secret_sibling",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": "secret_sibling"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    },
+    {
+     "name": "placement_node_id_list_5000_item_before_secret",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": "item_before_secret"
+     },
+     "cold": [
+      "RecursionError",
+      "RecursionError",
+      "RecursionError"
+     ],
+     "error": {
+      "type": "RecursionError",
+      "message": "maximum recursion depth exceeded"
+     }
+    },
+    {
+     "name": "placement_node_id_list_5000_secret_before_item",
+     "input": {
+      "field": "node_id",
+      "chain": "list",
+      "depth": 5000,
+      "leaf": "int",
+      "template": "secret_before_item"
+     },
+     "cold": [
+      "ValueError",
+      "ValueError",
+      "ValueError"
+     ],
+     "error": {
+      "type": "ValueError",
+      "message": "M16 runtime status contains private content"
+     }
+    }
+   ]
+  }
  }
 }
