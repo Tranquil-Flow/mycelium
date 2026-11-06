@@ -47,6 +47,9 @@ use crate::sidecar_pool::{MessageId, OutboundHandle, SidecarState};
 use budgets::{BudgetId, Entries, Refusal};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+/// The reservation reason of an owner-fanned cancellation (:2772, :2842).
+const PATH_CANCELLED: &str = "path_cancelled";
+
 /// `PathCancellation` (contracts.py:361-365).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathCancellation {
@@ -109,6 +112,12 @@ impl PendingSend {
     pub fn cancel_confirmed(&self) -> bool {
         self.cancel_confirmed
     }
+    /// The exact (request, path, attempt) equality of both sweeps (:2762-2767, :2833-2837).
+    fn exact(&self, subject: &PathCancellation) -> bool {
+        self.request_id.as_deref() == Some(subject.request_id.as_str())
+            && self.path_id.as_deref() == Some(subject.path_id.as_str())
+            && self.path_attempt == Some(subject.path_attempt)
+    }
 }
 
 /// A refusal of the core's construction.
@@ -123,8 +132,6 @@ pub enum SubjectCancelError {
 /// Why an apply raised.
 #[derive(Debug)]
 pub enum ApplyFault<E> {
-    /// RED stub: the controlled cancellation is not ported yet.
-    Unported,
     /// `IrohTransportError("delivery_cancel_worker_collision")` (:2906-2907): a reserved send's
     /// message id still has a registered worker. Raised under the lock, before the Router
     /// hand-off, so the path is not forgotten.
@@ -137,7 +144,6 @@ impl<E> ApplyFault<E> {
     /// The oracle's error code, `None` for the Router's own error.
     pub fn code(&self) -> Option<&'static str> {
         match self {
-            Self::Unported => Some("subject_cancel_unported"),
             Self::WorkerCollision => Some("delivery_cancel_worker_collision"),
             Self::Router(_) => None,
         }
@@ -210,6 +216,15 @@ pub enum RouterAnswer {
     EntryReceive(bool),
     /// Neither: no owner-control entry point and no known entry (:4417-4418).
     NoEntryPoint,
+}
+
+impl RouterAnswer {
+    fn accepted(self) -> bool {
+        match self {
+            Self::OwnerControl(accepted) | Self::EntryReceive(accepted) => accepted,
+            Self::NoEntryPoint => false,
+        }
+    }
 }
 
 /// One subject's apply.
@@ -349,6 +364,9 @@ struct Worker {
     cleanup_deadline: Option<f64>,
     window: Option<CancelWindow>,
 }
+
+/// A worker collision raised by a sweep.
+struct Collision;
 
 /// The transport state the controlled cancellation reads and writes.
 pub struct SubjectCancel {
@@ -554,22 +572,216 @@ impl SubjectCancel {
     /// the named one in its place). `accepted` is the OR of the subjects.
     pub fn apply_controlled_path_cancellation<R: OwnerRouter>(
         &mut self,
-        router: Option<&mut R>,
+        mut router: Option<&mut R>,
         cancellation: &PathCancellation,
         entry_cancelled: bool,
         cleanup_deadline_monotonic_s: Option<f64>,
     ) -> Result<ApplyReceipt, ApplyError<R::Error>> {
-        drop(router);
-        drop((cancellation, entry_cancelled, cleanup_deadline_monotonic_s));
-        Err(ApplyError {
-            fault: ApplyFault::Unported,
-            partial: ApplyReceipt {
-                accepted: false,
-                gate: Gate::Admitted,
-                subjects: Vec::new(),
-                dispatched: Vec::new(),
+        let mut receipt = ApplyReceipt {
+            accepted: false,
+            gate: Gate::Admitted,
+            subjects: Vec::new(),
+            dispatched: Vec::new(),
+        };
+        if router.is_none() {
+            receipt.gate = Gate::NoRouter;
+            return Ok(receipt);
+        }
+        if let Some(gate) = self.refused(cancellation, entry_cancelled) {
+            receipt.gate = gate;
+            return Ok(receipt);
+        }
+        self.remember_controlled(&cancellation.request_id);
+        let mut subjects = vec![cancellation.clone()];
+        for registered in &self.path_subjects {
+            if registered.request_id != cancellation.request_id {
+                continue;
+            }
+            match subjects
+                .iter_mut()
+                .find(|subject| subject.path_id == registered.path_id)
+            {
+                Some(subject) => *subject = registered.clone(),
+                None => subjects.push(registered.clone()),
+            }
+        }
+        for subject in subjects {
+            match self.apply_subject(
+                router.as_deref_mut(),
+                &subject,
+                entry_cancelled,
+                cleanup_deadline_monotonic_s,
+                &mut receipt.dispatched,
+            ) {
+                Ok(trace) => {
+                    receipt.accepted = trace.accepted || receipt.accepted;
+                    receipt.subjects.push(trace);
+                }
+                Err((fault, trace)) => {
+                    receipt.subjects.push(trace);
+                    // Retain the admitted subject for owner retry (:4327-4332).
+                    self.set_path_subject(subject);
+                    return Err(ApplyError {
+                        fault,
+                        partial: receipt,
+                    });
+                }
+            }
+        }
+        Ok(receipt)
+    }
+
+    /// `_apply_controlled_path_cancellation` (:4337-4438) for one subject.
+    fn apply_subject<R: OwnerRouter>(
+        &mut self,
+        router: Option<&mut R>,
+        subject: &PathCancellation,
+        entry_cancelled: bool,
+        cleanup_deadline: Option<f64>,
+        dispatched: &mut Vec<DeliveryCancelDispatch>,
+    ) -> Result<SubjectTrace, (ApplyFault<R::Error>, SubjectTrace)> {
+        let mut trace = SubjectTrace {
+            subject: subject.clone(),
+            gate: Gate::Admitted,
+            sends: Vec::new(),
+            router: None,
+            accepted: false,
+        };
+        let entry_node = self.entry_nodes.get(&subject.request_id).cloned();
+        let Some(router) = router else {
+            trace.gate = Gate::NoRouter;
+            return Ok(trace);
+        };
+        if let Some(gate) = self.refused(subject, entry_cancelled) {
+            trace.gate = gate;
+            return Ok(trace);
+        }
+        // The exact cancellation fence, published before the sweeps (:4379-4385).
+        self.last_cancellation = Some(subject.clone());
+        self.remember_cancellation(subject);
+        self.remember_controlled(&subject.request_id);
+        let swept = self
+            .sweep(
+                subject,
+                Sweep::CancellableForward,
+                None,
+                &mut trace.sends,
+                dispatched,
+            )
+            .and_then(|()| {
+                self.sweep(
+                    subject,
+                    Sweep::ExactSubject,
+                    cleanup_deadline,
+                    &mut trace.sends,
+                    dispatched,
+                )
+            });
+        if swept.is_err() {
+            return Err((ApplyFault::WorkerCollision, trace));
+        }
+        let answer = match router.apply_controlled_path_cancellation(subject) {
+            Some(result) => result.map(RouterAnswer::OwnerControl),
+            None => match entry_node.as_deref() {
+                Some(entry) => router
+                    .receive_path_cancellation(subject, entry)
+                    .map(RouterAnswer::EntryReceive),
+                None => Ok(RouterAnswer::NoEntryPoint),
             },
-        })
+        };
+        let observed =
+            self.cancellation_observed(&subject.request_id, &subject.path_id, subject.path_attempt);
+        // `finally`: the registries are retired even when the Router raised (:4426-4438).
+        self.forget_path(&subject.request_id, &subject.path_id);
+        match answer {
+            Ok(answer) => {
+                trace.router = Some(answer);
+                trace.accepted = answer.accepted() || observed;
+                Ok(trace)
+            }
+            Err(error) => Err((ApplyFault::Router(error), trace)),
+        }
+    }
+
+    /// The gates shared by the public entry and each subject (:4310-4315, :4363-4378); none
+    /// applies while the request's entry is unknown.
+    fn refused(&self, subject: &PathCancellation, entry_cancelled: bool) -> Option<Gate> {
+        let entry = self.entry_nodes.get(&subject.request_id)?;
+        if self
+            .participants
+            .get(&subject.path_id)
+            .is_some_and(|nodes| !nodes.contains(&self.node_id))
+        {
+            return Some(Gate::NotParticipant);
+        }
+        if *entry != self.node_id && entry_cancelled {
+            return Some(Gate::EntryCancelOnNonEntry);
+        }
+        None
+    }
+
+    /// One sweep over a snapshot of `_pending` (:2761-2780 with `cancellable_forward`,
+    /// :2832-2850 without): reserve each exact-subject send (:2704-2719) and register one worker
+    /// for each newly reserved one (:2898-2922).
+    fn sweep(
+        &mut self,
+        subject: &PathCancellation,
+        sweep: Sweep,
+        cleanup_deadline: Option<f64>,
+        sends: &mut Vec<SendSweep>,
+        dispatched: &mut Vec<DeliveryCancelDispatch>,
+    ) -> Result<(), Collision> {
+        let live = self.pending.clone();
+        for (message_id, record) in live {
+            let Some(send) = self.records.get_mut(&record) else {
+                continue;
+            };
+            if (sweep == Sweep::CancellableForward && !send.cancellable_forward)
+                || !send.exact(subject)
+            {
+                continue;
+            }
+            let reservation = if send.completed {
+                Reservation::Completed
+            } else if send.cancel_started {
+                Reservation::AlreadyStarted
+            } else {
+                send.cancelled = true;
+                send.reason = PATH_CANCELLED;
+                send.cancel_started = true;
+                if self.workers.iter().any(|(id, _)| *id == message_id) {
+                    sends.push(SendSweep {
+                        message_id,
+                        sweep,
+                        reservation: Reservation::WorkerCollision { cleanup_deadline },
+                    });
+                    return Err(Collision);
+                }
+                let token = self.next_id();
+                self.workers.push((
+                    message_id,
+                    Worker {
+                        token,
+                        record,
+                        cleanup_deadline,
+                        window: None,
+                    },
+                ));
+                dispatched.push(DeliveryCancelDispatch {
+                    message_id,
+                    record,
+                    token,
+                    cleanup_deadline,
+                });
+                Reservation::Reserved { cleanup_deadline }
+            };
+            sends.push(SendSweep {
+                message_id,
+                sweep,
+                reservation,
+            });
+        }
+        Ok(())
     }
 
     // ---- delivery-cancel workers -------------------------------------------------------------
@@ -583,16 +795,48 @@ impl SubjectCancel {
         dispatch: DeliveryCancelDispatch,
         clock: &impl MonotonicClock,
     ) -> WorkerStart {
-        drop(clock.monotonic());
-        WorkerStart::Sidecar(RunningDeliveryCancel {
-            message_id: dispatch.message_id,
-            token: dispatch.token,
-            window: CancelWindow {
-                started_at: 0.0,
-                deadline: 0.0,
-                ack_window: 0.0,
-            },
-        })
+        let started_at = clock.monotonic();
+        let (deadline, ack_window) = match dispatch.cleanup_deadline {
+            None => {
+                // Python's `min(cap, timeout)`: the timeout only when strictly smaller.
+                let window = if self.delivery_timeout_seconds < self.ack_cap_seconds {
+                    self.delivery_timeout_seconds
+                } else {
+                    self.ack_cap_seconds
+                };
+                (started_at + window, window)
+            }
+            Some(deadline) => {
+                // Python's `max(0.0, remaining)`: the remaining time only when strictly larger.
+                let remaining = deadline - started_at;
+                (deadline, if remaining > 0.0 { remaining } else { 0.0 })
+            }
+        };
+        let window = CancelWindow {
+            started_at,
+            deadline,
+            ack_window,
+        };
+        let current = self.current_worker(dispatch.message_id, dispatch.token);
+        if let Some(at) = current {
+            self.workers[at].1.window = Some(window);
+        }
+        let started = match self.records.get_mut(&dispatch.record) {
+            Some(send) if !send.admission_started => {
+                send.cancel_confirmed = true;
+                if let Some(at) = current {
+                    self.workers.remove(at);
+                }
+                WorkerStart::LocallyConfirmed(window)
+            }
+            _ => WorkerStart::Sidecar(RunningDeliveryCancel {
+                message_id: dispatch.message_id,
+                token: dispatch.token,
+                window,
+            }),
+        };
+        self.release_record(dispatch.record);
+        started
     }
 
     /// The worker's `finally` (:3086-3101): a confirmed answer confirms the live send of the
@@ -600,7 +844,18 @@ impl SubjectCancel {
     /// answer then makes the live send eligible for a later sweep again (`cancel_started`
     /// false), still a cleanup blocker. A send removed meanwhile is not an error.
     pub fn finish_delivery_cancel(&mut self, running: RunningDeliveryCancel, result: CancelResult) {
-        drop((running, result));
+        let confirmed = result == CancelResult::Confirmed;
+        let live = self.live(&running.message_id);
+        if confirmed && let Some(send) = live.and_then(|record| self.records.get_mut(&record)) {
+            send.cancel_confirmed = true;
+        }
+        if let Some(at) = self.current_worker(running.message_id, running.token) {
+            self.workers.remove(at);
+            if !confirmed && let Some(send) = live.and_then(|record| self.records.get_mut(&record))
+            {
+                send.cancel_started = false;
+            }
+        }
     }
 
     // ---- internals ---------------------------------------------------------------------------
@@ -615,6 +870,12 @@ impl SubjectCancel {
             .find(|(id, _)| id == message_id)
             .map(|(_, record)| *record)
     }
+    /// `self._delivery_cancel_threads.get(message_id) is current`.
+    fn current_worker(&self, message_id: MessageId, token: u64) -> Option<usize> {
+        self.workers
+            .iter()
+            .position(|(id, worker)| *id == message_id && worker.token == token)
+    }
     /// Drops an object neither `_pending` nor an unstarted worker still holds.
     fn release_record(&mut self, record: u64) {
         let held = self.pending.iter().any(|(_, live)| *live == record)
@@ -624,6 +885,42 @@ impl SubjectCancel {
                 .any(|(_, worker)| worker.record == record && worker.window.is_none());
         if !held {
             self.records.remove(&record);
+        }
+    }
+    /// `_remember_cancellation_locked` (:1274-1283).
+    fn remember_cancellation(&mut self, cancellation: &PathCancellation) {
+        self.cancellations_by_subject.retain(|c| {
+            !c.is(
+                &cancellation.request_id,
+                &cancellation.path_id,
+                cancellation.path_attempt,
+            )
+        });
+        self.cancellations_by_subject
+            .push_back(cancellation.clone());
+        while self.cancellations_by_subject.len() > self.history_capacity {
+            self.cancellations_by_subject.pop_front();
+        }
+    }
+    /// `_remember_controlled_cancellation_locked` (:1285-1292).
+    fn remember_controlled(&mut self, request_id: &str) {
+        self.controlled_requests.retain(|r| r != request_id);
+        self.controlled_requests.push_back(request_id.to_owned());
+        while self.controlled_requests.len() > self.history_capacity {
+            self.controlled_requests.pop_front();
+        }
+    }
+    /// `_forget_path` (:4712-4719), without the wiring's path graphs.
+    fn forget_path(&mut self, request_id: &str, path_id: &str) {
+        self.participants.remove(path_id);
+        self.path_subjects
+            .retain(|subject| subject.path_id != path_id);
+        if !self
+            .path_subjects
+            .iter()
+            .any(|subject| subject.request_id == request_id)
+        {
+            self.entry_nodes.remove(request_id);
         }
     }
 }
