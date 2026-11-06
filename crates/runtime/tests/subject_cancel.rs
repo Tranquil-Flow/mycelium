@@ -15,12 +15,14 @@ use runtime::sidecar_pool::{
     SidecarState,
 };
 use runtime::subject_cancel::{
-    ApplyError, ApplyReceipt, CancelResult, CancelWindow, Gate, OwnerRouter, PathCancellation,
-    PendingSend, Reservation, RouterAnswer, RunningDeliveryCancel, SendSweep, SidecarCancel,
-    SubjectCancel, SubjectTrace, Sweep, WorkerStart, WorkerView,
+    ApplyError, ApplyFault, ApplyReceipt, CancelResult, CancelWindow, Gate, OwnerRouter,
+    PathCancellation, PendingSend, Reservation, RouterAnswer, RunningDeliveryCancel, SendSweep,
+    SidecarCancel, SubjectCancel, SubjectTrace, Sweep, WorkerStart, WorkerView,
 };
 use std::cell::Cell;
+use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::fmt::Debug;
 
 const NODE: &str = "local-node";
 
@@ -69,6 +71,47 @@ impl OwnerRouter for Router {
     }
 }
 
+/// The Router's own error (a Router that raises; the physical node retries it,
+/// physical_inference_node.py:5635-5645).
+#[derive(Debug, PartialEq)]
+struct RouterRaised;
+
+/// An owner-control Router that answers each call from its script, in call order.
+struct ScriptedRouter {
+    script: VecDeque<Result<bool, RouterRaised>>,
+    owner_calls: Vec<PathCancellation>,
+}
+
+impl ScriptedRouter {
+    fn new(script: impl IntoIterator<Item = Result<bool, RouterRaised>>) -> Self {
+        Self {
+            script: script.into_iter().collect(),
+            owner_calls: Vec::new(),
+        }
+    }
+}
+
+impl OwnerRouter for ScriptedRouter {
+    type Error = RouterRaised;
+    fn apply_controlled_path_cancellation(
+        &mut self,
+        cancellation: &PathCancellation,
+    ) -> Option<Result<bool, RouterRaised>> {
+        self.owner_calls.push(cancellation.clone());
+        let answer = self.script.pop_front();
+        Some(answer.unwrap_or_else(|| panic!("no scripted Router answer for {cancellation:?}")))
+    }
+    fn receive_path_cancellation(
+        &mut self,
+        cancellation: &PathCancellation,
+        source_node_id: &str,
+    ) -> Result<bool, RouterRaised> {
+        panic!(
+            "an owner-control Router is never asked to receive {cancellation:?} from {source_node_id}"
+        )
+    }
+}
+
 fn subject(request: &str, path: &str, attempt: u64) -> PathCancellation {
     PathCancellation {
         request_id: request.to_owned(),
@@ -105,8 +148,23 @@ fn send(core: &mut SubjectCancel, n: u8, request: &str, path: &str, attempt: u64
     id(n)
 }
 
+/// A deferred path forward (`cancellable_forward=True`) that has started sidecar admission.
+fn forward_send(
+    core: &mut SubjectCancel,
+    n: u8,
+    request: &str,
+    path: &str,
+    attempt: u64,
+) -> MessageId {
+    let mut pending = PendingSend::new(Some(request), Some(path), Some(attempt));
+    pending.cancellable_forward = true;
+    pending.admission_started = true;
+    core.register_pending(id(n), pending);
+    id(n)
+}
+
 /// The public apply must be an accepted success.
-fn accepted(result: Result<ApplyReceipt, ApplyError<Infallible>>) -> ApplyReceipt {
+fn accepted<E: Debug>(result: Result<ApplyReceipt, ApplyError<E>>) -> ApplyReceipt {
     assert!(
         result.as_ref().is_ok_and(|receipt| receipt.accepted),
         "the public apply must be an accepted success, got {:?}",
@@ -123,6 +181,15 @@ fn reserved(message_id: MessageId, cleanup_deadline: Option<f64>) -> SendSweep {
         message_id,
         sweep: Sweep::ExactSubject,
         reservation: Reservation::Reserved { cleanup_deadline },
+    }
+}
+
+/// An exact-subject send whose cancellation had already started: no second worker.
+fn already_started(message_id: MessageId) -> SendSweep {
+    SendSweep {
+        message_id,
+        sweep: Sweep::ExactSubject,
+        reservation: Reservation::AlreadyStarted,
     }
 }
 
@@ -161,6 +228,21 @@ fn on_sidecar(started: WorkerStart) -> RunningDeliveryCancel {
     }
 }
 
+/// The (message id, cleanup deadline) of each registered worker, in registration order.
+fn worker_deadlines(receipt: &ApplyReceipt) -> Vec<(MessageId, Option<f64>)> {
+    receipt
+        .dispatched
+        .iter()
+        .map(|d| (d.message_id(), d.cleanup_deadline()))
+        .collect()
+}
+
+/// The node ids registered as a path's participants.
+fn participant_ids<'a>(core: &'a SubjectCancel, path_id: &str) -> Option<Vec<&'a str>> {
+    core.participants(path_id)
+        .map(|nodes| nodes.iter().map(String::as_str).collect())
+}
+
 /// A worker started at 100 s under the supplied absolute 107 s: the deadline verbatim and
 /// `max(0, 107 - 100)` left (:2975-2976).
 const AT_100_UNTIL_107: CancelWindow = CancelWindow {
@@ -179,6 +261,13 @@ const AT_101_UNTIL_107: CancelWindow = CancelWindow {
     started_at: 101.0,
     deadline: 107.0,
     ack_window: 6.0,
+};
+/// A worker with no cleanup deadline started at 100 s, delivery timeout 5 s: the
+/// `min(1.0, 5.0)` ACK window and 100 + 1 (:2960-2964).
+const AT_100_ACK_1S: CancelWindow = CancelWindow {
+    started_at: 100.0,
+    deadline: 101.0,
+    ack_window: 1.0,
 };
 
 /// A sidecar holding one queued outbound item per message id.
@@ -288,6 +377,66 @@ fn subject_cancel_supplied_deadline_reaches_every_matching_delivery() {
     );
     assert_eq!(core.delivery_cancel_workers(), 2);
     assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 2);
+
+    // A deferred forward of the same subject is met first, by the forward sweep (:4386,
+    // :2761-2780), and its worker gets no cleanup deadline (:2780): the 1 s ACK window even
+    // under the supplied 107. The exact sweep (:4391-4393) then reserves the ordinary send with
+    // 107 and finds the forward already started.
+    let clock = Clock::at(100.0);
+    let mut core = transport(5.0);
+    register(&mut core, &rp1);
+    let ordinary = send(&mut core, 1, "R", "P", 1);
+    let forward = forward_send(&mut core, 2, "R", "P", 1);
+    let mut router = Router::default();
+
+    let receipt = accepted(core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &rp1,
+        true,
+        Some(107.0),
+    ));
+
+    assert_eq!(
+        receipt.subjects,
+        vec![applied(
+            &rp1,
+            vec![
+                SendSweep {
+                    message_id: forward,
+                    sweep: Sweep::CancellableForward,
+                    reservation: Reservation::Reserved {
+                        cleanup_deadline: None
+                    },
+                },
+                reserved(ordinary, Some(107.0)),
+                already_started(forward),
+            ]
+        )]
+    );
+    assert_eq!(
+        worker_deadlines(&receipt),
+        vec![(forward, None), (ordinary, Some(107.0))]
+    );
+    assert_eq!(router.owner_calls, vec![rp1.clone()]);
+    assert_eq!(flags(&core, ordinary), RESERVED);
+    assert_eq!(flags(&core, forward), RESERVED);
+    let windows: Vec<(MessageId, CancelWindow)> = receipt
+        .dispatched
+        .into_iter()
+        .map(|d| on_sidecar(core.start_delivery_cancel(d, &clock)))
+        .map(|running| (running.message_id(), running.window()))
+        .collect();
+    assert_eq!(
+        windows,
+        vec![(forward, AT_100_ACK_1S), (ordinary, AT_100_UNTIL_107)]
+    );
+    assert_eq!(
+        core.delivery_cancel_worker(&forward),
+        Some(WorkerView {
+            cleanup_deadline: None,
+            window: Some(AT_100_ACK_1S),
+        })
+    );
 }
 
 #[test]
@@ -466,6 +615,199 @@ fn subject_cancel_successor_lineage_included() {
             (on_successor, AT_100_UNTIL_107),
         ]
     );
+
+    // The lineage is the named request's only (:4317-4319): a registered subject of request S
+    // is not applied, not forgotten, its send stays untouched and the Router never sees it. A
+    // same-request successor whose path excludes this node is refused by its own gate
+    // (:4368-4373) and stays registered, so R keeps its entry; the public result is the OR of
+    // the subjects (:4334), accepted although the last one was refused.
+    let clock = Clock::at(100.0);
+    let mut core = transport(5.0);
+    let other = subject("S", "X", 1);
+    let elsewhere = subject("R", "T", 4);
+    register(&mut core, &original);
+    register(&mut core, &successor);
+    register(&mut core, &other);
+    core.set_participants("T", ["peer-node"]);
+    core.set_path_subject(elsewhere.clone());
+    let on_original = send(&mut core, 1, "R", "P", 1);
+    let on_successor = send(&mut core, 2, "R", "Q", 2);
+    let on_other = send(&mut core, 3, "S", "X", 1);
+    let on_elsewhere = send(&mut core, 4, "R", "T", 4);
+    let mut router = Router::default();
+
+    let receipt = accepted(core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &original,
+        true,
+        Some(107.0),
+    ));
+
+    assert_eq!(receipt.gate, Gate::Admitted);
+    assert_eq!(
+        receipt.subjects,
+        vec![
+            applied(&original, vec![reserved(on_original, Some(107.0))]),
+            applied(&successor, vec![reserved(on_successor, Some(107.0))]),
+            SubjectTrace {
+                subject: elsewhere.clone(),
+                gate: Gate::NotParticipant,
+                sends: vec![],
+                router: None,
+                accepted: false,
+            },
+        ]
+    );
+    assert_eq!(
+        router.owner_calls,
+        vec![original.clone(), successor.clone()]
+    );
+    assert_eq!(
+        worker_deadlines(&receipt),
+        vec![(on_original, Some(107.0)), (on_successor, Some(107.0))]
+    );
+    assert_eq!(flags(&core, on_original), RESERVED);
+    assert_eq!(flags(&core, on_successor), RESERVED);
+    for untouched in [on_other, on_elsewhere] {
+        assert_eq!(flags(&core, untouched), UNTOUCHED, "{untouched:?}");
+        assert_eq!(
+            core.delivery_cancel_worker(&untouched),
+            None,
+            "{untouched:?}"
+        );
+    }
+    assert_eq!(core.delivery_cancel_workers(), 2);
+    assert_eq!(core.path_subjects(), &[other.clone(), elsewhere.clone()]);
+    assert_eq!(core.entry_node("R"), Some(NODE));
+    assert_eq!(core.entry_node("S"), Some(NODE));
+    assert_eq!(participant_ids(&core, "P"), None);
+    assert_eq!(participant_ids(&core, "Q"), None);
+    assert_eq!(participant_ids(&core, "X"), Some(vec![NODE, "peer-node"]));
+    assert_eq!(participant_ids(&core, "T"), Some(vec!["peer-node"]));
+    assert!(core.cancellation_observed("R", "P", 1));
+    assert!(core.cancellation_observed("R", "Q", 2));
+    assert!(!core.cancellation_observed("S", "X", 1));
+    assert!(!core.cancellation_observed("R", "T", 4));
+    assert!(core.request_controlled_cancelled("R"));
+    assert!(!core.request_controlled_cancelled("S"));
+    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 3);
+    assert_eq!(core.pending_delivery_count("S", "X", Some(1)), 1);
+    let windows: Vec<(MessageId, CancelWindow)> = receipt
+        .dispatched
+        .into_iter()
+        .map(|d| on_sidecar(core.start_delivery_cancel(d, &clock)))
+        .map(|running| (running.message_id(), running.window()))
+        .collect();
+    assert_eq!(
+        windows,
+        vec![
+            (on_original, AT_100_UNTIL_107),
+            (on_successor, AT_100_UNTIL_107),
+        ]
+    );
+
+    // A Router raising on the successor: the error propagates with everything applied before
+    // it, and the successor, forgotten by its `finally` (:4426-4438), is registered again for
+    // owner retry (:4327-4332). The retry re-applies it; this time the Router answers False for
+    // it, and its own fence is observed, so its trace is still accepted (:4419-4424).
+    let clock = Clock::at(101.0);
+    let mut core = transport(5.0);
+    register(&mut core, &original);
+    register(&mut core, &successor);
+    let on_original = send(&mut core, 1, "R", "P", 1);
+    let on_successor = send(&mut core, 2, "R", "Q", 2);
+    let mut router = ScriptedRouter::new([Ok(true), Err(RouterRaised)]);
+
+    let raised = match core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &original,
+        true,
+        Some(107.0),
+    ) {
+        Err(error) => error,
+        Ok(receipt) => panic!(
+            "the Router's error must propagate, got accepted={}",
+            receipt.accepted
+        ),
+    };
+    assert!(
+        matches!(raised.fault, ApplyFault::Router(RouterRaised)),
+        "{:?}",
+        raised.fault
+    );
+    assert_eq!(raised.fault.code(), None);
+    assert!(raised.partial.accepted);
+    assert_eq!(raised.partial.gate, Gate::Admitted);
+    assert_eq!(
+        raised.partial.subjects,
+        vec![
+            applied(&original, vec![reserved(on_original, Some(107.0))]),
+            SubjectTrace {
+                subject: successor.clone(),
+                gate: Gate::Admitted,
+                sends: vec![reserved(on_successor, Some(107.0))],
+                router: None,
+                accepted: false,
+            },
+        ]
+    );
+    assert_eq!(
+        worker_deadlines(&raised.partial),
+        vec![(on_original, Some(107.0)), (on_successor, Some(107.0))]
+    );
+    assert_eq!(
+        router.owner_calls,
+        vec![original.clone(), successor.clone()]
+    );
+    assert_eq!(core.path_subjects(), &[successor.clone()]);
+    assert_eq!(core.entry_node("R"), None);
+    assert_eq!(participant_ids(&core, "Q"), None);
+    assert!(core.cancellation_observed("R", "Q", 2));
+    assert_eq!(flags(&core, on_original), RESERVED);
+    assert_eq!(flags(&core, on_successor), RESERVED);
+
+    router.script.extend([Ok(true), Ok(false)]);
+    let retry = accepted(core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &original,
+        true,
+        Some(107.0),
+    ));
+    assert_eq!(
+        retry.subjects,
+        vec![
+            applied(&original, vec![already_started(on_original)]),
+            SubjectTrace {
+                subject: successor.clone(),
+                gate: Gate::Admitted,
+                sends: vec![already_started(on_successor)],
+                router: Some(RouterAnswer::OwnerControl(false)),
+                accepted: true,
+            },
+        ]
+    );
+    assert_eq!(retry.dispatched.len(), 0);
+    assert!(router.script.is_empty());
+    assert_eq!(
+        router.owner_calls,
+        vec![
+            original.clone(),
+            successor.clone(),
+            original.clone(),
+            successor.clone()
+        ]
+    );
+    assert_eq!(core.path_subjects(), &[] as &[PathCancellation]);
+    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 2);
+    for d in raised.partial.dispatched {
+        let running = on_sidecar(core.start_delivery_cancel(d, &clock));
+        assert_eq!(running.window(), AT_101_UNTIL_107);
+        core.finish_delivery_cancel(running, CancelResult::Confirmed);
+    }
+    assert_eq!(flags(&core, on_original), CONFIRMED);
+    assert_eq!(flags(&core, on_successor), CONFIRMED);
+    assert_eq!(core.pending_delivery_count("R", "P", Some(1)), 0);
+    assert_eq!(core.delivery_cancel_workers(), 0);
 }
 
 #[test]
