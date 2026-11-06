@@ -688,8 +688,9 @@ fn serving_gateway_root_status_responsive_while_driver_held() {
     let (tx, rx) = mpsc::channel();
     let reader = host.clone();
     let started = Instant::now();
-    std::thread::spawn(move || {
-        let _ = tx.send(request(&reader, "GET", "/api/status", None));
+    let status_read = std::thread::spawn(move || {
+        tx.send(request(&reader, "GET", "/api/status", None))
+            .is_ok()
     });
     let answer = rx.recv_timeout(millis(B::ModelSelection));
     let elapsed = started.elapsed();
@@ -697,6 +698,10 @@ fn serving_gateway_root_status_responsive_while_driver_held() {
     // Always release and join, including a broken host.
     rig.release();
     let stopped = stop.join().unwrap();
+    assert!(
+        status_read.join().unwrap(),
+        "the status reply had no receiver"
+    );
     eprintln!(
         "status_ms={} held={still_held} answered={}",
         elapsed.as_secs_f64() * 1000.0,
