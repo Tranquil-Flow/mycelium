@@ -8,15 +8,16 @@
 //! `_open_acquisition`, app.py:649-672 @ f4e366e9) downloads it into that same layout. The window
 //! always opens on the packaged action root; until the pinned snapshot is there the chat answers
 //! 503 `model_not_installed`, and once this process's acquisition prepared it the native service
-//! is composed over it on demand, without a relaunch. The node service is SLICE-1's:
-//! operator-fixture consent, development qualification identity, local 127.0.0.1 Iroh only. It is
-//! a real native service, not a certified release core.
+//! is composed over it on demand, without a relaunch. Quit closes the acquisition
+//! (`DemoApp.close`, app.py:1845-1847), so the next launch answers `closed`. The node service is
+//! SLICE-1's: operator-fixture consent, development qualification identity, local 127.0.0.1 Iroh
+//! only. It is a real native service, not a certified release core.
 use crate::{
     app_host::ModelSource,
     desktop_host::{DesktopServices, ModelGate},
     service::{Driver, Job, NodeService},
 };
-use api::{acquisition::Transport, schema::PublicError};
+use api::{acquisition::Transport, resources::Observer, schema::PublicError};
 use desktop::{
     core::Core,
     lifecycle::{Cleanup, CleanupError, Poll},
@@ -27,6 +28,7 @@ use std::{
     os::unix::fs::DirBuilderExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    thread::JoinHandle,
 };
 
 /// The four page endpoints (`state`, `send`, `events`, `stop`) the slice smoke served with;
@@ -136,38 +138,121 @@ impl ModelGate for NativeOnDemand {
     }
 }
 pub enum AppCleanup {
-    Service(Box<ServiceCleanup<DesktopServices>>),
+    /// The window's services, then the run model's acquisition.
+    Service(Box<ServiceCleanup<DesktopServices>>, ModelClose),
     Nothing,
 }
 impl Cleanup for AppCleanup {
     fn bind_clock(&mut self, origin: std::time::Instant) -> Result<(), CleanupError> {
         match self {
-            Self::Service(cleanup) => cleanup.bind_clock(origin),
+            Self::Service(cleanup, _) => cleanup.bind_clock(origin),
             Self::Nothing => Ok(()),
         }
     }
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
-            Self::Service(cleanup) => cleanup.begin(deadline),
+            Self::Service(cleanup, model) => {
+                cleanup.begin(deadline)?;
+                model.begin();
+                Ok(())
+            }
             Self::Nothing => Ok(()),
         }
     }
     fn poll(&mut self) -> Result<Poll, CleanupError> {
         match self {
-            Self::Service(cleanup) => cleanup.poll(),
+            Self::Service(cleanup, model) => match cleanup.poll()? {
+                Poll::Verified => model.poll(),
+                Poll::Pending => Ok(Poll::Pending),
+            },
             Self::Nothing => Ok(Poll::Verified),
         }
     }
 }
+/// Quit's acquisition step, `DemoApp.close` (app.py:1845-1847 @ f4e366e9):
+/// `self.acquisition.close()` cancels and joins the running attempt and persists `closed`, so the
+/// next launch answers `closed` with the bytes kept, never a recovered interrupted transfer. The
+/// attempt is asked to stop as soon as Quit begins; the close runs on its own thread once the
+/// window's services have stopped (no request can start or reopen an attempt after it), and its
+/// receipt is read without blocking. A close that fails keeps its code on stderr and leaves the
+/// cleanup unproven, as v0.1.4's `cleanup_error = 'acquisition_stop_failed'` makes its launcher
+/// report `cleanup_incomplete`.
+pub struct ModelClose {
+    source: ModelSource,
+    close: Closing,
+}
+enum Closing {
+    NotStarted,
+    Running(JoinHandle<Result<(), String>>),
+    Closed,
+    Failed,
+}
+impl ModelClose {
+    fn new(source: ModelSource) -> Self {
+        Self {
+            source,
+            close: Closing::NotStarted,
+        }
+    }
+    fn begin(&self) {
+        self.source.cancel();
+    }
+    fn poll(&mut self) -> Result<Poll, CleanupError> {
+        const FAILED: &str = "model source: acquisition_stop_failed";
+        match std::mem::replace(&mut self.close, Closing::Failed) {
+            Closing::NotStarted => {
+                let source = self.source.clone();
+                match std::thread::Builder::new()
+                    .name("packaged-acquisition-close".into())
+                    .spawn(move || source.close())
+                {
+                    Ok(worker) => {
+                        self.close = Closing::Running(worker);
+                        Ok(Poll::Pending)
+                    }
+                    Err(_) => {
+                        eprintln!("{FAILED}: acquisition_close_thread_unavailable");
+                        Err(CleanupError::Poll)
+                    }
+                }
+            }
+            Closing::Running(worker) if !worker.is_finished() => {
+                self.close = Closing::Running(worker);
+                Ok(Poll::Pending)
+            }
+            Closing::Running(worker) => match worker.join() {
+                Ok(Ok(())) => {
+                    self.close = Closing::Closed;
+                    Ok(Poll::Verified)
+                }
+                Ok(Err(code)) => {
+                    eprintln!("{FAILED}: {code}");
+                    Err(CleanupError::Poll)
+                }
+                Err(_) => {
+                    eprintln!("{FAILED}: acquisition_close_panicked");
+                    Err(CleanupError::Poll)
+                }
+            },
+            Closing::Closed => {
+                self.close = Closing::Closed;
+                Ok(Poll::Verified)
+            }
+            Closing::Failed => Err(CleanupError::Poll),
+        }
+    }
+}
 
-/// [`core`] with the model repository's transport given (a test serves a loopback repository).
+/// [`core`] with the model repository's transport and this Mac's resource observer given (a test
+/// serves a loopback repository and controls the observation).
 pub fn core_with(
     state_root: &Path,
     transport: Arc<dyn Transport>,
+    observer: Arc<dyn Observer>,
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     compose(
         state_root,
-        ModelSource::new(state_root.to_owned(), transport),
+        ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
     )
 }
 /// The core and cleanup for the window, from the state root.
@@ -199,7 +284,11 @@ fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, App
         crate::native::development_qualification().map_err(|e| format!("compose:{e}"))?,
     );
     let services =
-        DesktopServices::with_model_source(node, CALLBACK_CAPACITY, &private, source).gated(native);
+        DesktopServices::with_model_source(node, CALLBACK_CAPACITY, &private, source.clone())
+            .gated(native);
     let (core, cleanup) = desktop::services::adapt(Arc::new(services), CALLBACK_CAPACITY);
-    Ok((core, AppCleanup::Service(Box::new(cleanup))))
+    Ok((
+        core,
+        AppCleanup::Service(Box::new(cleanup), ModelClose::new(source)),
+    ))
 }

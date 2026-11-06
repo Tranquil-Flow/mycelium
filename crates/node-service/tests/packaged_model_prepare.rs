@@ -133,32 +133,6 @@ fn observation(power: &str, thermal: &str, network: &str) -> Observation {
 fn permissive() -> Observation {
     observation("external", "nominal", "unmetered")
 }
-/// RED only: the 1d48f36 source has no observation seam, so this shim ignores the observer and
-/// reports nothing observed, as that source does. The fix commit replaces it with the source's own.
-trait UnobservedSource {
-    fn with_observer(self, observer: Arc<dyn Observer>) -> Self;
-    fn policy_error(&self) -> Option<&'static str>;
-    fn resource_observation(&self) -> Observation;
-}
-impl UnobservedSource for ModelSource {
-    fn with_observer(self, _: Arc<dyn Observer>) -> Self {
-        self
-    }
-    fn policy_error(&self) -> Option<&'static str> {
-        None
-    }
-    fn resource_observation(&self) -> Observation {
-        Observation::unknown()
-    }
-}
-/// RED only: `packaged::core_with` without the observer it cannot take yet.
-fn core_with(
-    state: &Path,
-    transport: Arc<dyn Transport>,
-    _: Arc<dyn Observer>,
-) -> Result<(Arc<dyn Core>, AppCleanup), String> {
-    packaged::core_with(state, transport)
-}
 
 // ---- the tiny snapshot and its loopback repository ----
 
@@ -502,7 +476,7 @@ fn packaged_core(
     observed: &Observed,
 ) -> (Arc<dyn Core>, AppCleanup) {
     let (core, mut cleanup) =
-        core_with(state, repository.transport(), Arc::new(observed.clone())).unwrap();
+        packaged::core_with(state, repository.transport(), Arc::new(observed.clone())).unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
     (core, cleanup)
 }

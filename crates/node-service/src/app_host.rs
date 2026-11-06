@@ -9,9 +9,11 @@
 //! process has no relay and no public origin, so its seed answers on its own loopback address
 //! and a pairing code asked for waits for a relay (app.py:1703-1710). The run model's acquisition
 //! (`/api/model/download`, `/api/model/cancel`, the re-open after a run-model choice) is
-//! `api::app_host`'s too, over the [`ModelSource`] the packaged composition gives the host. Every
-//! other seam keeps the trait default, so an action whose producer is not ported yet (join,
-//! consent binding, serving compile) answers the host's 409 `action_not_completed`.
+//! `api::app_host`'s too, over the [`ModelSource`] the packaged composition gives the host, and
+//! the download is guarded by this Mac's resource observation against the owner's saved consent
+//! (`_resource_check`, [`PackagedHost`]'s `resource_check`). Every other seam keeps the trait
+//! default, so an action whose producer is not ported yet (join, consent binding, serving
+//! compile) answers the host's 409 `action_not_completed`.
 //! `/api/serving/status` keeps the trait default block on purpose: it is v0.1.4's own answer
 //! (app.py:1377-1399 @ f4e366e9; `{compilation: null, serving: null, route_ready: false}` until a
 //! chain compile starts, chain_compile.py:197), executed on the real packaged process in
@@ -22,7 +24,8 @@ use api::{
     actions::{Action, Backend as _},
     app_host::{self, AcquisitionSite, AcquisitionView, Authority},
     persistent::{Host, TOKEN_PATH_ENV},
-    preferences::{fast_mode, run_model},
+    preferences::{fast_mode, resource_policy, run_model},
+    resources::{self, Observation, Observer, ProbeObserver},
     schema::PublicError,
     wire::Json,
 };
@@ -75,32 +78,48 @@ impl FastModeProcess {
     }
 }
 
-/// `DemoApp.acquisition`, `DemoApp._acquisition_active` and `DemoApp.acquisition_policy_error`.
+/// `DemoApp.acquisition`, `DemoApp._acquisition_active`, `DemoApp.acquisition_policy_error` and
+/// `DemoApp.resource_observation` (`None` until the first check: `UNKNOWN_OBSERVATION`, app.py:563).
 #[derive(Default)]
 struct Acquisitions {
     acquisition: Option<Acquisition>,
     active: bool,
     policy_error: Option<&'static str>,
+    observation: Option<Observation>,
 }
 /// The packaged process's model source: `DemoApp.acquisition` (`_open_acquisition`, app.py:649-672
 /// @ f4e366e9) over v0.1.4's `model-source-*` directories in the state root, beside the private
 /// `v02-node/`, where the packaged lookup (`packaged::locate_model`) reads, fetched through one
-/// repository transport. Clones share one state: the packaged host opens, starts and cancels the
-/// attempts through `api::app_host`, the packaged core asks whether the pinned model was prepared.
+/// repository transport, and `DemoApp._policy_observer`, this Mac's power, thermal state and
+/// network. Clones share one state: the packaged host opens, starts and cancels the attempts
+/// through `api::app_host`, the packaged core asks whether the pinned model was prepared and
+/// closes the acquisition at Quit.
 #[derive(Clone)]
 pub struct ModelSource {
     sources: PathBuf,
     transport: Arc<dyn Transport>,
+    observer: Arc<dyn Observer>,
     state: Arc<Mutex<Acquisitions>>,
 }
 impl ModelSource {
-    /// `sources` is the state root the `model-source-*` directories live in.
+    /// `sources` is the state root the `model-source-*` directories live in. This Mac is observed
+    /// by the helper bundled beside the executable (`native/resource_probe`,
+    /// `ProbeObserver::beside_executable`, resources.py `_resource_probe_candidates`); without one
+    /// every observation is unknown and the resource guard refuses, as v0.1.4 does when its
+    /// observer fails (fail closed).
     pub fn new(sources: PathBuf, transport: Arc<dyn Transport>) -> Self {
         Self {
             sources,
             transport,
+            observer: Arc::new(ProbeObserver::beside_executable()),
             state: Arc::default(),
         }
+    }
+    /// This source with `observer` in place of the bundled helper (a test controls what this Mac
+    /// reports, as v0.1.4's tests replace `DemoApp._policy_observer`).
+    pub fn with_observer(mut self, observer: Arc<dyn Observer>) -> Self {
+        self.observer = observer;
+        self
     }
     /// The public Hugging Face hub (`_HTTPRepositoryTransport`), refused before any socket while
     /// `MYCELIUM_OFFLINE` is on (`mycelium_platform_neutral.offline`: `1`/`true`/`yes`/`on`).
@@ -120,6 +139,57 @@ impl ModelSource {
         self.lock().acquisition.as_ref().is_some_and(|acquisition| {
             acquisition.model().resolved_commit == revision
                 && acquisition.verified_snapshot().is_some()
+        })
+    }
+    /// `app.resource_observation`: the last observation the resource guard made, unknown before
+    /// the first.
+    pub fn resource_observation(&self) -> Observation {
+        self.lock()
+            .observation
+            .clone()
+            .unwrap_or_else(Observation::unknown)
+    }
+    /// `app.acquisition_policy_error`: the resource guard's last refusal, cleared by a started
+    /// attempt or a run-model choice.
+    pub fn policy_error(&self) -> Option<&'static str> {
+        self.lock().policy_error
+    }
+    /// One observation of this Mac, kept as `resource_observation` (`self.resource_observation =
+    /// observation`, app.py:941). The helper runs outside the state's lock.
+    fn observe(&self) -> Observation {
+        let observation = self.observer.observe();
+        self.lock().observation = Some(observation.clone());
+        observation
+    }
+    /// Quit's first step, at once: the running attempt is asked to stop, as `close()` sets the
+    /// attempt's cancel event before it joins (acquisition.py:1527-1534); `_acquisition_active`
+    /// is cleared (`_cancel_acquisition`). Nothing waits here.
+    pub(crate) fn cancel(&self) {
+        let mut state = self.lock();
+        let Acquisitions {
+            acquisition,
+            active,
+            policy_error,
+            ..
+        } = &mut *state;
+        app_host::cancel_acquisition(&mut AcquisitionView {
+            acquisition,
+            active,
+            policy_error,
+        });
+    }
+    /// `self.acquisition.close()` at Quit (`DemoApp.close`, app.py:1845-1847 @ f4e366e9;
+    /// acquisition.py:1524-1549): cancel and join the running attempt, persist `closed`, release
+    /// the process lock. Blocks up to the library's own join patience; the library's code when it
+    /// cannot close. Without an acquisition (it could not be opened) there is nothing to close.
+    pub(crate) fn close(&self) -> Result<(), String> {
+        let acquisition = {
+            let mut state = self.lock();
+            state.active = false;
+            state.acquisition.clone()
+        };
+        acquisition.map_or(Ok(()), |acquisition| {
+            acquisition.close().map_err(|e| e.code().to_owned())
         })
     }
     fn lock(&self) -> MutexGuard<'_, Acquisitions> {
@@ -146,6 +216,7 @@ impl ModelSource {
             acquisition,
             active,
             policy_error,
+            ..
         } = &mut *state;
         step(
             &mut AcquisitionView {
@@ -380,6 +451,21 @@ impl Host for PackagedHost {
     /// `app._acquisition_active` (v0.1.4's `False` without an acquisition, app.py:560).
     fn acquisition_active(&self) -> bool {
         self.model.as_ref().is_some_and(ModelSource::active)
+    }
+    /// `app._resource_check()` (app.py:929-947 @ f4e366e9), as the headless launcher's: this
+    /// Mac's observation from the model source's observer, kept as `resource_observation`, against
+    /// the saved resource policy (`read_resource_policy(self.root) or {}`) by
+    /// `resources::policy_violation` (resources.py:152-181); the power, thermal and network gates
+    /// are never softened. The packaged process has no member-leave fence and no A16 adaptive
+    /// admission. A host without a model source observes nothing: its download keeps the trait
+    /// default answer.
+    fn resource_check(&mut self) -> Option<&'static str> {
+        let observation = self.model.as_ref()?.observe();
+        let policy = resource_policy::read(&self.root)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        resources::policy_violation(&policy, &observation)
     }
     /// `app.owner_run.active()`: the node service's run still owns its driver.
     fn owner_run_active(&self) -> bool {
