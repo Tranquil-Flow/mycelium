@@ -12,6 +12,7 @@ use artifacts::acquisition::{
     PyValue, loads, validate_acquisition_status,
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 const INVALID: &str = "artifact_acquisition_status_invalid";
@@ -347,6 +348,45 @@ fn acquisition_status_bool_timestamp_refused() {
         accepted(&base()).aggregate_bytes_per_second,
         PyNumber::Float(1.5)
     );
+    // Only the type refuses these: with started_at 1, `true` (1) would pass updated >= started,
+    // and with updated_at 1 it would pass terminal >= updated (:314 via :1191-1203); the int 1 in
+    // the same place is accepted.
+    let ones = with(
+        base(),
+        &[
+            ("started_at_unix_ms", json!(1)),
+            ("updated_at_unix_ms", json!(1)),
+        ],
+    );
+    assert_eq!(outcome(&ones), "accepted");
+    let mut refused = vec![with(ones.clone(), &[("updated_at_unix_ms", json!(true))])];
+    for state in ["ready", "cancelled", "failed"] {
+        let ones = with(
+            terminal(state),
+            &[
+                ("started_at_unix_ms", json!(1)),
+                ("updated_at_unix_ms", json!(1)),
+                ("terminal_at_unix_ms", json!(1)),
+            ],
+        );
+        assert_eq!(outcome(&ones), "accepted", "{state}");
+        refused.push(with(ones, &[("terminal_at_unix_ms", json!(true))]));
+    }
+    for doc in &refused {
+        assert_eq!(outcome(doc), INVALID, "{doc}");
+    }
+    // The store refuses the same documents in current.json and leaves the file as it was.
+    let root = store_root("acq-bool-open-ok", Some(ones.to_string().as_bytes()), None);
+    assert_eq!(open_outcome(&root), "opened");
+    fs::remove_dir_all(&root).unwrap();
+    for doc in &refused {
+        let bytes = doc.to_string().into_bytes();
+        let root = store_root("acq-bool-open", Some(&bytes), None);
+        assert_eq!(open_outcome(&root), "artifact_state_corrupt", "{doc}");
+        assert_eq!(fs::read(root.join("state/current.json")).unwrap(), bytes);
+        assert!(!root.join("state/history.json").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[test]
@@ -476,6 +516,51 @@ fn acquisition_status_interrupted_current_recovered_failed() {
     assert_eq!(
         store.finish(&PyValue::from_json(&base())).unwrap_err().code,
         "artifact_terminal_status_invalid"
+    );
+    fs::remove_dir_all(&root).unwrap();
+
+    // 5. finish keeps the last history_limit statuses (:405): 65 terminal entries plus the
+    // recovered one, opened with history_limit 64, leave generations 3..=65 and the recovery.
+    let entries: Vec<Value> = (1..=65)
+        .map(|g| {
+            with(
+                terminal("cancelled"),
+                &[
+                    ("acquisition_id", json!(format!("acq-h{g}"))),
+                    ("generation", json!(g)),
+                ],
+            )
+        })
+        .collect();
+    let interrupted = with(
+        base(),
+        &[
+            ("generation", json!(66)),
+            ("updated_at_unix_ms", json!(FUTURE)),
+        ],
+    );
+    let root = store_root(
+        "acq-recover-limit",
+        Some(interrupted.to_string().as_bytes()),
+        Some(Value::Array(entries.clone()).to_string().as_bytes()),
+    );
+    let ledger = ArtifactAcquisitionStore::open(&root, 64)
+        .unwrap()
+        .ledger()
+        .unwrap();
+    let generations: Vec<u64> = ledger.history.iter().map(|s| s.generation).collect();
+    assert_eq!(generations, (3..=66).collect::<Vec<u64>>());
+    let kept: Vec<AcquisitionStatus> = entries[2..].iter().map(accepted).collect();
+    assert_eq!(ledger.history[..63], kept[..]);
+    assert_eq!(
+        ledger.history[63].reason_code.as_deref(),
+        Some("interrupted_transfer")
+    );
+    // The executed oracle's history.json for exactly these two files (86290 bytes).
+    let written = fs::read(root.join("state/history.json")).unwrap();
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&written)),
+        "c1dfc01d72f6e5ab4ddb38e20617099c736a66e295a3cd26051d8c429b94f43d"
     );
     fs::remove_dir_all(&root).unwrap();
 }
