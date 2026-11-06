@@ -7,19 +7,22 @@
 //! windows) is `api::app_host`, the same code the headless L3 launcher runs, and the host keeps
 //! the owner's lease renewed with that library's pass (`_renew_loop`, [`PackagedHost`]); the packaged
 //! process has no relay and no public origin, so its seed answers on its own loopback address
-//! and a pairing code asked for waits for a relay (app.py:1703-1710). Every other seam keeps the
-//! trait default, so an action whose producer is not ported yet (join, consent binding, model
-//! download, serving compile) answers the host's 409 `action_not_completed`.
+//! and a pairing code asked for waits for a relay (app.py:1703-1710). The run model's acquisition
+//! (`/api/model/download`, `/api/model/cancel`, the re-open after a run-model choice) is
+//! `api::app_host`'s too, over the [`ModelSource`] the packaged composition gives the host. Every
+//! other seam keeps the trait default, so an action whose producer is not ported yet (join,
+//! consent binding, serving compile) answers the host's 409 `action_not_completed`.
 //! `/api/serving/status` keeps the trait default block on purpose: it is v0.1.4's own answer
 //! (app.py:1377-1399 @ f4e366e9; `{compilation: null, serving: null, route_ready: false}` until a
 //! chain compile starts, chain_compile.py:197), executed on the real packaged process in
 //! `test-support/journeys/fixtures/python-v014-boundaries.json` (`no_model_no_execution_proposal`).
 use crate::service::NodeService;
 use api::{
+    acquisition::{Acquisition, HttpTransport, Transport},
     actions::{Action, Backend as _},
-    app_host::{self, Authority},
+    app_host::{self, AcquisitionSite, AcquisitionView, Authority},
     persistent::{Host, TOKEN_PATH_ENV},
-    preferences::fast_mode,
+    preferences::{fast_mode, run_model},
     schema::PublicError,
     wire::Json,
 };
@@ -27,7 +30,7 @@ use budgets::{BudgetId, Entries};
 use serde_json::{Map, Value};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError, mpsc},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc},
     thread::JoinHandle,
     time::Duration,
 };
@@ -72,18 +75,101 @@ impl FastModeProcess {
     }
 }
 
-/// The packaged process's model source: the state root its `model-source-*` directories live in
-/// and the repository transport. (Stub: not consulted yet.)
+/// `DemoApp.acquisition`, `DemoApp._acquisition_active` and `DemoApp.acquisition_policy_error`.
+#[derive(Default)]
+struct Acquisitions {
+    acquisition: Option<Acquisition>,
+    active: bool,
+    policy_error: Option<&'static str>,
+}
+/// The packaged process's model source: `DemoApp.acquisition` (`_open_acquisition`, app.py:649-672
+/// @ f4e366e9) over v0.1.4's `model-source-*` directories in the state root, beside the private
+/// `v02-node/`, where the packaged lookup (`packaged::locate_model`) reads, fetched through one
+/// repository transport. Clones share one state: the packaged host opens, starts and cancels the
+/// attempts through `api::app_host`, the packaged core asks whether the pinned model was prepared.
+#[derive(Clone)]
 pub struct ModelSource {
-    _sources: PathBuf,
-    _transport: Arc<dyn api::acquisition::Transport>,
+    sources: PathBuf,
+    transport: Arc<dyn Transport>,
+    state: Arc<Mutex<Acquisitions>>,
 }
 impl ModelSource {
-    pub fn new(sources: PathBuf, transport: Arc<dyn api::acquisition::Transport>) -> Self {
+    /// `sources` is the state root the `model-source-*` directories live in.
+    pub fn new(sources: PathBuf, transport: Arc<dyn Transport>) -> Self {
         Self {
-            _sources: sources,
-            _transport: transport,
+            sources,
+            transport,
+            state: Arc::default(),
         }
+    }
+    /// The public Hugging Face hub (`_HTTPRepositoryTransport`), refused before any socket while
+    /// `MYCELIUM_OFFLINE` is on (`mycelium_platform_neutral.offline`: `1`/`true`/`yes`/`on`).
+    pub fn hub(sources: PathBuf) -> Self {
+        let offline = std::env::var_os("MYCELIUM_OFFLINE").is_some_and(|value| {
+            matches!(
+                value.to_string_lossy().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        });
+        Self::new(sources, Arc::new(HttpTransport::hugging_face(offline)))
+    }
+    /// This process's acquisition of the model pinned at `revision` prepared it: downloaded,
+    /// verified and accepted by the native manifest compile (`prepared_source`'s precondition,
+    /// acquisition.py:1177-1184). A status recovered from disk is never `prepared` here.
+    pub fn prepared(&self, revision: &str) -> bool {
+        self.lock().acquisition.as_ref().is_some_and(|acquisition| {
+            acquisition.model().resolved_commit == revision
+                && acquisition.verified_snapshot().is_some()
+        })
+    }
+    fn lock(&self) -> MutexGuard<'_, Acquisitions> {
+        // Plain values and a cloneable handle: a panicked holder cannot leave them half-written.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    /// One `api::app_host` acquisition step for the owner whose private root is `root`.
+    fn step<R>(
+        &self,
+        root: &Path,
+        run_model_env: Option<&str>,
+        step: impl FnOnce(&mut AcquisitionView<'_>, &AcquisitionSite<'_>) -> R,
+    ) -> R {
+        let transport = || self.transport.clone();
+        let site = AcquisitionSite {
+            root,
+            sources: &self.sources,
+            target: false,
+            run_model_env,
+            transport: &transport,
+        };
+        let mut state = self.lock();
+        let Acquisitions {
+            acquisition,
+            active,
+            policy_error,
+        } = &mut *state;
+        step(
+            &mut AcquisitionView {
+                acquisition,
+                active,
+                policy_error,
+            },
+            &site,
+        )
+    }
+    /// `app._acquisition_active`. This process has no `_policy_loop`: its first half, a finished
+    /// attempt clears the flag (app.py:1016-1018), runs when the flag is read.
+    fn active(&self) -> bool {
+        let mut state = self.lock();
+        let finished = state.acquisition.as_ref().is_some_and(|acquisition| {
+            matches!(
+                acquisition.status().state.as_str(),
+                "prepared" | "cancelled" | "failed"
+            )
+        });
+        if state.active && finished {
+            state.active = false;
+        }
+        state.active
     }
 }
 
@@ -102,6 +188,9 @@ pub struct PackagedHost {
     /// cannot be read or resumed keeps its code: every authority seam refuses with it and nothing
     /// is written over it.
     authority: Result<Arc<Mutex<Authority>>, &'static str>,
+    /// `DemoApp.acquisition` over the state root's model sources. `None`: this host was built
+    /// without one, and every acquisition seam keeps the trait default.
+    model: Option<ModelSource>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -207,9 +296,32 @@ impl PackagedHost {
             }))),
             _renewal: renewal,
             authority,
+            model: None,
         };
         host.refresh_fast_mode();
         host
+    }
+    /// [`PackagedHost::new`] with the run model's acquisition over `source`, opened as
+    /// `DemoApp.start` does once the authority started (`self._open_acquisition()`, app.py:627).
+    /// An acquisition that cannot be opened keeps its code on stderr and answers as none.
+    pub fn with_model_source(node: NodeService, root: PathBuf, source: ModelSource) -> Self {
+        let mut host = Self::new(node, root);
+        let env = host.environment(run_model::ENV);
+        if let Err(error) = source.step(&host.root, env.as_deref(), app_host::open_acquisition) {
+            eprintln!("model source: {}", error.code);
+        }
+        host.model = Some(source);
+        host
+    }
+    /// One acquisition step over this host's model source, `None` without one.
+    fn acquisition<R>(
+        &self,
+        step: impl FnOnce(&mut AcquisitionView<'_>, &AcquisitionSite<'_>) -> R,
+    ) -> Option<R> {
+        let env = self.environment(run_model::ENV);
+        self.model
+            .as_ref()
+            .map(|model| model.step(&self.root, env.as_deref(), step))
     }
     pub fn fast_mode_process(&self) -> FastModeProcess {
         self.fast_mode.clone()
@@ -265,10 +377,9 @@ impl Host for PackagedHost {
     fn run_active(&self) -> bool {
         self.owner_run_active()
     }
-    /// `app._acquisition_active`: this process never starts an acquisition (v0.1.4's value
-    /// without one, app.py:560).
+    /// `app._acquisition_active` (v0.1.4's `False` without an acquisition, app.py:560).
     fn acquisition_active(&self) -> bool {
-        false
+        self.model.as_ref().is_some_and(ModelSource::active)
     }
     /// `app.owner_run.active()`: the node service's run still owns its driver.
     fn owner_run_active(&self) -> bool {
@@ -277,6 +388,31 @@ impl Host for PackagedHost {
     /// `app._refresh_fast_mode_process()`, after the file is written.
     fn fast_mode_changed(&mut self) {
         self.refresh_fast_mode();
+    }
+    /// `acquisition_policy_error = None; _open_acquisition()` after the run-model choice is saved.
+    fn run_model_saved(&mut self) {
+        self.acquisition(app_host::run_model_saved);
+    }
+    fn set_acquisition_policy_error(&mut self, reason: Option<&'static str>) {
+        self.acquisition(|view, _| *view.policy_error = reason);
+    }
+    /// `self.acquisition.start(grant)` then `self._acquisition_active = True`.
+    fn acquisition_start(&mut self, grant: &Value) -> Result<Json, PublicError> {
+        self.acquisition(|view, _| app_host::acquisition_start(view, grant))
+            .unwrap_or_else(|| Err(PublicError::new(409, "action_not_completed")))
+    }
+    /// `self._cancel_acquisition(); return self.acquisition.status()`.
+    fn acquisition_cancel(&mut self) -> Result<Json, PublicError> {
+        self.acquisition(|view, _| app_host::acquisition_cancel(view))
+            .unwrap_or_else(|| Err(PublicError::new(409, "action_not_completed")))
+    }
+    /// `self._cancel_acquisition()` (`/api/stop`, revocation of this Mac).
+    fn cancel_acquisition(&mut self) {
+        self.acquisition(|view, _| app_host::cancel_acquisition(view));
+    }
+    /// `if acquisition is None or its state_root differs: self._open_acquisition()`.
+    fn reopen_acquisition_if_needed(&mut self) {
+        self.acquisition(app_host::reopen_acquisition_if_needed);
     }
     /// `PersistentBackend` hands `/api/demo/{start,stop,rebuild}` to the host
     /// (`demo_app.action`). Stop and Rebuild are the node service's own (the inner backend:

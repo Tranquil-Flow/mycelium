@@ -168,9 +168,16 @@ type Source = Result<Arc<dyn QualificationSource>, PublicError>;
 fn development_source(node: &NodeService) -> Source {
     router_port::DevelopmentRecord::of(node).map(|r| Arc::new(r) as Arc<dyn QualificationSource>)
 }
+/// What the packaged executable's chat waits for: the native service over a located model.
+pub trait ModelGate: Send + Sync {
+    /// `Ok` once the native driver is composed over the model; else the refusal `/chat/*` answers.
+    fn ready(&self) -> Result<(), PublicError>;
+}
 #[derive(Clone)]
 pub struct DesktopServices {
     node: NodeService,
+    /// The packaged executable's [`ModelGate`]; none in the development hosts (always composed).
+    model: Option<Arc<dyn ModelGate>>,
     /// The request gateway over the node service (its construction failure answers every send).
     serving: Result<Arc<Serving>, PublicError>,
     /// Every `POST /api/*`, in one action transaction at a time (v0.1.4's `app.guard`).
@@ -223,15 +230,23 @@ impl DesktopServices {
         let source = development_source(&node);
         Self::with_host(node, capacity, private, host, source)
     }
-    /// [`DesktopServices::new`] with the packaged host's model source (stub: not consulted yet).
+    /// [`DesktopServices::new`] with the packaged host's run-model acquisition over `source`
+    /// (`PackagedHost::with_model_source`): `/api/model/download` and `/api/model/cancel`.
     pub fn with_model_source(
         node: NodeService,
         capacity: NonZeroUsize,
         private: &Path,
         source: crate::app_host::ModelSource,
     ) -> Self {
-        drop(source);
-        Self::new(node, capacity, private)
+        let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source);
+        let qualification = development_source(&node);
+        Self::with_host(node, capacity, private, host, qualification)
+    }
+    /// Every `/chat/*` request first asks `gate` (on its request thread, never the window's):
+    /// the packaged executable's chat waits for its native service over a prepared model.
+    pub fn gated(mut self, gate: Arc<dyn ModelGate>) -> Self {
+        self.model = Some(gate);
+        self
     }
     fn with_host(
         node: NodeService,
@@ -253,6 +268,7 @@ impl DesktopServices {
             serving,
             fast_mode,
             node,
+            model: None,
             gate: Arc::new(Mutex::new(Gate {
                 closing: false,
                 tasks: Vec::new(),
@@ -294,6 +310,10 @@ impl DesktopServices {
             &format!("{}:{}", request.method, request.target),
         );
         if request.target.starts_with("/chat/") {
+            if let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready()) {
+                Self::complete_error(complete, refusal);
+                return;
+            }
             chat_boundary::handle(self, request, complete);
             return;
         }
