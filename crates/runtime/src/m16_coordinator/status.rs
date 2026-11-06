@@ -64,6 +64,7 @@ use crate::m16_router_contracts::{
 };
 use budgets::BudgetId;
 use serde_json::Value;
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 
@@ -550,14 +551,20 @@ fn projection_error(error: PyError) -> StatusError {
     }
 }
 
-/// One `placement_status()` entry (:321-336), in its key order.
-fn placement_projection(status: &PlacementStatus) -> Result<PyJson, StatusError> {
+/// One `placement_status()` entry (:321-336), in its key order; its graph values are read in
+/// place by the bounded [`json_at`].
+fn placement_projection<V: Borrow<Value>>(
+    status: &PlacementStatus<V>,
+) -> Result<PyJson, StatusError> {
     Ok(dict(vec![
         (
             "placement_id",
-            json_at(&status.placement_id, PLACEMENT_FIELD_DEPTH)?,
+            json_at(status.placement_id.borrow(), PLACEMENT_FIELD_DEPTH)?,
         ),
-        ("node_id", json_at(&status.node_id, PLACEMENT_FIELD_DEPTH)?),
+        (
+            "node_id",
+            json_at(status.node_id.borrow(), PLACEMENT_FIELD_DEPTH)?,
+        ),
         (
             "memory_capacity_bytes",
             PyJson::Num(PyReal::signed(false, status.memory_capacity_bytes.clone())),
@@ -721,9 +728,11 @@ impl M16RuntimeCoordinator {
                 int(inner.max_concurrent_requests),
             ),
         ]);
+        // Borrowed, not cloned: a placement's node may be a graph value of any depth, which
+        // only the bounded json_at reads (a full copy, and its drop, would recurse natively).
         let placements = inner
             .ledger
-            .placement_status()
+            .placement_status_borrowed()
             .map_err(StatusError::Ledger)?
             .iter()
             .map(placement_projection)
