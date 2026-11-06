@@ -48,6 +48,27 @@ fn span(id: BudgetId) -> Duration {
 fn poll() -> Duration {
     span(BudgetId::PyMyceliumDeadlinesGatewayProducerStallPollSecondsL244)
 }
+/// Wait until the driver's run returned (its generation released), reading `run_active`:
+/// `Ok(true)`, or `Ok(false)` once `deadline` passed first (`None`: no deadline). A driver state
+/// that cannot be read is never a return: the run fails `backend_failed`, the code the oracle
+/// gateway publishes for a raising backend without a retained code (service.py:851-860,
+/// `_backend_failure_code` :1353-1364 @ f4e366e9; backend.py:624-648 retains none for it).
+fn await_driver(
+    run_active: &dyn Fn() -> Result<bool, PublicError>,
+    deadline: Option<Instant>,
+) -> Result<bool, Refusal> {
+    loop {
+        match run_active() {
+            Ok(false) => return Ok(true),
+            Ok(true) if deadline.is_some_and(|d| Instant::now() >= d) => return Ok(false),
+            Ok(true) => std::thread::sleep(poll()),
+            Err(e) => {
+                eprintln!("router port: driver state unreadable: {}", e.code);
+                return Err(Refusal("backend_failed"));
+            }
+        }
+    }
+}
 
 /// `QualificationBinding` read from the node service's qualification document.
 pub fn binding(document: &Value) -> Result<Binding, &'static str> {
@@ -336,13 +357,6 @@ impl RouterPort {
             }
         }
     }
-    /// The driver's run returned (its generation released), within the stage-cleanup budget.
-    fn await_driver(&self) {
-        let deadline = Instant::now() + span(BudgetId::StageCleanup);
-        while self.node.run_active().unwrap_or(false) && Instant::now() < deadline {
-            std::thread::sleep(poll());
-        }
-    }
     fn drive(
         &self,
         request_id: &str,
@@ -390,8 +404,24 @@ impl RouterPort {
                 Err(Refusal(e.code))
             }
         };
-        self.await_driver();
-        outcome
+        let run_active = || self.node.run_active();
+        match outcome {
+            // The job's own terminal ends the run only once the driver's run returned, however
+            // long that takes: the gateway publishes it after `backend.run` returned
+            // (service.py:803-822), and the router session's run returns only at the router's
+            // terminal status, with no wall bound (backend.py:317-331). A Stop meanwhile still
+            // reaches the driver once, through `Backend::cancel` (service.py:596-616).
+            Ok(outcome) => await_driver(&run_active, None).map(|_| outcome),
+            // A failure keeps its own code (the oracle backend cancels and raises at once,
+            // backend.py:380-383); its driver gets the stage-cleanup budget to return.
+            Err(refusal) => {
+                let deadline = Instant::now() + span(BudgetId::StageCleanup);
+                if await_driver(&run_active, Some(deadline)) != Ok(true) {
+                    eprintln!("router port: driver not returned after {}", refusal.0);
+                }
+                Err(refusal)
+            }
+        }
     }
     /// The driver job's events into the gateway, each acknowledged once the gateway took it; the
     /// job's own terminal ends the run.
@@ -701,4 +731,39 @@ pub fn packaged_host(
         crate::desktop_host::DesktopServices::with_qualification(node, capacity, private, source);
     let ledger = host.ledger();
     (host, ledger)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// A driver state that cannot be read is never the driver's return, with or without a
+    /// deadline: the run fails `backend_failed` (service.py:851-860, 1353-1364 @ f4e366e9). The
+    /// node service's state is unreadable only behind a poisoned lock, which no public or
+    /// crate-visible node-service API can produce, so this reads the state through the seam.
+    #[test]
+    fn unreadable_driver_state_is_never_a_return() {
+        let unreadable = || Err(PublicError::new(409, "request_poisoned"));
+        assert_eq!(
+            await_driver(&unreadable, None),
+            Err(Refusal("backend_failed"))
+        );
+        assert_eq!(
+            await_driver(&unreadable, Some(Instant::now())),
+            Err(Refusal("backend_failed"))
+        );
+    }
+    /// Only the driver's return ends the wait; a deadline's expiry is reported as not returned.
+    #[test]
+    fn only_the_driver_return_ends_the_wait() {
+        let reads = Cell::new(0);
+        let returns_at_third_read = || {
+            reads.set(reads.get() + 1);
+            Ok(reads.get() < 3)
+        };
+        assert_eq!(await_driver(&returns_at_third_read, None), Ok(true));
+        assert_eq!(reads.get(), 3);
+        assert_eq!(await_driver(&|| Ok(true), Some(Instant::now())), Ok(false));
+    }
 }
