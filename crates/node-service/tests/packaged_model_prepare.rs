@@ -12,9 +12,16 @@
 //! tokenizer file. What lands on disk is compared with the executed acquisition oracle
 //! (`api/tests/fixtures/oracle_acquisition.json`, scenario by scenario), the route answers with the
 //! executed v0.1.4 process (`api/tests/fixtures/oracle_model_routes.json`).
+//!
+//! This Mac's resource observation is controlled (the reviewer's executed v0.1.4 sequences replace
+//! `DemoApp._policy_observer` the same way: `status/moonweaver/workers/rv-s1-app-host-model-prepare/`
+//! `evidence/oracle/drive_v014.py` in the program root, its answers in `v014-all.out` and
+//! `v014-revoke_quit.out`), so no test depends on the power, thermal state or network of the Mac it
+//! runs on.
 #![cfg(feature = "desktop-shell")]
 use api::{
     acquisition::{HttpTransport, Transport},
+    resources::{Observation, Observer},
     schema::PublicError,
 };
 use budgets::{BudgetId as B, Entries};
@@ -94,6 +101,63 @@ fn snapshot_dir(state: &Path, revision: &str) -> PathBuf {
         .join(MODEL_DIR)
         .join("snapshots")
         .join(revision)
+}
+
+// ---- this Mac's resource observation, controlled ----
+
+/// The observation the packaged host's resource guard reads in place of the bundled
+/// `native/resource_probe`; a test changes it between requests.
+#[derive(Clone)]
+struct Observed(Arc<Mutex<Observation>>);
+impl Observed {
+    fn new(seen: Observation) -> Self {
+        Self(Arc::new(Mutex::new(seen)))
+    }
+    fn set(&self, seen: Observation) {
+        *self.0.lock().unwrap() = seen;
+    }
+}
+impl Observer for Observed {
+    fn observe(&self) -> Observation {
+        self.0.lock().unwrap().clone()
+    }
+}
+fn observation(power: &str, thermal: &str, network: &str) -> Observation {
+    Observation {
+        power: power.into(),
+        thermal: thermal.into(),
+        network: network.into(),
+    }
+}
+/// What the window's consent (`ac_only`, `unmetered_only`, `stop_on_serious`) permits.
+fn permissive() -> Observation {
+    observation("external", "nominal", "unmetered")
+}
+/// RED only: the 1d48f36 source has no observation seam, so this shim ignores the observer and
+/// reports nothing observed, as that source does. The fix commit replaces it with the source's own.
+trait UnobservedSource {
+    fn with_observer(self, observer: Arc<dyn Observer>) -> Self;
+    fn policy_error(&self) -> Option<&'static str>;
+    fn resource_observation(&self) -> Observation;
+}
+impl UnobservedSource for ModelSource {
+    fn with_observer(self, _: Arc<dyn Observer>) -> Self {
+        self
+    }
+    fn policy_error(&self) -> Option<&'static str> {
+        None
+    }
+    fn resource_observation(&self) -> Observation {
+        Observation::unknown()
+    }
+}
+/// RED only: `packaged::core_with` without the observer it cannot take yet.
+fn core_with(
+    state: &Path,
+    transport: Arc<dyn Transport>,
+    _: Arc<dyn Observer>,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    packaged::core_with(state, transport)
 }
 
 // ---- the tiny snapshot and its loopback repository ----
@@ -410,9 +474,13 @@ fn assert_started(started: &(u16, Value)) {
     );
     assert_eq!(started.1["model"], identity());
 }
-/// The packaged action root (`PersistentBackend<PackagedHost, …>`) with its model source over
-/// `transport`, the node service's driver never started.
-fn action_root(state: &Path, transport: Arc<dyn Transport>) -> DesktopServices {
+/// The run model's source in `state` over `transport`, this Mac observed through `observed`.
+fn model_source(state: &Path, transport: Arc<dyn Transport>, observed: &Observed) -> ModelSource {
+    ModelSource::new(state.to_owned(), transport).with_observer(Arc::new(observed.clone()))
+}
+/// The packaged action root (`PersistentBackend<PackagedHost, …>`) over `source` (a clone: the
+/// test reads the same state), the node service's driver never started.
+fn action_root(state: &Path, source: &ModelSource) -> DesktopServices {
     let dirs = packaged::prepare_dirs(state).unwrap();
     let node = NodeService::new(
         Arc::new(MustNotRun),
@@ -423,19 +491,31 @@ fn action_root(state: &Path, transport: Arc<dyn Transport>) -> DesktopServices {
         node,
         NonZeroUsize::new(4).unwrap(),
         &dirs.private,
-        ModelSource::new(state.to_owned(), transport),
+        source.clone(),
     )
 }
-/// The packaged executable's core over `state` (`packaged::core`, the repository given).
-fn packaged_core(state: &Path, repository: &Repository) -> (Arc<dyn Core>, AppCleanup) {
-    let (core, mut cleanup) = packaged::core_with(state, repository.transport()).unwrap();
+/// The packaged executable's core over `state` (`packaged::core`, the repository and this Mac's
+/// observation given).
+fn packaged_core(
+    state: &Path,
+    repository: &Repository,
+    observed: &Observed,
+) -> (Arc<dyn Core>, AppCleanup) {
+    let (core, mut cleanup) =
+        core_with(state, repository.transport(), Arc::new(observed.clone())).unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
     (core, cleanup)
 }
 /// Quit: the window's cleanup reaches `Verified` within the quit allowance.
-fn quit(core: Arc<dyn Core>, mut cleanup: AppCleanup) {
+fn quit(core: Arc<dyn Core>, cleanup: AppCleanup) {
+    quit_with(core, cleanup, || ());
+}
+/// Quit with `meanwhile` run once the cleanup has begun (the window's Quit returns at once; the
+/// process then waits for its cleanup).
+fn quit_with(core: Arc<dyn Core>, mut cleanup: AppCleanup, meanwhile: impl FnOnce()) {
     let allowance = desktop::lifecycle::quit_allowance().unwrap();
     cleanup.begin(allowance).unwrap();
+    meanwhile();
     let deadline = Instant::now() + Duration::from_millis(allowance.millis());
     while cleanup.poll().unwrap() != Poll::Verified {
         assert!(
@@ -590,10 +670,83 @@ fn packaged_model_prepare_download_reaches_prepared() {
     let state = state_root();
     let files = tiny_snapshot(None);
     let repository = Repository::start(files.clone());
-    let host = action_root(&state, repository.transport());
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let host = action_root(&state, &source);
     assert_created(&host);
+    // `_resource_check` (app.py:1567-1570 -> 929-947, resources.py:152-181 @ f4e366e9) against
+    // the window's consent (`ac_only`, `unmetered_only`): what this Mac reports is refused with the
+    // guard's own code, kept as `acquisition_policy_error`, and nothing is fetched (the model
+    // source holds only its lock). v0.1.4's answers: the reviewer's executed sequence `guard`
+    // (`v014-all.out`: battery, metered, thermal serious, network unknown, observer raising ->
+    // UNKNOWN_OBSERVATION); unknown thermal is the near miss of the thermal gate.
+    let unprobed = Observation::unknown();
+    for (label, seen, code) in [
+        (
+            "battery",
+            observation("battery", "nominal", "unmetered"),
+            "resource_power_policy_violation",
+        ),
+        (
+            "metered",
+            observation("external", "nominal", "metered"),
+            "resource_network_policy_violation",
+        ),
+        (
+            "thermal_serious",
+            observation("external", "serious", "unmetered"),
+            "resource_thermal_policy_violation",
+        ),
+        (
+            "network_unknown",
+            observation("external", "nominal", "unknown"),
+            "resource_network_policy_violation",
+        ),
+        (
+            "observer_fails",
+            unprobed.clone(),
+            "resource_power_policy_violation",
+        ),
+        (
+            "thermal_unknown",
+            observation("external", "unknown", "unmetered"),
+            "resource_thermal_policy_violation",
+        ),
+    ] {
+        observed.set(seen.clone());
+        assert_eq!(refusal(&download(&host)), (400, code), "{label}");
+        assert_eq!(source.policy_error(), Some(code), "{label}");
+        assert_eq!(source.resource_observation(), seen, "{label}");
+        assert_eq!(
+            entries(&state.join(SOURCE)),
+            ["acquisition.lock"],
+            "{label}"
+        );
+    }
+    // In production the observation is the helper bundled beside the executable
+    // (`native/resource_probe`); a bundle without one observes nothing and is refused as an
+    // observer failure is (fail closed), before anything is fetched.
+    let exe = std::env::current_exe().unwrap();
+    assert!(!exe.parent().unwrap().join("native/resource_probe").exists());
+    let bare = state_root();
+    let bundled = ModelSource::new(bare.clone(), repository.transport());
+    let bare_host = action_root(&bare, &bundled);
+    assert_created(&bare_host);
+    assert_eq!(
+        refusal(&download(&bare_host)),
+        (400, "resource_power_policy_violation")
+    );
+    assert_eq!(bundled.resource_observation(), unprobed);
+    assert_eq!(entries(&bare.join(SOURCE)), ["acquisition.lock"]);
+    drop(bare_host);
+    std::fs::remove_dir_all(&bare).unwrap_or_default();
+    // What the consent permits: the download starts and the refusal is cleared (`guard`,
+    // `download_good` -> `settled_good` prepared).
+    observed.set(permissive());
     // `self.acquisition.start(grant)`: one background attempt, its status answered.
     assert_started(&download(&host));
+    assert_eq!(source.policy_error(), None);
+    assert_eq!(source.resource_observation(), permissive());
     let prepared = settled(&state);
     assert_eq!(
         prepared,
@@ -634,7 +787,8 @@ fn packaged_model_prepare_core_leaves_model_not_installed() {
     // A snapshot of another revision is not the pinned model (near miss).
     plant(&state, &"0".repeat(40), &files);
     let repository = Repository::start(files.clone());
-    let (core, cleanup) = packaged_core(&state, &repository);
+    let observed = Observed::new(permissive());
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
     // No model: the window opens and the native service answers `model_not_installed`.
     assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
     // The action root is the packaged one: the owner creates the swarm and asks for the model.
@@ -657,25 +811,27 @@ fn packaged_model_prepare_core_leaves_model_not_installed() {
     let private = state.join("v02-node/private");
     assert!(private.join("member").is_dir(), "{:?}", entries(&private));
     quit(core, cleanup);
-    // Relaunch after prepared: the window composes the located model at open, and the
-    // acquisition recovers v0.1.4's `failed prepared_source_revalidation_required`
-    // (oracle `happy_then_reverify`, the `new` step).
-    let (core, cleanup) = packaged_core(&state, &repository);
+    // Relaunch after prepared: the window composes the located model at open. Quit closed the
+    // acquisition (`DemoApp.close` -> `self.acquisition.close()`, app.py:1845-1847 @ f4e366e9:
+    // cancel, join, `closed` persisted, acquisition.py:1524-1549), so the next process answers
+    // v0.1.4's quit-path `closed` with the bytes kept: the reviewer's executed sequences
+    // `compile_refused_relaunch` and `quit_running` (`cancel_after_relaunch` 200 `closed`) and the
+    // acquisition oracle `close_when_idle` (the `new` step after `close`). A process that died
+    // without closing recovers `failed prepared_source_revalidation_required` instead
+    // (`happy_then_reverify`, the `new` step): the crash path, not Quit.
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
     assert_eq!(chat_state(&core).0, 200);
-    let oracle = scenario("happy_then_reverify");
-    let recovered = &oracle["ops"][1]["final_status"];
+    let oracle = scenario("close_when_idle");
+    let reopened = &oracle["ops"][2];
+    assert_eq!(reopened["op"], "new");
     let answered = cancel(&core);
     assert_eq!(answered.0, 200, "{}", answered.1);
-    assert_eq!(outcome(&answered.1), outcome(recovered));
+    assert_eq!(outcome(&answered.1), outcome(&reopened["status"]));
     assert_eq!(
         answered.1,
-        status_doc(
-            "failed",
-            total(&files),
-            total(&files),
-            Some("prepared_source_revalidation_required")
-        )
+        status_doc("closed", total(&files), total(&files), None)
     );
+    assert_eq!(acquisition_status(&state), answered.1);
     quit(core, cleanup);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
@@ -687,7 +843,8 @@ fn packaged_model_prepare_bad_snapshot_refused() {
     let files = tiny_snapshot(None);
     let repository = Repository::start(files.clone());
     repository.tamper(Some("model.safetensors"));
-    let (core, cleanup) = packaged_core(&state, &repository);
+    let observed = Observed::new(permissive());
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
     assert_created(&core);
     assert_started(&download(&core));
     let failed = settled(&state);
@@ -725,7 +882,7 @@ fn packaged_model_prepare_bad_snapshot_refused() {
     let state = state_root();
     let files = tiny_snapshot(Some(25));
     let repository = Repository::start(files.clone());
-    let (core, cleanup) = packaged_core(&state, &repository);
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
     assert_created(&core);
     assert_started(&download(&core));
     let refused = settled(&state);
@@ -754,7 +911,8 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
     let state = state_root();
     let files = tiny_snapshot(None);
     let repository = Repository::start(files.clone());
-    let (core, cleanup) = packaged_core(&state, &repository);
+    let observed = Observed::new(permissive());
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
     let routes: Value = serde_json::from_str(ROUTES_ORACLE).unwrap();
     let step = |label: &str| {
         routes["steps"]
@@ -784,6 +942,31 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
         )
     );
     assert_created(&core);
+    // Quit with nothing ever started: Quit closes the acquisition (`DemoApp.close` ->
+    // `self.acquisition.close()`, app.py:1845-1847 @ f4e366e9), which persists `closed` over the
+    // idle status, and the next process answers it (acquisition oracle `close_when_idle`: `close`,
+    // then `new`).
+    quit(core, cleanup);
+    let idle_closed = status_doc("closed", 0, 0, None);
+    let oracle = scenario("close_when_idle");
+    assert_eq!(acquisition_status(&state), idle_closed);
+    assert_eq!(outcome(&idle_closed), outcome(&oracle["ops"][0]["status"]));
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
+    assert_eq!(cancel(&core), (200, idle_closed.clone()));
+    assert_eq!(outcome(&idle_closed), outcome(&oracle["ops"][2]["status"]));
+    // A download the resource guard refuses after the relaunch fetches nothing and leaves the
+    // closed status as it was (the reviewer's `guard`: `tree_after_battery`).
+    observed.set(observation("battery", "nominal", "unmetered"));
+    assert_eq!(
+        refusal(&download(&core)),
+        (400, "resource_power_policy_violation")
+    );
+    assert_eq!(acquisition_status(&state), idle_closed);
+    assert_eq!(
+        entries(&state.join(SOURCE)),
+        ["acquisition.lock", "status.json"]
+    );
+    observed.set(permissive());
     // The weights' response is held: the attempt waits inside its request.
     repository.hold("model.safetensors");
     assert_started(&download(&core));
@@ -830,7 +1013,30 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
     assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
     // Cancel with nothing running answers the cancelled status and changes nothing.
     assert_eq!(cancel(&core), (200, cancelled.clone()));
-    // Download after cancel resumes the stage to prepared; then the core answers.
+    // Quit while an attempt runs: Quit asks the attempt to stop at once and closes the
+    // acquisition (cancel, join, `closed` persisted, acquisition.py:1524-1549); the stage stays
+    // resumable and nothing reaches the snapshot. The response it waits in is released once Quit
+    // has begun, as in the reviewer's executed v0.1.4 sequence `quit_running` (`status_after_close`:
+    // `closed`, no error, the config's bytes; `cancel_after_relaunch`: 200 the same).
+    repository.hold("model.safetensors");
+    assert_started(&download(&core));
+    repository.wait_held();
+    quit_with(core, cleanup, || repository.release());
+    let closed = status_doc(
+        "closed",
+        size_of(&files, "config.json"),
+        total(&files),
+        None,
+    );
+    assert_eq!(acquisition_status(&state), closed);
+    assert_eq!(
+        tree(&state.join(SOURCE)),
+        oracle_tree("cancel_before_file", &files)
+    );
+    assert!(!snapshot_dir(&state, REVISION).exists());
+    let (core, cleanup) = packaged_core(&state, &repository, &observed);
+    assert_eq!(cancel(&core), (200, closed));
+    // Download after the quit resumes the stage to prepared; then the core answers.
     assert_started(&download(&core));
     assert_eq!(
         settled(&state),
@@ -845,14 +1051,22 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
 /// The executed v0.1.4 process's `/api/model/*` sequence (`oracle_model_routes.json`: shape,
 /// membership and grant refusals, cancel, the offline refusal of the public hub, the retry after
 /// a failure, stop/start) replayed on the packaged action root, offline as the oracle ran. The
-/// `status_view` blocks are compared on their `acquisition` (the persisted status); the packaged
-/// `/api/status` does not project `acquisition_policy_error`, `resource_observation`, `running`
-/// or `membership_state` (declared, counted).
+/// `status_view` blocks are compared on their `acquisition` (the persisted status) and, through
+/// the model source, on `resource_observation` and `acquisition_policy_error`: this Mac is
+/// observed as the oracle's own probe observed its Mac (`battery`, `nominal`, `unmetered`), which
+/// the oracle's `battery_allowed`/`metered_allowed` policy permits. The packaged `/api/status`
+/// projects neither, nor `running` or `membership_state` (declared, counted).
 #[test]
 fn packaged_model_prepare_routes_equal_the_executed_oracle() {
     let oracle: Value = serde_json::from_str(ROUTES_ORACLE).unwrap();
     let state = state_root();
-    let host = action_root(&state, Arc::new(HttpTransport::hugging_face(true)));
+    let observed = Observed::new(observation("battery", "nominal", "unmetered"));
+    let source = model_source(
+        &state,
+        Arc::new(HttpTransport::hugging_face(true)),
+        &observed,
+    );
+    let host = action_root(&state, &source);
     const GB: u64 = 1_000_000_000;
     let grant = json!({"download_acknowledged": true, "max_download_bytes": 2 * GB, "storage_limit_bytes": 4 * GB});
     let policy = json!({"peer_visibility": true, "power": "battery_allowed", "storage_bytes": 4 * GB,
@@ -876,8 +1090,18 @@ fn packaged_model_prepare_routes_equal_the_executed_oracle() {
                 status
             };
             assert_eq!(status, view["acquisition"], "status view at {label}");
-            exact += 1;
-            declared += view.as_object().unwrap().len() - 1;
+            assert_eq!(
+                source.resource_observation().to_value(),
+                view["resource_observation"],
+                "resource observation at {label}"
+            );
+            assert_eq!(
+                json!(source.policy_error()),
+                view["acquisition_policy_error"],
+                "policy error at {label}"
+            );
+            exact += 3;
+            declared += view.as_object().unwrap().len() - 3;
             continue;
         }
         let path = step["path"].as_str().unwrap();
@@ -940,7 +1164,9 @@ fn packaged_model_prepare_present_snapshot_reverified() {
         }
         plant(&state, REVISION, &present);
         let repository = Repository::start(files.clone());
-        let host = action_root(&state, repository.transport());
+        let observed = Observed::new(permissive());
+        let source = model_source(&state, repository.transport(), &observed);
+        let host = action_root(&state, &source);
         assert_created(&host);
         assert_started(&download(&host));
         let failed = settled(&state);
