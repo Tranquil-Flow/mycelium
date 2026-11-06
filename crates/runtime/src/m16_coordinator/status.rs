@@ -47,12 +47,28 @@
 //! - RecursionError: `_reject_private` / `_finite` recurse in Python and raise it, outside the
 //!   JSON-safe handler, for a value nested deeper than CPython's recursion limit allows; the
 //!   port raises [`StatusValidationError::Recursion`] at the same point of its walk for a node
-//!   more than [`MAX_STATUS_VALUE_DEPTH`] below a top-level field, the oracle's depth when the
-//!   validator is called from a fresh top-level interpreter. CPython's real boundary also
-//!   depends on its caller's stack and isinstance caches: on the oracle's producer path
-//!   (`build_live_m16_runtime`, then `status()`, from a fresh top level) it raises from depth
-//!   989, so from 989 to 993 the port accepts what that path refuses (a declared, stack-dependent
-//!   difference; workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_summary.json).
+//!   more than [`MAX_STATUS_VALUE_DEPTH`] (993) below a top-level field: the oracle's warm,
+//!   steady-state boundary (993 accepted, 994 raised) when the validator is called from a fresh
+//!   top-level interpreter. CPython's real boundary also depends on its caller's stack and on
+//!   its isinstance caches (a type the walk meets for the first time costs ABC
+//!   `__instancecheck__` / `__subclasscheck__` frames), so two bands are reviewed declared
+//!   differences where the port accepts what a cold oracle run refuses (Moonweaver ruling,
+//!   retro 3, 2026-11-06; no cache emulation). Measured with CPython 3.14.2 (recursion limit
+//!   1,000), three fresh `python3.14 -B` runs each, the call at module top level, every run the
+//!   same (workers/l1b-m16-coordinator-status-a3/evidence/oracle_a3_measure.py,
+//!   oracle_a3_summary.json; the fixture's `recursion.a3` rows hold both traces):
+//!   - validator path, cold first-seen None, depths 991-993: in the reviewer's construction (an
+//!     empty coordinator's real status, None inside `claim_boundary` in list or dict chains)
+//!     the cold run accepts 990 and raises from 991; after one shallow None validation (warm)
+//!     it accepts 993 and raises from 994, like int and str leaves cold or warm;
+//!   - producer path, depths 989-993 (counted from the top-level field, a placement's
+//!     `node_id` two levels down): `status()` from a fresh top level raises cold from 989 (None
+//!     and int leaves; str from 992) and warm from 992 (its caller's frames); the factory
+//!     (`build_live_m16_runtime`, then `status()`) raises from 989 with an int leaf (a2 and a3
+//!     measurements; workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_summary.json).
+//!
+//!   Outside the bands the outcomes are the oracle's: shallower values are accepted on every
+//!   path and 994 or deeper is RecursionError on every path, list or dict, any leaf.
 //! - An int past CPython's 4,300-digit `str()` limit is refused by the round trip
 //!   (`json.dumps` raises ValueError: "M16 runtime status is not JSON-safe"), as the oracle's
 //!   validator refuses it; the oracle's `json.loads` already refuses such a graph text.
@@ -187,9 +203,13 @@ const INT_MAX_STR_DIGITS: usize = 4_300;
 /// without RecursionError, counted from a top-level field's value (depth 0), measured on the
 /// oracle under CPython 3.14.2's default recursion limit (1,000) with
 /// `validate_m16_runtime_status` called from a fresh interpreter's top level: `claim_boundary`
-/// inside 993 lists or one-key dicts passes and inside 994 raises, for every leaf, in three
-/// fresh runs each (workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_measure.py
-/// and oracle_recursion_summary.json; the fixture's `recursion` record).
+/// inside 993 lists or one-key dicts passes and inside 994 raises, for every leaf type the walk
+/// has already seen (warm), in three fresh runs each
+/// (workers/l1b-m16-coordinator-status-a2/evidence/oracle_recursion_measure.py and
+/// oracle_recursion_summary.json; the fixture's `recursion` record). Declared bands below it
+/// (module doc): a cold first-seen None raises from 991 (991-993; warm 993 / 994), the producer
+/// path from 989 (989-993), measured by
+/// workers/l1b-m16-coordinator-status-a3/evidence/oracle_a3_measure.py (`recursion.a3`).
 const MAX_STATUS_VALUE_DEPTH: usize = 993;
 /// Where graph values sit below a status field: a placement's field (`placements[k][f]`), a
 /// request's field (`requests[k][f]`) and a request's placement id (`requests[k][f][j]`).
