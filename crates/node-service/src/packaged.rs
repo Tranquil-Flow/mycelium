@@ -101,6 +101,14 @@ impl Cleanup for AppCleanup {
     }
 }
 
+/// [`core`] with the model repository's transport given (stub: not consulted yet).
+pub fn core_with(
+    state_root: &Path,
+    transport: Arc<dyn api::acquisition::Transport>,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    drop(transport);
+    core(state_root)
+}
 /// The core and cleanup for the window, from the state root.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     let Some(model) = locate_model(state_root) else {

@@ -223,6 +223,16 @@ impl DesktopServices {
         let source = development_source(&node);
         Self::with_host(node, capacity, private, host, source)
     }
+    /// [`DesktopServices::new`] with the packaged host's model source (stub: not consulted yet).
+    pub fn with_model_source(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+    ) -> Self {
+        drop(source);
+        Self::new(node, capacity, private)
+    }
     fn with_host(
         node: NodeService,
         capacity: NonZeroUsize,

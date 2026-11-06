@@ -26,7 +26,7 @@ pub mod loopback;
 pub mod native;
 pub mod native_selection;
 pub mod owner_chain;
-#[cfg(feature = "packaged")]
+#[cfg(any(feature = "desktop-shell", feature = "packaged"))]
 pub mod packaged;
 pub mod phase;
 pub mod planning;

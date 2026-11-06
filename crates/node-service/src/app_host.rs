@@ -72,6 +72,21 @@ impl FastModeProcess {
     }
 }
 
+/// The packaged process's model source: the state root its `model-source-*` directories live in
+/// and the repository transport. (Stub: not consulted yet.)
+pub struct ModelSource {
+    _sources: PathBuf,
+    _transport: Arc<dyn api::acquisition::Transport>,
+}
+impl ModelSource {
+    pub fn new(sources: PathBuf, transport: Arc<dyn api::acquisition::Transport>) -> Self {
+        Self {
+            _sources: sources,
+            _transport: transport,
+        }
+    }
+}
+
 /// The packaged process as `persistent::Host`. It holds the same [`NodeService`] that is the
 /// backend's inner delegate (one shared state), the private state root, the fast-mode default,
 /// the owner authority over that root and the loop that keeps the owner's lease renewed.
