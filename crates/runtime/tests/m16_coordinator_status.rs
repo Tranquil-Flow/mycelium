@@ -28,7 +28,7 @@ use runtime::m16_router_contracts::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------------------------
@@ -2482,6 +2482,18 @@ const ORACLE: &str = include_str!("fixtures/m16-coordinator-status-oracle.json")
 /// The stack of the thread that replays the deep-value cases (see the parity test).
 const DEEP_CASE_STACK_BYTES: usize = 64 << 20;
 
+/// The reviewed declared-difference bands (Moonweaver ruling, retro 3), the test's one policy
+/// location, both endpoints (rv-l1b-m16-coordinator-status-a3 F2a-control): on the fresh
+/// validator path a cold first-seen `None` raises from depth 991 where the port, with its one
+/// fixed boundary, accepts through 993. The fixture's metadata (`recursion.a3.declared_bands`)
+/// and the parity test's classifier bindings must equal it, its declared rows must reach both
+/// endpoints, and a declared row outside it (990, 994) fails the row check.
+const VALIDATOR_COLD_BAND: (u64, u64) = (991, 993);
+/// The same for the producer path (`status()` from a fresh top level): the oracle raises from
+/// 989, the port accepts through 993 (`recursion.declared_band`, `recursion.a3.declared_bands`);
+/// a declared row at 988 or 994 fails the row check.
+const PRODUCER_BAND: (u64, u64) = (989, 993);
+
 /// A Python value from the probe's `json.dumps(value, ensure_ascii=True, allow_nan=True,
 /// separators=(",", ":"))` text: a literal with `.`, `e` or `E` is a float, any other number
 /// an int of any size, `NaN` / `Infinity` / `-Infinity` floats, and `\uXXXX` escapes joined
@@ -3275,6 +3287,91 @@ fn paired(failures: &mut Vec<String>, label: &str, case: impl FnOnce()) {
     }
 }
 
+/// A rejecting control's failure message (the case must fail), or `None` when it passed.
+fn rejection(case: impl FnOnce()) -> Option<String> {
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(case)).err()?;
+    Some(
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|m| (*m).to_owned()))
+            .unwrap_or_default(),
+    )
+}
+
+/// One attempt-3 validator row (`input`: the reviewer's base with the row's value as
+/// `claim_boundary`): the port matches the warm trace exactly, and a row whose cold trace
+/// differs is declared, inside `cold_band`.
+fn a3_validator_row(label: &str, row: &Value, cold_band: (u64, u64), input: &PyJson) {
+    let depth = row["input"]["depth"].as_u64().expect("a depth");
+    let warm = row.get("warm").unwrap_or(&row["cold"]);
+    let declared = warm != &row["cold"];
+    assert_three_runs(label, &row["cold"]);
+    assert_three_runs(label, warm);
+    if declared {
+        // The declared difference: the cold oracle raised, the warm one
+        // accepted, inside the cold band.
+        assert!(
+            (cold_band.0..=cold_band.1).contains(&depth),
+            "{label}: outside the cold band"
+        );
+        assert_eq!(row["cold"][0], "RecursionError", "{label}");
+        assert_eq!(warm[0], "accepted", "{label}");
+    }
+    match validate_m16_runtime_status(input) {
+        Ok(doc) => {
+            assert_eq!(warm[0], "accepted", "{label}: the oracle raised");
+            assert_deep_document(label, &row["result"], &doc);
+        }
+        Err(error) => {
+            assert_ne!(warm[0], "accepted", "{label}: the oracle accepted");
+            assert_status_error(label, &row["error"], &StatusError::Validation(error));
+        }
+    }
+}
+
+/// One attempt-3 producer row against the port's `status()` `result`: a row the port accepts
+/// where the oracle's cold run raised is declared, inside `producer_band`.
+fn a3_producer_row(
+    label: &str,
+    row: &Value,
+    producer_band: (u64, u64),
+    result: Result<PyJson, StatusError>,
+) {
+    let depth = row["input"]["field_depth"].as_u64().expect("a depth");
+    let cold_raised = row["cold"][0] != "accepted";
+    let warm_accepted = row["warm"][0] == "accepted";
+    assert_three_runs(label, &row["cold"]);
+    assert_three_runs(label, &row["warm"]);
+    match result {
+        // The declared difference: the port accepts, the oracle's producer
+        // path raised cold (and warm too past its caller's frames).
+        Ok(doc) if cold_raised => {
+            assert!(
+                (producer_band.0..=producer_band.1).contains(&depth),
+                "{label}: accepted outside the producer band"
+            );
+            assert_python_error(
+                label,
+                &row["error"],
+                "RecursionError",
+                "maximum recursion depth exceeded",
+            );
+            if warm_accepted {
+                assert_deep_document(label, &row["result"], &doc);
+            }
+        }
+        Ok(doc) => assert_deep_document(label, &row["result"], &doc),
+        Err(error) => {
+            assert!(
+                cold_raised && !warm_accepted,
+                "{label}: refused where the oracle accepts"
+            );
+            assert_status_error(label, &row["error"], &error);
+        }
+    }
+}
+
 #[test]
 fn m16_coordinator_status_python_value_domain_parity() {
     let oracle: Value = serde_json::from_str(ORACLE).expect("the fixture");
@@ -3459,6 +3556,23 @@ fn m16_coordinator_status_python_value_domain_parity() {
     let cold_band = band_of("validator_cold");
     let producer_band = band_of("producer");
     assert_eq!((cold_band.1, producer_band), (limit, band));
+    // The test policy (rv-l1b-m16-coordinator-status-a3 F2a-control): the fixture's bands and
+    // the classifier's bindings are the pinned ones, both endpoints.
+    assert_eq!(
+        (band_of("validator_cold"), band_of("producer"), band),
+        (VALIDATOR_COLD_BAND, PRODUCER_BAND, PRODUCER_BAND),
+        "the fixture's declared bands"
+    );
+    assert_eq!(
+        (cold_band, producer_band, band, limit),
+        (
+            VALIDATOR_COLD_BAND,
+            PRODUCER_BAND,
+            PRODUCER_BAND,
+            VALIDATOR_COLD_BAND.1
+        ),
+        "the classifier's bands"
+    );
     let cold_base = PyText::parse(
         a3["reviewer_base_text"]
             .as_str()
@@ -3470,7 +3584,7 @@ fn m16_coordinator_status_python_value_domain_parity() {
     // with debug-build frames) need more than the default test stack, so the deep cases run on
     // a larger one; the port's bounded walk on the default stack is
     // m16_runtime_status_validation_refusals.
-    let (deep_failures, declared, a3_declared) = std::thread::scope(|scope| {
+    let (deep_failures, declared, a3_declared, a3_checks) = std::thread::scope(|scope| {
         std::thread::Builder::new()
             .stack_size(DEEP_CASE_STACK_BYTES)
             .spawn_scoped(scope, || {
@@ -3518,6 +3632,8 @@ fn m16_coordinator_status_python_value_domain_parity() {
                     });
                 }
                 let mut a3_declared = (0u64, 0u64);
+                // The depths of the declared rows, per path (the bands are tight: see below).
+                let mut a3_depths = (BTreeSet::new(), BTreeSet::new());
                 for row in validator_rows {
                     let label = format!("recursion a3 {}", row["name"]);
                     let depth = row["input"]["depth"].as_u64().expect("a depth");
@@ -3525,79 +3641,67 @@ fn m16_coordinator_status_python_value_domain_parity() {
                     let declared = warm != &row["cold"];
                     if declared {
                         a3_declared.0 += 1;
+                        a3_depths.0.insert(depth);
                     }
                     let input = with(&cold_base, "claim_boundary", a3_value(&row["input"]));
                     paired(&mut failures, &label, || {
-                        assert_three_runs(&label, &row["cold"]);
-                        assert_three_runs(&label, warm);
-                        if declared {
-                            // The declared difference: the cold oracle raised, the warm one
-                            // accepted, inside the cold band.
-                            assert!(
-                                (cold_band.0..=cold_band.1).contains(&depth),
-                                "{label}: outside the cold band"
-                            );
-                            assert_eq!(row["cold"][0], "RecursionError", "{label}");
-                            assert_eq!(warm[0], "accepted", "{label}");
-                        }
-                        match validate_m16_runtime_status(&input) {
-                            Ok(doc) => {
-                                assert_eq!(warm[0], "accepted", "{label}: the oracle raised");
-                                assert_deep_document(&label, &row["result"], &doc);
-                            }
-                            Err(error) => {
-                                assert_ne!(warm[0], "accepted", "{label}: the oracle accepted");
-                                assert_status_error(
-                                    &label,
-                                    &row["error"],
-                                    &StatusError::Validation(error),
-                                );
-                            }
-                        }
+                        a3_validator_row(&label, row, cold_band, &input);
                     });
                 }
                 for row in producer_rows {
                     let label = format!("recursion a3 {}", row["name"]);
                     let depth = row["input"]["field_depth"].as_u64().expect("a depth");
                     let cold_raised = row["cold"][0] != "accepted";
-                    let warm_accepted = row["warm"][0] == "accepted";
                     let result = a3_coordinator(&row["input"]).status();
                     if result.is_ok() && cold_raised {
                         a3_declared.1 += 1;
+                        a3_depths.1.insert(depth);
                     }
                     paired(&mut failures, &label, || {
-                        assert_three_runs(&label, &row["cold"]);
-                        assert_three_runs(&label, &row["warm"]);
-                        match result {
-                            // The declared difference: the port accepts, the oracle's producer
-                            // path raised cold (and warm too past its caller's frames).
-                            Ok(doc) if cold_raised => {
-                                assert!(
-                                    (producer_band.0..=producer_band.1).contains(&depth),
-                                    "{label}: accepted outside the producer band"
-                                );
-                                assert_python_error(
-                                    &label,
-                                    &row["error"],
-                                    "RecursionError",
-                                    "maximum recursion depth exceeded",
-                                );
-                                if warm_accepted {
-                                    assert_deep_document(&label, &row["result"], &doc);
-                                }
-                            }
-                            Ok(doc) => assert_deep_document(&label, &row["result"], &doc),
-                            Err(error) => {
-                                assert!(
-                                    cold_raised && !warm_accepted,
-                                    "{label}: refused where the oracle accepts"
-                                );
-                                assert_status_error(&label, &row["error"], &error);
-                            }
-                        }
+                        a3_producer_row(&label, row, producer_band, result);
                     });
                 }
-                (failures, declared, a3_declared)
+                // Rejecting controls (rv-l1b-m16-coordinator-status-a3 F2a-control): a measured
+                // row made a declared row outside its band, by one changed trace or depth, must
+                // fail the same row check on its band assertion. Validator (list and dict): the
+                // 990 rows with a raising cold trace, the 994 rows with an accepting warm one.
+                // Producer: the port's accepted results of two 989 rows recorded at 988 and of
+                // two rows at field depth 993 recorded at 994.
+                let measured = |rows: &[Value], name: &str| {
+                    rows.iter()
+                        .find(|row| row["name"] == name)
+                        .expect("a measured row")
+                        .clone()
+                };
+                let mut rejections = Vec::new();
+                for (name, trace, outcome) in [
+                    ("validator_list_none_990", "cold", "RecursionError"),
+                    ("validator_dict_none_990", "cold", "RecursionError"),
+                    ("validator_list_none_994", "warm", "accepted"),
+                    ("validator_dict_none_994", "warm", "accepted"),
+                ] {
+                    let mut row = measured(validator_rows, name);
+                    row[trace] = json!([outcome, outcome, outcome]);
+                    let label = format!("rejecting control {name}, {trace} {outcome}");
+                    let input = with(&cold_base, "claim_boundary", a3_value(&row["input"]));
+                    let failed = rejection(|| a3_validator_row(&label, &row, cold_band, &input));
+                    rejections.push((label, failed, "outside the cold band"));
+                }
+                for (name, depth) in [
+                    ("producer_deployment_id_list_none_989", 988),
+                    ("producer_deployment_id_dict_int_989", 988),
+                    ("producer_deployment_id_list_none_993", 994),
+                    ("producer_node_id_dict_int_991", 994),
+                ] {
+                    let mut row = measured(producer_rows, name);
+                    let result = a3_coordinator(&row["input"]).status();
+                    assert!(result.is_ok(), "{name}: the port accepts");
+                    row["input"]["field_depth"] = json!(depth);
+                    let label = format!("rejecting control {name} at {depth}");
+                    let failed = rejection(|| a3_producer_row(&label, &row, producer_band, result));
+                    rejections.push((label, failed, "accepted outside the producer band"));
+                }
+                (failures, declared, a3_declared, (a3_depths, rejections))
             })
             .expect("a deep-case thread")
             .join()
@@ -3608,6 +3712,25 @@ fn m16_coordinator_status_python_value_domain_parity() {
         failures,
         Vec::<String>::new(),
         "paired cases unlike the oracle"
+    );
+    let (a3_depths, rejections) = a3_checks;
+    // Every rejecting control failed, on its band assertion.
+    assert_eq!(rejections.len(), 8);
+    for (label, failed, expected) in &rejections {
+        assert!(
+            failed.as_ref().is_some_and(|m| m.contains(expected)),
+            "{label}: not rejected by its band ({failed:?})"
+        );
+    }
+    // The bands are tight: each path's declared rows reach both pinned endpoints.
+    let ends = |depths: &BTreeSet<u64>| (depths.first().copied(), depths.last().copied());
+    assert_eq!(
+        (ends(&a3_depths.0), ends(&a3_depths.1)),
+        (
+            (Some(VALIDATOR_COLD_BAND.0), Some(VALIDATOR_COLD_BAND.1)),
+            (Some(PRODUCER_BAND.0), Some(PRODUCER_BAND.1))
+        ),
+        "the declared rows' depths"
     );
     assert_eq!(
         cases.len() as u64,
