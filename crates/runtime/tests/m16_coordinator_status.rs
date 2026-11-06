@@ -3787,6 +3787,11 @@ fn m16_coordinator_status_python_value_domain_parity() {
 const DEFAULT_THREAD_STACK_BYTES: usize = 2_097_152;
 /// Set in the child process the deep-placement regression re-runs itself in.
 const DEEP_PLACEMENT_CHILD: &str = "M16_STATUS_DEEP_PLACEMENT_CHILD";
+/// The deep-placement rows the fixture records (`recursion.a3.placement`).
+const DEEP_PLACEMENT_ROWS: usize = 11;
+/// The child's completion marker, followed by the number of rows whose `status()` returned on
+/// the 2 MiB thread and whose outcome was then checked against the oracle's.
+const DEEP_PLACEMENT_VERIFIED: &str = "deep placement rows verified: ";
 
 /// rv-l1b-m16-coordinator-status-a2 F2b: `status()` of a coordinator whose graph holds a deep
 /// placement `node_id` (and the deep `deployment_id` controls) on a default 2 MiB thread. The
@@ -3795,20 +3800,23 @@ const DEEP_PLACEMENT_CHILD: &str = "M16_STATUS_DEEP_PLACEMENT_CHILD";
 /// three fresh top-level runs each: RecursionError for node_id dict 2000/5000 and list 5000,
 /// accepted at depth 100, and a private key above the deep value refused first). A native stack
 /// overflow aborts the whole process, so the rows run in a child process (this test, re-run
-/// alone) and its clean exit is asserted here.
+/// alone) and its clean exit is asserted here, with its receipt: the count of rows verified
+/// (rv-l1b-m16-coordinator-status-a3 F2b-control), never the fixture's length.
 #[test]
 fn m16_coordinator_status_deep_placement_default_stack() {
     let oracle: Value = serde_json::from_str(ORACLE).expect("the fixture");
     let rows = oracle["recursion"]["a3"]["placement"]
         .as_array()
         .expect("placement rows");
-    let matched = format!("deep placement rows matched: {}", rows.len());
     if std::env::var_os(DEEP_PLACEMENT_CHILD).is_some() {
-        let failures = std::thread::scope(|scope| {
+        let (failures, verified) = std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .stack_size(DEEP_CASE_STACK_BYTES)
                 .spawn_scoped(scope, || {
                     let mut failures: Vec<String> = Vec::new();
+                    // A row counts once its status() returned on the 2 MiB thread and its
+                    // outcome was checked, the last step of its case.
+                    let mut verified = 0usize;
                     for row in rows {
                         let label = format!("placement {}", row["name"]);
                         let c = a3_coordinator(&row["input"]);
@@ -3833,17 +3841,23 @@ fn m16_coordinator_status_deep_placement_default_stack() {
                                 }
                                 Err(error) => assert_status_error(&label, &row["error"], &error),
                             }
+                            verified += 1;
                         });
                         println!("{label} returned");
                     }
-                    failures
+                    (failures, verified)
                 })
                 .expect("a setup thread")
                 .join()
                 .expect("the rows ran")
         });
         assert_eq!(failures, Vec::<String>::new(), "rows unlike the oracle");
-        println!("{matched}");
+        assert_eq!(
+            (verified, rows.len()),
+            (DEEP_PLACEMENT_ROWS, DEEP_PLACEMENT_ROWS),
+            "rows whose status() returned and was checked"
+        );
+        println!("{DEEP_PLACEMENT_VERIFIED}{verified}");
         return;
     }
     let child = std::process::Command::new(std::env::current_exe().expect("the test binary"))
@@ -3864,6 +3878,21 @@ fn m16_coordinator_status_deep_placement_default_stack() {
         "the child did not exit cleanly ({}):\n{stdout}\n{stderr}",
         child.status
     );
-    assert!(stdout.contains(&matched), "{stdout}");
+    // The receipt: one marker, its count the child's verified rows.
+    let receipts: Vec<usize> = stdout
+        .lines()
+        .filter_map(|line| line.split_once(DEEP_PLACEMENT_VERIFIED))
+        .map(|(_, count)| {
+            let digits = count.split(|c: char| !c.is_ascii_digit()).next();
+            digits
+                .and_then(|d| d.parse().ok())
+                .expect("a verified count")
+        })
+        .collect();
+    assert_eq!(
+        receipts,
+        [DEEP_PLACEMENT_ROWS],
+        "the child's receipt:\n{stdout}"
+    );
     assert_eq!(rows.len(), 11);
 }
