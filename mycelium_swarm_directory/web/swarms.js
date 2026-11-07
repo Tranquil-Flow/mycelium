@@ -81,7 +81,7 @@ function renderPerformance(s) {
       el('caption', {}, 'Hop round trips · latest estimate, not percentiles'),
       el('thead', {}, el('tr', {}, ...['Link','Measurement','RTT','Samples','Age'].map(x=>el('th',{scope:'col'},x)))),hops)));
     section.append(el('p', {class:'meta'}, 'Activation transport RTT measures an actual consecutive-stage link. Network round trip (probe) instead measures the owner control channel, including mailbox polling and health-command execution. It is an upper bound on pure network RTT, not one-way latency. Existing idle probes add no extra traffic. Probe samples: retained last 64; transport samples: source-reported count.'));
-  } else section.append(el('p', {class:'meta'}, 'Hop round trip: not measured yet (or this is a one-Mac route). Stage compute and browser latency are not substitutes for hop time.'));
+  } else section.append(el('p', {class:'meta'}, 'Hop round trip: not measured yet. Stage compute and browser latency are not substitutes for hop time.'));
   section.append(el('p', {}, `Served in the last 24 h: ${v.requests_24h} completed app-chat requests · coverage ${duration(v.coverage_seconds)} of 24 h (resets when the app restarts). Counts across listings may overlap.`));
   return section;
 }

@@ -145,7 +145,9 @@ def test_apex_real_counts_delayed_and_unavailable_without_identity(local, monkey
             assert page.evaluate('async()=> (await indexedDB.databases()).length') == 0
             assert page.evaluate('localStorage.length + sessionStorage.length') == 0
             assert all(method=='GET' and url.startswith(local['directory'].origin) for method,url in requests)
-            expect(page.get_by_role('link',name='Try the demo chat')).to_have_attribute('href','https://demo.mycelium.now/chat')
+            expect(page.get_by_role('link',name='Start your own swarm',exact=True)).to_have_attribute('href','/swarms/#new')
+            expect(page.locator('#demo-route')).to_contain_text('Demo offline')
+            expect(page.get_by_role('link',name='Try the demo chat')).to_have_count(0)
             if os.environ.get('SITEB_SHOTS'):
                 out=Path(os.environ['SITEB_SHOTS']);out.mkdir(parents=True,exist_ok=True)
                 name=f'apex-{width}-{theme}'+('-unavailable' if failed else '')
@@ -187,9 +189,10 @@ def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, w
         time.sleep(.7)  # real server thread; first paint/CSS is not held
         return original()
     monkeypatch.setattr(d, 'list_swarms', delayed)
-    neutral = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.'
+    neutral = 'Demo offline. Download the Mac app on two Apple silicon Macs to run your own swarm.'
     notes = {
-        'one-mac': 'The demo route runs on one Mac, not a distributed swarm.',
+        'unknown': 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.',
+        'one-mac': 'The listing reports one Mac; a swarm needs at least two Apple silicon Macs.',
         'two-mac': 'The demo route runs across 2 Macs.',
         'max-macs': 'The demo route runs across 64 Macs.',
     }
@@ -210,6 +213,11 @@ def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, w
             page.goto(local['directory'].origin + '/')
             expect(page.locator('#apex-fresh')).to_contain_text('Status unavailable' if state == 'unavailable' else 'snapshot just loaded')
             expect(page.locator('.apex-demo')).to_contain_text(notes.get(state, neutral))
+            if state in notes:
+                expect(page.get_by_role('link',name='Try the demo chat')).to_have_attribute('href','https://demo.mycelium.now/chat')
+            else:
+                expect(page.get_by_role('link',name='Start your own swarm',exact=True)).to_have_attribute('href','/swarms/#new')
+                expect(page.get_by_role('link',name='Try the demo chat')).to_have_count(0)
             page.wait_for_timeout(700)
             cls = sum(page.evaluate('window.__cls'))
             assert cls == 0, (state,width,theme,page.evaluate('window.__clsDetails'))

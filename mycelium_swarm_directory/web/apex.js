@@ -20,12 +20,18 @@
     // Match the actual demo destination, never its mutable display name or the
     // directory-wide sum. Offline duplicates do not describe the serving route.
     // Multiple serving listings are ambiguous: retain the neutral HTML fallback.
-    const demoOrigin = new URL(document.getElementById('demo-chat').href).origin;
-    const demo = value.swarms.filter(s => s.entry_origin === demoOrigin && s.status === 'serving');
+    const demoChat = document.getElementById('demo-chat');
+    const demoURL = 'https://demo.mycelium.now/chat';
+    const demo = value.swarms.filter(s => s.entry_origin === new URL(demoURL).origin && s.status === 'serving');
+    if (demo.length === 1) {
+      demoChat.href = demoURL;
+      demoChat.textContent = 'Try the demo chat';
+      document.getElementById('demo-route').textContent = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.';
+    }
     if (demo.length === 1 && Number.isSafeInteger(demo[0].members) && demo[0].members > 0 && demo[0].members <= 64) {
       const count = demo[0].members;
       document.getElementById('demo-route').textContent = (count === 1
-        ? 'The demo route runs on one Mac, not a distributed swarm.'
+        ? 'The listing reports one Mac; a swarm needs at least two Apple silicon Macs.'
         : `The demo route runs across ${count} Macs.`) + ' Reported by its listing; availability may change.';
     }
     label.textContent = 'Directory snapshot just loaded. Refresh for a new snapshot.';

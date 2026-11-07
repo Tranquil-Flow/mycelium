@@ -39,6 +39,8 @@ p{margin:0 0 .6em;text-wrap:pretty}
 
 /* Static apex: asynchronous counts never determine geometry. */
 .apex-hero{padding:64px 0 32px;max-width:820px}
+/* Keep both CTA states the same width while directory status loads. */
+#demo-chat{min-width:13em}
 .apex-hero h1{font-size:clamp(2.3rem,5vw,3.8rem);max-width:18ch;margin-bottom:24px}
 .apex-lead{font-size:1.15rem;max-width:65ch;margin:20px 0}
 /* Reserve the longest route note before the public snapshot arrives. */

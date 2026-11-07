@@ -19,7 +19,12 @@ def test_apex_explains_without_identity_or_chat_surface():
         r = c.getresponse(); body = r.read().decode()
         assert r.status == 200
         assert 'Run an AI model' in body and 'MVP' in body
-        assert 'https://demo.mycelium.now/chat' in body and 'Check its listing for current serving Macs.' in body
+        assert 'href="https://demo.mycelium.now/chat"' not in body
+        assert 'Demo offline' in body and 'Start your own swarm</a>' in body
+        assert 'id="demo-chat" class="btn" href="/swarms/#new"' in body
+        assert '<a href="/swarms/#contributing">Download the Mac app</a> on two Apple silicon Macs to run your own swarm.' in body
+        assert 'Today a swarm needs at least two Apple silicon Macs.' in body
+        assert 'A one-Mac route runs the model on that Mac alone.' not in body
         assert 'The fast demo route' not in body
         assert 'apex.js' in body and 'swarms.js' not in body
         assert not r.getheader('Set-Cookie')
