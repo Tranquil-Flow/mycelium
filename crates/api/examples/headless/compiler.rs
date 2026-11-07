@@ -176,12 +176,12 @@ impl Compiler {
     /// Source consent/observation ladder precedes any local source reads.
     fn acquire(&mut self) -> Result<CompileInputs, PortError> {
         let core = self.host()?;
-        let (root, acquisition, seed) = {
+        let (acquisition, seed) = {
             let c = lock(&core)?;
             if c.target || !c.running {
                 return Err(failed("model_preparation_consent_required"));
             }
-            (c.root.clone(), c.acquisition.clone(), c.seed.clone())
+            (c.acquisition.clone(), c.seed.clone())
         };
         let (run, deployment, members, cards, facts, observations) = {
             let observation = lock(&self.observation.0)?;
@@ -199,7 +199,7 @@ impl Compiler {
                 context.members.clone(),
                 context.descriptors.clone(),
                 context.compiler_facts.clone(),
-                document.to_value(),
+                document.clone(),
             )
         };
         if self.retired && self.identity.as_ref() != Some(&(run.clone(), deployment.clone())) {
@@ -293,11 +293,10 @@ impl Compiler {
         let inputs = CompileInputs {
             facts,
             observation_hosts: Some(
-                observations["observations"]
-                    .as_array()
-                    .ok_or_else(|| failed("two_distinct_hosts_required"))?
+                observations
+                    .observations
                     .iter()
-                    .map(|r| r["host_id"].as_str().unwrap_or_default().to_owned())
+                    .map(|r| r.host_id.clone())
                     .collect(),
             ),
             local: metadata.local,
@@ -321,18 +320,55 @@ impl Compiler {
             keys: json!({"gossip":[seed.coordinator.signer().public_key_record()], "load_proof":keys}),
             epoch: 0,
         };
+        self.retain_prepared_source(source, &inputs, &observations)?;
+        Ok(inputs)
+    }
+    /// Retain the admitted source/observation boundary before starting byte work.
+    /// This is not consent admission; acquire performs that ladder first.
+    fn retain_prepared_source(
+        &mut self,
+        source: api::serving_source::Prepared,
+        inputs: &CompileInputs,
+        observations: &runtime::observe::ObservationsDocument,
+    ) -> Result<(), PortError> {
+        if self.retired
+            || self.prepared.is_some()
+            || self.worker.is_some()
+            || self.artifact.is_some()
+            || self.failure.is_some()
+        {
+            return Err(failed("compiler_already_started"));
+        }
+        let document = observations.to_value();
+        api::compiler_inputs::validate_hosts(&document, inputs.facts.len())?;
+        let nodes: std::collections::BTreeSet<_> = observations
+            .observations
+            .iter()
+            .map(|row| row.node_id.as_str())
+            .collect();
+        if nodes != inputs.facts.keys().map(String::as_str).collect()
+            || inputs.manifest_digest != source.manifest_digest
+            || inputs.manifest != Value::Object(source.manifest.clone())
+        {
+            return Err(failed("compiler_model_changed"));
+        }
+        let core = self.host()?;
+        let root = lock(&core)?.root.clone();
         let topology = api::compiler_inputs::topology(&inputs.facts)?;
-        self.identity = Some((run.clone(), deployment.clone()));
+        self.identity = Some((
+            observations.run_id.clone(),
+            observations.deployment_id.clone(),
+        ));
         self.prepared = Some(PreparedBuild {
             source,
             inputs: inputs.clone(),
-            run,
-            deployment,
-            observations,
+            run: observations.run_id.clone(),
+            deployment: observations.deployment_id.clone(),
+            observations: document,
             topology,
             root,
         });
-        Ok(inputs)
+        Ok(())
     }
     pub(super) fn teardown(&mut self) -> Result<(), String> {
         self.retired = true;
@@ -422,8 +458,13 @@ impl CompilePort for Compiler {
                     &prepared.inputs.keys,
                     &prepared.inputs.context_members,
                 )?;
-                artifact.produce_assignments(&check()?, now())?;
-                artifact.validate_assignments(&check()?, now())?;
+                if request.stage_sharded {
+                    artifact.produce_stage_shards(&check()?, now())?;
+                    artifact.validate_stage_shards(&check()?, now())?;
+                } else {
+                    artifact.produce_assignments(&check()?, now())?;
+                    artifact.validate_assignments(&check()?, now())?;
+                }
                 artifact.validate_members(&check()?, now())?;
                 Ok(artifact)
             });
@@ -440,8 +481,8 @@ impl CompilePort for Compiler {
             match worker.join() {
                 Ok(Ok(artifact)) => {
                     self.artifact = Some(artifact);
-                    // Metadata assignments exist; actual loaded-stage proofs,
-                    // challenge tokens and an operator plan still do not.
+                    // Metadata or stage-shard bytes exist; actual loaded-stage
+                    // proofs, challenge tokens and an operator plan still do not.
                     self.failure = Some(failed("native_challenge_producer_unavailable"));
                 }
                 Ok(Err(error)) => self.failure = Some(error),
