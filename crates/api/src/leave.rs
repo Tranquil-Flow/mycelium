@@ -34,6 +34,13 @@ pub struct TypeError;
 #[derive(Debug, PartialEq)]
 pub struct Unobservable;
 
+/// Positive cleanup evidence: an owned set was cleaned, or durably owns nothing.
+#[derive(Clone, Copy, Debug)]
+pub enum ComputeCleanup {
+    Proven,
+    NoneOwned,
+}
+
 /// A host's side of a leave that may run on a background thread (`member_leave.app_steps`). The host
 /// hands one out per leave (`Host::leave_worker`); it must own whatever it touches (shared state).
 pub trait LeaveWorker: Send + 'static {
@@ -48,7 +55,7 @@ pub trait LeaveWorker: Send + 'static {
     }
     /// An explicit host proof, separate from membership departure. None means
     /// this legacy worker has no compute-proof interface, not successful cleanup.
-    fn compute_cleanup(&mut self) -> Option<Result<(), String>> {
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
         None
     }
     /// `time.time()`.
@@ -77,7 +84,7 @@ pub trait Steps {
     }
     /// Forward the host's explicit compute proof; membership steps alone cannot
     /// manufacture one. A refusal remains durable and retryable.
-    fn compute_cleanup(&mut self) -> Option<Result<(), String>> {
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
         None
     }
     /// `resume_leave`: keep a leave that already happened fenced (and, when `left`, not renewing).
@@ -311,11 +318,12 @@ impl MemberLeave {
         self.step(&mut record, "withdraw_consent", steps);
         self.step(&mut record, "disconnect", steps);
         self.step(&mut record, "cancel_work", steps);
-        if record.get("compute_cleanup").and_then(|v| v.get("state")) != Some(&json!("proven"))
+        if !record.get("compute_cleanup").is_some_and(cleanup_proven)
             && let Some(proof) = steps.compute_cleanup()
         {
             record.insert("compute_cleanup".into(), match proof {
-                Ok(()) => json!({"state":"proven","code":null}),
+                Ok(ComputeCleanup::Proven) => json!({"state":"proven","code":null}),
+                Ok(ComputeCleanup::NoneOwned) => json!({"state":"none_owned","code":null}),
                 Err(code) => json!({"state":"unproven","code": if code_shaped(&code) { code } else { "compute_cleanup_unproven".into() }}),
             });
         }
@@ -409,6 +417,9 @@ pub enum ResumeError {
     Type,
     Failed(PublicError),
 }
+fn cleanup_proven(proof: &Value) -> bool {
+    matches!(proof["state"].as_str(), Some("proven" | "none_owned")) && proof["code"].is_null()
+}
 /// A finished membership action can still owe cleanup. Do not clear its rows
 /// or issue a new leave just because the legacy membership label is `left`.
 pub fn cleanup_pending(record: &Map<String, Value>) -> bool {
@@ -417,7 +428,7 @@ pub fn cleanup_pending(record: &Map<String, Value>) -> bool {
         .is_some_and(|rows| rows.iter().any(|row| row["ok"] != true))
         || record
             .get("compute_cleanup")
-            .is_some_and(|proof| proof["state"] != "proven")
+            .is_some_and(|proof| !cleanup_proven(proof))
 }
 /// `leave_status`: membership progress plus any explicit compute proof.
 pub fn status_view(leave: &MemberLeave) -> Result<Value, TypeError> {

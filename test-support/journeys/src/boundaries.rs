@@ -29,11 +29,14 @@ pub fn validate_leave(value: &Value, mode: &str) -> Result<()> {
         .into_iter()
         .map(|name| json!({"name":name,"ok":true,"code":null}))
         .collect();
-    require(
-        value
-            == &json!({"state":"left","mode":mode,"fallback":null,"handoff":"unavailable","steps":steps}),
-        "leave:incomplete_or_failed_steps",
-    )
+    let mut expected =
+        json!({"state":"left","mode":mode,"fallback":null,"handoff":"unavailable","steps":steps});
+    // The Python golden predates this additive field. This corpus owns no compute;
+    // if a proof is supplied, only the positive empty-owned-set proof is valid.
+    if value.get("compute_cleanup").is_some() {
+        expected["compute_cleanup"] = json!({"state":"none_owned","code":null});
+    }
+    require(value == &expected, "leave:incomplete_or_failed_steps")
 }
 
 fn post(

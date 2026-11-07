@@ -920,6 +920,49 @@ fn contributor_restart_keeps_unreconciled_stage_debt_visible() {
 }
 
 #[test]
+fn member_without_owned_compute_leaves_with_legacy_success_and_positive_proof() {
+    let _serial = one_at_a_time();
+    build();
+    for mode in ["instant", "smooth"] {
+        let base = fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("lane-a-empty-leave-{mode}-{}", std::process::id()));
+        fs::create_dir(&base).unwrap();
+        let (owner, member, _) = pair_up_with_owner_env(&base, &[]);
+        // Reopen real durable membership before leaving: missing memory alone is
+        // not evidence, but this member has never acquired a worker or stage.
+        let member = member.restart();
+        let requested = member.post("/api/leave", &json!({"mode":mode,"confirm":true}));
+        assert_eq!(requested.0, 200, "{requested:?}");
+        let left = member.until_with(
+            "empty owned set needs no unknown-work drain",
+            budget(BudgetId::WorkerStartup),
+            || member.get("/api/status").1["leave"].clone(),
+            |s| s["state"] == "left",
+        );
+        let mut names = vec!["fence"];
+        if mode == "smooth" {
+            names.extend(["unload", "publish_withdrawal"]);
+        }
+        names.extend(["withdraw_consent", "disconnect", "cancel_work"]);
+        let expected = json!({"state":"left","mode":mode,"fallback":null,
+            "handoff":"unavailable","compute_cleanup":{"state":"none_owned","code":null},
+            "steps":names.into_iter().map(|name| json!({"name":name,"ok":true,"code":null})).collect::<Vec<_>>()});
+        assert_eq!(left, expected);
+        journey_tests::boundaries::validate_leave(&left, mode).unwrap();
+        let mut unproven = left.clone();
+        unproven["compute_cleanup"] =
+            json!({"state":"unproven","code":"member_compute_cleanup_unavailable"});
+        assert!(journey_tests::boundaries::validate_leave(&unproven, mode).is_err());
+        let member = member.restart();
+        assert_eq!(member.get("/api/status").1["leave"], expected);
+        drop(member);
+        drop(owner);
+        fs::remove_dir_all(base).unwrap();
+    }
+}
+
+#[test]
 fn membership_leave_reports_unproven_compute_before_and_after_restart() {
     membership_leave("instant");
 }
@@ -935,6 +978,25 @@ fn membership_leave(mode: &str) {
         .join(format!("lane-a-membership-leave-{}", std::process::id()));
     fs::create_dir(&base).unwrap();
     let (owner, member, _) = pair_up_with_owner_env(&base, &[]);
+    // Unlike the empty-set case, this member has real staged bootstrap bytes.
+    // Use the production stage constructor, not a fabricated cleanup record.
+    let native = member.root.join("local-contributor/native-bootstrap");
+    fs::create_dir_all(&native).unwrap();
+    let identity = protocol::identity::Identity::from_secret("leave-stage", &[32; 32]).unwrap();
+    let scope = json!({"target_node_id":"target","target_endpoint_id":identity.endpoint_id(),
+        "target_key_digest":identity.verification_key_digest(),"membership_generation":1,
+        "member_incarnation":"incarnation","run_id":"run","deployment_id":"deployment"});
+    let archive = runtime::observe::bootstrap_archive("run", "deployment");
+    let mut offer = scope.clone();
+    offer["archive_bytes"] = json!(archive.len());
+    offer["archive_digest"] = json!(protocol::artifact_grant::range_digest(&archive));
+    let stage = api::bootstrap_stage::BootstrapStage::create(
+        &native.join("stage"),
+        &scope,
+        &offer,
+        &archive,
+    )
+    .unwrap();
     let requested = member.post("/api/leave", &json!({"mode":mode,"confirm":true}));
     assert_eq!(requested.0, 200, "{requested:?}");
     let left = if mode == "smooth" {
@@ -966,7 +1028,11 @@ fn membership_leave(mode: &str) {
         retried.1["steps"], left.1["steps"],
         "retry updates debt, never duplicates successful steps"
     );
+    drop(stage);
+    assert!(!native.join("stage").exists());
     let member = member.restart();
+    // Even with the stage gone and memory lost, retained leave debt forbids
+    // relabelling the cleanup as none_owned.
     assert_eq!(
         fs::read(member.root.join("standing-consent.json")).unwrap(),
         consent

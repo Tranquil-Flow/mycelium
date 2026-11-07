@@ -401,7 +401,7 @@ impl crate::leave::Steps for RunnerSteps<'_> {
     fn inflight(&mut self) -> Result<i64, crate::leave::Unobservable> {
         self.0.worker.borrow_mut().inflight()
     }
-    fn compute_cleanup(&mut self) -> Option<Result<(), String>> {
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
         self.0.worker.borrow_mut().compute_cleanup()
     }
 }
