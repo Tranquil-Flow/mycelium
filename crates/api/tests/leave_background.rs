@@ -109,6 +109,108 @@ impl LeaveWorker for SlowWorker {
         1_761_700_000.25
     }
 }
+// A persisted completion can precede thread exit: hold the host worker's
+// destructor after execute has published its final record. No timing race.
+struct ExitHost {
+    inner: SlowHost,
+    hold: Option<(
+        std::sync::mpsc::SyncSender<()>,
+        std::sync::mpsc::Receiver<()>,
+    )>,
+}
+impl Host for ExitHost {
+    fn closed(&self) -> bool {
+        false
+    }
+    fn owner(&self) -> bool {
+        false
+    }
+    fn environment(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn device_memory_bytes(&self) -> Option<u64> {
+        None
+    }
+    fn run_active(&self) -> bool {
+        false
+    }
+    fn acquisition_active(&self) -> bool {
+        false
+    }
+    fn owner_run_active(&self) -> bool {
+        false
+    }
+    fn adopt_target_role(&mut self) -> Result<(), PublicError> {
+        Ok(())
+    }
+    fn start_authority(&mut self) -> Result<(), PublicError> {
+        Ok(())
+    }
+    fn leave_worker(&mut self) -> Box<dyn LeaveWorker> {
+        match self.hold.take() {
+            Some((entered, release)) => Box::new(ExitWorker { entered, release }),
+            None => self.inner.leave_worker(),
+        }
+    }
+}
+struct ExitWorker {
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+impl LeaveWorker for ExitWorker {
+    fn now_seconds(&self) -> f64 {
+        1_761_700_000.25
+    }
+}
+impl Drop for ExitWorker {
+    fn drop(&mut self) {
+        self.entered.send(()).unwrap();
+        self.release
+            .recv_timeout(ceiling())
+            .expect("release exit hold");
+    }
+}
+struct ExitRelease(std::sync::mpsc::SyncSender<()>);
+impl Drop for ExitRelease {
+    fn drop(&mut self) {
+        self.0.send(()).expect("release held worker even on RED");
+    }
+}
+#[test]
+fn completed_leave_accepts_next_mode_before_previous_thread_exits() {
+    let dir = std::env::temp_dir().join(format!("leave-exit-hold-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (entered, observed) = std::sync::mpsc::sync_channel(1);
+    let (release, hold) = std::sync::mpsc::sync_channel(1);
+    let release = ExitRelease(release);
+    let host = ExitHost {
+        inner: SlowHost {
+            seen: Arc::new(Mutex::new(Seen::default())),
+            started: Instant::now(),
+        },
+        hold: Some((entered, hold)),
+    };
+    let control = Control::new(SignedBackend::new(
+        PersistentBackend::new(dir.clone(), host, Nothing),
+        (|| 1_761_700_000.25) as fn() -> f64,
+    ));
+    assert_eq!(
+        control.action("/api/leave", &body("smooth")).unwrap()["mode"],
+        "smooth"
+    );
+    observed
+        .recv_timeout(ceiling())
+        .expect("worker held after final publication");
+    assert_eq!(state_of(&dir).0, "left");
+    let answer = control.action("/api/leave", &body("instant")).unwrap();
+    drop(release);
+    assert_eq!(
+        answer["mode"], "instant",
+        "thread exit must not override completed action: {answer}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 struct Nothing;
 impl Backend for Nothing {
     fn prepare(&mut self, _: Action, _: &Map<String, Value>) -> Result<(), PublicError> {

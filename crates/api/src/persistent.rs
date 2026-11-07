@@ -643,7 +643,12 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
                 })
                 .map(Json::from)
         };
-        if self.leave_thread.as_ref().is_some_and(|t| !t.is_finished()) {
+        // execute publishes `left` after its last step. The OS thread may still
+        // be returning/dropping its worker; that is not an in-progress action.
+        // `left` is membership/action completion, never compute-cleanup proof.
+        if self.leave_thread.as_ref().is_some_and(|t| !t.is_finished())
+            && !matches!(leave.status(), Ok(Some(record)) if record["state"] == "left")
+        {
             return status(&leave);
         }
         let smooth = body["mode"].as_str() == Some("smooth");
