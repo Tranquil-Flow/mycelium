@@ -9,6 +9,9 @@ use owner_run::steps::compile::{
 use owner_run::steps::observe::ObservePort;
 use planner::chain_compile::{BuildRequest, GrantCaps, ModelContract};
 use std::sync::{MutexGuard, Weak};
+#[cfg(test)]
+#[path = "compiler_tests.rs"]
+mod compiler_tests;
 
 fn failed(code: &str) -> PortError {
     PortError::Failed {
@@ -382,19 +385,32 @@ impl CompilePort for Compiler {
         let worker = std::thread::Builder::new()
             .name("chain-compiler-inputs".into())
             .spawn(move || {
-                let check = || -> Result<(), PortError> {
+                let check = || -> Result<BTreeMap<String, Value>, PortError> {
                     if cancel.load(std::sync::atomic::Ordering::SeqCst) {
                         return Err(failed("compiler_stopped"));
                     }
                     let core = core.upgrade().ok_or_else(|| failed("compiler_stopped"))?;
-                    let c = lock(&core)?;
-                    if c.closed || !c.running {
-                        return Err(failed("compiler_stopped"));
+                    let seed = {
+                        let c = lock(&core)?;
+                        if c.closed || !c.running || c.target {
+                            return Err(failed("compiler_stopped"));
+                        }
+                        c.seed
+                            .clone()
+                            .ok_or_else(|| failed("compiler_member_changed"))?
+                    };
+                    let mut current = BTreeMap::new();
+                    for node in &request.node_ids {
+                        let member = seed
+                            .coordinator
+                            .member(node)
+                            .map_err(|_| failed("compiler_member_changed"))?;
+                        current.insert(node.clone(), member);
                     }
-                    Ok(())
+                    Ok(current)
                 };
                 check()?;
-                let artifact = api::compiler_inputs::emit(
+                let mut artifact = api::compiler_inputs::emit(
                     &prepared.root,
                     &prepared.run,
                     &prepared.deployment,
@@ -406,7 +422,9 @@ impl CompilePort for Compiler {
                     &prepared.inputs.keys,
                     &prepared.inputs.context_members,
                 )?;
-                check()?;
+                artifact.produce_assignments(&check()?, now())?;
+                artifact.validate_assignments(&check()?, now())?;
+                artifact.validate_members(&check()?, now())?;
                 Ok(artifact)
             });
         match worker {
@@ -422,7 +440,9 @@ impl CompilePort for Compiler {
             match worker.join() {
                 Ok(Ok(artifact)) => {
                     self.artifact = Some(artifact);
-                    self.failure = Some(failed("native_assignment_producer_unavailable"));
+                    // Metadata assignments exist; actual loaded-stage proofs,
+                    // challenge tokens and an operator plan still do not.
+                    self.failure = Some(failed("native_challenge_producer_unavailable"));
                 }
                 Ok(Err(error)) => self.failure = Some(error),
                 Err(_) => self.failure = Some(failed("compiler_worker_panicked")),

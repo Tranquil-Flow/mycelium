@@ -148,6 +148,134 @@ fn rows() -> Vec<Value> {
         .unwrap()
         .clone()
 }
+
+impl Fixture {
+    fn assignments(
+        &self,
+        current: &BuildRequest,
+    ) -> planner::Result<producer::AssignmentDocuments> {
+        let roots: BTreeMap<_, _> = self
+            .request
+            .node_ids
+            .iter()
+            .map(|n| (n.clone(), format!("/fixture/{n}/deployment")))
+            .collect();
+        let runtimes: BTreeMap<_, _> = self
+            .request
+            .node_ids
+            .iter()
+            .map(|n| {
+                (
+                    n.clone(),
+                    json!({"backend":"mlx", "dtype":"float32", "quantization":"int8-weight-only"}),
+                )
+            })
+            .collect();
+        producer::compile_source_assignments(
+            &self.request,
+            current,
+            PreparedSource {
+                manifest: &self.row["manifest"],
+                manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
+                files: &self.source,
+            },
+            0,
+            &json!(roots),
+            &json!(runtimes),
+        )
+    }
+}
+
+/// Real bounded source bytes from the existing oracle fixture; no native proof.
+#[test]
+fn source_bytes_produce_revalidatable_metadata_assignments() {
+    for row in rows() {
+        let mut f = Fixture::new(row);
+        f.request.stage_sharded = false;
+        let result = f
+            .assignments(&f.request)
+            .expect("source-bound assignment producer");
+        assert_eq!(result.assignments.len(), f.request.node_ids.len());
+        assert_eq!(
+            result.route["model"]["manifest_digest"],
+            f.row["manifest_digest"]
+        );
+        for (i, a) in result.assignments.iter().enumerate() {
+            planner::compile::validate_assignment(a).unwrap();
+            assert_eq!(a["route_ready"], false);
+            assert_eq!(a["node_id"], f.request.node_ids[i]);
+            assert_eq!(a["manifest_digest"], f.row["manifest_digest"]);
+            assert_eq!(
+                a["range"]["start_layer"],
+                f.request.managed_layer_ranges[i][0]
+            );
+            assert_eq!(
+                a["range"]["end_layer_exclusive"],
+                f.request.managed_layer_ranges[i][1]
+            );
+        }
+        // Independently reopen all source files and rerun the producer.
+        for (name, file) in &mut f.source {
+            *file = File::open(f.root.join("source_files").join(name)).unwrap();
+        }
+        assert_eq!(
+            f.assignments(&f.request).unwrap().assignments,
+            result.assignments
+        );
+        let mut changed = f.request.clone();
+        changed
+            .compilation_cache_key
+            .push_str("-new-member-generation");
+        assert_eq!(
+            f.assignments(&changed).unwrap_err().code,
+            "source_plan_binding_changed"
+        );
+        let path = f.row["manifest"]["files"][0]["path"].as_str().unwrap();
+        let file = f.root.join("source_files").join(path);
+        let mut bytes = fs::read(&file).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        fs::write(file, bytes).unwrap();
+        assert_eq!(
+            f.assignments(&f.request).unwrap_err().code,
+            "slice_source_manifest_invalid"
+        );
+    }
+}
+#[test]
+fn assignments_reject_repinned_wrong_source_file_ownership() {
+    let mut f = Fixture::new(rows().remove(1));
+    f.request.stage_sharded = false;
+    f.row["manifest"]["layer_files"]["0"] = f.row["manifest"]["layer_files"]["5"].clone();
+    f.row["manifest"]["component_files"]["input_embedding"] =
+        f.row["manifest"]["layer_files"]["5"].clone();
+    f.repin_manifest();
+    assert_eq!(
+        f.assignments(&f.request).unwrap_err().code,
+        "source_plan_assignment_mismatch"
+    );
+}
+
+#[test]
+fn assignments_refuse_unsupported_stage_output_and_incoherent_split() {
+    let mut f = Fixture::new(rows().remove(0));
+    assert_eq!(
+        f.assignments(&f.request).unwrap_err().code,
+        "native_stage_shard_producer_unavailable"
+    );
+    f.request.stage_sharded = false;
+    f.request.layer_split["stages"][0]["end"] = json!(99);
+    assert_eq!(
+        f.assignments(&f.request).unwrap_err().code,
+        "source_plan_assignment_mismatch"
+    );
+    f.request.layer_split["stages"][0]["end"] = json!(f.request.managed_layer_ranges[0][1]);
+    f.row["manifest"]["runtime_model"]["model_config"]["n_embd"] = json!(999);
+    assert_eq!(
+        f.assignments(&f.request).unwrap_err().code,
+        "slice_source_manifest_invalid"
+    );
+}
+
 #[test]
 fn full_documents_equal_real_oracle_and_ordered_bytes() {
     let mut emitted = Vec::new();
