@@ -1,0 +1,977 @@
+{
+  "items": [
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "LyBC4zJW70AvcGR+WKqfB6nJ5iXleyxk/pYLIoxytsOKZlsLibajFwbvSKfmxp1QTB2L//w+vbS8/Ubp554TBg==",
+          "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:base"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "other-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "ICgIV0tMFL1+JYdNsE/yyHQMCFtuY6EtRRnmacStmATb+50p/U3G8ZCmYiJ2Ze3QNCvZtrxghKkOlWsI/R+XDg==",
+          "signed_statement_digest": "sha256:3f13c0fc09b507e8cff1cd10eebdab74f5a7e9f86eb9aef97a4740a99c29e57b",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:recipient_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "other-swarm"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "2V40uNHvr5TOUcMHBBknMQsb7DJaP/nDA+Bgxk7cN0H7oeUNp6GLuWf1N3oBv7i0KxP0TFprHkZ5BMX8Bt6jAw==",
+          "signed_statement_digest": "sha256:3516427ae41207d5d4ee050c693acb2aea09621d313dce588e65cb4997087995",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:swarm_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "other-sender",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "Pzhuy5KdKMq63xNeHrIsPt18nU5s+tl4pAzkkgyal3U3u0K05g/R1ONw1cXspQx4BslmgazhkWqVmsEvLFwjDg==",
+          "signed_statement_digest": "sha256:6046e0bbe54c4746f8ce0ce6c6137ff1cf91fe344c04bf1324f29a098c3f4434",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:sender_node_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.heartbeat.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "8LppsGihTEkbtkXYUq7efyBqH11+D8r3OQSnLmfA52tHW8tEDvZK/gGnvZCXc6emAJBG7xAFauyR1CYlpySuCw==",
+          "signed_statement_digest": "sha256:5e74680534ba6888e2e6caa3f7b3a8688d7d7ea59005058e1410604479967fcc",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:protocol_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1699990500.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1699990000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "kWm9pkHP0MWFv6neOXdCplxb796y9Gl2E9H/bLpVCCvDLhoXDbLdxN986U14fNIC/bc8WfLZOU1xOnJRD2qUDw==",
+          "signed_statement_digest": "sha256:38e050bb0098fedca04c703b72dde16d4ca07af02d6b5b04e4a6f805924585b5",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:expired"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700001300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700001000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "a+aV0MNj+wKKk0ijxzQbv/7COTtnePCRWtkEwJDB3ZbnFZicktbNP8fJtdgvHQlv7W9q6qdJRpvdnFQNpG6bBg==",
+          "signed_statement_digest": "sha256:cf6b677d9b7cbd21559e0612200074494d9fd500c650b652b5a553237bab72c5",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:from_future"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "tampered",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "LyBC4zJW70AvcGR+WKqfB6nJ5iXleyxk/pYLIoxytsOKZlsLibajFwbvSKfmxp1QTB2L//w+vbS8/Ubp554TBg==",
+          "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:tampered_after_signing"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "lia9pH7nH9fzAI0tExVXEWeSV1oHDqPnQg+819p1gkeCxpQeZKUZO/J6IZcKlvxXC5Kueu0k95wHhFLtONApCg==",
+          "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+          "signer_endpoint_id": "foreign-endpoint",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:signature_by_foreign_key"
+    },
+    {
+      "envelope": {
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "lia9pH7nH9fzAI0tExVXEWeSV1oHDqPnQg+819p1gkeCxpQeZKUZO/J6IZcKlvxXC5Kueu0k95wHhFLtONApCg==",
+          "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+          "signer_endpoint_id": "foreign-endpoint",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "+AzM3OSuHAeuIIoq35mjEK5CB+Awb6AjYRCwaCe7uNA=",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:foreign_signer_and_record"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "s7BU9Te/C3UysyZvow88QMHctx0i7iN26aO8JN2kOTauqp0oBD+DK8hMVukrEWZna5fJBWIi5Ivpsb9dKOSODA==",
+          "signed_statement_digest": "sha256:329857844a517bd3badc91aa9d3aa11fe06a14a93e6a6da5e2794b28f77734ea",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:base"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "other-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "Whz90aUwZQ1chlfEthmlo7tdHB7zAWfIdNrP1BO7nxmMf7OrXhfJE7kcFVngGFYekEo4EC/G2FkCUSVa27nDDw==",
+          "signed_statement_digest": "sha256:45f50d665b6543e553f465d7054a6972a91191786774105554b6ff19f628188e",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:recipient_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "other-swarm"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "iqd8vcWB7vxLQA07yxNqaIrzo7qpuAzCUErJUbynw/BTloiuvJGEEnq3kXZ0N8vQHYgvkVySP7ZyquN0gTs3AQ==",
+          "signed_statement_digest": "sha256:1ac23d4dda1f5748467f3c3fd2ce643f7d04d9f3dafdf7d2602bf267f9da7307",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:swarm_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "other-sender",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "ngifcsfadJv+Juek3nB2gJcJwhG7epNyYDPuuAdRGOHjC15CwgJsQCZ9ZJhhKxO+PVm5/Xx0Bb+bVGcdN+eCBQ==",
+          "signed_statement_digest": "sha256:a4036bd18ab3fee223a798a806c5a591d6c70c61ceb676c5f55a35c609a6abc1",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:sender_node_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.heartbeat.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "aKy1nehcRYNljNY0/PVD01HqZg2B/ndvLTKHWjh5lGB8OaHNdReCbjNqCEIGuCWbhMrJnkMLyeAefaumM4zrAQ==",
+          "signed_statement_digest": "sha256:b37246f763ada8d452274d6520309377313dc057a7ddc30ea525059e0ab6e0b8",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:protocol_other"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1699990500.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1699990000.0,
+          "lease_expires_at": 1699990500.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "DIORsqI52OPy0cAW+nx90RYLzwdEcANQg9wqN3SM8yaLQgGlvqzirhpE7Arr1YKGG1l6B4MpmCQ3vE3TteYcCQ==",
+          "signed_statement_digest": "sha256:44e042476e9aa5a228f5037c7d6d95d84ba7d70af7cf9e14fdbb9536d1c1d353",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:expired"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700001300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700001000.0,
+          "lease_expires_at": 1700001300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "q09k6ENto4roa5LpOiwT9UtAu/c7YajGDY3l5C97pzcvC9Xlb5e/G1jN1gM/uMonZvxyM/RiMaUqDlJa2cLoCg==",
+          "signed_statement_digest": "sha256:98b2abc4682627077d6cf26a33d771794842eaee44db796c056bec9fa35402a3",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:from_future"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "tampered",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "s7BU9Te/C3UysyZvow88QMHctx0i7iN26aO8JN2kOTauqp0oBD+DK8hMVukrEWZna5fJBWIi5Ivpsb9dKOSODA==",
+          "signed_statement_digest": "sha256:329857844a517bd3badc91aa9d3aa11fe06a14a93e6a6da5e2794b28f77734ea",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:tampered_after_signing"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "GkoKRcd/wrHsVuJWaQ/C5LPdNr/5Wnb+YdlfE8HIjq5vsq8NwMdTGrJmlJZnUCBUYOApsaHHjXRwvxK2/zyRDg==",
+          "signed_statement_digest": "sha256:329857844a517bd3badc91aa9d3aa11fe06a14a93e6a6da5e2794b28f77734ea",
+          "signer_endpoint_id": "foreign-endpoint",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:signature_by_foreign_key"
+    },
+    {
+      "envelope": {
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "GkoKRcd/wrHsVuJWaQ/C5LPdNr/5Wnb+YdlfE8HIjq5vsq8NwMdTGrJmlJZnUCBUYOApsaHHjXRwvxK2/zyRDg==",
+          "signed_statement_digest": "sha256:329857844a517bd3badc91aa9d3aa11fe06a14a93e6a6da5e2794b28f77734ea",
+          "signer_endpoint_id": "foreign-endpoint",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "+AzM3OSuHAeuIIoq35mjEK5CB+Awb6AjYRCwaCe7uNA=",
+          "verification_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:foreign_signer_and_record"
+    },
+    {
+      "envelope": {
+        "extra": 1,
+        "message": {
+          "accepted_incarnation": "boot-1",
+          "accepted_node_id": "member-node",
+          "expires_at": 1700000300.0,
+          "generation": 1,
+          "incarnation": "owner",
+          "issued_at": 1700000000.0,
+          "lease_expires_at": 1700000300.0,
+          "membership_generation": 1,
+          "message_id": "efbe743637d0e6ef9222ff319624a2d268a3253928477af21f6c5ce7c7327dcd",
+          "protocol": "mycelium.membership.join_acceptance.v1",
+          "recipient_node_id": "member-node",
+          "request_message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "sender_endpoint_id": "owner-endpoint",
+          "sender_node_id": "owner-node",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "s7BU9Te/C3UysyZvow88QMHctx0i7iN26aO8JN2kOTauqp0oBD+DK8hMVukrEWZna5fJBWIi5Ivpsb9dKOSODA==",
+          "signed_statement_digest": "sha256:329857844a517bd3badc91aa9d3aa11fe06a14a93e6a6da5e2794b28f77734ea",
+          "signer_endpoint_id": "owner-endpoint",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+          "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+        }
+      },
+      "kind": "join_acceptance",
+      "name": "join_acceptance:envelope_extra_field"
+    },
+    {
+      "envelope": {
+        "extra": 1,
+        "message": {
+          "endpoint_addr": {
+            "addrs": [
+              "127.0.0.1:12345"
+            ],
+            "id": "member-endpoint"
+          },
+          "expires_at": 1700000300.0,
+          "generation": 0,
+          "incarnation": "boot-1",
+          "invite_nonce": "authority-nonce",
+          "issued_at": 1700000000.0,
+          "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+          "peer_class": "mac_mlx_iroh",
+          "protocol": "mycelium.membership.join_request.v1",
+          "recipient_node_id": "owner-node",
+          "runtime_capability": {
+            "activation_protocol": "mycelium.router_wire.v1",
+            "runtime_backend": "mlx",
+            "transport": "iroh"
+          },
+          "sender_endpoint_id": "member-endpoint",
+          "sender_node_id": "member-node",
+          "software_version": "mycelium-a13-macos-demo/1",
+          "swarm_id": "swarm-authority"
+        },
+        "protocol": "mycelium.membership.signed_message.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "LyBC4zJW70AvcGR+WKqfB6nJ5iXleyxk/pYLIoxytsOKZlsLibajFwbvSKfmxp1QTB2L//w+vbS8/Ubp554TBg==",
+          "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+          "signer_endpoint_id": "member-endpoint",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+          "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+        }
+      },
+      "kind": "join_request",
+      "name": "join_request:envelope_extra_field"
+    }
+  ],
+  "member_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+    "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+  },
+  "member_node": "member-node",
+  "now_ms": 1700000000000,
+  "owner_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "wFDFY3pE+oYp//PMzOIwDLNipj2Z2V/FQUUmb0MyRFo=",
+    "verification_key_digest": "sha256:4b735ac174e40636507716ed5c9a8a75fbf6f462357fabb71ac42b7bd502c64a"
+  },
+  "owner_node": "owner-node",
+  "request": {
+    "message": {
+      "endpoint_addr": {
+        "addrs": [
+          "127.0.0.1:12345"
+        ],
+        "id": "member-endpoint"
+      },
+      "expires_at": 1700000300.0,
+      "generation": 0,
+      "incarnation": "boot-1",
+      "invite_nonce": "authority-nonce",
+      "issued_at": 1700000000.0,
+      "message_id": "93e8b648d189f8c786961f006488cf51e537ba4bce1302109d416468f9ed37f9",
+      "peer_class": "mac_mlx_iroh",
+      "protocol": "mycelium.membership.join_request.v1",
+      "recipient_node_id": "owner-node",
+      "runtime_capability": {
+        "activation_protocol": "mycelium.router_wire.v1",
+        "runtime_backend": "mlx",
+        "transport": "iroh"
+      },
+      "sender_endpoint_id": "member-endpoint",
+      "sender_node_id": "member-node",
+      "software_version": "mycelium-a13-macos-demo/1",
+      "swarm_id": "swarm-authority"
+    },
+    "protocol": "mycelium.membership.signed_message.v1",
+    "signature": {
+      "algorithm": "ed25519",
+      "signature": "LyBC4zJW70AvcGR+WKqfB6nJ5iXleyxk/pYLIoxytsOKZlsLibajFwbvSKfmxp1QTB2L//w+vbS8/Ubp554TBg==",
+      "signed_statement_digest": "sha256:21cd11f9ef851880026db146be5e3c3641337cdff68a2a3388219feaef3b66ff",
+      "signer_endpoint_id": "member-endpoint",
+      "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+    },
+    "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc=",
+      "verification_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+    }
+  },
+  "swarm": "swarm-authority"
+}

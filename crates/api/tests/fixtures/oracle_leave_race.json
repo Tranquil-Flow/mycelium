@@ -1,0 +1,88 @@
+{
+ "in_flight": {
+  "answer": {
+   "fallback": null,
+   "handoff": "unavailable",
+   "mode": "smooth",
+   "state": "draining",
+   "steps": []
+  },
+  "caller_thread": "MainThread",
+  "fence_at_answer": true,
+  "final_state": "left",
+  "final_steps": [
+   "fence",
+   "unload",
+   "publish_withdrawal",
+   "withdraw_consent",
+   "disconnect",
+   "cancel_work"
+  ],
+  "finished_after_seconds_ge_0_8": true,
+  "response_seconds_lt_0_1": true,
+  "thread_daemon": true,
+  "thread_name": "member-leave",
+  "timeline": [
+   {
+    "fallback": null,
+    "state": "draining",
+    "steps": [],
+    "t": 0.0
+   },
+   {
+    "fallback": null,
+    "state": "draining",
+    "steps": [
+     "fence"
+    ],
+    "t": 0.01
+   },
+   {
+    "fallback": null,
+    "state": "left",
+    "steps": [
+     "fence",
+     "unload",
+     "publish_withdrawal",
+     "withdraw_consent",
+     "disconnect",
+     "cancel_work"
+    ],
+    "t": 1.01
+   }
+  ]
+ },
+ "no_work_histogram": [
+  {
+   "count": 300,
+   "state": "draining",
+   "steps": []
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "second_while_running": {
+  "first": {
+   "fallback": null,
+   "handoff": "unavailable",
+   "mode": "smooth",
+   "state": "draining",
+   "steps": []
+  },
+  "instant": {
+   "fallback": null,
+   "handoff": "unavailable",
+   "mode": "smooth",
+   "state": "draining",
+   "steps": []
+  },
+  "second": {
+   "fallback": null,
+   "handoff": "unavailable",
+   "mode": "smooth",
+   "state": "draining",
+   "steps": []
+  },
+  "thread_count_after": 1
+ }
+}

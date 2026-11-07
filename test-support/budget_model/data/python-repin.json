@@ -1,0 +1,20 @@
+{
+  "previous_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+  "source_sha": "ef9ae61de0222c78d83c8133f8f709619394bf51",
+  "scope_paths": 725,
+  "unchanged_scoped_paths": 724,
+  "changed_scoped_paths": [
+    {
+      "path": "mycelium_a13_macos/managed_runtime.py",
+      "previous_sha256": "e807a7ebe8efd267fe0c9bd98310c579d1a56ce6bbb74481ae5efbe77bdcfe02",
+      "sha256": "a4cdfd23bbc39b0ceb9e14ff423f2cf38a593f32c6a743c8bec6bfea54d9df3c",
+      "previous_lines": 538,
+      "lines": 553,
+      "previous_candidates": 17,
+      "candidates": 20,
+      "preserved_reviewed_rows": 1,
+      "rescanned_candidates": 19,
+      "manual_supplements": 1
+    }
+  ]
+}

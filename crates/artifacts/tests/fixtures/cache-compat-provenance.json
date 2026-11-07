@@ -1,0 +1,20 @@
+{
+  "claim": "actual oracle outcomes and on-disk state for dir-mode/symlink/hard-link/hand-edited-entry scenarios, plus raw indexes written by every oracle index-writing code path; synthetic bytes, no model",
+  "counts": {
+    "corpus_cases": 7,
+    "corpus_entries": 180,
+    "scenarios": 32,
+    "steps": 274
+  },
+  "generator_sha256": "b790ef6c671499809a225666173869abacd7ba17cfc0125d94b249805a344cc4",
+  "imported_sources": {
+    "mycelium_assignment_cache.py": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": {
+    "cache-compat.json": "61a850986f13e9dc52152a86143278d7e7092c1f67425dde31f153632d7de7f6",
+    "index-corpus.json": "1734f8785f4a19154716c05ce23108121dc1d0399b78958aeb95f870d2146518"
+  },
+  "python": "3.14.8",
+  "umask": "022"
+}

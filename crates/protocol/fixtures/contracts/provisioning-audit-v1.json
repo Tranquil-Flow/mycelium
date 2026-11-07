@@ -1,0 +1,41 @@
+{
+  "all_assignments_verified": true,
+  "assignment_bindings": [
+    {
+      "assignment_id": "1d6f4e06-2904-5c52-8d18-315864429791",
+      "node_id": "node-a",
+      "range": {
+        "end_layer_exclusive": 2,
+        "layer_count": 2,
+        "start_layer": 0
+      }
+    },
+    {
+      "assignment_id": "663f7f62-ca01-5e07-8f1d-ca9914eb9ae0",
+      "node_id": "node-b",
+      "range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 2,
+        "start_layer": 2
+      }
+    }
+  ],
+  "claim_boundary": "artifact provisioning only; runtime layer load, stage probe, and route challenge remain required",
+  "deployment_epoch": 1,
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "errors": [],
+  "model": {
+    "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+    "model_id": "org/model",
+    "num_layers": 4,
+    "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "protocol": "mycelium.provisioning_audit.v1",
+  "ready_for_runtime_load": true,
+  "route_ready": false,
+  "timestamp": "2026-07-17T00:00:00+00:00",
+  "verified_nodes": [
+    "node-a",
+    "node-b"
+  ]
+}

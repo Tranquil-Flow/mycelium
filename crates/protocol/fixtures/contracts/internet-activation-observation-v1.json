@@ -1,0 +1,21 @@
+{
+  "connection_generation": 3,
+  "connection_reuse": 2,
+  "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "evidence_lifetime_until_unix_ms": 1752500090000,
+  "freshness": "current",
+  "metrics": {
+    "goodput_bytes_per_second": 1500000,
+    "jitter_ms": 2,
+    "loss_ratio": 0.0,
+    "measured_zero": true,
+    "rtt_ms": 12,
+    "sample_count": 64,
+    "warm_rtt_ms": 9
+  },
+  "observation_id": "fixture-observation",
+  "observed_at_unix_ms": 1752500000000,
+  "path_class": "direct",
+  "path_source": "bound_live_connection",
+  "protocol": "mycelium.internet_activation_observation.v1"
+}

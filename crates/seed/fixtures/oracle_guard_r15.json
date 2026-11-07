@@ -1,0 +1,73 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "rows": [
+    {
+      "expected": {
+        "generation": 1,
+        "node_id": "node-a"
+      },
+      "field": null,
+      "value": null
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "node_id",
+      "value": "other-node"
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "endpoint_id",
+      "value": "other-endpoint"
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "verification_key_digest",
+      "value": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "incarnation",
+      "value": "new-boot"
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "generation",
+      "value": 2
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "peer_class",
+      "value": "linux_native_iroh"
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "lease_expires_at",
+      "value": 1301.0
+    },
+    {
+      "expected": {
+        "error": "seed_state_member_stale"
+      },
+      "field": "lifecycle_state",
+      "value": "STOPPED"
+    }
+  ],
+  "source": [
+    "mycelium_seed/coordinator.py:972-1058",
+    "mycelium_seed/state.py:852-884"
+  ]
+}

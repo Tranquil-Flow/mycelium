@@ -1,0 +1,55 @@
+{
+  "_source": "v0.1.4 @ f4e366e98a1f705dfaf182897044500d290dbd7f: layer_split.policy_for_runtime (split) and model_resources constants lines 40-95 (resources); values equal the oracle sweep inputs in tests/fixtures/planning.json",
+  "resources": {
+    "context_tokens": 4096,
+    "control_archive_bytes": 67108864,
+    "disk_headroom": [
+      11,
+      10
+    ],
+    "group_fixed_bytes": 1073741824,
+    "guard_headroom": [
+      23,
+      20
+    ],
+    "load_peak_factor": 2,
+    "memory_fraction": [
+      3,
+      4
+    ],
+    "resident_factors": {
+      "int8-weight-only": [
+        501,
+        1000
+      ],
+      "none": [
+        2,
+        1
+      ]
+    },
+    "slice_header_bytes": 4194304,
+    "staged_copy_factor": 2
+  },
+  "split": {
+    "int8-weight-only": {
+      "memory_fraction_denominator": 2,
+      "memory_fraction_numerator": 1,
+      "resident_factor_denominator": 8,
+      "resident_factor_numerator": 5,
+      "runtime_overhead_bytes": 1073741824,
+      "speed_clamp_high": 2,
+      "speed_clamp_low_denominator": 2,
+      "speed_clamp_low_numerator": 1
+    },
+    "none": {
+      "memory_fraction_denominator": 2,
+      "memory_fraction_numerator": 1,
+      "resident_factor_denominator": 1,
+      "resident_factor_numerator": 1,
+      "runtime_overhead_bytes": 1073741824,
+      "speed_clamp_high": 2,
+      "speed_clamp_low_denominator": 2,
+      "speed_clamp_low_numerator": 1
+    }
+  }
+}

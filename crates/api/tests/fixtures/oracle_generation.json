@@ -1,0 +1,105 @@
+{
+ "backend_calls_next": [
+  [
+   0,
+   1
+  ],
+  [
+   1,
+   2
+  ],
+  [
+   2,
+   3
+  ]
+ ],
+ "next_stream_generation": 3,
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "probe": {
+  "0,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ],
+   "result": "stale_publisher_generation"
+  },
+  "1,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ],
+   "result": "stale_publisher_generation"
+  },
+  "2,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     3
+    ]
+   ],
+   "result": "ok",
+   "stream_generation": 3
+  },
+  "3,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ],
+   "result": "stale_publisher_generation"
+  },
+  "4,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ],
+   "result": "stale_publisher_generation"
+  },
+  "5,0": {
+   "backend_calls": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ]
+   ],
+   "result": "stale_publisher_generation"
+  }
+ },
+ "python": "3.14.8",
+ "session_generation": 2
+}

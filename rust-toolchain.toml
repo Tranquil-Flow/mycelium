@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Pinned so every worktree, worker and CI run builds with the same compiler (process fix P4).
+# 1.95.0 is already installed; this file must never trigger a download.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]

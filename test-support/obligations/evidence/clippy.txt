@@ -1,0 +1,5 @@
+    Checking serde_json v1.0.154
+    Checking obligations v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l0/test-support/obligations)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.29s
+
+EXIT=0

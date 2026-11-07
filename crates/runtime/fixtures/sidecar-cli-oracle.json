@@ -1,0 +1,821 @@
+{
+  "provenance": {
+    "oracle": "mycelium-iroh-sidecar production build of f4e366e98a1f705dfaf182897044500d290dbd7f (native/iroh_transport, git archive)",
+    "binary_sha256": "4b24aefc1f36a798bb3dc2711fad2eec2a6e28855ea3400dabe2333091ba4ddb",
+    "probe": "L9-evidence/r13-cli-probe.rb",
+    "probe_sha256": "5700b250d1f17f46314c3b3ecc806f71d062810de5cc283528a64f2705f08412",
+    "method": "EXECUTED: each case spawns the oracle binary with the argv shape, a bootstrap pipe on fd 3 where listed, and key files in a fresh 0700 directory",
+    "cases": 36
+  },
+  "cases": [
+    {
+      "name": "no_args",
+      "argv_shape": [
+
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "only_uds",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s"
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "only_fd",
+      "argv_shape": [
+        "--bootstrap-fd",
+        "<fd>"
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "unknown_flag",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--nope"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "positional",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "extra"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "duplicate_uds",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--uds",
+        "<dir>/t",
+        "--bootstrap-fd",
+        "<fd>"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "uds_missing_value",
+      "argv_shape": [
+        "--bootstrap-fd",
+        "<fd>",
+        "--uds"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "value_starts_with_dash",
+      "argv_shape": [
+        "--uds",
+        "-x",
+        "--bootstrap-fd",
+        "<fd>"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "fd_not_a_number",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "abc"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "fd_negative",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "-1"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "queue_zero",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--queue-capacity",
+        "0"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "queue_not_a_number",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--queue-capacity",
+        "many"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "local_only_and_force_relay",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--force-relay"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "flag_with_value",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only=yes"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "artifact_objects_alone",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--artifact-objects",
+        "<dir>"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "artifact_seed_key_alone",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--artifact-seed-key",
+        "<dir>/seed"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "artifact_state_alone",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--artifact-state",
+        "<dir>"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "artifact_signing_alone",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--artifact-signing-key-file",
+        "<dir>/sig"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "artifact_objects_missing_signing",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/seed",
+        "--artifact-state",
+        "<dir>"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 2,
+      "stdout": "",
+      "events": [
+
+      ],
+      "stderr_is_event_free": true
+    },
+    {
+      "name": "help",
+      "argv_shape": [
+        "--help"
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 0,
+      "stdout": "POSIX hosts: the Router reaches the sidecar over a Unix-domain socket\n\nUsage: mycelium-iroh-sidecar [OPTIONS] --uds <PATH> --bootstrap-fd <FD>\n\nOptions:\n      --uds <PATH>\n          Unix-domain socket used by the local Router process\n      --bootstrap-fd <FD>\n          Inherited pipe descriptor containing exactly 32 bootstrap bytes\n      --endpoint-secret-file <PATH>\n          Host-local raw 32-byte Iroh identity key; never copied by the controller\n      --local-only\n          Disable relays and bind iroh only to the IPv4 loopback interface\n      --force-relay\n          Retain production relays while disabling every direct IP transport\n      --queue-capacity <QUEUE_CAPACITY>\n          Independent capacity of the inbound and outbound message queues [default: 128]\n      --artifact-objects <DIR>\n          Also serve phone stage objects (`<sha256 hex>` files in this directory) on the ALPN `mycelium.artifact_chunk.v1` under seed grants\n      --artifact-seed-key <PATH>\n          The seed's public key record (JSON); grants must verify under it\n      --artifact-state <DIR>\n          Directory of the durable artifact admission journal\n      --artifact-signing-key-file <PATH>\n          Host-local raw 32-byte receipt-signing key (0600, like the endpoint key)\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n",
+      "events": [
+
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "help_short",
+      "argv_shape": [
+        "-h"
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 0,
+      "stdout": "POSIX hosts: the Router reaches the sidecar over a Unix-domain socket\n\nUsage: mycelium-iroh-sidecar [OPTIONS] --uds <PATH> --bootstrap-fd <FD>\n\nOptions:\n      --uds <PATH>\n          Unix-domain socket used by the local Router process\n      --bootstrap-fd <FD>\n          Inherited pipe descriptor containing exactly 32 bootstrap bytes\n      --endpoint-secret-file <PATH>\n          Host-local raw 32-byte Iroh identity key; never copied by the controller\n      --local-only\n          Disable relays and bind iroh only to the IPv4 loopback interface\n      --force-relay\n          Retain production relays while disabling every direct IP transport\n      --queue-capacity <QUEUE_CAPACITY>\n          Independent capacity of the inbound and outbound message queues [default: 128]\n      --artifact-objects <DIR>\n          Also serve phone stage objects (`<sha256 hex>` files in this directory) on the ALPN `mycelium.artifact_chunk.v1` under seed grants\n      --artifact-seed-key <PATH>\n          The seed's public key record (JSON); grants must verify under it\n      --artifact-state <DIR>\n          Directory of the durable artifact admission journal\n      --artifact-signing-key-file <PATH>\n          Host-local raw 32-byte receipt-signing key (0600, like the endpoint key)\n  -h, --help\n          Print help\n  -V, --version\n          Print version\n",
+      "events": [
+
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "version",
+      "argv_shape": [
+        "--version"
+      ],
+      "bootstrap_hex": null,
+      "files": [
+
+      ],
+      "exit": 0,
+      "stdout": "mycelium-iroh-sidecar 0.1.0\n",
+      "events": [
+
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "bootstrap_31_bytes",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"bootstrap_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "bootstrap_33_bytes",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"bootstrap_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "bootstrap_empty",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only"
+      ],
+      "bootstrap_hex": "",
+      "files": [
+
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"bootstrap_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "endpoint_secret_missing",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--endpoint-secret-file",
+        "<dir>/absent"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"endpoint_secret_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "endpoint_secret_mode_0644",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--endpoint-secret-file",
+        "<dir>/ep"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "ep",
+          "content_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+          "mode": 420
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"endpoint_secret_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "endpoint_secret_31_bytes",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--endpoint-secret-file",
+        "<dir>/ep"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "ep",
+          "content_hex": "11111111111111111111111111111111111111111111111111111111111111",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"endpoint_secret_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "endpoint_secret_33_bytes",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--endpoint-secret-file",
+        "<dir>/ep"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "ep",
+          "content_hex": "111111111111111111111111111111111111111111111111111111111111111111",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"endpoint_secret_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "artifact_seed_key_missing",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/absent",
+        "--artifact-state",
+        "<dir>/st",
+        "--artifact-signing-key-file",
+        "<dir>/sig"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "sig",
+          "content_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"artifact_source_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "artifact_seed_key_not_json",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/seed",
+        "--artifact-state",
+        "<dir>/st",
+        "--artifact-signing-key-file",
+        "<dir>/sig"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "seed",
+          "content_hex": "6e6f74206a736f6e",
+          "mode": 384
+        },
+        {
+          "name": "sig",
+          "content_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"artifact_source_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "artifact_signing_key_mode_0644",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/seed",
+        "--artifact-state",
+        "<dir>/st",
+        "--artifact-signing-key-file",
+        "<dir>/sig"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "seed",
+          "content_hex": "7b2270726f746f636f6c223a2278222c226b6579223a2279227d",
+          "mode": 384
+        },
+        {
+          "name": "sig",
+          "content_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+          "mode": 420
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"artifact_source_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "artifact_signing_key_missing",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/seed",
+        "--artifact-state",
+        "<dir>/st",
+        "--artifact-signing-key-file",
+        "<dir>/absent"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "seed",
+          "content_hex": "7b2270726f746f636f6c223a2278222c226b6579223a2279227d",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"artifact_source_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "artifact_signing_key_31_bytes",
+      "argv_shape": [
+        "--uds",
+        "<dir>/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only",
+        "--artifact-objects",
+        "<dir>",
+        "--artifact-seed-key",
+        "<dir>/seed",
+        "--artifact-state",
+        "<dir>/st",
+        "--artifact-signing-key-file",
+        "<dir>/sig"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "seed",
+          "content_hex": "7b2270726f746f636f6c223a2278222c226b6579223a2279227d",
+          "mode": 384
+        },
+        {
+          "name": "sig",
+          "content_hex": "22222222222222222222222222222222222222222222222222222222222222",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"artifact_source_rejected\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "uds_parent_is_a_file",
+      "argv_shape": [
+        "--uds",
+        "<dir>/notdir/s",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "notdir",
+          "content_hex": "78",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false
+    },
+    {
+      "name": "uds_path_is_a_regular_file",
+      "argv_shape": [
+        "--uds",
+        "<dir>/occupied",
+        "--bootstrap-fd",
+        "<fd>",
+        "--local-only"
+      ],
+      "bootstrap_hex": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+      "files": [
+        {
+          "name": "occupied",
+          "content_hex": "78",
+          "mode": 384
+        }
+      ],
+      "exit": 1,
+      "stdout": "",
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false
+    }
+  ]
+}

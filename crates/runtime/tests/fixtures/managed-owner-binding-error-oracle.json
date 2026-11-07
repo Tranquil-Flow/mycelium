@@ -1,0 +1,57 @@
+{
+  "cases": [
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-2",
+        "membership_generation": 2,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        "enqueue"
+      ],
+      "first": {
+        "error": "managed_control_reconciliation_required"
+      },
+      "name": "begin",
+      "second": {
+        "error": "managed_control_member_stale"
+      },
+      "second_io_count": 0
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-2",
+        "membership_generation": 2,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        "enqueue",
+        "result"
+      ],
+      "first": {
+        "error": "managed_control_signature_invalid"
+      },
+      "name": "poll",
+      "second": {
+        "error": "managed_control_member_stale"
+      },
+      "second_io_count": 0
+    }
+  ],
+  "source_hashes": {
+    "authority.py": "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4",
+    "control_session.py": "aac49ba38c2b247ef4c1af80dd50f1bde997123545f9d8df8c55a916caccf613",
+    "durable_requests.py": "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09",
+    "managed_control.py": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+    "session_factory.py": "62c0e0c1c45a9061fb3970f055319da0357430ad63e1c8b845afdbda69048eae"
+  },
+  "source_pin": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

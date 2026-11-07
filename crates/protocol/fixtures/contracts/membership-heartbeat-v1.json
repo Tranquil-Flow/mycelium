@@ -1,0 +1,19 @@
+{
+  "active_requests": 0,
+  "activity_peer_node_id": null,
+  "activity_receipt_digest": null,
+  "expires_at": 1300.0,
+  "generation": 1,
+  "heartbeat_sequence": 7,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "lifecycle_state": "RUNNING",
+  "liveness_source": "scheduled_heartbeat",
+  "message_id": "heartbeat-fixture",
+  "protocol": "mycelium.membership.heartbeat.v1",
+  "recipient_node_id": "seed-node",
+  "route_ready": false,
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture"
+}

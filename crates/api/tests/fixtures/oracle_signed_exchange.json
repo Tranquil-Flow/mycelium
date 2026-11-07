@@ -1,0 +1,1315 @@
+{
+  "owner_node_id": "seed-4e08424127fa086c",
+  "rows": [
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "0L9MTuOPJ+HEhVFgaKOIqmPSrdQ95XYQD+umg2jsl4rNxIx12gZs5VPYjLcw+eOBLNmek6CXzhZuvMz5FrVUAQ==",
+          "signed_statement_digest": "sha256:6bff78f2b3cd98983a212608e7a338a3c44482afd82eaf32e109ca01c4aaf0bb",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-read",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-read",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "ok": {
+          "announcement": {
+            "bootstrap_offer_id": "offer-one",
+            "deployment_id": "dep-1",
+            "issued_at": 1793267919.837374,
+            "manifest_digest": null,
+            "member_resources": null,
+            "model": null,
+            "model_source": null,
+            "node_slice_plan": null,
+            "phase": "collect",
+            "protocol": "mycelium.a13_demo_run_announcement.v1",
+            "run_id": "run-1",
+            "slice_mode": false,
+            "work_limits": null
+          },
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267979.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "owner_endpoint_id": "node-identity-1795a389795ef4ec62e6eb302115dfb0",
+          "owner_node_id": "seed-4e08424127fa086c",
+          "protocol": "mycelium.a13_demo_run_state.v1",
+          "request_id": "request-read",
+          "run_id": "demo-run-discovery",
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        }
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.0037031173706054688,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "read",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {}
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "dqNgDdZhHDVahC3zloHi4UdLdhriwsu8jiyJ6tjdwmKqjZ1pknOcF3IFGDz8TiytDyvaRy2H7l45pxXc1+JwCg==",
+          "signed_statement_digest": "sha256:33cabef97e9fd1ce9c1f82006cc52888af67468446d28f16c52ec17e328a1bd2",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-report",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267919.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "reported"
+          },
+          "request_id": "request-report",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "ok": {
+          "announcement": {
+            "bootstrap_offer_id": "offer-one",
+            "deployment_id": "dep-1",
+            "issued_at": 1793267919.837374,
+            "manifest_digest": null,
+            "member_resources": null,
+            "model": null,
+            "model_source": null,
+            "node_slice_plan": null,
+            "phase": "collect",
+            "protocol": "mycelium.a13_demo_run_announcement.v1",
+            "run_id": "run-1",
+            "slice_mode": false,
+            "work_limits": null
+          },
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267979.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "owner_endpoint_id": "node-identity-1795a389795ef4ec62e6eb302115dfb0",
+          "owner_node_id": "seed-4e08424127fa086c",
+          "protocol": "mycelium.a13_demo_run_state.v1",
+          "request_id": "request-report",
+          "run_id": "demo-run-discovery",
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        }
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.004518270492553711,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "report",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267919.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "reported"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "c5xLnxUtvl6GkHT9zF39um0vVYeZw7fhfptO3hlP/OepdYlh0yam8eHWCVGBXNl4bxRBiycuiBxx4wHo8wrjBQ==",
+          "signed_statement_digest": "sha256:2dd9492bda934053607f7ed514662fd9aa9817a46a6173b149f1e955eee78c96",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-newer",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267924.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "work_running"
+          },
+          "request_id": "request-newer",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "ok": {
+          "announcement": {
+            "bootstrap_offer_id": "offer-one",
+            "deployment_id": "dep-1",
+            "issued_at": 1793267919.837374,
+            "manifest_digest": null,
+            "member_resources": null,
+            "model": null,
+            "model_source": null,
+            "node_slice_plan": null,
+            "phase": "collect",
+            "protocol": "mycelium.a13_demo_run_announcement.v1",
+            "run_id": "run-1",
+            "slice_mode": false,
+            "work_limits": null
+          },
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267979.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "owner_endpoint_id": "node-identity-1795a389795ef4ec62e6eb302115dfb0",
+          "owner_node_id": "seed-4e08424127fa086c",
+          "protocol": "mycelium.a13_demo_run_state.v1",
+          "request_id": "request-newer",
+          "run_id": "demo-run-discovery",
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        }
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.00517725944519043,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "newer",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "work_running"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "xFHKz9b8nVn6RdJcIqHO71n51MnnJ00y8OigjsYFnwt/pHothICQtZtNP6Qp6dyU70EUPwlEA5SOhUUGXPZiCQ==",
+          "signed_statement_digest": "sha256:0e2d0f05266acef73695609ec9f6980879a9aa9be161e13f425edc6d172e8728",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-older",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267914.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "idle"
+          },
+          "request_id": "request-older",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "ok": {
+          "announcement": {
+            "bootstrap_offer_id": "offer-one",
+            "deployment_id": "dep-1",
+            "issued_at": 1793267919.837374,
+            "manifest_digest": null,
+            "member_resources": null,
+            "model": null,
+            "model_source": null,
+            "node_slice_plan": null,
+            "phase": "collect",
+            "protocol": "mycelium.a13_demo_run_announcement.v1",
+            "run_id": "run-1",
+            "slice_mode": false,
+            "work_limits": null
+          },
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267979.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "owner_endpoint_id": "node-identity-1795a389795ef4ec62e6eb302115dfb0",
+          "owner_node_id": "seed-4e08424127fa086c",
+          "protocol": "mycelium.a13_demo_run_state.v1",
+          "request_id": "request-older",
+          "run_id": "demo-run-discovery",
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        }
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.0058062076568603516,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "older",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "work_running"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "P0gcGmsEX0PY4WAUIHeZji3kUOkPv34vxIjwCpOgPjpA2+R7XVyyyZCymuP6pjgBP1fUY6GXBAiYZy3j0ilsDQ==",
+          "signed_statement_digest": "sha256:ad92a6cf4d3080d951608ca28837cc43c1c075ec8d175ebbe363f574de49adc4",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-equal",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267924.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "stopped"
+          },
+          "request_id": "request-equal",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "ok": {
+          "announcement": {
+            "bootstrap_offer_id": "offer-one",
+            "deployment_id": "dep-1",
+            "issued_at": 1793267919.837374,
+            "manifest_digest": null,
+            "member_resources": null,
+            "model": null,
+            "model_source": null,
+            "node_slice_plan": null,
+            "phase": "collect",
+            "protocol": "mycelium.a13_demo_run_announcement.v1",
+            "run_id": "run-1",
+            "slice_mode": false,
+            "work_limits": null
+          },
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267979.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "owner_endpoint_id": "node-identity-1795a389795ef4ec62e6eb302115dfb0",
+          "owner_node_id": "seed-4e08424127fa086c",
+          "protocol": "mycelium.a13_demo_run_state.v1",
+          "request_id": "request-equal",
+          "run_id": "demo-run-discovery",
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        }
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.006423234939575195,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "equal",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "GT65lKNVsJrHXHRsMJTIRSdTFLNNsm5aXlZ9sJQirKB7TGFqsUsurAztH4OLY3IPceMIh6QI6Ls7lwESzLzYAA==",
+          "signed_statement_digest": "sha256:5b92ef480845835a3b9f4e4835980cb22d2005b29ce55fda457363169f6b4554",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "changed",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267929.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "idle"
+          },
+          "request_id": "request-tamper",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_signature_invalid"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.00675201416015625,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "tamper",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "1mglMaomBcQJ7MhTGkcOIEskQYKPtjiGuZ27GrkZTU2Tqrh1qzLVP2XAiQ95I9qtpZOW6unn5dYRY7pQO2/0Cw==",
+          "signed_statement_digest": "sha256:e916fe1be70f88a24e03b54fc657fa020beb58815693a79ca2b8f6308a54acc6",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-wrong-swarm",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-wrong-swarm",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "other",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_authority_binding_invalid"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.006875276565551758,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "wrong-swarm",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "+dGy0NChJpYojOUWfqHCZmBXGCRi+7hOc9yW9k59ZyIO3448K6tO0r/e1K4fU5KaWlPsAWq8XPpd6BOMN53DAA==",
+          "signed_statement_digest": "sha256:e911e65c930b171c087b00747e572b12322bebc352761fc529810b86e466d771",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-wrong-run",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-wrong-run",
+          "run_id": "other",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "demo_request_invalid"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.007353067398071289,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "wrong-run",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "KT9bI+vjeMx5yyNpG3jqDUFCKVHZGizWEdBqP7ojkTWrVsBtuSegOjbOsdA9tgQ571Ta1Lsd7AAz7b30YujUCw==",
+          "signed_statement_digest": "sha256:2e989732103328d4e75b0728359d0a3b8487bcda85ddf1fd8c38e42fdcf1a6bc",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 2,
+          "nonce": "nonce-stale-generation",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-stale-generation",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_member_stale"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.007626056671142578,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "stale-generation",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "Z15n2LrgPquaItY/mxrG+6aJV6UXYA0+CWz6yDHiUTyI7PJCdNejXFAdUpG7BVV7QP1dY8aWHklS79dyV1AaCA==",
+          "signed_statement_digest": "sha256:3724f1fbc679b96daa6b4f9545f55ff14744a863146ef2b28f29a987ad7d06bf",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267879.837374,
+          "issued_at": 1793267819.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-expired",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-expired",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_message_expired"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.008208274841308594,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "expired",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "m+RuYpqwAMLvwmRKpUH7yuVEdxryX4XRzDOHe7MxGdRbQ0V3W+8Bc9eRev6sH2XF5O0zHmdMoMhkt0wU0Q/sCA==",
+          "signed_statement_digest": "sha256:ae48b8df589c333b690da87a980932fd84c2d1200dfbaa8a28cc294899c5bd6e",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267989.837374,
+          "issued_at": 1793267959.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-future",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-future",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_message_from_future"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.008829355239868164,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "future",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "b1IB5exZCQDNzlAV9HoMOUbg9rdQHUuFOVVuxhesnIaeW8kxvJBS5oG4ZdblYWMdhDCP4RImZ/UfucoZNCtYCA==",
+          "signed_statement_digest": "sha256:73c52715ab328c675588d76fa21353105991b95c7df1afdd5fb342c2bf84d7ef",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "extra": true,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-extra",
+          "protocol": "mycelium.a13_demo_run_read.v1",
+          "request_id": "request-extra",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "managed_control_fields_invalid"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.008948087692260742,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "extra",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/read",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    },
+    {
+      "envelope": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+          "algorithm": "ed25519",
+          "signature": "UCSU175bfHuxQyuOfXUmy3pz9718thK5fENA6atn2r2ms4UFRQGlhF13NbBQ4vrFYY7BY7UcP28TuNOCOnuCDg==",
+          "signed_statement_digest": "sha256:e559375e228a551b5109a9d64012a9034867bf5374c37822095126ea02151a9d",
+          "signer_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        },
+        "statement": {
+          "deployment_id": "demo-run-discovery",
+          "expires_at": 1793267949.837374,
+          "issued_at": 1793267919.837374,
+          "member_incarnation": "remote-incarnation-8b68c752cba92984",
+          "membership_generation": 1,
+          "nonce": "nonce-invalid-report",
+          "protocol": "mycelium.a13_demo_run_report.v1",
+          "report": {
+            "deployment_id": "dep-1",
+            "descriptor": null,
+            "detail": null,
+            "issued_at": 1793267919.837374,
+            "model": null,
+            "progress": null,
+            "protocol": "mycelium.a13_demo_member_report.v1",
+            "run_id": "run-1",
+            "state": "hacked"
+          },
+          "request_id": "request-invalid-report",
+          "run_id": "demo-run-discovery",
+          "sequence": 1,
+          "swarm_id": "swarm-daa74515a63b6202c616eab7",
+          "target_endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+          "target_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24",
+          "target_node_id": "remote-mac-e7e67b2798dfea2d3cc5497c"
+        },
+        "verification_key": {
+          "algorithm": "ed25519",
+          "encoding": "base64",
+          "verification_key": "m08VU3zvpWYSk7zuHqwq9Pt23M3vrFDBWPiY8G5ncXY=",
+          "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+        }
+      },
+      "expected": {
+        "error": "demo_report_invalid"
+      },
+      "member": {
+        "activation_eligible": true,
+        "active_requests": 0,
+        "endpoint_addrs": [
+          "https://node-identity-e7e67b2798dfea2d3cc5497c48ff24f4.invalid/control"
+        ],
+        "endpoint_id": "node-identity-e7e67b2798dfea2d3cc5497c48ff24f4",
+        "evidence_freshness_expired": false,
+        "generation": 1,
+        "heartbeat_overdue_seconds": 0.0,
+        "incarnation": "remote-incarnation-8b68c752cba92984",
+        "last_activity_receipt_at": null,
+        "last_heartbeat_sequence": 0,
+        "last_liveness_at": 1793267919.8346848,
+        "lease_expires_at": 1793268219.8346848,
+        "lifecycle_state": "NEW",
+        "liveness_age_seconds": 0.009475231170654297,
+        "liveness_dead": false,
+        "liveness_reason": null,
+        "liveness_status": "idle_fresh",
+        "missed_keepalives": 0,
+        "next_heartbeat_due_at": 1793267949.8346848,
+        "node_id": "remote-mac-e7e67b2798dfea2d3cc5497c",
+        "peer_class": "mac_mlx_iroh",
+        "runtime_capability": {
+          "activation_protocol": "mycelium.router_wire.v1",
+          "runtime_backend": "mlx",
+          "transport": "iroh"
+        },
+        "verification_key_digest": "sha256:e7e67b2798dfea2d3cc5497c48ff24f415a14149cbf00be3df6e6e00fef6dc24"
+      },
+      "name": "invalid-report",
+      "now": 1793267919.837374,
+      "path": "/managed-control/demo-run/report",
+      "reports": {
+        "remote-mac-e7e67b2798dfea2d3cc5497c": {
+          "deployment_id": "dep-1",
+          "descriptor": null,
+          "detail": null,
+          "issued_at": 1793267924.837374,
+          "model": null,
+          "progress": null,
+          "protocol": "mycelium.a13_demo_member_report.v1",
+          "received_at": 1793267919.837374,
+          "run_id": "run-1",
+          "state": "stopped"
+        }
+      }
+    }
+  ],
+  "swarm_id": "swarm-daa74515a63b6202c616eab7"
+}

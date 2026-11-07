@@ -1,0 +1,50 @@
+{
+  "schema": "mycelium.package-independent-verification.v1",
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "observed_at": "2026-10-27T23:22:21Z",
+  "archive": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/mycelium-0.1.4-macos-arm64.zip",
+    "sha256": "fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025",
+    "size_bytes": 102696204
+  },
+  "method": "Read-only system unzip -tqq, -Z -1 and independent unzip -p hash/size verification for every non-directory ZIP entry; git show only for accepted-source members/evidence. Embedded metadata uses bounded external Ruby table/ZIP parser; no Python import, bytecode execution, Mach-O launch or payload dump.",
+  "zip_entries": 1552,
+  "zip_files_and_links_verified": 1370,
+  "symlink_bytes_verified": 55,
+  "source_objects_rehashed": 739,
+  "evidence_pins_rehashed": 4,
+  "corrupt_zip_digest_rejected": true,
+  "previous_gaps_resolved": 637,
+  "zip_dispositions": {
+    "data-retained": 39,
+    "rust": 728,
+    "retire": 234,
+    "native-reused": 361,
+    "web-retained": 8
+  },
+  "previous_gap_dispositions": {
+    "data-retained": 39,
+    "rust": 8,
+    "retire": 229,
+    "native-reused": 361
+  },
+  "families": 431,
+  "embedded_scopes": {
+    "carchive": 13,
+    "pyz": 2463,
+    "base-library": 155
+  },
+  "secret_payloads_printed": false,
+  "package_executed": false,
+  "source_crosswalk_objects_rehashed": 738,
+  "embedded_entries_regenerated_and_compared": 2631,
+  "embedded_kind_counts": {
+    "archive-member": 13,
+    "module": 2211,
+    "package": 240,
+    "namespace": 12,
+    "file": 155
+  },
+  "census_sha256": "2f17888f957e899de6ff501a96fa64f0926645d40839caaf22eb15d7c1e806ed",
+  "dispositions_sha256": "86c32d1966506d6c0047440f96456bb4b9e7da04d594a99ac203092e67e50b70"
+}

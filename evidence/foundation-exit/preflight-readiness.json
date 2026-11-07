@@ -1,0 +1,40 @@
+{
+  "schema": "mycelium.foundation.preflight-readiness.v1",
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "meaning": "RUN is file-presence selection readiness only; no tests/native/oracle jobs are executed by preflight. Independent content verification is separately sealed.",
+  "manifest_environment": {
+    "MYCELIUM_ORACLE_MANIFEST": "/Users/mycelium-dev/Projects/mycelium-rs-fx/evidence/foundation-exit/oracle-provenance.json",
+    "MYCELIUM_NATIVE_INPUT_MANIFEST": "/Users/mycelium-dev/Projects/mycelium-rs-fx/evidence/foundation-exit/native-inputs.json"
+  },
+  "before": {
+    "receipt": {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-before.json",
+      "size_bytes": 874,
+      "sha256": "0df2a0718d381106847bb246dbd1ad29119218161c277aa719fa980d4479d95e"
+    },
+    "exit_code": 1,
+    "exact_output": "   Compiling unicode-ident v1.0.27\n   Compiling quote v1.0.47\n   Compiling proc-macro2 v1.0.107\n   Compiling serde_core v1.0.229\n   Compiling zmij v1.0.23\n   Compiling syn v3.0.9\n   Compiling serde v1.0.229\n   Compiling serde_json v1.0.154\n   Compiling serde_derive v1.0.229\n   Compiling memchr v2.8.3\n   Compiling itoa v1.0.18\n   Compiling syn v2.0.119\n   Compiling xtask v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-fx/xtask)\n    Finished `dev` profile [unoptimized] target(s) in 6.61s\n     Running `/Users/mycelium-dev/.hermes/cache/scratch/v02-fx-target/debug/xtask preflight`\nxtask-unit: RUN\nworkspace-unit: RUN\nworkspace-doctest: RUN\nlint-policy: RUN\nnative-adapters: NOT_RUN(BLOCKED: native-input-manifest: environment MYCELIUM_NATIVE_INPUT_MANIFEST is unset)\noracle-journeys: NOT_RUN(BLOCKED: oracle-manifest: environment MYCELIUM_ORACLE_MANIFEST is unset)\npreflight: readiness only; RUN admits selection, it is not a test PASS; no tools or jobs executed\nCOMMAND [\"/usr/bin/nice\",\"-n\",\"19\",\"/Users/mycelium-dev/.cargo/bin/cargo\",\"run\",\"--offline\",\"--locked\",\"-j\",\"2\",\"-p\",\"xtask\",\"--\",\"preflight\"]\nHEAD 14aa6a27f2e682dddc67cdd9936156274b59a356\nADMITTED 2026-10-27T22:06:31Z\n"
+  },
+  "after": {
+    "receipt": {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-final.json",
+      "size_bytes": 1129,
+      "sha256": "ea80d8e9858dcdca56278fe6ef9ae85ce7d73b5899ffae74ba08becc65e23400"
+    },
+    "exit_code": 0,
+    "exact_output": "COMMAND [\"/usr/bin/nice\",\"-n\",\"19\",\"/Users/mycelium-dev/.cargo/bin/cargo\",\"run\",\"--offline\",\"--locked\",\"-j\",\"2\",\"-p\",\"xtask\",\"--\",\"preflight\"]\nHEAD 14aa6a27f2e682dddc67cdd9936156274b59a356\nADMITTED 2026-10-27T22:16:54Z\n    Finished `dev` profile [unoptimized] target(s) in 0.14s\n     Running `/Users/mycelium-dev/.hermes/cache/scratch/v02-fx-target/debug/xtask preflight`\nxtask-unit: RUN\nworkspace-unit: RUN\nworkspace-doctest: RUN\nlint-policy: RUN\nnative-adapters: RUN\noracle-journeys: RUN\npreflight: readiness only; RUN admits selection, it is not a test PASS; no tools or jobs executed\n"
+  },
+  "initial_data_location_failure": {
+    "receipt": {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-after.json",
+      "size_bytes": 876,
+      "sha256": "d53bf7dfe7da6d234b9a5083543b69fe52405212689c88972c2477f2093025fa"
+    },
+    "reason": "Data initially placed under test-support/* matched workspace crate glob, so Cargo refused missing Cargo.toml. Moved data to evidence/foundation-exit without editing workspace/lock. This failed attempt is not admission evidence."
+  },
+  "content_verification": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/content-verification.json",
+    "size_bytes": 18563,
+    "sha256": "6e2f2d6fff1e1efbc1313434cbbaa8ab4bfa5f792f9a44cb6d8ac91c465c15be"
+  }
+}

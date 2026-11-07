@@ -1,0 +1,221 @@
+{
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "claim": "Frozen source field sets; not full nested schema or execution qualification",
+  "desktop_status": {
+    "required_top_level_fields": [
+      "acquisition",
+      "acquisition_policy_error",
+      "adaptive_host",
+      "adaptive_host_publication",
+      "authority",
+      "chat",
+      "demo_target",
+      "distribution",
+      "fast_mode",
+      "installation_role",
+      "join_flow",
+      "label",
+      "leave",
+      "model_contract",
+      "network",
+      "owner_run",
+      "peer_liveness",
+      "recovery_error",
+      "relay_wait",
+      "renewal_error",
+      "resource_observation",
+      "resource_policy",
+      "role",
+      "run_model",
+      "running",
+      "serving",
+      "sharing",
+      "swarm",
+      "test_seams",
+      "test_seams_active"
+    ],
+    "additional_read_field": "status_snapshot",
+    "nested_validation": "L6/L9 integration pending; outer field-set freeze only",
+    "provenance": {
+      "path": "mycelium_a13_macos/app.py",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "8ea6022e102930eaf3883f5598f67a7f687d81f5a995d5160dab7d5d641a01d5",
+      "start": 1263,
+      "end": 1283
+    }
+  },
+  "directory_signed_documents": {
+    "protocol_fields": {
+      "mycelium.swarm.record.v1": [
+        "access_mode",
+        "description",
+        "entry",
+        "model",
+        "name",
+        "open_quota",
+        "owner_key",
+        "protocol",
+        "seq",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.delete.v1": [
+        "owner_key",
+        "protocol",
+        "seq",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.heartbeat.v1": [
+        "at",
+        "members",
+        "protocol",
+        "served_model",
+        "sig",
+        "signer_key",
+        "status",
+        "swarm_id"
+      ],
+      "mycelium.swarm.access_request.v1": [
+        "at",
+        "note",
+        "protocol",
+        "requester_key",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.deny.v1": [
+        "at",
+        "owner_key",
+        "protocol",
+        "requester_key",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.grant.v1": [
+        "expires_at",
+        "grant_id",
+        "grantee_key",
+        "issued_at",
+        "issuer_key",
+        "max_requests",
+        "max_tokens",
+        "protocol",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.owner_query.v1": [
+        "at",
+        "nonce",
+        "owner_key",
+        "protocol",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.grantee_query.v1": [
+        "at",
+        "grantee_key",
+        "nonce",
+        "protocol",
+        "sig"
+      ],
+      "mycelium.swarm.entry_offer.v1": [
+        "at",
+        "entry_key",
+        "origin",
+        "protocol",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.entry_send.v1": [
+        "at",
+        "grant",
+        "key",
+        "max_new_tokens",
+        "nonce",
+        "prompt",
+        "protocol",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.open_grant_request.v1": [
+        "at",
+        "key",
+        "nonce",
+        "protocol",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.kill_switch.v1": [
+        "at",
+        "engaged",
+        "owner_key",
+        "protocol",
+        "seq",
+        "sig",
+        "swarm_id"
+      ],
+      "mycelium.swarm.entry_cancel.v1": [
+        "at",
+        "key",
+        "nonce",
+        "protocol",
+        "request_id",
+        "sig",
+        "swarm_id"
+      ]
+    },
+    "provenance": {
+      "path": "mycelium_swarm_directory/docs.py",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "4cabaf75b3f00d2ae50f99670a6585c4083ca8a781fe63bcd6a62aa2666ec862",
+      "start": 54,
+      "end": 70
+    },
+    "semantic_validation": "docs.py:222-321; signatures/replay/rate/TTL not implemented by field sets"
+  },
+  "browser_bootstrap": {
+    "protocol": "mycelium.product_ui.bootstrap.v1",
+    "required_fields": [
+      "protocol",
+      "source_mode",
+      "session",
+      "api",
+      "limits",
+      "qualification_authority"
+    ],
+    "optional_fields": [
+      "features"
+    ],
+    "session_fields": [
+      "csrf_header",
+      "csrf_token",
+      "expires_at_unix_ms"
+    ],
+    "api": {
+      "observatory_snapshot": "/api/v1/observatory/snapshot",
+      "observatory_events": "/api/v1/observatory/events",
+      "qualification_current": "/api/v1/qualification/current",
+      "recovery_status": "/api/v1/recovery/status",
+      "inference_submit": "/api/v1/inference",
+      "swarm_status": "/api/v1/swarm/status",
+      "swarm_invites": "/api/v1/swarm/invites",
+      "swarm_join": "/api/v1/swarm/join",
+      "swarm_leave": "/api/v1/swarm/leave",
+      "product_snapshot": "/api/v1/product/snapshot",
+      "product_events": "/api/v1/product/events",
+      "product_export": "/api/v1/product/export"
+    },
+    "limits": {
+      "max_prompt_utf8_bytes": 131072,
+      "max_new_tokens": 4096
+    },
+    "provenance": {
+      "path": "mycelium_ui_gateway/app.py",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "e37cae1d9304ef975bdd690398d621c879793749b7857d87457fe5ab4e1899f9",
+      "start": 448,
+      "end": 484
+    }
+  }
+}

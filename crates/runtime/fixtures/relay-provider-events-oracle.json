@@ -1,0 +1,109 @@
+{
+ "cases": [
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://abc-def-123.trycloudflare.com"
+   },
+   "line": "2026-10-28T10:00:00Z INF |  https://abc-def-123.trycloudflare.com                                       |"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://a.trycloudflare.com"
+   },
+   "line": "https://a.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "https://UPPER.trycloudflare.com"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://abc.trycloudflare.com"
+   },
+   "line": "https://abc.trycloudflare.com/path"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://one.trycloudflare.com"
+   },
+   "line": "visit https://one.trycloudflare.com and https://two.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "http://abc.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "https://abc.trycloudflare.org"
+  },
+  {
+   "event": null,
+   "line": "https://abc.example.com"
+  },
+  {
+   "event": null,
+   "line": "https://.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "https://a_b.trycloudflare.com"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://-a-.trycloudflare.com"
+   },
+   "line": "https://-a-.trycloudflare.com"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://abc.trycloudflare.com"
+   },
+   "line": "https://abc.trycloudflare.comx"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://abc.trycloudflare.com"
+   },
+   "line": "xhttps://abc.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "https://abc.sub.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": ""
+  },
+  {
+   "event": null,
+   "line": "no url here"
+  },
+  {
+   "event": {
+    "event": "opened",
+    "origin": "https://tidy-quartz-9.trycloudflare.com"
+   },
+   "line": "Your quick Tunnel has been created! Visit it at (it may take some time to be reachable): https://tidy-quartz-9.trycloudflare.com"
+  },
+  {
+   "event": null,
+   "line": "https://abc.trycloudflare.com",
+   "provider": "other"
+  }
+ ],
+ "provenance": {
+  "cases": 18,
+  "function_sha256": "9bfe8c8045227f06a48591ce01bee6b71edff94f4f3fc9359db5729bb49c1051",
+  "method": "EXECUTED the oracle's provider_event (source text extracted verbatim by ast, sha256 below) over the lines",
+  "oracle": "mycelium_a13_macos/public_relay.py @ f4e366e98a1f705dfaf182897044500d290dbd7f (git archive copy)",
+  "probe_sha256": "e861e3d3910fbead7dd075ff8561f8786a151628a0c35f289df5a2c19ebdea96",
+  "source_sha256": "03397d4407e5c4c7a1483d678bf7c36bb5ff9e465fc7057737256a2f150e8012"
+ }
+}

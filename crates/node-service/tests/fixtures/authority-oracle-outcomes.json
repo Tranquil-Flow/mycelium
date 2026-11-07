@@ -1,0 +1,90 @@
+{
+ "join_acceptance:base": {
+  "error": null,
+  "ok": true
+ },
+ "join_acceptance:envelope_extra_field": {
+  "error": "membership_envelope_invalid",
+  "ok": false
+ },
+ "join_acceptance:expired": {
+  "error": "membership_message_expired",
+  "ok": false
+ },
+ "join_acceptance:foreign_signer_and_record": {
+  "error": "membership_key_pin_mismatch",
+  "ok": false
+ },
+ "join_acceptance:from_future": {
+  "error": "membership_message_from_future",
+  "ok": false
+ },
+ "join_acceptance:protocol_other": {
+  "error": "membership_fields_invalid",
+  "ok": false
+ },
+ "join_acceptance:recipient_other": {
+  "error": "membership_recipient_mismatch",
+  "ok": false
+ },
+ "join_acceptance:sender_node_other": {
+  "error": "membership_sender_node_mismatch",
+  "ok": false
+ },
+ "join_acceptance:signature_by_foreign_key": {
+  "error": "membership_signature_invalid",
+  "ok": false
+ },
+ "join_acceptance:swarm_other": {
+  "error": "membership_swarm_mismatch",
+  "ok": false
+ },
+ "join_acceptance:tampered_after_signing": {
+  "error": "membership_signature_invalid",
+  "ok": false
+ },
+ "join_request:base": {
+  "error": null,
+  "ok": true
+ },
+ "join_request:envelope_extra_field": {
+  "error": "membership_envelope_invalid",
+  "ok": false
+ },
+ "join_request:expired": {
+  "error": "membership_message_expired",
+  "ok": false
+ },
+ "join_request:foreign_signer_and_record": {
+  "error": "membership_key_pin_mismatch",
+  "ok": false
+ },
+ "join_request:from_future": {
+  "error": "membership_message_from_future",
+  "ok": false
+ },
+ "join_request:protocol_other": {
+  "error": "membership_fields_invalid",
+  "ok": false
+ },
+ "join_request:recipient_other": {
+  "error": "membership_recipient_mismatch",
+  "ok": false
+ },
+ "join_request:sender_node_other": {
+  "error": "membership_sender_node_mismatch",
+  "ok": false
+ },
+ "join_request:signature_by_foreign_key": {
+  "error": "membership_signature_invalid",
+  "ok": false
+ },
+ "join_request:swarm_other": {
+  "error": "membership_swarm_mismatch",
+  "ok": false
+ },
+ "join_request:tampered_after_signing": {
+  "error": "membership_signature_invalid",
+  "ok": false
+ }
+}

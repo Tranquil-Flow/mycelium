@@ -1,0 +1,27 @@
+case	outcome	result	raw_trace	previous_trace	inputs
+fresh	accepted	1400.0	1160.0	1300.0	{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+ttl-edge	accepted	1400.0	4700.0	1300.0	{"expiry":"4700.0","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+ttl-over	refused	membership_ttl_invalid	4700.0001		{"expiry":"4700.0001","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-large	refused	membership_ttl_invalid	1e+100		{"expiry":"1e+100","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-negative	refused	membership_time_invalid	-1e+100		{"expiry":"-1e+100","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-infinity	refused	membership_time_invalid	inf		{"expiry":"inf","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-nan	refused	membership_time_invalid	nan		{"expiry":"nan","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-string	refused	membership_time_invalid	1160.0		{"expiry":"'1160'","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-bool	refused	membership_time_invalid	1.0		{"expiry":"True","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-null	refused	membership_time_invalid			{"expiry":"None","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+raw-overflow	refused	int too large to convert to float			{"expiry":"10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+future-edge	accepted	1400.0	1190.0	1300.0	{"expiry":"1190.0","issued":"1130.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+future-over	refused	membership_message_from_future	1190.0		{"expiry":"1190.0","issued":"1130.0001","lease":"1300.0","mode":"fresh","now":"1100.0"}
+expired-fresh	refused	membership_message_expired	1150.0		{"expiry":"1150.0","issued":"1100.0","lease":"1300.0","mode":"fresh","now":"1200.0"}
+expiry-equal-now	accepted	1400.0	1100.0	1300.0	{"expiry":"1100.0","issued":"1090.0","lease":"1300.0","mode":"fresh","now":"1100.0"}
+large-valid-domain	accepted	1000000000300.0	1000000000060.0	1000000000100.0	{"expiry":"1000000000060.0","issued":"1000000000000.0","lease":"1000000000100.0","mode":"fresh","now":"1000000000000.0"}
+negative-valid-domain	accepted	-999999999700.0	-999999999940.0	-999999999900.0	{"expiry":"-999999999940.0","issued":"-1000000000000.0","lease":"-999999999900.0","mode":"fresh","now":"-1000000000000.0"}
+bad-signature	refused	membership_signature_invalid	1160.0		{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"bad-signature","now":"1100.0"}
+wrong-key	refused	membership_key_pin_mismatch	1160.0		{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"wrong-key","now":"1100.0"}
+previous-large	refused	seed_deadline_unavailable	1160.0	1e+100	{"expiry":"1160.0","issued":"1100.0","lease":"1e+100","mode":"fresh","now":"1100.0"}
+previous-at-ceiling	refused	seed_deadline_unavailable	1160.0	4700.0	{"expiry":"1160.0","issued":"1100.0","lease":"4700.0","mode":"fresh","now":"1100.0"}
+previous-before-ceiling	accepted	4700.0	1160.0	4699.999999999999	{"expiry":"1160.0","issued":"1100.0","lease":"4699.999999999999","mode":"fresh","now":"1100.0"}
+previous-expired	refused	seed_member_lease_expired	1160.0		{"expiry":"1160.0","issued":"1100.0","lease":"1100.0","mode":"fresh","now":"1100.0"}
+replay-old-request	accepted	1400.0	1160.0,1160.0	1300.0	{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"replay","now":"1100.0"}
+replay-large-previous	accepted	1e+100	1160.0,1160.0	1300.0	{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"replay-large-previous","now":"1100.0"}
+replay-expired-renewal	refused	membership_message_expired	1160.0,1160.0	1300.0	{"expiry":"1160.0","issued":"1100.0","lease":"1300.0","mode":"replay-expired-renewal","now":"1100.0"}

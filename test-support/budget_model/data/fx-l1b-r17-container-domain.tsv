@@ -1,0 +1,7 @@
+helper	input_domain	reported_input_length	status	actual_return_length
+nullable_text	builtin-str	9	refused	-
+nullable_text	str-subclass	1	accepted	9
+bounded_list	builtin-list	9	refused	-
+bounded_list	list-subclass	1	accepted	9
+bounded_list	builtin-tuple	9	refused	-
+bounded_list	tuple-subclass	1	accepted	9

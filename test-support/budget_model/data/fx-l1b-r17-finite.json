@@ -1,0 +1,3184 @@
+{
+  "id": "FX-L1b-r17-finite",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "6e573af214323e4971615c237eb5121205e03ec595bb4edb3f7e2f24a64b5abe",
+  "scope": "Exact source operands and actual helper/default range; per-helper success, not whole validator success",
+  "rows": [
+    {
+      "key": "mycelium_platform_neutral/acceleration_profile.py:155:90:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/acceleration_profile.py:157:77:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:216:83:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:217:86:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:345:45:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:174:77:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:235:80:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:238:82:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:371:52:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1000000000.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1000000000.0",
+          "accepted",
+          "1000000000.0"
+        ],
+        [
+          "above",
+          "1000000001.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:371:65:validator-keyword:maximum",
+      "operand": 1000000000.0,
+      "canonical": 1000000000000,
+      "unit": "milliseconds",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1000000000.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1000000000.0",
+          "accepted",
+          "1000000000.0"
+        ],
+        [
+          "above",
+          "1000000001.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:373:52:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "permille",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1.0",
+          "accepted",
+          "1.0"
+        ],
+        [
+          "above",
+          "2.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:373:65:validator-keyword:maximum",
+      "operand": 1.0,
+      "canonical": 1000,
+      "unit": "permille",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1.0",
+          "accepted",
+          "1.0"
+        ],
+        [
+          "above",
+          "2.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/class_qualification.py:188:91:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/class_qualification.py:190:78:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/eligibility.py:160:89:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/eligibility.py:162:76:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/eligibility.py:232:51:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration.py:343:49:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration.py:436:74:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration.py:535:80:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration.py:637:49:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration_executor.py:312:56:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration_executor.py:340:110:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration_executor.py:432:98:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration_executor.py:501:60:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/migration_executor.py:530:53:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:335:90:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:337:77:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:368:82:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:467:52:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:228:80:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:232:85:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "permille",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:237:24:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "permille",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:244:95:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:286:88:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:287:91:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:342:86:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/seed_migration.py:335:70:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/seed_migration.py:459:94:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/seed_migration.py:507:71:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/seed_migration.py:508:64:validator-keyword:minimum",
+      "operand": 1.0,
+      "canonical": 1000,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 1.0,
+        "maximum": 3600.0
+      },
+      "cases": [
+        [
+          "below",
+          "0.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1.0",
+          "accepted",
+          "1.0"
+        ],
+        [
+          "within",
+          "1.5",
+          "accepted",
+          "1.5"
+        ],
+        [
+          "ceiling",
+          "3600.0",
+          "accepted",
+          "3600.0"
+        ],
+        [
+          "above",
+          "3601.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/seed_migration.py:508:77:validator-keyword:maximum",
+      "operand": 3600.0,
+      "canonical": 3600000,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 1.0,
+        "maximum": 3600.0
+      },
+      "cases": [
+        [
+          "below",
+          "0.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1.0",
+          "accepted",
+          "1.0"
+        ],
+        [
+          "within",
+          "1.5",
+          "accepted",
+          "1.5"
+        ],
+        [
+          "ceiling",
+          "3600.0",
+          "accepted",
+          "3600.0"
+        ],
+        [
+          "above",
+          "3601.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:105:72:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1000000000.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1000000000.0",
+          "accepted",
+          "1000000000.0"
+        ],
+        [
+          "above",
+          "1000000001.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:105:85:validator-keyword:maximum",
+      "operand": 1000000000.0,
+      "canonical": 1000000000,
+      "unit": "milliseconds",
+      "helper": "nullable_finite",
+      "kwargs": {
+        "minimum": 0.0,
+        "maximum": 1000000000.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "ceiling",
+          "1000000000.0",
+          "accepted",
+          "1000000000.0"
+        ],
+        [
+          "above",
+          "1000000001.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:178:80:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:181:82:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:203:89:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:247:24:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "milliseconds",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    }
+  ]
+}

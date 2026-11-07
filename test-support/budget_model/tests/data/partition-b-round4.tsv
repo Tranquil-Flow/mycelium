@@ -1,0 +1,17 @@
+key	claim	unit
+mycelium_a6_case_observations.py:268:11:comparison:settled.reservation_count	category:reviewed-structural-slot	not-applicable
+mycelium_live/a6_recovery.py:436:8:assignment:expiry	partition-b-quantity:minimum-wallclock-literal	milliseconds
+mycelium_live/artifact_transport.py:547:8:assignment:expires	partition-b-quantity:minimum-wallclock-literal	milliseconds
+mycelium_live/command_controller.py:416:12:assignment:requested_cleanup_deadline_ms	partition-b-family:minimum-offset-reference	milliseconds
+mycelium_live/command_controller.py:471:12:assignment:state.cleanup_deadline_ms	partition-b-family:postvalidated-cleanup-branch	milliseconds
+mycelium_live/command_controller.py:861:12:assignment:state.cleanup_deadline_ms	partition-b-family:minimum-offset-reference	milliseconds
+mycelium_live/liveness.py:263:16:keyword:next_keepalive_due_ms	partition-b-family:clock-policy-default	milliseconds
+mycelium_live/liveness.py:362:12:assignment:state.next_keepalive_due_ms	partition-b-family:clock-policy-default	milliseconds
+mycelium_live/liveness.py:367:12:assignment:stale_ms	category:reviewed-observation-slot	not-applicable
+mycelium_live/liveness.py:694:12:assignment:state.next_keepalive_due_ms	partition-b-family:clock-policy-default	milliseconds
+mycelium_live/member_transport.py:1020:8:assignment:expires	partition-b-family:minimum-offset-reference	milliseconds
+mycelium_live/member_transport.py:1049:20:dict-field:not_before_unix_ms	category:reviewed-observation-slot	not-applicable
+mycelium_live/member_transport.py:926:8:assignment:deadline	partition-b-family:helper-clock-upper-cap	milliseconds
+mycelium_live/route.py:3546:12:assignment:inline_receipt_grace_deadline	partition-b-family:minimum-offset-reference	milliseconds
+mycelium_live/supervisor.py:520:16:keyword:ttl_seconds	partition-b-family:guarded-scalar-reference	milliseconds
+mycelium_live/supervisor.py:530:12:assignment:expires_at	partition-b-family:guarded-wallclock-offset	milliseconds

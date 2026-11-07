@@ -1,0 +1,2378 @@
+[
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "ok": {
+        "activation_endpoint_id": "5affc667e314510df4d6876b90425c2a9db7897fb49303fd9e9e8bf3c21d92ef",
+        "endpoint_id": "endpoint-probe",
+        "endpoint_secret_file": "/scratch/key",
+        "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "membership_generation": 1,
+        "node_id": "member-probe",
+        "process_transport": "managed_https",
+        "python_executable": "/scratch/host",
+        "route_ready": false,
+        "runtime_backend": "mlx",
+        "sidecar_binary": "/scratch/sidecar",
+        "source_root": "/scratch/source",
+        "ssh_identity_file": null,
+        "ssh_target": null,
+        "staging_root": "/scratch/stage"
+      }
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "valid",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/tampered",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_signature_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "tampered",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_expired"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "expired",
+    "now": 1400
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_from_future"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "future",
+    "now": 900
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_member_lease_expired"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "lease-equality",
+    "now": 2000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_key_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "name": "wrong-key",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_generation_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 2,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "generation",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_generation_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-next",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "incarnation",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "a+7ZWLzfbp2TQe5pQmp0KQ3bkas1Kao9dAxQiO36pVTvNm5rpjSCGCyAvNrS9ENNpn7lIG31Vlm2TvRqvny1Cw==",
+        "signed_statement_digest": "sha256:042e905bec2ad0e653e32f692be98eb0fa60fcaf028f87a4a5b543045810a743",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "other",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_binding_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "swarm",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "sZOOkxK9Me/lXK68tfIXqavJ+MA2VSBIXB1puhEi1g1oMK0UmgrN0m51w0cqmawwOQhKEiUJau1m+5eDV6LmCA==",
+        "signed_statement_digest": "sha256:49dc61f317d91b05ae15e058b6962237ce7d96e6696d8743a99ae425323f4610",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "other",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_binding_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "run",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "pLW14ooKw9/4ElrYFpmGq+OE0I+XL9oOV2siHN0a51nzX1Th1DHwjk1RKXbJZLIg8yPlEFAQv7MWFduBPF16Dw==",
+        "signed_statement_digest": "sha256:cb6228f1984e5aebc323f9d606151dd77e4c852080c20101ea4b6e0277bff7eb",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "other",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_binding_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "endpoint",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "lX5HmwxxIQ2GQwUD6WLNyjp/iGdt0QVKPl/BBJ8U7opt5Y3yoVOOmsKySSIcggmJPKwAeuemhLz3VZuTUsDGDQ==",
+        "signed_statement_digest": "sha256:05f34d3cdaba0f8fe7fbea4f9fc5dd2c429860f8e77bb139e06ad765a3567a9c",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "extra": true,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_malformed"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "extra-statement",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "p6Fh8W4AEvpBDUL/bQpprz/EJFfoimDuZv/Qmwt23ck57o3gEqMs/dMdYruzGRZC40MTODqCwYgSZXlm2Lg6Aw==",
+        "signed_statement_digest": "sha256:85235ec80ad888e55bff739b06f3f801f9b49f9df722d4cc9707ea7ffa618c75",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 2,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_generation_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-generation",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/7QZcTklQmHGDt5nNLU5n2Vl1Hnm+O7A7SsUunkdhhvM+kxHtgCc5tc9IvUs6/68oLvGejfGFtt38hxKIps5BA==",
+        "signed_statement_digest": "sha256:3140761ce172a535bedac4a931867408bcdd14d8212d9e9475693e601452bb49",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "other",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_binding_mismatch"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-node",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "sdfzSvbMM35EmUlBtm2YagPRnmfxz+2Om2gpnIG44tF08raeJ2WgifXontw4Tb/FPvEIG9ZE9tm0C/myrQyIBw==",
+        "signed_statement_digest": "sha256:a647875364d46b61cbe756728a78a76852924fe0cc7afd4b5d347812b869c6e4",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "relative"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "staging_root-'relative'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ZPdIvZIVeWuN8nTDbU8/p9f0eamotnK1DQQO3Au+JcGtbve89yxW9MSToOtT6bScgyht+cZ/hF97PeVL8TvUAw==",
+        "signed_statement_digest": "sha256:55fc877b4baace08e32c3fe3561f8b875a42e9644fde419928f0c15f2ca214b3",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/../escape"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "staging_root-'/scratch/../escape'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "Rhg+c8kyAI+XnBQmSHUnf5twrHHExgpw8x42UmQiXKAzG0Fw3PPn1p8HPFmhE2anufyNM13DeO7yjuXBnVJjBQ==",
+        "signed_statement_digest": "sha256:f3cacc81086c5822d1f003e0484656d46832de279122a742a3ede3b80e6f0d9d",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/\u0000bad"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "staging_root-'/scratch/\\x00bad'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "UbPGLlQu8DCBzSlhBHl/j7hmeM02HvoAhvcaJR+WZqeBmRdPRKSacqIcvihnEsJDuj3iCVbtVaht8OpeeTXbAQ==",
+        "signed_statement_digest": "sha256:1b118ea77f05bfec5e0699e004a6b10d9c3f62af74183886dcfc14a38205447f",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "relative",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "python_executable-'relative'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "zOJNAeEOw36H5H7YG9AUwa1PHzrNigURl9dgrIQVxdlO6UBAJf5+knx0ZAVe0N+PPIwrK3P6j85KkeY08Nu3Dw==",
+        "signed_statement_digest": "sha256:deccb1197f261153a7f8c3dc0376dcfd466e488b093bc4043d3412101c1cb87a",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/../escape",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "python_executable-'/scratch/../escape'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "HaIWPxnXXTfVyGGCAWD/MLB0QtVz7anJZ2gSMCUl3NKJIjFceV596KgG8wYgxRgaK3DXH9bXacA7HZvpQ24sBg==",
+        "signed_statement_digest": "sha256:26fdcaf3f2c62e7ca8e5f9125ff6945d0eb675e3000f6c956047c2779100b95e",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/\u0000bad",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "python_executable-'/scratch/\\x00bad'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "UYmEvDPSpnOsO4NvN/7m78jvDZKpaNpypszhElimHhrN2KLFmNpl6KWUlTDagPEBM8vmmupgUQ9lDeG8HRscCw==",
+        "signed_statement_digest": "sha256:33ac98ac5f80626a2024590fbe1ff03df0a02b298e9f7fd8cca6c076864ba204",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "relative",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "sidecar_binary-'relative'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "hcD/kk9RS1XQmIKz/JPJvxwFnEzq5XZHTHBqrgTKuC57U2awHaikR5O92OBpJUn/6hWt5XKXMiq4pQraq2cNDw==",
+        "signed_statement_digest": "sha256:e77713d594943b77cc80e880d31095975b01cd37af03fc0ff47830f7664ac741",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/../escape",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "sidecar_binary-'/scratch/../escape'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "Lp9x85u3YhdupM3QiudteL2vQPoCZmEJI4I3ba9KkeTv0g6mpZzx4WUpZmh9M2yHXBio2U2IfLmHAJAwr3FpCw==",
+        "signed_statement_digest": "sha256:0d566ef1ff6e137a8a02d89c0ba311e290a5222d6f5e6a3ab2dd8ad79ad9c370",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/\u0000bad",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "sidecar_binary-'/scratch/\\x00bad'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "VW4XPiSoPqTJ02Pi/m9xM/kBboLlXiec6gIoGEZUCWiU9wig9VwU4tBSJim3+Bq51sZNPtWdmjJEernsyq/kBA==",
+        "signed_statement_digest": "sha256:7b12ba9873988dd71d4267aa3b5cc242ddfde585e839466ff93dc477fda3bcbb",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "relative",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "endpoint_secret_file-'relative'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "82Cfs4RZ/Mp56Y74s9brfXjTpmPe/qNxmzLTEtGR0kijPDQoCqm1jSom0uaXFjB9cieSU6bASR6F1N2exP0nDA==",
+        "signed_statement_digest": "sha256:482c02924bfab40c21d508f17ea00a611cf75660cd50bd706d3d5c3a9d270373",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/../escape",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "endpoint_secret_file-'/scratch/../escape'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "nQSsoqNvkJZiY/wZbEUAInH6AYHYlY6L8dEMBOxWrXMwaUfdXwlz4kF2DqTAZLOHMY+5XUTEC6ZYX1T15IXzCQ==",
+        "signed_statement_digest": "sha256:53df6da4a02b472b1ef707eb60ac0a0afb5f67b8977c0d052682e272ece88f4b",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/\u0000bad",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "endpoint_secret_file-'/scratch/\\x00bad'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ib8FX46udF8R7QOezXTsc6nSfbQRPGspGNjWXu5oIVxjtrrhPIcslvNK/Z2ohQB0FdxJvf4GMO4TDgnG+dU1CQ==",
+        "signed_statement_digest": "sha256:7da89379042ebd23c243d159b1a80d5a3ae25dde035f14753e63001c43cbade7",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "relative",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "source_root-'relative'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "x4Z/ERiFwB8xoZJB7slX4Lm/+Nfq4wN1rZ3HtPZdEYwOHLGXOBHFGUAGwWXNtWiiUdgopZTm27FC3AW0PcJqAg==",
+        "signed_statement_digest": "sha256:f9acf3f73e0c1f7721c04d7632e65f9f5004ee722bb5cdea56b3c5d8eb8d3624",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/../escape",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "source_root-'/scratch/../escape'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "EQEW/AADV7DflxYC9rx6UhBiDQ/KkKpj+rq0bUz55z6opjhk3nGg/tEw35O7YiUnKqeuvuOtyIiWZJxQEk6mDg==",
+        "signed_statement_digest": "sha256:25b73b60748b50be8cafa7bf83bc81c1aff3027d6096fe36728eaab7f1b4f6cb",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/\u0000bad",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "source_root-'/scratch/\\x00bad'",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "4XVDtYkubIjG0gJ9mGo4EbG/IosAmyiGGaqBxhdrDyWpLwKVs57a8l5AVCd6qszFs1/TS6CiM8+CT202ImdwBw==",
+        "signed_statement_digest": "sha256:36ee84b8b6775bfa3b1a96db2ecc6a4ea622b4391998cd5222d43ba81681540a",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": true,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-route_ready",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "J7dkYeG8nfJoKSzppkBGpgjffrO/XkxbMpgj7QYVmGjovVkNDSF+vXw9/apmGEzhu9l/dbSCCdoGt1OiaPEZCA==",
+        "signed_statement_digest": "sha256:8c7eb6636135b719fe03fda201f9691db0b5b1502beb0d7943f6abd31a70a1f7",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": 0,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-route_ready",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "Ll9en9pExt+fd2m2CBeKkPOPYqpiq1dTuxJUFKSF0qYck37250pIe4NQyPdsGg/EouSF4jSMCT61QN15D3LlAg==",
+        "signed_statement_digest": "sha256:ac1e57c45b8f10923bcfa1ebe3ad3d0f41d16771c39595058f831892268140fa",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "numpy",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-runtime_backend",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "Gq4d/Z31bej/RFdQKjcJAhAgE0YYFe34TCEj4pwUD9t8RXfxJW7GuhHKwhtxY3qCtYPmFgFabqnngMW5vrclDA==",
+        "signed_statement_digest": "sha256:ff9d4dce55da42ff2cd99ed4046b78d1af5669a9fd54eaeb2b6738cda5969ba9",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": "host",
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-ssh_target",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "aqnvMJBNTLt2pLGgM68gp4zsInPMqgWrVBV8aNRYuZohIRgob4ZFeEuvFh/wNpS9rLEIDtbxNORKF7Yt3A7PAQ==",
+        "signed_statement_digest": "sha256:9fb44ef781d039ff1ccd6a9e460bad097b86c61bac19baa01ffee98690afbfa9",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "ssh",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-process_transport",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "rdWOnq2YvcTeAqSvwJkQ60mmjTlZSgKM9pukvcfm7EvXSMsaQfDzEy+yukjtM0TgqfMol7RMou8eBRkYoK6CCQ==",
+        "signed_statement_digest": "sha256:e8121779086fd8742236efbaccc04530d32ac1c5c6101b66b5516bcf8c6a007a",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage",
+          "unexpected": 1
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_facts_invalid"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "fact-unexpected",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "Ll9en9pExt+fd2m2CBeKkPOPYqpiq1dTuxJUFKSF0qYck37250pIe4NQyPdsGg/EouSF4jSMCT61QN15D3LlAg==",
+        "signed_statement_digest": "sha256:ac1e57c45b8f10923bcfa1ebe3ad3d0f41d16771c39595058f831892268140fa",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "numpy",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "ok": {
+        "activation_endpoint_id": "5affc667e314510df4d6876b90425c2a9db7897fb49303fd9e9e8bf3c21d92ef",
+        "endpoint_id": "endpoint-probe",
+        "endpoint_secret_file": "/scratch/key",
+        "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "membership_generation": 1,
+        "node_id": "member-probe",
+        "process_transport": "managed_https",
+        "python_executable": "/scratch/host",
+        "route_ready": false,
+        "runtime_backend": "numpy",
+        "sidecar_binary": "/scratch/sidecar",
+        "source_root": "/scratch/source",
+        "ssh_identity_file": null,
+        "ssh_target": null,
+        "staging_root": "/scratch/stage"
+      }
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "peer_class": "windows_native_iroh",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "windows",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_malformed"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "peer_class": "unknown",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "unknown-class",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "oTqnIS5vdByWmuHVtLi/BMZslSM+PnOi4hdaHS8+PXLImNSHMcHSb8OWKJQnm+w0pz0CCEqw3m/biTLqgJ4FBQ==",
+        "signed_statement_digest": "sha256:bf361a444386a6c82c39c4b657e7f9c9c2a2f0e92ecca78f5ef6247db16085f1",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 10000,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_malformed"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "ttl-too-long",
+    "now": 1000
+  },
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "vEJV5uk/cCn0fyJNuquVzE4sh6G3uiVa+/Lj8Lo8bht1G0VeZJlM9PX3oWZ7V6CYWVoGdoiwRN+7jRdhOfnDAA==",
+        "signed_statement_digest": "sha256:42f039ed47ec463637f06d33db40c73d3dce8834818670bf6d5b5d27a3ed0a85",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku8=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "error": "installation_descriptor_malformed"
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "oversized",
+    "now": 1000
+  }
+]

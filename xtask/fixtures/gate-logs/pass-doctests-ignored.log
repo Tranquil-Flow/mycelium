@@ -1,0 +1,337 @@
+    Finished `test` profile [unoptimized] target(s) in 0.47s
+     Running unittests src/lib.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/desktop-a082143facb61a04)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/package.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/desktop_package-f0a45650e1a6abec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/assets.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/assets-b670bf6e8da63268)
+
+running 2 tests
+test tauri_config_grants_no_native_ipc_and_never_bundles_a_release_by_default ... ok
+test unchanged_assets_match_frozen_oracle_inventory_and_digests ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/boundaries.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/boundaries-554b6b591fc3500a)
+
+running 9 tests
+test navigation_never_opens_remote_file_or_bootstrap_endpoints ... ok
+test c1_readiness_requires_native_ready_and_a_later_event_barrier ... ok
+test quit_exit_status_is_the_v014_launcher_status ... ok
+test f16_hung_cleanup_expires_without_permission_to_exit_or_retry ... ok
+test f16_all_quit_sources_share_one_cleanup_even_before_ready ... ok
+test channel_allows_trusted_window_but_refuses_browser_assumptions ... ok
+test native_missing_origin_requires_verified_document_not_a_browser_exception ... ok
+test platform_preserves_oracle_exact_legacy_exception ... ok
+test channel_rejects_duplicate_headers_paths_and_replay_after_close ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bundle.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/bundle-6e2ff2a13332b9f5)
+
+running 18 tests
+test embedded_pins_equal_the_genuine_native_input_manifest_and_the_backend_build_pins ... ok
+test an_unknown_schema_is_still_refused_even_with_a_pin ... ok
+test identity_constants_icon_and_tauri_packaged_config_agree ... ok
+test a_candidate_source_that_does_not_match_its_recorded_identity_refuses_assembly ... ok
+test info_plist_has_the_released_v014_key_set_and_values_except_two_named_differences ... ok
+test icon_must_be_the_certified_v014_icon ... ok
+test a_v014_shaped_tree_is_rejected_and_a_symlinked_python_is_named ... ok
+test native_input_manifest_refusals ... ok
+test every_native_source_is_identity_checked_and_a_failed_build_leaves_nothing ... ok
+test clean_bundle_has_no_python_indicators ... ok
+test a_candidate_manifest_is_consumed_only_with_a_verified_pin_and_its_sources_are_verified ... ok
+test every_python_indicator_kind_is_found ... ok
+test a_pinned_native_inputs_manifest_is_used_only_when_its_sha256_matches ... ok
+test content_manifest_reports_sizes_sources_trust_level_and_unqualified_minimum_os ... ok
+test layout_admits_only_the_named_icon_and_licenses_as_resources ... ok
+test packaged_manifest_is_pins_plus_the_measured_executable_and_still_refuses_corruption ... ok
+test bundle_has_the_documented_layout_modes_and_verifies_against_its_own_manifest ... ok
+test marker_bytes_straddling_every_read_boundary_are_found ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests/bundle_chat.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/bundle_chat-7d3211aa33685a97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bundle_gate.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/bundle_gate-6305dbd0950d8574)
+
+running 5 tests
+test built_bundle_contains_no_python_by_name_content_shebang_or_load_command ... ignored, explicit gate over a built bundle; set MYCELIUM_BUNDLE_APP
+test built_bundle_links_and_rpaths_are_relocatable_with_no_workspace_or_package_manager_path ... ignored, explicit gate over a built bundle; set MYCELIUM_BUNDLE_APP
+test built_bundle_matches_its_content_manifest_and_info_plist_identity ... ignored, explicit gate over a built bundle; set MYCELIUM_BUNDLE_APP
+test built_executable_carries_exactly_the_relocatable_frameworks_rpath_and_every_rpath_dependency_resolves ... ignored, explicit gate over a built bundle; set MYCELIUM_BUNDLE_APP
+test the_packaged_executable_really_links_the_bundled_mlx_libraries_and_nothing_foreign ... ignored, explicit gate over a built bundle; set MYCELIUM_BUNDLE_APP
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bundle_smoke.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/bundle_smoke-3a4dcc9cccca453b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/chat_answer_oracle.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/chat_answer_oracle-46c61a6f4d956c19)
+
+running 5 tests
+test the_oracle_fixture_is_the_executed_v014_answer_for_the_gate_question ... ok
+test round_9_whitespace_answer_is_refused ... ok
+test only_the_documented_horizon_tolerates_numeric_divergence ... ok
+test a_wrong_token_or_text_inside_the_horizon_is_refused ... ok
+test an_oracle_prefix_of_any_length_passes ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/chat_channel.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/chat_channel-90b9bf3e15f60e0c)
+
+running 5 tests
+test exact_chat_posts_need_chat_not_action_in_each_pinned_document ... ok
+test chat_keeps_path_method_and_revocation_checks ... ok
+test chat_header_never_authorizes_non_chat_or_action_paths ... ok
+test chat_keeps_supplied_origin_content_type_and_duplicate_header_refusals ... ok
+test chat_keeps_foreign_window_and_native_document_refusals ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/development_probe.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/development_probe-43a385379e097e78)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/entry.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/entry-2b8d7eca0ca4901a)
+
+running 6 tests
+test the_product_roots_are_home_and_home_applications ... ok
+test bad_command_lines_exit_two_and_change_nothing ... ok
+test refusals_are_one_structured_line_with_the_plain_language_message_where_v014_has_one ... ok
+test the_refusal_names_the_installed_copy_when_there_is_one ... ok
+test routing_follows_v014_main ... ok
+test installer_flags_run_install_status_uninstall_with_v014_output_and_defaults ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/failure_controls.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/failure_controls-c7f109fba3ede183)
+
+running 3 tests
+test clock_overflow_and_zero_budget_refuse_before_cleanup ... ok
+test f16_cleanup_errors_remain_terminal_and_observable ... ok
+test channel_content_method_size_and_duplicate_action_refusals ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/install.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/install-5fc8e27d1a970de0)
+
+running 34 tests
+test a_different_publisher_key_than_the_pinned_one_is_refused_without_writes ... ok
+test a_recorded_version_damaged_on_disk_is_repaired_from_the_verified_bundle_keeping_the_damaged_copy ... ok
+test a_valid_but_different_payload_under_an_unrecorded_version_is_a_conflict ... ok
+test bundle_digest_equals_the_signed_package_digest_of_a_real_v01x_release ... ignored, reads a real extracted v0.1.x release bundle; set MYCELIUM_V01X_BUNDLE
+test bundle_digest_matches_the_python_oracle_golden_values ... ok
+test a_second_installer_refuses_while_the_lock_is_held_and_works_again_once_it_is_released ... ok
+test a_version_below_the_recorded_rollback_floor_is_refused ... ok
+test a_lock_file_that_others_can_read_is_a_host_failure_not_a_lock ... ok
+test layout_is_the_v014_layout_under_the_given_root ... ok
+test a_link_anywhere_on_the_programs_path_makes_the_record_untrusted ... ok
+test a_copy_that_does_not_match_the_signed_digest_is_discarded_before_quarantine_is_touched ... ok
+test a_failed_copy_leaves_nothing_installed_recorded_or_unquarantined ... ok
+test a_version_directory_without_a_valid_payload_is_moved_aside_never_deleted ... ok
+test fresh_install_is_versioned_verified_linked_recorded_and_leaves_state_empty ... ok
+test missing_parents_are_created_owner_only_like_private_directory_create ... ok
+test leftovers_of_a_killed_installer_are_cleaned_by_the_next_run ... ok
+test reinstalling_the_current_version_drops_the_rollback_target_exactly_as_v014_does ... ok
+test the_real_home_and_real_applications_folders_are_refused_as_install_roots ... ok
+test rollback_refusals_change_nothing ... ok
+test rollback_swaps_current_and_previous_relinks_and_rolls_forward_again ... ok
+test status_reports_not_installed_then_current_and_previous ... ok
+test the_installer_never_writes_inside_the_state_root_and_never_creates_identity ... ok
+test uninstall_of_nothing_is_a_report_not_an_error ... ok
+test the_default_copy_is_ditto_and_keeps_links_modes_mtimes_and_extended_attributes ... ok
+test uninstall_run_from_the_installed_version_unlinks_it_while_running_like_v014 ... ok
+test a_damaged_or_foreign_installation_record_is_refused_not_trusted ... ok
+test upgrade_from_a_v014_installed_tree_keeps_its_record_pin_and_unknown_fields ... ok
+test upgrade_keeps_previous_for_rollback_and_prunes_older_versions ... ok
+test user_state_survives_install_upgrade_rollback_refusals_and_uninstall_byte_for_byte ... ok
+test a_programs_folder_or_record_that_is_not_exactly_owner_only_is_untrusted ... ok
+test an_app_the_user_put_in_applications_is_never_replaced_and_v014s_residue_is_characterized ... ok
+test a_package_with_a_valid_digest_but_a_bad_signature_is_refused_before_any_write ... ok
+test every_check_refuses_before_any_write ... ok
+test hostile_artifact_names_and_path_tricks_are_refused_at_the_document_check ... ok
+
+test result: ok. 33 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.07s
+
+     Running tests/install_cli.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/install_cli-d7b1a1063db597c9)
+
+running 2 tests
+test refusals_are_one_structured_stderr_line_exit_two_and_never_touch_real_roots ... ok
+test finalize_install_upgrade_status_rollback_uninstall_keep_user_state_byte_for_byte ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.86s
+
+     Running tests/install_command.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/install_command-4d2e3ff44c7cf4d3)
+
+running 8 tests
+test the_script_uses_no_network_no_admin_and_no_global_trust_changes ... ok
+test sums_cover_the_documents_the_script_checks_and_every_regular_app_file ... ok
+test an_app_that_is_not_a_plain_bundle_inside_this_folder_is_refused ... ok
+test the_script_refuses_when_quarantine_removal_fails ... ok
+test a_document_that_does_not_match_the_sums_stops_everything_before_any_trust_is_extended ... ok
+test the_mark_on_a_link_itself_is_cleared_too ... ok
+test the_installer_refusal_is_passed_through_and_never_reported_as_installed ... ok
+test the_script_clears_quarantine_from_the_app_only_then_runs_the_installer ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.59s
+
+     Running tests/launch_location.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/launch_location-8e33470d74a68ac8)
+
+running 3 tests
+test only_a_bare_launch_outside_the_install_is_refused ... ok
+test installed_translocated_and_elsewhere_are_told_apart ... ok
+test a_downloaded_copy_points_at_the_installed_app_only_when_the_entry_really_resolves_there ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/launch_wiring.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/launch_wiring-adb38e9c27722562)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/links.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/links-60293bdcd627d8f8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native_smoke.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/native_smoke-425d6c701e75e8a7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/node_settlement.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/node_settlement-3f889ecb378ecf96)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/node_shutdown.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/node_shutdown-7aa8a5711b2b8f9f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/package.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/package-e845d07883df8c8e)
+
+running 6 tests
+test package_rejects_traversal_symlink_and_incomplete_manifests ... ok
+test nested_code_signing_is_inside_out_without_deep_signing ... ok
+test packaged_entry_admission_precedes_any_native_factory ... ok
+test relocation_and_exclusive_staging_preserve_payload_and_existing_target ... ok
+test relocatable_manifest_refuses_missing_and_corrupt_native_files ... ok
+test cli_stage_verify_and_sign_plan_are_real_and_nonpublishing ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/package_docs.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/package_docs-4a8e232469de4f4c)
+
+running 17 tests
+test python_float_repr_vectors_match_the_oracle ... ok
+test canonical_json_matches_the_oracle_bytes ... ok
+test ed25519_signing_equals_the_oracles_deterministic_signature ... ok
+test tampered_or_wrong_key_copies_of_the_real_release_are_refused_with_v014s_codes ... ignored, reads a real extracted v0.1.x release bundle; set MYCELIUM_V01X_BUNDLE (read only)
+test the_install_command_asset_is_the_oracles_script_with_one_executable_name_changed ... ok
+test the_real_v012_release_signature_verifies_with_the_pinned_publisher_key ... ignored, reads a real extracted v0.1.x release bundle; set MYCELIUM_V01X_BUNDLE (read only)
+test signing_key_files_must_hold_exactly_32_raw_bytes_and_are_never_echoed ... ok
+test a_fresh_signed_bundle_verifies_and_reports_the_version_from_the_artifact_name ... ok
+test the_manifest_signature_cannot_be_replayed_onto_another_payload ... ok
+test signature_clock_publisher_pin_platform_and_floor_checks_follow_the_oracles_order ... ok
+test install_source_with_a_floor_below_the_pin_is_refused ... ok
+test a_well_formed_signature_that_is_not_the_signers_fails_the_ed25519_check ... ok
+test canonical_json_refuses_what_the_oracle_refuses ... ok
+test missing_linked_or_malformed_documents_are_bundle_incomplete ... ok
+test an_edit_to_any_signed_binding_without_re_signing_breaks_the_signature ... ok
+test install_source_mutations_report_the_oracles_codes ... ok
+test manifest_mutations_report_the_oracles_codes ... ok
+
+test result: ok. 15 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests/probe_absence.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/probe_absence-3b67cb20e6a54269)
+
+running 3 tests
+test the_default_bundle_contains_no_probe_code ... ignored, explicit gate over a built DEFAULT bundle; set MYCELIUM_BUNDLE_APP
+test the_scanner_sees_every_marker_in_the_probe_bundle ... ignored, positive control over a built qualification-probe bundle; set MYCELIUM_PROBE_BUNDLE_APP
+test the_scanner_finds_a_marker_split_by_nothing_and_ignores_near_misses ... ok
+
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/quit_exit_codes.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/quit_exit_codes-728c241245894757)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repro_canonical.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/repro_canonical-ee4d9486f52b78b5)
+
+running 3 tests
+test two_path_builds_of_the_same_commit_are_byte_identical ... ignored, two release builds; set MYCELIUM_REPRO_SCRATCH
+test a_stale_lock_of_a_dead_owner_is_broken_and_a_real_directory_is_never_replaced ... ok
+test trees_at_different_paths_build_identical_binaries_through_the_canonical_link_only ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests/rpath.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/rpath-6d2f22f784a2f803)
+
+running 7 tests
+test rpath_policy_accepts_only_bundle_relative_directories ... ok
+test otool_output_parsing_is_exact_about_rpaths_and_dependencies ... ok
+test a_non_mach_o_file_has_no_links_to_check ... ok
+test an_executable_with_the_frameworks_rpath_passes_the_link_check ... ok
+test an_absolute_rpath_is_refused_as_is_a_missing_one_for_an_rpath_dependency ... ok
+test bundle_assembly_refuses_an_executable_with_an_absolute_rpath_and_builds_with_the_relocatable_one ... ok
+dyld[21078]: Library not loaded: @rpath/libprobe.dylib
+  Referenced from: <82351A72-7311-362B-907D-0F4DE645777C> /Users/mycelium-dev/.hermes/cache/scratch/v02-l11-rpath-20997-4/c/Probe.app/Contents/MacOS/probe
+  Reason: tried: '/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-rpath-20997-4/b/Probe.app/Contents/Frameworks/libprobe.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-rpath-20997-4/b/Probe.app/Contents/Frameworks/libprobe.dylib' (no such file), '/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-rpath-20997-4/b/Probe.app/Contents/Frameworks/libprobe.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-rpath-20997-4/b/Probe.app/Contents/Frameworks/libprobe.dylib' (no such file), '/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/build/libsqlite3-sys-0a762add66265010/out/libprobe.dylib' (no such file), '/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/libprobe.dylib' (no such file), '/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/libprobe.dylib' (no such file), '/Users/mycelium-dev/.rustup/toolchains/1.95-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/lib/libprobe.dylib' (no such file), '/Users/mycelium-dev/.rustup/toolchains/1.95-aarch64-apple-darwin/lib/libprobe.dylib' (no such file), '/Users/mycelium-dev/lib/libprobe.dylib' (no such file), '/usr/local/lib/libprobe.dylib' (no such file), '/usr/lib/libprobe.dylib' (no such file, not in dyld cache)
+test the_relocatable_bundle_runs_after_being_moved_and_the_absolute_one_does_not ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running tests/security.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/security-93cfaaaab49ae99b)
+
+running 3 tests
+test pinned_document_csp_has_explicit_child_and_active_content_restrictions ... ok
+test native_document_adversarial_url_and_window_matrix ... ok
+test supplied_origin_always_preserves_strict_guard_regressions ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/services.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l11-target/debug/deps/services-87fdf67cb1139689)
+
+running 8 tests
+test dropped_callback_expires_in_the_actual_shutdown_machine_without_permission_to_exit ... ok
+test dropped_host_callback_is_not_counted_as_completed_cleanup ... ok
+test clock_rebinding_and_foreign_service_targets_refuse_without_host_dispatch ... ok
+test capacity_and_shutdown_fence_bound_pending_callbacks_and_suppress_late_success ... ok
+test service_request_translation_is_exact_and_never_synthesizes_browser_credentials ... ok
+test missing_clock_and_host_failure_never_manufacture_cleanup_proof ... ok
+test concurrent_admission_never_exceeds_injected_capacity ... ok
+test callback_delivery_itself_is_part_of_the_drain_not_just_host_completion ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests desktop
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

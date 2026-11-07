@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "base_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582",
+  "count": 10,
+  "simulator": "mycelium-sim-v2",
+  "producer_build": "sha256:67eb23cca6807d0009eeed18571e588dfd2313b23c797aeedf8ad81f34850feb",
+  "cargo_lock_sha256": "fc4ad41d8a28a63f1ddb839015569d96c4565d1185cc6cf7f4043b91ce88b4a0",
+  "traces": [
+    {
+      "incident": "F1",
+      "source": "test-support/sim/traces/F1-v1.json",
+      "source_sha256": "578131e62b72a14f7342cc18ec5bfb8c6f00fbbf937652fa9a124c8fadff265b",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F1-outcomes.json",
+      "baseline_sha256": "858fdb9e09976e87c12b28da1d1bd1a24dfeba7ff71ced58826c6333df698902",
+      "migrated": "test-support/sim/traces/F1-v2.json",
+      "migrated_sha256": "714b636aaeebb5b8933045ac84e93e72bee522fd031dc73746c37e3556b96c73",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "LeaseRenewalInterval",
+        "MembershipTtl",
+        "RenewalDivisor",
+        "WorkerDefaultWall"
+      ],
+      "corrected_reads": [
+        "LeaseRenewalInterval",
+        "MembershipTtl",
+        "RenewalDivisor",
+        "WorkerDefaultWall"
+      ]
+    },
+    {
+      "incident": "F2",
+      "source": "test-support/sim/traces/F2-v1.json",
+      "source_sha256": "375f48f0a97ceaef0f63ddb0024c7a2acc97a83fdabd69ec7e2cd91db95fe06e",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F2-outcomes.json",
+      "baseline_sha256": "249cc2d8b037d285a37b85b293d2171f1bef3521f212c803d33b3bd739b4c20a",
+      "migrated": "test-support/sim/traces/F2-v2.json",
+      "migrated_sha256": "8db827af08fa6abd8f278f89f6b57ec7ce1d65e8368197823ae74ccdc11f0cca",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "ControlClockSkew",
+        "ControlTtl",
+        "MailboxCeiling",
+        "OwnerPoll",
+        "ReplayCapacity",
+        "ReplayKeep",
+        "ReplayPage",
+        "RetiredCommandAge"
+      ],
+      "corrected_reads": [
+        "ControlClockSkew",
+        "ControlTtl",
+        "MailboxCeiling",
+        "OwnerPoll",
+        "ReplayCapacity",
+        "ReplayHistoryPerSigner",
+        "ReplayKeep",
+        "ReplayPage",
+        "RetentionBatch",
+        "RetiredCommandAge"
+      ]
+    },
+    {
+      "incident": "F3",
+      "source": "test-support/sim/traces/F3-v1.json",
+      "source_sha256": "5855a3a551a97482ca16b99f513523702bef47245ee8e46c5a0fc1531bba5fea",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F3-outcomes.json",
+      "baseline_sha256": "3e1e6c26be6663d32520de809aab11688ab2e0db6c249acb08a683f7be77665d",
+      "migrated": "test-support/sim/traces/F3-v2.json",
+      "migrated_sha256": "7950794359742f5b766fc77e91336e54bce76054ca07fafba5c42fb54409055a",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "MemberRestartGrace",
+        "OwnerPoll"
+      ],
+      "corrected_reads": [
+        "MemberRestartGrace",
+        "OwnerPoll"
+      ]
+    },
+    {
+      "incident": "F4",
+      "source": "test-support/sim/traces/F4-v1.json",
+      "source_sha256": "eea3fdb1c404770233301c4df387fd5613e259dff5b92092ca652b3c90481d7b",
+      "source_build_id": "sha256:99a09a36a2e7d74cd35986860ea3ab7cd8bece7b12ff1744e9c9764599d379e6",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F4-outcomes.json",
+      "baseline_sha256": "b0974e7920c455ee50dacdd187a954b5a664a5919e52be6bdeea2771ee012b82",
+      "migrated": "test-support/sim/traces/F4-v2.json",
+      "migrated_sha256": "7accdd0a475e2f11dab093aa3431a1fe8ac809e04c51357cd36baabc773c5d8a",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall"
+      ],
+      "corrected_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall"
+      ]
+    },
+    {
+      "incident": "F5",
+      "source": "test-support/sim/traces/F5-v1.json",
+      "source_sha256": "d1b1923186ea84fe91e708e97885da3b45e465903abf0822e470f87b9728a735",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F5-outcomes.json",
+      "baseline_sha256": "ca4371947ac54c852646f3c9dc323e8abd688afa84279aea5dd6e5104ce84309",
+      "migrated": "test-support/sim/traces/F5-v2.json",
+      "migrated_sha256": "c5987d3dda63bfae8b442d187178a3e6043026944b27829e56385986d8dcbc3c",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerStartup"
+      ],
+      "corrected_reads": [
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerStartup"
+      ]
+    },
+    {
+      "incident": "F13",
+      "source": "test-support/sim/traces/F13-v1.json",
+      "source_sha256": "354d63ec55f9acfd07edb0dc38a15797dddd0c520a43b4e7352a1b380f8fe836",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F13-outcomes.json",
+      "baseline_sha256": "121c23a1e585faae93c22934896688e90f587524f97c3b480af36848b4836686",
+      "migrated": "test-support/sim/traces/F13-v2.json",
+      "migrated_sha256": "aec228989965aa677b5dc8358d0c5e061589f6864e87f22206074487e751fb6d",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "OwnerPoll",
+        "QuickRelayMaximumWindow",
+        "RelayGrantedWindowCap",
+        "RelayMinimumWindow",
+        "RelayRenewalLead",
+        "RelayWindow",
+        "RenewalDivisor"
+      ],
+      "corrected_reads": [
+        "OwnerPoll",
+        "QuickRelayMaximumWindow",
+        "RelayGrantedWindowCap",
+        "RelayMinimumWindow",
+        "RelayRenewalLead",
+        "RelayWindow",
+        "RenewalDivisor"
+      ]
+    },
+    {
+      "incident": "F14",
+      "source": "test-support/sim/traces/F14-v1.json",
+      "source_sha256": "9918b62d1f991bcef1c1a507810232907f3a9191646df610ddcd7d0f03e98e0e",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F14-outcomes.json",
+      "baseline_sha256": "7d03d5843c912143d59e1dc660d7b3e73ce3268b0946e68de1ecea01a693390d",
+      "migrated": "test-support/sim/traces/F14-v2.json",
+      "migrated_sha256": "be0cdfe35011aed57cedb05faad0b804ca766d5697b382247a735fb56eeeaccc",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "CorrectedOwnerShare",
+        "FreshStorageConsent",
+        "HistoricalOwnerShare",
+        "MemberChosenWall",
+        "OwnerPoll",
+        "SavedStorageConsent"
+      ],
+      "corrected_reads": [
+        "CorrectedOwnerShare",
+        "FreshStorageConsent",
+        "HistoricalOwnerShare",
+        "MemberChosenWall",
+        "OwnerPoll",
+        "SavedStorageConsent"
+      ]
+    },
+    {
+      "incident": "F15",
+      "source": "test-support/sim/traces/F15-v1.json",
+      "source_sha256": "e4732897f4f56bd55438ee736ef5dfd23c3ae143dec0d7e0c35f0af89b451efa",
+      "source_build_id": "sha256:99a09a36a2e7d74cd35986860ea3ab7cd8bece7b12ff1744e9c9764599d379e6",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F15-outcomes.json",
+      "baseline_sha256": "5a4a0bf030cfeb007b04ac533c3ddc368eb4a3d030ce775a6faaa7adf2cf16de",
+      "migrated": "test-support/sim/traces/F15-v2.json",
+      "migrated_sha256": "caefd91e9f8a893c662a9eb5fc4be47589e483fb9075f15df4bee82e5bf7cb9d",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "MemberChosenWall",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall",
+        "WorkerStartup"
+      ],
+      "corrected_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "MemberChosenWall",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall",
+        "WorkerStartup"
+      ]
+    },
+    {
+      "incident": "F15b",
+      "source": "test-support/sim/traces/F15b-v1.json",
+      "source_sha256": "1dc159314d806201df30bd7921b5332da74647ac9a14d07ec80b325918135d2f",
+      "source_build_id": "sha256:1d1ad0ebfb6caf020ba414496536cafc6a042a81bd58d3de348f793438d1d7d3",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F15b-outcomes.json",
+      "baseline_sha256": "1e80d923c0bc412faf93e355593f6b14c5f48e7f1399ae43b3d5d13412790a24",
+      "migrated": "test-support/sim/traces/F15b-v2.json",
+      "migrated_sha256": "320c9238c83889c7c94efdf87edc3e80549094f6b47101b9e2ca61e2052dd37c",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "MemberChosenWall",
+        "ObservedStart",
+        "UnknownMemberWall",
+        "WorkerDefaultWall"
+      ],
+      "corrected_reads": [
+        "MemberChosenWall",
+        "ObservedStart",
+        "UnknownMemberWall",
+        "WorkerDefaultWall"
+      ]
+    },
+    {
+      "incident": "F16",
+      "source": "test-support/sim/traces/F16-v1.json",
+      "source_sha256": "07919817be4bd15b69961d50376b27a9410e971ddf8218cfd4a7bcb34b553850",
+      "source_build_id": "sha256:99a09a36a2e7d74cd35986860ea3ab7cd8bece7b12ff1744e9c9764599d379e6",
+      "baseline": "test-support/sim/fixtures/legacy-outcomes/F16-outcomes.json",
+      "baseline_sha256": "382b9709080982dd11a72fe2cf4070ce7e741f3a3c364cc7cc613c392714381f",
+      "migrated": "test-support/sim/traces/F16-v2.json",
+      "migrated_sha256": "57e4fe184430a7a030744de415284a11e5407db9a56dadac5dbf25c7e36439ef",
+      "historical_complete_outcome_identical": true,
+      "corrected_complete_outcome_identical": true,
+      "commands_config_and_failure_set_identical": true,
+      "historical_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "HistoricalOuterStop",
+        "MemberChosenWall",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall"
+      ],
+      "corrected_reads": [
+        "EffectiveRolloverLead",
+        "ExecutionCeilingLead",
+        "HalfWallDivisor",
+        "MemberChosenWall",
+        "ObservedStart",
+        "ObservedStop",
+        "OwnerPoll",
+        "RolloverMargin",
+        "WorkerCleanupReserve",
+        "WorkerDefaultWall"
+      ]
+    }
+  ]
+}

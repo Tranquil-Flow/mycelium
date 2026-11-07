@@ -1,0 +1,443 @@
+{
+  "lane": "foundation-exit",
+  "head": "edee89e6bca0938a544d3d230bf16411b6f4a4a2",
+  "head_scope": "round3 package-disposition evidence/data; product/test source last changed at 6e3ae8d685f9fbefb2bd7af17d3221af2f22028f (gates rerun on edee89e, docs-only delta); this report/status subsequently committed metadata-only",
+  "tested_code_head": "6e3ae8d685f9fbefb2bd7af17d3221af2f22028f",
+  "updated": "2026-10-27T23:53:12Z",
+  "foundation_exit": "BLOCKED",
+  "lane_deliverable": "COMPLETE_BOUNDED_ROUND3_PACKAGE_DISPOSITION",
+  "base": "64662848eb49da52888cb7f3642323360edf2966",
+  "preview": "e3773ea3970935e1a8fc71a4d0f8d7c7665c0cc6",
+  "merge": "14aa6a27f2e682dddc67cdd9936156274b59a356",
+  "protected_main": "8a2c0f0d1f3110c55645e0357aa9b0420cafe159",
+  "gates": {
+    "scope": "round3 guarded default workspace + obligations focused gates; Metal compile-only check and historical model controls retained from round2 (unchanged code)",
+    "fmt": false,
+    "clippy": true,
+    "tests_passed": 952,
+    "tests_failed": 2,
+    "tests_ignored": 1,
+    "unit_integration_passed": 949,
+    "doctests_passed": 3,
+    "lint_violations": 12,
+    "lint_sources": 518,
+    "inventory_closure": false,
+    "inventory_violations": 1337,
+    "preflight": true,
+    "preflight_meaning": "metadata readiness, not test or content-authentication PASS",
+    "native_input_metal_check": true,
+    "native_gpu_tests_run": false,
+    "historical_model_assertion_reds": 10,
+    "corrected_controls_passed": 10,
+    "python_slice_passed": true,
+    "python_slice_scope": "prior receipts, rehashed not rerun",
+    "full_python_corpus_passed": false,
+    "fmt_scope": "only inherited L10 crates/api/tests/event_validation.rs",
+    "focused_fmt_obligations": true,
+    "failed_tests": [
+      "budget-model inventory_bindings::binding_categories_reference_real_rows_without_turning_defaults_into_values (inherited L1)",
+      "journey-tests process_safety::early_child_exit_fails_readiness_and_removes_its_scratch (L3 harness: BLOCKED:host_busy_marker, environmental DEVICE.busy device-calib)"
+    ],
+    "lint_owner": "all 12 TM002 in inherited L12 crates/device-harness/tests/{keeper,native_session}.rs; none in lane files",
+    "obligations_tests_passed": 45,
+    "obligations_tests_failed": 0,
+    "package_gate_exit": 0,
+    "package_unexplained_paths": 0
+  },
+  "done_when": {
+    "met": 14,
+    "partial": 15,
+    "open": 6
+  },
+  "checklist_states": {
+    "PARTIAL": 15,
+    "MET": 14,
+    "BLOCKED": 5,
+    "OPEN": 1
+  },
+  "checklist_total": 35,
+  "pct_estimate": 61,
+  "pct_method": "non-authoritative checklist tracking only, not readiness",
+  "checklist": [
+    {
+      "id": "L0.1",
+      "plan_clause": "L0.1 /113",
+      "clause": "Every shipped module/resource/public endpoint/profile and old test group has a Rust destination or reviewed retirement",
+      "status": "PARTIAL",
+      "evidence": "Round3: package-dispositions.json maps all 1,370 non-directory ZIP paths and 2,631 embedded members in 431 reviewed families (637 former gaps included); package_gate exit0, 0 unexplained; obligations tests 45 PASS; D/package-verification.json rehashes ZIP + 739 source objects. Stays PARTIAL: endpoint/profile/old-suite-history rebinding to f4e366e9 remains open."
+    },
+    {
+      "id": "L0.2",
+      "plan_clause": "L0.2 /113",
+      "clause": "Compare final package, static closure, contract owners and A6; zero unexplained paths",
+      "status": "PARTIAL",
+      "evidence": "Round3: exact census 1,552 ZIP entries (182 dirs) + CArchive13/PYZ2463/base_library155 with zero unexplained package paths; same-shape new paths fail. Runtime path set equals provisional static closure but final contract-owner/A6 digests differ and crosswalk rebinding remains OPEN, so PARTIAL."
+    },
+    {
+      "id": "L0.3",
+      "plan_clause": "L0.3 /113",
+      "clause": "Pin existing fixtures; preserve external old suite/history",
+      "status": "PARTIAL",
+      "evidence": "D/oracle-provenance.json and seal.json bind accepted source/tree, executable, published ZIP, READY/release receipts and immutable historical fixture identities; prior accepted-successor replays remain separate. Full retained old suite/history and final registry rebind still need L0 review; no golden recapture."
+    },
+    {
+      "id": "L0.4",
+      "plan_clause": "L0.4 /113",
+      "clause": "Supported device/model/profile cells and explicit unknowns",
+      "status": "MET",
+      "evidence": "R2/tests.log: obligations supported-cells inventory controls pass; test-support/obligations/data/supported-cells.json retains explicit unknowns. Inventory credit only, not device/model qualification."
+    },
+    {
+      "id": "L0.5",
+      "plan_clause": "L0.5 /114",
+      "clause": "Inventory all ten mandatory IDs and historical/model recipes",
+      "status": "MET",
+      "evidence": "R2/tests.log obligations/incident matrix controls; data/escapes.json and sim/INCIDENTS.md preserve all ten IDs. R2 historical-model-red/corrected-controls logs additionally execute each named model assertion."
+    },
+    {
+      "id": "L1.1",
+      "plan_clause": "L1.1 /120",
+      "clause": "Property/stateful valid/impossible caps, checked arithmetic, jumps and late joins",
+      "status": "MET",
+      "evidence": "R2/tests.log: checked_arithmetic_never_wraps, explicit_overflows_units_and_clock_domains, stateful_reservations_atomic_and_cleanup_bound and f15_absolute_member_deadline_red_green_and_late_join pass. Model-contract scope, not whole-product admission."
+    },
+    {
+      "id": "L1.2",
+      "plan_clause": "L1.2 /120",
+      "clause": "Renewal \u2264 TTL/3; rollover reserve \u2265 stop+start+safety",
+      "status": "MET",
+      "evidence": "R2/tests.log: renewal_valid_and_impossible, individual_origins_not_smallest_relative_cap, f4_worker_not_extended_rollover_precedes_worker_expiry pass. Configured/model relations only; tail calibration remains separate."
+    },
+    {
+      "id": "L1.3",
+      "plan_clause": "L1.3 /120",
+      "clause": "Every applicable operational budget \u22652\u00d7 measured phase p99",
+      "status": "BLOCKED",
+      "evidence": "FX/device-v2-final.json still has zero qualified p99; no new physical measurements authorized. R2/inventory.log has 1337 violations. R2/tests.log also exposes inherited L1 binding_categories_reference_real_rows_without_turning_defaults_into_values failure; current owner repairs are outside the frozen preview."
+    },
+    {
+      "id": "L1.4",
+      "plan_clause": "L1.4 /120",
+      "clause": "Consent is upper bound; refuse early/use authorized plan, never enlarge grant",
+      "status": "PARTIAL",
+      "evidence": "R2/tests.log preserves consent_fit_and_impossible_work and consent_never_expands_to_fit_work. New planner/node-service component tests do not replace genuine joined-member public assignment/deadline observations."
+    },
+    {
+      "id": "L1.5",
+      "plan_clause": "L1.5 /120",
+      "clause": "Independent expected values do not call implementation budget function",
+      "status": "PARTIAL",
+      "evidence": "Independent model/literal controls remain in R2/tests.log. Complete call-site expected-value independence review is absent; inherited binding-category failure and unclosed source inventory are not waived."
+    },
+    {
+      "id": "L1.6",
+      "plan_clause": "L1.6 /121",
+      "clause": "F1/F4/F13/F14/F15/F15b/F16 RED/GREEN, plus F2 retention accounting",
+      "status": "MET",
+      "evidence": "R2/historical-model-red.log: ten actual intended assertion failures, exit101. R2/corrected-controls.log: identical ten names PASS, exit0. All required IDs including F2 are retained; no historical Python execution or final product-GREEN claim."
+    },
+    {
+      "id": "L2.1",
+      "plan_clause": "L2.1 /127",
+      "clause": "Synchronous driver controls clock/RNG/order/persistence/restart/I/O",
+      "status": "MET",
+      "evidence": "R2/tests.log driver_contract tests pass with clock/RNG/order/restart/I/O control. Original L2C producer provenance remains at 2ee2ae0d; no new determinism claim for native adapters."
+    },
+    {
+      "id": "L2.2",
+      "plan_clause": "L2.2 /127",
+      "clause": "Pinned turmoil partition/drop/duplicate/reorder/disk integration and comparison",
+      "status": "MET",
+      "evidence": "R2/tests.log pinned_turmoil_network_matches_minimal_driver_and_independent_oracle and pinned_turmoil_disk_failure_matches_minimal_driver pass at the typed application seam. This does not claim deterministic Iroh/QUIC/Metal."
+    },
+    {
+      "id": "L2.3",
+      "plan_clause": "L2.3 /128",
+      "clause": "Raw samples/count/method/model/build/device/load and p50/p99 for compile/publish/start/stop/close/relay RTT/TTFT; sparse calibration BLOCKED",
+      "status": "PARTIAL",
+      "evidence": "R2/tests.log reruns V2 importer controls. Preserved FX/device-v2-final.json contains 24 attempts/360 base profiles plus 672 synthetic variants, not new measurements. Native close/relay RTT, comparable repeated tail samples and complete hardware/checkpoint/load identity remain missing; p99 stays BLOCKED."
+    },
+    {
+      "id": "L2.4",
+      "plan_clause": "L2.4 /128",
+      "clause": "Explicit synthetic 2\u00d7/3\u00d7 loaded-host variants, never called measured",
+      "status": "MET",
+      "evidence": "R2/tests.log V2 provenance/scaling controls pass. 2x/3x millisecond variants remain explicitly SYNTHETIC_NOT_MEASURED; throughput is not multiplied and sparse/censored data cannot invent p99."
+    },
+    {
+      "id": "L2.5",
+      "plan_clause": "L2.5 /129",
+      "clause": "Replay pins build/lock/simulator/PRNG/config/profile; concrete minimized traces survive generator changes",
+      "status": "MET",
+      "evidence": "R2/tests.log budget_reads, trace_migration and both persisted corpora pass on merged code. Concrete v2 traces retain their original build/profile identities and migration metadata; no seed-only substitution."
+    },
+    {
+      "id": "L2.6",
+      "plan_clause": "L2.6 /129",
+      "clause": "Same fake/real storage/transport/worker corpus incl. failures/cleanup",
+      "status": "PARTIAL",
+      "evidence": "R2/tests.log storage corpus and integrated runtime worker-adapter controls pass. Same-corpus production transport/Metal-worker parity is not proved by default-feature tests; this round does not execute real Iroh/GPU/model jobs."
+    },
+    {
+      "id": "L2.7",
+      "plan_clause": "L2.7 /130",
+      "clause": "Ten actual historical-model assertion REDs; corrected controls with authorized progress and reachability",
+      "status": "MET",
+      "evidence": "R2/historical-model-red.log and corrected-controls.log freshly prove the same ten historical assertion REDs and ten corrected GREENs; R2/tests.log retains authorized-progress/reachability checks. Setup failures are excluded from RED counts."
+    },
+    {
+      "id": "L2.8",
+      "plan_clause": "L2.8 /130",
+      "clause": "Replace model SUT with actual production transitions after L5+",
+      "status": "OPEN",
+      "evidence": "Preview3 introduces more production node/worker transitions, but L2 incident SUTs remain models. L2 with L5/L6/L8 must replace those seams and kill the same faults against actual production transitions before release qualification."
+    },
+    {
+      "id": "L3.1",
+      "plan_clause": "L3.1 /136",
+      "clause": "Same full corpus passes accepted Python first, then unchanged assertions against Rust",
+      "status": "PARTIAL",
+      "evidence": "D/oracle-provenance.json rehashes prior f4e366e9 baseline20/boundary33 observation receipts and original golden bytes. R2/tests.log tests runner mechanics, not external app journeys. Full accepted-Python corpus and unchanged Rust-target replay remain unrun."
+    },
+    {
+      "id": "L3.2",
+      "plan_clause": "L3.2 /136",
+      "clause": "Create/join/consent/model/plan/serve/chat/cancel/status/stats/restart/leave; signed refusals, persisted normal/fast and cleanup",
+      "status": "PARTIAL",
+      "evidence": "Preserved FX released receipts cover create/model choices/normal-fast persistence/status/signed refusals/unjoined restart/leave/teardown. Successful bound join, public plan/serve/chat/active cancel/SSE/directory stats remain blocked; native manifest readiness does not execute them."
+    },
+    {
+      "id": "L3.3",
+      "plan_clause": "L3.3 /137",
+      "clause": "Fresh state, genuine constructors/defaults/test keys; owner no standing member grant",
+      "status": "MET",
+      "evidence": "Prior released receipts retain genuine constructors/defaults/test keys, fresh isolated HOME/state and exact-owned cleanup; R2/tests.log reruns process containment controls. Owner standing grant is not fabricated. No external package is launched in round2."
+    },
+    {
+      "id": "L3.4",
+      "plan_clause": "L3.4 /137",
+      "clause": "Member explicitly chooses 10min/2GB; separate fresh4GB and saved2GB upgrade",
+      "status": "PARTIAL",
+      "evidence": "Prior observations include fresh4GB and saved unjoined2GB restart. Genuine bound member10min/2GB and actual saved2GB cross-version upgrade require separately authorized non-demo HTTPS/two-host resources and are not substituted by helper fixtures."
+    },
+    {
+      "id": "L3.5",
+      "plan_clause": "L3.5 /137",
+      "clause": "Public actual stage assignment/reservation and worker/rollover deadlines",
+      "status": "BLOCKED",
+      "evidence": "Actual public assignment/reservation and worker/rollover deadline observations need joined consent, distinct hosts and prepared models. New planner/component tests cannot discharge this HTTP boundary; no fake second host or grant enlargement."
+    },
+    {
+      "id": "L3.6",
+      "plan_clause": "L3.6 /137",
+      "clause": "Preserve production unknown-member semantics",
+      "status": "PARTIAL",
+      "evidence": "Unchanged historical refusal fixtures plus accepted-successor receipts preserve observed unknown-member rules. Successful real-worker public observations remain absent; no unapproved stricter strategy-draft policy introduced."
+    },
+    {
+      "id": "L3.7",
+      "plan_clause": "L3.7 /138",
+      "clause": "Direct F3/F5/F14/F15/F15b, compose other lifecycle escapes with L2",
+      "status": "BLOCKED",
+      "evidence": "Direct F3/F5/F14/F15/F15b joined-member journey coverage remains unrun. Fresh model RED/GREEN evidence is separate; idle status is not compile responsiveness, unjoined restart is not leave/re-report, and helper staging is not public actual placement."
+    },
+    {
+      "id": "L3.8",
+      "plan_clause": "L3.8 /138",
+      "clause": "Combined real-default regression target \u22645min",
+      "status": "BLOCKED",
+      "evidence": "Prior 12,419ms baseline and 9,474ms boundary runs omit real-default worker cases. No complete real-default corpus duration exists; short partial runs cannot prove the <=5min target."
+    },
+    {
+      "id": "L4.1",
+      "plan_clause": "L4.1 /144",
+      "clause": "Compiler/Clippy + tested policy reject ignored fallible results, detached failures, false cleanup success and literal durations",
+      "status": "PARTIAL",
+      "evidence": "R2/clippy.log: default workspace/all-targets -D warnings PASS; former L6 and SLICE-1 Clippy diagnostics are closed. R2/lint.log is RED: 518 sources, 12 TM002 violations in inherited L12 keeper/native_session tests. R2/tests.log policy controls pass; this lane neither suppresses violations nor edits the owner crate. Round3 rerun: lint 518 sources / 12 inherited L12 TM002, fmt RED only L10 event_validation.rs; none in lane files."
+    },
+    {
+      "id": "L4.2",
+      "plan_clause": "L4.2 /144",
+      "clause": "Safe specific error code/kind/source/phase; best effort records failure; no secrets",
+      "status": "PARTIAL",
+      "evidence": "R2/tests.log retains sanitized importer/journey/xtask diagnostics and explicit failure controls. No exhaustive product error-kind/source/phase and no-secret diagnostics audit is claimed."
+    },
+    {
+      "id": "L4.3",
+      "plan_clause": "L4.3 /145",
+      "clause": "Positive/negative fixtures; narrow owned expiring exceptions; beyond must_use",
+      "status": "MET",
+      "evidence": "R2/tests.log xtask syntax/semantic positive and negative fixtures pass; measurements remain distinct from enforcement. Existing owned expiring exception rules remain enforced; no exception added or weakened."
+    },
+    {
+      "id": "L4.4",
+      "plan_clause": "L4.4 /145,147",
+      "clause": "F16 swallowed-stop and literal30 negative controls; C1/C2 harness regressions",
+      "status": "MET",
+      "evidence": "R2/tests.log: F16 swallowed-stop/literal30 negative controls and C1/C2 harness regressions pass. R2/lint.log still rejects 12 inherited L12 literals; controls passing does not waive actual violations. Real native-close performance/physical cleanup remain separate qualifications."
+    },
+    {
+      "id": "L4.5",
+      "plan_clause": "L4.5 /146",
+      "clause": "Fresh-worktree admitted native/tool/fixture discovery/build; absent prerequisites BLOCKED",
+      "status": "PARTIAL",
+      "evidence": "D/native-inputs.json, oracle-provenance.json and content-verification receipt bind genuine inputs; R2/preflight-final.log changes both blocked selections to RUN. R2/native-input-check.log passes Metal all-target compile/check with actual selected header/libs, no GPU execution. Automatic fresh setup, shared content authenticator and packaged relocation/minimum-OS/IO receipts remain open; preflight is file presence only."
+    },
+    {
+      "id": "L4.6",
+      "plan_clause": "L4.6 /146",
+      "clause": "Quarantine owner/reason/expiry/replacement; expired quarantine fails",
+      "status": "MET",
+      "evidence": "R2/tests.log expired_quarantine_fails_even_with_present_prerequisite and valid_quarantine_is_visible_and_does_not_admit_mandatory_group pass. No new quarantine; mandatory absent inputs stay NOT_RUN/BLOCKED."
+    },
+    {
+      "id": "L4.7",
+      "plan_clause": "L4.7 /146",
+      "clause": "Per-change/transitive selection includes doctests and custom jobs",
+      "status": "PARTIAL",
+      "evidence": "R2/tests.log transitive selection/blocked dependency controls pass; R2/preflight-final.log admits workspace doctest and custom lint/native/journey groups. Per-change execution automation and descriptive command repair remain L4/L12 work; RUN is not executed coverage."
+    },
+    {
+      "id": "EXIT",
+      "plan_clause": "EXIT /147",
+      "clause": "L1\u2013L4 contracts/lints/control tests work, all ten historical/model RED recipes have real assertion-failure evidence, corrected controls pass, and HTTP corpus has passed Python",
+      "status": "BLOCKED",
+      "evidence": "Ten fresh historical/model assertion REDs and corrected GREENs, strict Clippy and genuine input discovery are proven. Full Python HTTP corpus, measured calibration, complete disposition/budget closure and inherited L1 test/L10 fmt/L12 literal-lint failures remain. No main promotion or product-port GREEN."
+    }
+  ],
+  "profiles": {
+    "schema_version": 2,
+    "method_version": "recorded-device-v2.2",
+    "attempts": 24,
+    "hashed_files": 134,
+    "base_profiles": 360,
+    "synthetic_profiles": 672,
+    "qualified_p99": 0,
+    "calibration": "BLOCKED"
+  },
+  "journeys": [
+    {
+      "name": "baseline-released",
+      "result": "PASS",
+      "observations": 20,
+      "launches": 5,
+      "elapsed_ms": 12419,
+      "all_cleanup": true
+    },
+    {
+      "name": "boundaries-released",
+      "result": "PASS",
+      "observations": 33,
+      "launches": 3,
+      "elapsed_ms": 9474,
+      "all_cleanup": true
+    }
+  ],
+  "package_reconciliation": {
+    "zip_entries": 1552,
+    "directories": 182,
+    "dispositioned_zip_entries": 1370,
+    "embedded_entries": 2631,
+    "families": 431,
+    "unexplained_paths": 0,
+    "former_gaps_resolved": 637,
+    "source_objects_rehashed": 739,
+    "corrupt_zip_digest_rejected": true,
+    "package_executed": false,
+    "final_contract_a6_digests_match_provisional": false,
+    "dispositions": "test-support/obligations/data/package-dispositions.json",
+    "report": "evidence/foundation-exit/package-verification.json",
+    "review": "evidence/foundation-exit/package-disposition-review.md",
+    "released_zip_sha256": "fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025"
+  },
+  "blockers": [
+    "L0 (with L8/L11 for package resources): Rebind final static/contract-owner/A6/test-history inventories and endpoint/profile coverage to accepted f4e366e9. Round3 closed all 637 package-path gaps and dispositioned every embedded PYZ/base_library/CArchive member; L8/L11 keep candidate-native/JIT placement, minimum-OS/relocation and replacement-parity obligations (inventory disposition does not qualify them).",
+    "L1 coordinator/review partitions: Close 1337 frozen-preview inventory violations; repair inventory_bindings.rs:49 exact-category assertion without loosening it (new reviewed-composed-ceiling category). Independently review all expected values. Integrate later owner fixes only in a new preview, not as untested credit.",
+    "L1 + L12 (BACKLOG 11): Adjudicate/register all seven exact semantic requests: HarnessMinimumSoak 1200000ms, KeeperRecoveryWindow 21600000ms, KeeperRecoveryAttempts 3, KeeperRolloverGrace 300000ms, KeeperStartupGrace 900000ms, proposed KeeperMemberSilence 300000ms, HarnessOwnerStatusCheck 20000ms; preserve source/owner-decision provenance, no fallback constants. Names are absent from frozen budgets source.",
+    "Owner/fleet + L2 + L1: Supply authorized exact-boundary repeated comparable compile/publish/start/stop/native-close/relay-RTT/TTFT trials with source/checkpoint/device/macOS/load identity and reviewed independence/tail method; then enforce applicable >=2x measured phase p99 without enlarging consent. Existing sparse/censored observations stay BLOCKED.",
+    "Owner/fleet + L3 + composition owners L6/L7/L8/L10: Authorize separate non-demo HTTPS and actual two-host/model-backed resources; execute genuine member10min/2GB, fresh4GB, saved2GB upgrade, join/leave/re-report, actual plan/staging/reservations/deadlines, serve/chat/active-cancel/SSE/status/stats and clean teardown. Complete direct F3/F5/F14/F15/F15b plus lifecycle compositions on accepted Python, then unchanged Rust assertions; measure full real-default <=5min target. Refusals/model helpers are not substitutes.",
+    "L2 + L5/L6/L8: Run the same behavioral failure/cleanup corpus over actual transport and worker adapters, replace incident model SUT seams with production transitions and kill the same faults. Current default/component tests do not qualify real Iroh/Metal or the full supported native model matrix.",
+    "L10 + L12 + integrator: Repair inherited L10 formatting in crates/api/tests/event_validation.rs. Repair 12 inherited L12 TM002 calls: keeper.rs lines137,144,153,211,229,245,256,262,276 and native_session.rs lines427,459,483, with typed registry/fake-policy seams, not suppressions. Then rerun fmt, strict Clippy, full workspace tests and lint on the next preview.",
+    "L4/L12 + L8/L11 + integrator: Agree/enforce content-authenticated manifest setup and reconcile descriptive preflight commands with real journey/Metal invocations before scheduling. Complete safe product diagnostics and per-change/transitive execution automation. Bind candidate executable/resources/toolchain to relocation/minimum-OS/install-upgrade-rollback/native-IO receipts. Round2 discovery RUN and compile-only Metal check are not package/physical acceptance."
+  ],
+  "remaining_by_owner": [
+    {
+      "owner": "L0 (with L8/L11 for package resources)",
+      "clauses": [
+        "L0.1",
+        "L0.2",
+        "L0.3"
+      ],
+      "work": "Rebind final static/contract-owner/A6/test-history inventories and endpoint/profile coverage to accepted f4e366e9. Round3 closed all 637 package-path gaps and dispositioned every embedded PYZ/base_library/CArchive member; L8/L11 keep candidate-native/JIT placement, minimum-OS/relocation and replacement-parity obligations (inventory disposition does not qualify them)."
+    },
+    {
+      "owner": "L1 coordinator/review partitions",
+      "clauses": [
+        "L1.3",
+        "L1.5"
+      ],
+      "work": "Close 1337 frozen-preview inventory violations; repair inventory_bindings.rs:49 exact-category assertion without loosening it (new reviewed-composed-ceiling category). Independently review all expected values. Integrate later owner fixes only in a new preview, not as untested credit."
+    },
+    {
+      "owner": "L1 + L12 (BACKLOG 11)",
+      "clauses": [
+        "L1.3",
+        "L4.5"
+      ],
+      "work": "Adjudicate/register all seven exact semantic requests: HarnessMinimumSoak 1200000ms, KeeperRecoveryWindow 21600000ms, KeeperRecoveryAttempts 3, KeeperRolloverGrace 300000ms, KeeperStartupGrace 900000ms, proposed KeeperMemberSilence 300000ms, HarnessOwnerStatusCheck 20000ms; preserve source/owner-decision provenance, no fallback constants. Names are absent from frozen budgets source."
+    },
+    {
+      "owner": "Owner/fleet + L2 + L1",
+      "clauses": [
+        "L1.3",
+        "L1.4",
+        "L2.3"
+      ],
+      "work": "Supply authorized exact-boundary repeated comparable compile/publish/start/stop/native-close/relay-RTT/TTFT trials with source/checkpoint/device/macOS/load identity and reviewed independence/tail method; then enforce applicable >=2x measured phase p99 without enlarging consent. Existing sparse/censored observations stay BLOCKED."
+    },
+    {
+      "owner": "Owner/fleet + L3 + composition owners L6/L7/L8/L10",
+      "clauses": [
+        "L1.4",
+        "L3.1",
+        "L3.2",
+        "L3.4",
+        "L3.5",
+        "L3.6",
+        "L3.7",
+        "L3.8"
+      ],
+      "work": "Authorize separate non-demo HTTPS and actual two-host/model-backed resources; execute genuine member10min/2GB, fresh4GB, saved2GB upgrade, join/leave/re-report, actual plan/staging/reservations/deadlines, serve/chat/active-cancel/SSE/status/stats and clean teardown. Complete direct F3/F5/F14/F15/F15b plus lifecycle compositions on accepted Python, then unchanged Rust assertions; measure full real-default <=5min target. Refusals/model helpers are not substitutes."
+    },
+    {
+      "owner": "L2 + L5/L6/L8",
+      "clauses": [
+        "L2.6",
+        "L2.8"
+      ],
+      "work": "Run the same behavioral failure/cleanup corpus over actual transport and worker adapters, replace incident model SUT seams with production transitions and kill the same faults. Current default/component tests do not qualify real Iroh/Metal or the full supported native model matrix."
+    },
+    {
+      "owner": "L10 + L12 + integrator",
+      "clauses": [
+        "L4.1",
+        "EXIT"
+      ],
+      "work": "Repair inherited L10 formatting in crates/api/tests/event_validation.rs. Repair 12 inherited L12 TM002 calls: keeper.rs lines137,144,153,211,229,245,256,262,276 and native_session.rs lines427,459,483, with typed registry/fake-policy seams, not suppressions. Then rerun fmt, strict Clippy, full workspace tests and lint on the next preview. Also L3/L12 owner ruling: journeys process.rs host_busy_marker blocks on the device lane's DEVICE.busy (/device-calib/) which the resume guard exempts."
+    },
+    {
+      "owner": "L4/L12 + L8/L11 + integrator",
+      "clauses": [
+        "L4.2",
+        "L4.5",
+        "L4.7"
+      ],
+      "work": "Agree/enforce content-authenticated manifest setup and reconcile descriptive preflight commands with real journey/Metal invocations before scheduling. Complete safe product diagnostics and per-change/transitive execution automation. Bind candidate executable/resources/toolchain to relocation/minimum-OS/install-upgrade-rollback/native-IO receipts. Round2 discovery RUN and compile-only Metal check are not package/physical acceptance."
+    }
+  ],
+  "evidence_root": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3",
+  "evidence_manifest": "runs/v2/v02/FOUNDATION-EXIT-round3-evidence-manifest.json",
+  "report": "runs/v2/v02/FOUNDATION-EXIT.md",
+  "lock_requests": [],
+  "public_api_changes": "none; test-support/obligations data/tests and evidence only"
+}

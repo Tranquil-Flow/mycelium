@@ -1,0 +1,33 @@
+{
+  "boundary": "Exact capacity parser: bounded duplicate-free canonical UTF-8 ingress and complete pure reconstruction of safety, SLO, throughput, boundary reasons, claim flags and digest; no measurement or qualification.",
+  "generator_sha256": "411e061207837ef15aa3081845b0a52bc4f3b8efd4e852e91fe5ebd82f4206b1",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_capacity_profiles/__init__.py",
+      "sha256": "c5908bdf3bb41db9d8a9d7675c415756f49d7ca03c4125e1d6547bd474fb57e8"
+    },
+    {
+      "path": "mycelium_capacity_profiles/catalog.py",
+      "sha256": "068798f8ab807c34a9497a4b3b231702ed402343247a1569f0c271b2008234c2"
+    },
+    {
+      "path": "mycelium_capacity_profiles/compiler.py",
+      "sha256": "f94e7d3a33024574d2499421cad0606796382210d791fa5fc566e050918ff7b4"
+    },
+    {
+      "path": "mycelium_capacity_profiles/contracts.py",
+      "sha256": "63ca5a8b4930d78e206c4ef407d56d53f2f5f50d9f187e35b05a07a5461273ee"
+    },
+    {
+      "path": "mycelium_capacity_profiles/document.py",
+      "sha256": "39a7463fdb861370c6b3e4d31acae53868f266431efc2bc8f57f33632e070103"
+    },
+    {
+      "path": "mycelium_capacity_profiles/status.py",
+      "sha256": "936db9a76690710f448fc782ca4473346d27a92d816c0d8bc33f08b498873f6e"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

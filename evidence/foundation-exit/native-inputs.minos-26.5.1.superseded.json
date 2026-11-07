@@ -1,0 +1,862 @@
+{
+  "schema": "mycelium.foundation.native-input-evidence.v1",
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "observed_at": "2026-10-27T22:14:11Z",
+  "rust_candidate": {
+    "source_commit": "14aa6a27f2e682dddc67cdd9936156274b59a356",
+    "cargo_lock": {
+      "path": "Cargo.lock",
+      "path_base": "repository",
+      "size_bytes": 170184,
+      "sha256": "99e480492042c05e903d1877ff04d1f623994276111dc3f9228fffa4edd7682a"
+    },
+    "toolchain": {
+      "pin": "BLOCKED: repository has no rust-toolchain.toml; no exact historical L8 Rust compiler claimed",
+      "declared_workspace_manifest": {
+        "path": "Cargo.toml",
+        "path_base": "repository",
+        "size_bytes": 519,
+        "sha256": "0ccf5da5befd3c9be8cbe079b449de651659c78e2968486695883037df92e9ce"
+      }
+    },
+    "backend_build_script": {
+      "path": "crates/backend-mlx/build.rs",
+      "path_base": "repository",
+      "size_bytes": 3769,
+      "sha256": "555c38fddc9a38ae66fd9031d7771d4043204020c3dec18cd3f9e9127c3baecc"
+    },
+    "target": "aarch64-apple-darwin",
+    "packaged_executable": null
+  },
+  "native_sources": {
+    "mlx_c_commit": "57731b00e8bed710e0750e7356da9f18f8eb3e20",
+    "mlx_version": "0.32.4",
+    "mlx_commit": "36969c094354086e15d2a327a9c50feb20b9cf11",
+    "source_archives": [
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/downloads/mlx-c.tar.gz",
+        "path_base": "absolute",
+        "size_bytes": 179035,
+        "sha256": "55014245c4ba580c44a1e98a59c514c5e51732ad8f2485fb7ccc7781a17bac6f"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/downloads/mlx.tar.gz",
+        "path_base": "absolute",
+        "size_bytes": 4535793,
+        "sha256": "0276db8d7bf1af8db6d4ae25c7c550abea4d5b3b6a16207610a5d4a0c19fe1a0"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/downloads/mlx-tag.json",
+        "path_base": "absolute",
+        "size_bytes": 333,
+        "sha256": "c124e8cb206e13c5872bfbe30a8219bc1b057142aff0d6802958391275c20c88"
+      }
+    ],
+    "archive_provenance": {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/downloads.jsonl",
+      "path_base": "absolute",
+      "size_bytes": 1779,
+      "sha256": "88ef200d3bcaa5532d2b2706342e4afac3f04b0fcc39b57ae4f7cb2e25fb8b30"
+    },
+    "build_record": {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/build-record.json",
+      "path_base": "absolute",
+      "size_bytes": 1491,
+      "sha256": "98f3405ceb8ff37e57514157e8fa66c84da42e85662519c72c370e40642bbc67"
+    },
+    "build_log": {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/build.log",
+      "path_base": "absolute",
+      "size_bytes": 22501,
+      "sha256": "28f73b55523a739d9a4816fb9872781bbeb091559f352be24db6c271da5f5816"
+    },
+    "compiler": "AppleClang 21.0.0.21000101",
+    "sdk": "macOS 26.5",
+    "minimum_os_qualified": false
+  },
+  "selection_environment": {
+    "MLXC_INCLUDE_DIR": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20",
+    "MLXC_LIB_DIR": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/install/lib"
+  },
+  "selection_provenance": [
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-COMPUTE-evidence/lifecycle/guard-final.sh.txt",
+      "path_base": "absolute",
+      "size_bytes": 1766,
+      "sha256": "7dd1904840b2d15e82a436a77b5ca18dc08dee5a771f249d06bc252a919f3013"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-COMPUTE-evidence/moe-decoder/v02-l8-guard.rb.txt",
+      "path_base": "absolute",
+      "size_bytes": 4127,
+      "sha256": "93326d0936eef9afdbb2a74982eee7f79b4bc463d671924c95dd2395798a053e"
+    }
+  ],
+  "header_tree": {
+    "root": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20",
+    "method": "SHA256 of sorted relative UTF-8 path, NUL, exact file bytes concatenated; build.rs::verify_native",
+    "count": 44,
+    "sha256": "6a1ede0629032ef3ae66d71d28794b703ec6618470e81c1ea9747822b46b7a5f",
+    "files": [
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/array.h",
+        "path_base": "absolute",
+        "size_bytes": 10297,
+        "sha256": "d2205ba0ce146ff722f2ca97c170facb19b28784e7ffa47a07cdad69651c9801"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/closure.h",
+        "path_base": "absolute",
+        "size_bytes": 5792,
+        "sha256": "b43a6d7c0e943a8df0f67377d49d92f4fa76eea79eed049adaff80e05ed854f7"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/compile.h",
+        "path_base": "absolute",
+        "size_bytes": 1596,
+        "sha256": "266dc3f98e6223221bf7ad2f01f942f3b402890340742ca116f25e171c66a0ff"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/cuda.h",
+        "path_base": "absolute",
+        "size_bytes": 733,
+        "sha256": "ee99d74dc4131dca3ec7ab7d9015ff109481ee6fbcf3c015de7ebfdcc7df2644"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/device.h",
+        "path_base": "absolute",
+        "size_bytes": 3557,
+        "sha256": "5a942ce9888d5ac241ae9cd456183ee36264f5a7f7f3953e101c311ca67171e5"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/distributed.h",
+        "path_base": "absolute",
+        "size_bytes": 2031,
+        "sha256": "68b1dcbdc8dc8c1b4d58220caa7aec2396776282691e99999ff6547b52f7e28e"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/distributed_group.h",
+        "path_base": "absolute",
+        "size_bytes": 1211,
+        "sha256": "af45861a8f71dae21cf88ed581f64cd3008e3c1c4045487b2dbe56934f7df470"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/error.h",
+        "path_base": "absolute",
+        "size_bytes": 693,
+        "sha256": "80090e79eb9add61961885e7aa491b9f47d1b838d188303734490e528b0db2c2"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/export.h",
+        "path_base": "absolute",
+        "size_bytes": 1880,
+        "sha256": "723346c34761fb87c9a03a133ecff8f9fd8f83a3d80e680d63557c58739e11c1"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/fast.h",
+        "path_base": "absolute",
+        "size_bytes": 6017,
+        "sha256": "c6b7d449ad6e652a84eafa852c30e61248f32390aa811822e521b5d225bbfe2a"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/fft.h",
+        "path_base": "absolute",
+        "size_bytes": 3252,
+        "sha256": "38c87a460e1338e8f5f1d9ee1159bfb274c8bc08ade66ffa6ebbe1c9d5fccad2"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/graph_utils.h",
+        "path_base": "absolute",
+        "size_bytes": 1270,
+        "sha256": "5896da889e0c85f70594395498ed46ec401798d6bd3c9bdb53c0b3e937fcfeb3"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/half.h",
+        "path_base": "absolute",
+        "size_bytes": 440,
+        "sha256": "90d57285c4b8436fbea18758661e84bf962c13179d545bbaac52b176de899ed8"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/io.h",
+        "path_base": "absolute",
+        "size_bytes": 1682,
+        "sha256": "4b69ffcfea5a96b635228e2384bf6ac0bedb6e1fbd6df4f4a3371cacdcae22eb"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/io_types.h",
+        "path_base": "absolute",
+        "size_bytes": 3566,
+        "sha256": "845cb8922495e76c22a131a68406b0e29d93527566b310cf610f2e35708653ab"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/linalg.h",
+        "path_base": "absolute",
+        "size_bytes": 3172,
+        "sha256": "d8f5bf42ab6f720efc15628ae261d388d4ab2ca31ea7d841ff1e8253595bddfb"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/map.h",
+        "path_base": "absolute",
+        "size_bytes": 3386,
+        "sha256": "4d5df4eef2757ca76b83dea06935568611d439ad3a8687c3b0df739902377a4d"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/memory.h",
+        "path_base": "absolute",
+        "size_bytes": 1142,
+        "sha256": "aa9241e80f661bcfdf4e1a9eb6123be52d3476fdbc6f7288dd3a3c5290b53be9"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/metal.h",
+        "path_base": "absolute",
+        "size_bytes": 920,
+        "sha256": "8361bdf3f004bdfaade0fdbd93aa53a09f3981647a52b5d30104af32e9321d2c"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/mlx.h",
+        "path_base": "absolute",
+        "size_bytes": 833,
+        "sha256": "ab688925d76cff3805235c2dd3f5985d1d41a8a23b5ecdef0bde0ac8d9b52582"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/ops.h",
+        "path_base": "absolute",
+        "size_bytes": 35276,
+        "sha256": "4c77b1db780456f85c015a48a9a45cae9eac90ccf75219eb1a83eb2c4a72e546"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/optional.h",
+        "path_base": "absolute",
+        "size_bytes": 687,
+        "sha256": "b0f20e24bd02cba4c2f624cd83f68a096a9d4ae6b2e4c4eb30d13719660ecf36"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/array.h",
+        "path_base": "absolute",
+        "size_bytes": 1374,
+        "sha256": "d3bab0904e1f6ba1477a439ef8268b8156b36b02fc924cf13fc5938246fea7f0"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/closure.h",
+        "path_base": "absolute",
+        "size_bytes": 18501,
+        "sha256": "ab2ee9e6d0a967a43b4f444feca7e64bfd287cd4af276ca7f4986c9cb1adeefb"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/compile.h",
+        "path_base": "absolute",
+        "size_bytes": 1875,
+        "sha256": "3c1d9da862edec56a81be40f2863673727f5d92d7cc634d8e2fc0d010302b249"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/device.h",
+        "path_base": "absolute",
+        "size_bytes": 2721,
+        "sha256": "1b8ecf5be16fc24b917efb7740de01916a019d49832be29e6bd82fce38b8431e"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/distributed_group.h",
+        "path_base": "absolute",
+        "size_bytes": 1859,
+        "sha256": "47c19fbb0233d8cee1c639dd5f30ea523946e94bed84d45093855f01d2b6ba8f"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/enums.h",
+        "path_base": "absolute",
+        "size_bytes": 2542,
+        "sha256": "2069089f0df471cec17bfb73f4164def8bd85f8740e74c91867a6820aa6684eb"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/export.h",
+        "path_base": "absolute",
+        "size_bytes": 2282,
+        "sha256": "5258d5e29c44b708740b1ba3160af920ab9df5b62911ed1f98244a1cbda0eb52"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/gguf.h",
+        "path_base": "absolute",
+        "size_bytes": 1096,
+        "sha256": "3f3002308d1b2026ee14a60a472dcacc114da02bfd28481a639f836571e4e3fe"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/graph_utils.h",
+        "path_base": "absolute",
+        "size_bytes": 1172,
+        "sha256": "4a48dba5df182f54583648bc52730e4634dbf3e73bdd895ec5048fd0d322ab2a"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/io.h",
+        "path_base": "absolute",
+        "size_bytes": 5317,
+        "sha256": "d36c9e25423f111b6e4cb9f0dbdf5a8729184dcf69b239375f716abc88f9aea5"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/map.h",
+        "path_base": "absolute",
+        "size_bytes": 7214,
+        "sha256": "8782d1247fc9bf4689bbcf95a6893c4d003b0d5c6108b80965111a99f8a86e06"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/mlx.h",
+        "path_base": "absolute",
+        "size_bytes": 537,
+        "sha256": "1838a81b5d7b0788141e7c1298266669f749361639b1656b47e1ffae0e7fb894"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/stream.h",
+        "path_base": "absolute",
+        "size_bytes": 2919,
+        "sha256": "32ffd49b8c4eb800642c71fe431c2af5cca2cc05de096ff4bef15a3c7b4b7921"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/string.h",
+        "path_base": "absolute",
+        "size_bytes": 1332,
+        "sha256": "014b60d9ec025e4ebc1415be392fa450bbca315c7cebc4bd8d517d887b014aad"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/private/vector.h",
+        "path_base": "absolute",
+        "size_bytes": 7304,
+        "sha256": "48ef6ed5be387e8501142cb63a17f61ece1a06b5d226b7e54457e3e18eef230a"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/random.h",
+        "path_base": "absolute",
+        "size_bytes": 4010,
+        "sha256": "7b21eea9c4b0b19636365b114f36d54ed1e534d9b353446b37aae8f9c3ef4df3"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/stream.h",
+        "path_base": "absolute",
+        "size_bytes": 3689,
+        "sha256": "cc73482bf011f487d3aef4f1d1830bcd2eca7023009004412059570a9fb5c2f5"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/string.h",
+        "path_base": "absolute",
+        "size_bytes": 858,
+        "sha256": "29b3cfafb60b536a27c2ad96f9868c892e9242754868e1b770f55b7cf34ef598"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/transforms.h",
+        "path_base": "absolute",
+        "size_bytes": 1712,
+        "sha256": "2cf31bbda041fdf60a83243cff2f9d000cff148b153f406158f8e77ff2072ceb"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/transforms_impl.h",
+        "path_base": "absolute",
+        "size_bytes": 1197,
+        "sha256": "2700a13d26aa07339a815b4762b74d9bd6ffa0a9a21298be828ca367b5817701"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/vector.h",
+        "path_base": "absolute",
+        "size_bytes": 5263,
+        "sha256": "56f523542a591e80833e4a523316174e951f0508cae71b9ece577e7f1d4b0e09"
+      },
+      {
+        "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/mlx/c/version.h",
+        "path_base": "absolute",
+        "size_bytes": 225,
+        "sha256": "d1c9aecddd98ad6c16b7c56c056f5b1040a633c4548fe97297481fd625450810"
+      }
+    ]
+  },
+  "native_inputs": [
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/install/lib/libmlxc.dylib",
+      "path_base": "absolute",
+      "size_bytes": 1018624,
+      "sha256": "524cfcb750590c20fb22add68f0ed5c6847874ea6c33a94776fdbdf983b404c8",
+      "role": "linked_or_transitive_dylib",
+      "load_commands": [
+        "@rpath/libmlxc.dylib (compatibility version 0.0.0, current version 0.0.0)",
+        "@rpath/libmlx.dylib (compatibility version 0.0.0, current version 0.0.0)",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 373.2.0)",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5026.5.4)",
+        "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1195.14.4)",
+        "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate (compatibility version 1.0.0, current version 4.0.0)",
+        "/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2100.43.0)",
+        "/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+      ],
+      "macho_build_version": "cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 26.0\n      sdk 26.5\n   ntools 1\n     tool 3\n  version 1267.0\nLoad command 11\n"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/install/lib/libmlx.dylib",
+      "path_base": "absolute",
+      "size_bytes": 21617088,
+      "sha256": "b05f5026e2744341ecba4d1fcdf2814c74ac5b1d20229f5c5f525f6ab6c2a6b7",
+      "role": "linked_or_transitive_dylib",
+      "load_commands": [
+        "@rpath/libmlx.dylib (compatibility version 0.0.0, current version 0.0.0)",
+        "/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 373.2.0)",
+        "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5026.5.4, weak)",
+        "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore (compatibility version 1.2.0, current version 1195.14.4)",
+        "/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate (compatibility version 1.0.0, current version 4.0.0)",
+        "@rpath/libjaccl.dylib (compatibility version 0.0.0, current version 0.0.0)",
+        "/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2100.43.0)",
+        "/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+        "/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)"
+      ],
+      "macho_build_version": "cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 26.5.1\n      sdk 26.5\n   ntools 1\n     tool 3\n  version 1267.0\nLoad command 11\n"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/install/lib/libjaccl.dylib",
+      "path_base": "absolute",
+      "size_bytes": 2113248,
+      "sha256": "cd74c2359f5e168b7a17b0446afa5b414f671f59a7c62ab2c759c7a3a7b36a4f",
+      "role": "linked_or_transitive_dylib",
+      "load_commands": [
+        "@rpath/libjaccl.dylib (compatibility version 0.0.0, current version 0.0.0)",
+        "/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2100.43.0)",
+        "/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+      ],
+      "macho_build_version": "cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 26.5.1\n      sdk 26.5\n   ntools 1\n     tool 3\n  version 1267.0\nLoad command 11\n"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/install/lib/mlx.metallib",
+      "path_base": "absolute",
+      "size_bytes": 214156448,
+      "sha256": "ad01281395f80177e8ec51e66251ac52443f6c815a8aa7c26f1237bfa2106124",
+      "role": "runtime_metal_library",
+      "load_commands": [],
+      "macho_build_version": null
+    }
+  ],
+  "license_notices": [
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/LICENSE",
+      "path_base": "absolute",
+      "size_bytes": 1067,
+      "sha256": "44326a4ea062241ae6fc26ee2ec90bdc81af7eb7b9d3966181b733fa69d42057"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20/ACKNOWLEDGMENTS.md",
+      "path_base": "absolute",
+      "size_bytes": 291,
+      "sha256": "6b91480a91653156bd97b276e9cb5d2a16c3315b07e997b1ddcfd92ab8f51d0b"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-0.32.4/LICENSE",
+      "path_base": "absolute",
+      "size_bytes": 1066,
+      "sha256": "ccfab7ccb2ea306f71531c8ca77bb55507606cd90768b1e32b8b52ab5b48cf01"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/mlx-0.32.4/ACKNOWLEDGMENTS.md",
+      "path_base": "absolute",
+      "size_bytes": 14859,
+      "sha256": "f0c28f5bccbbf37e1a6cb9d0fc1b34a46901788770bd5b5d654dd78854da60c4"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/metal-cpp/LICENSE.txt",
+      "path_base": "absolute",
+      "size_bytes": 11344,
+      "sha256": "f4e92c7fe2aa066e294c0da9d08683dc9fb741ee6e6debbfad99a0c96e07c1f2"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/json/LICENSE.MIT",
+      "path_base": "absolute",
+      "size_bytes": 1076,
+      "sha256": "86b998c792894ccb911a1cb7994f7a9652894e7a094c0b5e45be2f553f45cf14"
+    },
+    {
+      "path": "/Users/mycelium-dev/Projects/mycelium-spike-mlxc/vendor/fmt-12.1.0/LICENSE",
+      "path_base": "absolute",
+      "size_bytes": 1431,
+      "sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8"
+    }
+  ],
+  "recorded_fixtures": [
+    {
+      "path": "crates/backend-mlx/tests/fixtures/moe-component-f32.json",
+      "path_base": "repository",
+      "size_bytes": 14674,
+      "sha256": "8f88ac62161b45ec67722856f877075b9c63f2fe1d4bed7102df5ab16e97429b",
+      "recorded_metadata": {
+        "schema": "l8-moe-component-v1"
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/moe-component-packed.json",
+      "path_base": "repository",
+      "size_bytes": 18611,
+      "sha256": "69a6da765ba7acf0b424ac931a62307fa3453936fd1083c0aafa35cbe650a426",
+      "recorded_metadata": {
+        "schema": "l8-moe-component-v1"
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/moe-decoder-f32.json",
+      "path_base": "repository",
+      "size_bytes": 675276,
+      "sha256": "2dc05b2a00fa04d961a9ade34f0784cd669e80adebf61580a9181f0fe9ffee65",
+      "recorded_metadata": {
+        "schema": "l8-moe-decoder-component-v1"
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/moe-decoder-packed.json",
+      "path_base": "repository",
+      "size_bytes": 977523,
+      "sha256": "75142e1d3d6bb166ca47c948a8c9e4cf8b6289904c6f3df08365f597a7d06fc3",
+      "recorded_metadata": {
+        "schema": "l8-moe-decoder-component-v1"
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/oracle-successor.json",
+      "path_base": "repository",
+      "size_bytes": 797,
+      "sha256": "5fa732df4199b0739bb900eafd4e5b92cf3d13f447d72f87a0150ba83a2d3cee",
+      "recorded_metadata": {
+        "schema": "l8-oracle-successor-v1",
+        "recorded_oracle": "941765e882ed3eea9a5576cc53e525c4caa20300",
+        "accepted_oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen2-f32.json",
+      "path_base": "repository",
+      "size_bytes": 1231980,
+      "sha256": "5de917abc01a1abd6a1c4f8c241dd7160a72a6fd40a9b9c3fe64feff7165ec8c",
+      "recorded_metadata": {
+        "accepted_oracle": "27fdd49de7e18b58affa85b8a31e9a734d7b4d1e",
+        "candidate_mlx": "0.32.4",
+        "claim": "Same-module-byte differential oracle; not independent author-reference or cross-device proof",
+        "oracle_mlx": "0.31.1",
+        "recorded_oracle": "52d1b69fb98e85529537500133ce6301c612d093",
+        "schema": "qwen2-mlx-explicit-f32-oracle-v1",
+        "source_spike": "2e0dd01349f886ecce4c68a51870adb900c7565a",
+        "workload": {
+          "checkpoint_dtype": "bf16",
+          "compute_dtype": "float32",
+          "eos_policy": "fixed length 64 selections, do not stop at EOS",
+          "file_bytes": 988097824,
+          "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+          "prompt": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nExplain how rain forms and why plants need it. Give a detailed answer.<|im_end|>\n<|im_start|>assistant\n",
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "safetensors_header_sha256": "65d3f3bf8256224d5ecc7dc63e12c2211717a116cb98428648e5f1fe952a14d5",
+          "selection": "raw logits argmax, ties lowest id",
+          "stages": [
+            [
+              0,
+              8
+            ],
+            [
+              8,
+              24
+            ]
+          ],
+          "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+          "tokens": 64
+        }
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen2-packed.json",
+      "path_base": "repository",
+      "size_bytes": 1028326,
+      "sha256": "b95716d827ac0de79f81c2a1817e05894b8903e8964b5c6cb5de9a9b1c318516",
+      "recorded_metadata": {
+        "schema": "l8-recorded-oracle-v2",
+        "workload": {
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "note": "fixed stage-boundary IDs; tokenizer/template port not qualified"
+        }
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen3-f32.json",
+      "path_base": "repository",
+      "size_bytes": 1050071,
+      "sha256": "0f57eb25a10696c68490a3cc4e7bd539cca2b7b01eb0b7cacad0e6c08649a683",
+      "recorded_metadata": {
+        "schema": "l8-recorded-oracle-v2",
+        "workload": {
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "note": "fixed stage-boundary IDs; tokenizer/template port not qualified"
+        }
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen3-packed.json",
+      "path_base": "repository",
+      "size_bytes": 1190965,
+      "sha256": "9d710a61196eda979039ac8d9591b74163b8a8d7108aadba8a4ffbb231171acf",
+      "recorded_metadata": {
+        "schema": "l8-recorded-oracle-v2",
+        "workload": {
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "note": "fixed stage-boundary IDs; tokenizer/template port not qualified"
+        }
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen35-f32.json",
+      "path_base": "repository",
+      "size_bytes": 933618,
+      "sha256": "ebb13b370f7b322110e93b9dc87c060b4e9d3989857673ad3beabe037d7cbf88",
+      "recorded_metadata": {
+        "schema": "l8-recorded-oracle-v2",
+        "workload": {
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "note": "fixed stage-boundary IDs; tokenizer/template port not qualified"
+        }
+      }
+    },
+    {
+      "path": "crates/backend-mlx/tests/fixtures/qwen35-packed.json",
+      "path_base": "repository",
+      "size_bytes": 1065975,
+      "sha256": "5d13a67a00e7dec11cfe2b01f304c95631b0fbb233673a543701b72bd2d3f0f2",
+      "recorded_metadata": {
+        "schema": "l8-recorded-oracle-v2",
+        "workload": {
+          "prompt_ids": [
+            151644,
+            8948,
+            198,
+            2610,
+            525,
+            264,
+            10950,
+            17847,
+            13,
+            151645,
+            198,
+            151644,
+            872,
+            198,
+            840,
+            20772,
+            1246,
+            11174,
+            7586,
+            323,
+            3170,
+            10779,
+            1184,
+            432,
+            13,
+            20678,
+            264,
+            11682,
+            4226,
+            13,
+            151645,
+            198,
+            151644,
+            77091,
+            198
+          ],
+          "note": "fixed stage-boundary IDs; tokenizer/template port not qualified"
+        }
+      }
+    }
+  ],
+  "prior_native_receipts": [
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-COMPUTE-evidence/candidate-receipt.json",
+      "path_base": "absolute",
+      "size_bytes": 2804,
+      "sha256": "f9af1fdd05be44b7bb233ed91af2300412971665b7d39f7c008a43a5a0e383bc"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-COMPUTE-evidence/moe-decoder/candidate-receipt.json",
+      "path_base": "absolute",
+      "size_bytes": 78034,
+      "sha256": "f115560f7fa44e303856b1cc611225979b96193b0e83bf9e82c6c0443a5a390d"
+    }
+  ],
+  "qualification": {
+    "selected_inputs": "VERIFIED_READ_ONLY_MATCH_BUILD_PINS",
+    "native_tests_this_round": "NOT_RUN: inventory/hash inspection only; previous L8 receipts are not new candidate executions",
+    "obsolete_scratch_copy": "BLOCKED_ABSENT: ~/.hermes/cache/scratch/v02-l8-native/lib; not selected. Later L8 guards use the existing install/lib selected above.",
+    "package_relocation_minimum_os_install_rollback": "BLOCKED: no Rust packaged candidate or same-candidate physical receipts",
+    "full_moe_f32_decoder": "BLOCKED: L8 retained mandatory test not run in cited receipt",
+    "admission_boundary": "Build-input discovery only. Does not grant device/GPU execution, model acquisition, package or release acceptance."
+  }
+}

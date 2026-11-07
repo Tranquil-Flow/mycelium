@@ -1,0 +1,756 @@
+[
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": null
+    },
+    "expected": "membership_envelope_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": null
+    },
+    "expected": "membership_envelope_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {}
+    },
+    "expected": "membership_key_pin_mismatch"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {}
+    },
+    "expected": "membership_key_pin_mismatch"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {
+        "extra": true
+      }
+    },
+    "expected": "membership_key_pin_mismatch"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {
+        "extra": true
+      }
+    },
+    "expected": "membership_key_pin_mismatch"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": null,
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_envelope_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": null,
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_envelope_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {},
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_signature_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {},
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_message_expired"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "extra": true
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_signature_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "extra": true
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_message_expired"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 1000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "wrong",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_verifier_invalid"
+  },
+  {
+    "context": {
+      "expected_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d",
+      "expected_protocol": "mycelium.membership.assignment_offer.v1",
+      "expected_recipient_node_id": "node-a",
+      "expected_sender_endpoint_id": "endpoint-seed",
+      "expected_sender_node_id": "seed-node",
+      "expected_swarm_id": "swarm-fixture",
+      "now": 100000.0
+    },
+    "envelope": {
+      "message": {
+        "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "assignment_id": "assignment-fixture",
+        "deployment_epoch": 1,
+        "deployment_id": "deployment-fixture",
+        "expires_at": 1300.0,
+        "generation": 1,
+        "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "incarnation": "incarnation-fixture",
+        "issued_at": 1000.0,
+        "load_generation": 1,
+        "message_id": "assignment_offer-fixture",
+        "peer_endpoint_records": [
+          {
+            "deployment_epoch": 1,
+            "endpoint_id": "endpoint-node-b",
+            "membership_generation": 1,
+            "node_id": "node-b",
+            "valid_from": 1000.0,
+            "valid_until": 1300.0
+          }
+        ],
+        "placement_provenance": "frozen_fixture",
+        "protocol": "mycelium.membership.assignment_offer.v1",
+        "recipient_node_id": "node-a",
+        "sender_endpoint_id": "endpoint-seed",
+        "sender_node_id": "seed-node",
+        "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "swarm_id": "swarm-fixture"
+      },
+      "protocol": "mycelium.membership.signed_message.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "/1boHck4omCz1Kgz2sgqYiUd+6Z6VemdBrOeNvvZwjl/gXp4rwMhvRYU+9821yzjdCyDAs/8v04fqUEVpvvtDQ==",
+        "signed_statement_digest": "sha256:18363e210c062ebd4bc2774f676137fd3eae66eb4e38faa10725214e107db300",
+        "signer_endpoint_id": "endpoint-seed",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "wrong",
+        "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+        "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+      }
+    },
+    "expected": "membership_verifier_invalid"
+  }
+]

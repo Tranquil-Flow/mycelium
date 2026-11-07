@@ -1,0 +1,6 @@
+key	target_key	rule
+mycelium_live/phone_stage_session.py:135:8:assignment:deadline	mycelium_live/phone_stage_session.py:108:8:assignment:self._timeout	upper-cap-reference
+mycelium_live/phone_stage_session.py:175:27:keyword:deadline	mycelium_live/phone_stage_session.py:135:8:assignment:deadline	same-scope-binding
+mycelium_live/supervisor.py:1320:28:keyword:timeout	mycelium_live/supervisor.py:1316:8:assignment:deadline	remaining-monotonic-local
+mycelium_live/supervisor.py:1345:32:keyword:timeout	mycelium_live/supervisor.py:1342:12:assignment:reap_deadline	remaining-monotonic-local
+mycelium_router/transports/iroh.py:2964:12:assignment:deadline	mycelium_router/transports/iroh.py:2960:12:assignment:acknowledgement_timeout	monotonic-offset-same-scope-binding

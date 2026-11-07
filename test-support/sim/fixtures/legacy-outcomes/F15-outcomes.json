@@ -1,0 +1,157 @@
+{
+  "corrected": {
+    "cleanup_proofs": 2,
+    "deadlines": [
+      [
+        600000,
+        1830000,
+        480000
+      ],
+      [
+        1113000,
+        2343000,
+        993000
+      ],
+      [
+        1626000,
+        2856000,
+        1506000
+      ]
+    ],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 2,
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "479500:crossing_chat",
+      "480000:stop",
+      "480000:chat_interrupted_explicitly",
+      "513000:close_completion",
+      "513000:cleanup_proven",
+      "513000:replacement_attempt",
+      "513000:fresh_run",
+      "513000:start_attempt",
+      "590000:stale_completion_ignored",
+      "600000:stale_completion_ignored",
+      "673000:serving",
+      "673000:chat_success",
+      "992500:crossing_chat",
+      "993000:stop",
+      "993000:chat_interrupted_explicitly",
+      "1026000:close_completion",
+      "1026000:cleanup_proven",
+      "1026000:replacement_attempt",
+      "1026000:fresh_run",
+      "1026000:start_attempt",
+      "1103000:stale_completion_ignored",
+      "1113000:stale_completion_ignored",
+      "1186000:serving",
+      "1186000:chat_success"
+    ],
+    "rollovers": 2,
+    "served": 3,
+    "starts": 3,
+    "successful_chats": 3,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_interrupted_explicitly": 2,
+      "chat_success": 3,
+      "cleanup_proven": 2,
+      "close_completion": 2,
+      "crossing_chat": 2,
+      "fresh_run": 2,
+      "replacement_attempt": 2,
+      "serving": 3,
+      "stale_completion_ignored": 4,
+      "start_attempt": 3,
+      "stop": 2
+    },
+    "workers": [
+      {
+        "cleanup_by_ms": 590000,
+        "closed_at_ms": 513000,
+        "generation": 1,
+        "member_expiry_ms": 600000,
+        "member_origin_ms": 0,
+        "owner_expiry_ms": 1830000,
+        "owner_origin_ms": 30000
+      },
+      {
+        "cleanup_by_ms": 1103000,
+        "closed_at_ms": 1026000,
+        "generation": 2,
+        "member_expiry_ms": 1113000,
+        "member_origin_ms": 513000,
+        "owner_expiry_ms": 2343000,
+        "owner_origin_ms": 543000
+      },
+      {
+        "cleanup_by_ms": 1616000,
+        "closed_at_ms": null,
+        "generation": 3,
+        "member_expiry_ms": 1626000,
+        "member_origin_ms": 1026000,
+        "owner_expiry_ms": 2856000,
+        "owner_origin_ms": 1056000
+      }
+    ]
+  },
+  "historical": {
+    "cleanup_proofs": 1,
+    "deadlines": [
+      [
+        600000,
+        1830000,
+        1710000
+      ]
+    ],
+    "diagnostics": [
+      "rollover_cleanup_unproven:StopDeadline"
+    ],
+    "expiry_losses": 1,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "600000:worker_expired",
+      "1709500:crossing_chat",
+      "1710000:stop",
+      "1710000:outer_wait_expired",
+      "1743000:close_completion",
+      "1743000:cleanup_proven"
+    ],
+    "rollovers": 0,
+    "served": 1,
+    "starts": 1,
+    "successful_chats": 1,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_success": 1,
+      "cleanup_proven": 1,
+      "close_completion": 1,
+      "crossing_chat": 1,
+      "outer_wait_expired": 1,
+      "serving": 1,
+      "start_attempt": 1,
+      "stop": 1,
+      "worker_expired": 1
+    },
+    "workers": [
+      {
+        "cleanup_by_ms": 590000,
+        "closed_at_ms": 1743000,
+        "generation": 1,
+        "member_expiry_ms": 600000,
+        "member_origin_ms": 0,
+        "owner_expiry_ms": 1830000,
+        "owner_origin_ms": 30000
+      }
+    ]
+  },
+  "source_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582"
+}

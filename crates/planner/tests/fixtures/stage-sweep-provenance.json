@@ -1,0 +1,29 @@
+{
+ "cases": 4181,
+ "claim": "executed oracle plan_for_members outcomes (ok digest / refusal code+node / exception class); pure planner, no model loaded",
+ "fixture_sha256": "99d414476ceacaaad697e3671253e426c40b9a61b223a655eced0a53ee13a19e",
+ "flips_found": 225,
+ "generator": "round10-capture-stage-sweep.py",
+ "generator_sha256": "4081d024b7c95b55adca3b471ec767b1d44787da9b1cf95acffc3e5e337fd2c3",
+ "id": "FX-L7-stage-sweep-r10",
+ "imported_sources": {
+  "mycelium_a13_macos/__init__.py": "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707",
+  "mycelium_a13_macos/layer_split.py": "e3dd6b7ee8827675ad7fae669d607ea3cb8bda6d2e2ff1d404c22218146e0f60",
+  "mycelium_a13_macos/model_resources.py": "471de9db12ef4b6f1c78db7579475a82f2c4a94a1924d8a77095bccaad494fb7",
+  "mycelium_a13_macos/serving.py": "228f8ad0391acbf257958d6a5a62e2ae34121f8a2dc8c6ccffcc58938d2cb16f"
+ },
+ "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "outcomes": {
+  "ok": 1651,
+  "raised:AttributeError": 18,
+  "raised:TypeError": 9,
+  "refusal:member_cannot_hold_share": 1031,
+  "refusal:member_capability_invalid": 62,
+  "refusal:member_disk_insufficient_for_share": 369,
+  "refusal:member_memory_cap_below_share": 393,
+  "refusal:member_memory_insufficient_for_share": 279,
+  "refusal:member_storage_cap_below_share": 369
+ },
+ "python": "3.14.8",
+ "seed": 7002
+}

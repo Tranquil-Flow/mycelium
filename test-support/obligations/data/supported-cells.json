@@ -1,0 +1,406 @@
+[
+  {
+    "id": "model:candidate",
+    "scope": "registered_macos_model",
+    "status": "source_registered_not_release_qualified",
+    "values": {
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "resolved_commit": "a09a35458c702b33eeacc393d103063234e8bc28",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "choice": "candidate",
+      "surface": "environment-only",
+      "route_modes": [
+        "normal",
+        "fast"
+      ],
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+    },
+    "citations": [
+      "mycelium_a13_macos/serving.py:189-196 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:150-159 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-319 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:34-43 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:69-72 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:22-37 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Final accepted v0.1.4 model/profile device receipts are not pinned by this provisional census."
+    ]
+  },
+  {
+    "id": "model:a9-route",
+    "scope": "registered_macos_model",
+    "status": "source_registered_not_release_qualified",
+    "values": {
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "choice": "a9-route",
+      "surface": "GUI; fresh-install default",
+      "route_modes": [
+        "normal",
+        "fast"
+      ],
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+    },
+    "citations": [
+      "mycelium_a13_macos/serving.py:215-222 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:150-159 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-319 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:34-43 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:69-72 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:22-37 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Final accepted v0.1.4 model/profile device receipts are not pinned by this provisional census."
+    ]
+  },
+  {
+    "id": "model:qwen3-0.6b",
+    "scope": "registered_macos_model",
+    "status": "source_registered_not_release_qualified",
+    "values": {
+      "model_id": "Qwen/Qwen3-0.6B",
+      "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "choice": "qwen3-0.6b",
+      "surface": "GUI; labelled not yet tested on two Macs",
+      "route_modes": [
+        "normal",
+        "fast"
+      ],
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+    },
+    "citations": [
+      "mycelium_a13_macos/serving.py:233-240 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:150-159 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-319 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:34-43 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:69-72 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:22-37 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Final accepted v0.1.4 model/profile device receipts are not pinned by this provisional census."
+    ]
+  },
+  {
+    "id": "model:qwen3-8b",
+    "scope": "registered_macos_model",
+    "status": "source_registered_not_release_qualified",
+    "values": {
+      "model_id": "Qwen/Qwen3-8B",
+      "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "choice": "qwen3-8b",
+      "surface": "GUI; labelled not yet tested on two Macs",
+      "route_modes": [
+        "normal",
+        "fast"
+      ],
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+    },
+    "citations": [
+      "mycelium_a13_macos/serving.py:250-257 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:150-159 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-319 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:34-43 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:69-72 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:22-37 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Final accepted v0.1.4 model/profile device receipts are not pinned by this provisional census."
+    ]
+  },
+  {
+    "id": "model:qwen3-14b",
+    "scope": "registered_macos_model",
+    "status": "source_registered_not_release_qualified",
+    "values": {
+      "model_id": "Qwen/Qwen3-14B",
+      "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "choice": "qwen3-14b",
+      "surface": "GUI; labelled not yet tested on two Macs",
+      "route_modes": [
+        "normal",
+        "fast"
+      ],
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+    },
+    "citations": [
+      "mycelium_a13_macos/serving.py:258-265 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:150-159 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-319 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:34-43 @ f5bfb709",
+      "mycelium_a13_macos/run_model.py:69-72 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:22-37 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Final accepted v0.1.4 model/profile device receipts are not pinned by this provisional census."
+    ]
+  },
+  {
+    "id": "os:macos-arm64",
+    "scope": "release_platform",
+    "status": "source_admitted_exact_versions",
+    "values": {
+      "system": "macos",
+      "architecture": "arm64",
+      "admitted_versions": [
+        "15.6.1",
+        "26.5.1"
+      ],
+      "lowest_admitted_macos": "15.6.1",
+      "minimum_os_interval_claim": false,
+      "final_package_LSMinimumSystemVersion": null,
+      "builder_rule": "min(highest Mach-O minos in bundle, lowest ADMITTED_VERSIONS)"
+    },
+    "citations": [
+      "mycelium_a13_macos/package_manifest.py:40-42 @ f5bfb709",
+      "mycelium_a13_macos/package_manifest.py:109-115 @ f5bfb709",
+      "scripts/build_a13_macos.py:211-234 @ f5bfb709",
+      "docs/user/QUICKSTART-MACOS.md:7-11 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Do not interpret exact-version admission as every macOS >=15.6.1 being accepted. Final Info.plist/native library floors and real Metal operation on the minimum OS require final package bytes and L11 qualification.",
+      "Quickstart still names preview.2; source constants are authoritative for this provisional pin, not that stale release label."
+    ]
+  },
+  {
+    "id": "profile:normal-fast",
+    "scope": "route_mode",
+    "status": "source_reachable",
+    "values": {
+      "modes": [
+        "normal",
+        "fast"
+      ],
+      "fresh_preference_enabled": false,
+      "environment": "MYCELIUM_TOKEN_PATH",
+      "environment_values": [
+        "on",
+        "off"
+      ],
+      "saved_preference_preserved": true,
+      "active_run_change_refused": "fast_mode_run_active"
+    },
+    "citations": [
+      "mycelium_a13_macos/fast_mode.py:16-37 @ f5bfb709",
+      "mycelium_a13_macos/fast_mode.py:53-69 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Normal/fast is route activation policy, not a synonym for fp32/packed-int8. Source default is normal/off, despite historical pipeline prose calling fast/default."
+    ]
+  },
+  {
+    "id": "profile:mlx-contract",
+    "scope": "reachable_stage_contract",
+    "status": "source_admission_not_qualification",
+    "values": {
+      "backend": "mlx",
+      "architectures": [
+        "gpt2",
+        "qwen2",
+        "qwen3",
+        "qwen3_5",
+        "qwen3_5_moe"
+      ],
+      "dtypes": [
+        "float16",
+        "bfloat16",
+        "float32"
+      ],
+      "quantizations": [
+        "none",
+        "int8-weight-only"
+      ],
+      "gpt2_quantization_restriction": "none",
+      "decode_modes": [
+        "stage_local_kv",
+        "complete_context_replay"
+      ]
+    },
+    "citations": [
+      "runtime_contracts.py:80-98 @ f5bfb709",
+      "runtime_contracts.py:462-543 @ f5bfb709",
+      "mycelium_router/mlx_runtime.py:1044-1045 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Schema admission is not a Cartesian-product device support claim. Preserve configuration validators and actual path refusals; qualify each reachable cell in L8.",
+      "GPT2 legacy backend is source-reachable but not an A13 registered model; keep contract pending reachability review, never silently retire it."
+    ]
+  },
+  {
+    "id": "profile:numpy-contract",
+    "scope": "reachable_stage_contract",
+    "status": "source_admission_not_macos_release_expansion",
+    "values": {
+      "backend": "numpy",
+      "architectures": [
+        "gpt2",
+        "qwen2",
+        "qwen3"
+      ],
+      "dtype": "float32",
+      "quantizations": [
+        "none",
+        "int8-weight-only"
+      ],
+      "gpt2_quantization_restriction": "none",
+      "explicitly_refused_architectures": [
+        "qwen3_5",
+        "qwen3_5_moe"
+      ]
+    },
+    "citations": [
+      "runtime_contracts.py:546-577 @ f5bfb709",
+      "model_adapters.py:247-297 @ f5bfb709"
+    ],
+    "unknowns": [
+      "NumPy oracle implementations for Qwen3.5 are not stage runtimes. CPU Rust parity must not substitute the MLX device contract."
+    ]
+  },
+  {
+    "id": "profile:mobile-rust-qwen2",
+    "scope": "existing_native_profile",
+    "status": "metadata_admission_and_existing_native_arithmetic",
+    "values": {
+      "backend": "mobile-rust-qwen2",
+      "architecture": "qwen2",
+      "dtype": "float32",
+      "quantization": "int8-weight-only",
+      "arithmetic": "f32 activations/accumulators, rowwise int8, pure Rust libm, single-threaded"
+    },
+    "citations": [
+      "runtime_contracts.py:594-599 @ f5bfb709",
+      "native/mobile_core/src/qwen2.rs:1-14 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Not a new phone release or macOS runtime fallback. Its deterministic CPU output contract differs from FP32-expanded MLX spike evidence."
+    ]
+  },
+  {
+    "id": "profile:mlx-int8-execution",
+    "scope": "execution_layout",
+    "status": "source_reachable",
+    "values": {
+      "values": [
+        "persistent_packed_int8",
+        "per_call_float32_materialization",
+        "none"
+      ],
+      "verify_arithmetic": [
+        "auto",
+        "row_attention",
+        "sequential_rows"
+      ],
+      "auto_row_attention_when": "qwen2 or qwen3 with persistent_packed_int8; otherwise sequential_rows"
+    },
+    "citations": [
+      "mycelium_router/mlx_runtime.py:467-510 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Do not replace production packed int8 with the spike float32-expanded fixture. Preserve separate oracle and residency/rounding checks."
+    ]
+  },
+  {
+    "id": "profile:platform-neutral-int8",
+    "scope": "optional_execution_path",
+    "status": "reachable_with_explicit_qualification_limits",
+    "values": {
+      "selectors": [
+        "weight-quantization",
+        "platform-neutral-int8"
+      ],
+      "activation_frame_dtypes": [
+        "float16",
+        "bfloat16"
+      ],
+      "packed_experts_refused": "qwen3_5_moe"
+    },
+    "citations": [
+      "runtime_loader.py:71-96 @ f5bfb709",
+      "runtime_loader.py:2581-2601 @ f5bfb709",
+      "runtime_loader.py:2634-2649 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Reachability does not establish real-device qualification for this optional kernel path."
+    ]
+  },
+  {
+    "id": "architecture:qwen35-hybrid",
+    "scope": "reachable_not_registered_macos_choice",
+    "status": "preserve_not_silently_pruned",
+    "values": {
+      "model_types": [
+        "qwen3_5",
+        "qwen3_5_moe"
+      ],
+      "architectures": [
+        "Qwen3_5ForConditionalGeneration",
+        "Qwen3_5MoeForConditionalGeneration"
+      ],
+      "backend": "mlx",
+      "layer_types": [
+        "linear_attention",
+        "full_attention"
+      ],
+      "recurrent_state_dtype": "float32",
+      "visual_mtp_excluded": true,
+      "registered_macos_checkpoint": null
+    },
+    "citations": [
+      "model_adapters.py:165-165 @ f5bfb709",
+      "model_adapters.py:267-297 @ f5bfb709",
+      "runtime_contracts.py:280-455 @ f5bfb709",
+      "mycelium_a13_macos/serving.py:300-307 @ f5bfb709"
+    ],
+    "unknowns": [
+      "No Qwen3.5 checkpoint/revision in the A13 REGISTERED_MODELS list. Exact supported real checkpoints, fixture sufficiency, state/reset/no-rewind and device matrix remain explicit L8/owner follow-up. Do not advertise an arbitrary checkpoint or remove the reachable hybrid/MoE contract."
+    ]
+  },
+  {
+    "id": "boundary:unsupported-families",
+    "scope": "adapter_only_not_serving",
+    "status": "explicit_non_support",
+    "values": {
+      "model_types": [
+        "llama",
+        "mistral",
+        "mixtral",
+        "gemma",
+        "gemma2",
+        "gemma3_text"
+      ],
+      "runtime_backends": [
+
+      ]
+    },
+    "citations": [
+      "model_adapters.py:301-332 @ f5bfb709"
+    ],
+    "unknowns": [
+      "Legacy llama/openrouter router ports also require exposed-contract review under plan section 3.1; no silent provider or llama.cpp substitution is authorized."
+    ]
+  }
+]

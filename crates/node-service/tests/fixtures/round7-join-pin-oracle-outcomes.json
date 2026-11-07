@@ -1,0 +1,105 @@
+{
+ "now": 1700000000.0,
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "results": {
+  "exemplar:join_request:base": {
+   "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+   "accepted": true,
+   "accepted_node_id": "member-node",
+   "bound_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40",
+   "v0_2_outcome": "accepted"
+  },
+  "exemplar:join_request:envelope_extra_field": {
+   "accepted": false,
+   "code": "membership_envelope_invalid",
+   "exception": "MembershipContractError"
+  },
+  "exemplar:join_request:expired": {
+   "accepted": false,
+   "code": "membership_message_expired",
+   "exception": "MembershipContractError"
+  },
+  "exemplar:join_request:foreign_signer_and_record": {
+   "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+   "accepted": true,
+   "accepted_node_id": "member-node",
+   "bound_key_digest": "sha256:f993bf2661c8a80d1ec098a49f6fb01d39439a1d5d6295a9ae435950026536da",
+   "v0_2_outcome": "join_identity_pin_mismatch"
+  },
+  "exemplar:join_request:from_future": {
+   "accepted": false,
+   "code": "membership_message_from_future",
+   "exception": "MembershipContractError"
+  },
+  "exemplar:join_request:protocol_other": {
+   "accepted": false,
+   "code": "join_request_protocol_required",
+   "exception": "MembershipContractError"
+  },
+  "exemplar:join_request:recipient_other": {
+   "accepted": false,
+   "code": "seed_join_mismatch",
+   "exception": "SeedCoordinatorError"
+  },
+  "exemplar:join_request:sender_node_other": {
+   "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+   "accepted": true,
+   "accepted_node_id": "other-sender",
+   "bound_key_digest": "sha256:87ee73837d4ba020e074790b42767a34f435e8ef60f2d4c9daa773b7c4251a40"
+  },
+  "exemplar:join_request:signature_by_foreign_key": {
+   "accepted": false,
+   "code": "membership_signature_invalid",
+   "exception": "MembershipContractError"
+  },
+  "exemplar:join_request:swarm_other": {
+   "accepted": false,
+   "code": "seed_join_mismatch",
+   "exception": "SeedCoordinatorError"
+  },
+  "exemplar:join_request:tampered_after_signing": {
+   "accepted": false,
+   "code": "membership_signature_invalid",
+   "exception": "MembershipContractError"
+  },
+  "scratch:foreign_key_fresh_seed": {
+   "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+   "accepted": true,
+   "accepted_node_id": "member-node",
+   "bound_key_digest": "sha256:c6107c1842c20449a2e69adba9606b0780be1d0c9cdca5fd2fb771b388d2eadb"
+  },
+  "scratch:foreign_key_other_node_after_member": {
+   "first": {
+    "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+    "accepted": true,
+    "accepted_node_id": "member-node",
+    "bound_key_digest": "sha256:1f5fe64ec2f8c901be3aad94a41d70c12d2f3a8f43755f902e665c96f41c87e3"
+   },
+   "second": {
+    "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+    "accepted": true,
+    "accepted_node_id": "other-node",
+    "bound_key_digest": "sha256:c6107c1842c20449a2e69adba9606b0780be1d0c9cdca5fd2fb771b388d2eadb"
+   }
+  },
+  "scratch:member_key": {
+   "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+   "accepted": true,
+   "accepted_node_id": "member-node",
+   "bound_key_digest": "sha256:1f5fe64ec2f8c901be3aad94a41d70c12d2f3a8f43755f902e665c96f41c87e3"
+  },
+  "scratch:member_then_foreign_same_node": {
+   "first": {
+    "acceptance_protocol": "mycelium.membership.join_acceptance.v1",
+    "accepted": true,
+    "accepted_node_id": "member-node",
+    "bound_key_digest": "sha256:1f5fe64ec2f8c901be3aad94a41d70c12d2f3a8f43755f902e665c96f41c87e3"
+   },
+   "second": {
+    "accepted": false,
+    "code": "seed_node_key_conflict",
+    "exception": "SeedCoordinatorError"
+   }
+  }
+ }
+}

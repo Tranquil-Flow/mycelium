@@ -1,0 +1,74 @@
+{
+  "id": "FX-L1b-r17-rate",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "dbb01bdda6bd22f2963b812002e171b114bcec17f057715c705678d0de0a66ae",
+  "scope": "Exact source operands and actual helper/default range; per-helper success, not whole validator success",
+  "rows": [
+    {
+      "key": "mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum",
+      "operand": 0.0,
+      "canonical": 0,
+      "unit": "entries-per-second",
+      "helper": "finite",
+      "kwargs": {
+        "minimum": 0.0
+      },
+      "cases": [
+        [
+          "below",
+          "-1.0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0.0",
+          "accepted",
+          "0.0"
+        ],
+        [
+          "within",
+          "0.5",
+          "accepted",
+          "0.5"
+        ],
+        [
+          "large-unbounded",
+          "1e+20",
+          "accepted",
+          "1e+20"
+        ],
+        [
+          "larger-unbounded",
+          "1e+100",
+          "accepted",
+          "1e+100"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "nan",
+          "nan",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "infinity",
+          "inf",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,156 @@
+path	scope	symbol	role	meaning
+mycelium_a11_evidence_control.py	RouteA11Evidence.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a13_macos/authority.py	DemoAuthority._renew_locked	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_a13_macos/authority.py	DemoAuthority.status	lease_state	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_a13_macos/control_pump.py	TargetControlPump.__init__	self._outbound_retry_attempts	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/control_pump.py	TargetControlPump._clear_outbound_retry	self._outbound_retry_attempts	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/demo_chain.py	AppDemoChain._progress_wait	polled	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/demo_chain.py	AppDemoChain._progress_wait.check	track['polled']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/demo_chain.py	AppDemoChain._step_descriptors.have	polled	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/managed_classes.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a13_macos/native_quit.py	NativeQuit.__init__	self._native.mycelium_quit_poll.argtypes	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a13_macos/native_quit.py	NativeQuit.__init__	self._native.mycelium_quit_poll.restype	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a13_macos/peer.py	RemoteMacMember._membership_result	lease_state	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_a13_macos/peer.py	RemoteMacMember.renew	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_a13_macos/peer.py	RemoteMacMember.status	lease_state	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_a13_macos/swarm_publish.py	SwarmPublisher.status	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_a13_macos/swarm_stats.py	PerformanceWindow.__init__	self.window_started	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/swarm_stats.py	PerformanceWindow.select_context	self.window_started	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a13_macos/token_owner.py	ManagedRouteTokenOwner.prepare	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a13_windows/service_lifecycle.py	windows_service_member_from_shared_renderer	declared_windows_service_name	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a13_windows/service_lifecycle.py	windows_service_member_from_shared_renderer	windows_install_mode	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a13_windows/service_lifecycle.py	windows_service_member_from_shared_renderer	windows_member	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_a6_fault_control.py	ControlledFaultMechanism.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a6_http_fault_control.py	A6LocalFaultReceiver.__call__	clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a6_http_fault_control.py	A6LocalFaultReceiver.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a6_product_fault_control.py	ProductFaultControl.__init__	clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_entry_controller.py	A7EntryController.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_evidence_control.py	RouteA7Evidence.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_node_agent.py	A7NodeAgent.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_parity_measurement.py	measure_identity_qualification	clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_parity_measurement.py	measure_parity	clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_a7_physical_measurement.py	_measure	result_poll	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['final_reads']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['last_state']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['last_state']['result_present']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['refusals'][exc.code]	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['restored_from']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['restored_reads']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['stop']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	result_poll['stream_done_at_stop']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_measure	trace['result_poll']	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_a7_physical_measurement.py	_post_kill_observations	result_poll	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_evidence.py	EvidenceProjectionRegistry.__init__	self._clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_gate_requirements/binding.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_gateway/semantic.py	ObservatoryPublicationOwner.__init__	self._lease_descriptor	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_gateway/semantic.py	ObservatoryPublicationOwner._acquire_owner_lease	lease_path	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_gateway/semantic.py	ObservatoryPublicationOwner._acquire_owner_lease	self._lease_descriptor	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_gateway/semantic.py	ObservatoryPublicationOwner.close	self._lease_descriptor	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_live/a6_recovery.py	LiveA6RecoveryQualifier.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/artifact_agent.py	load_artifact_source_agent	clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/artifact_provisioner.py	ArtifactProvisioningError.__init__	self.retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_live/artifact_provisioner.py	SwarmArtifactProvisioner.__init__	clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/artifact_provisioner.py	SwarmArtifactProvisioner._consume_stream	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_live/artifact_provisioner.py	SwarmArtifactProvisioner.acquire	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_live/artifact_transport.py	ArtifactHTTPSChunkReader.__call__	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_live/artifact_transport.py	ArtifactTransportError.__init__	self.retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_live/health.py	RouteHealthSource.__init__	self._clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/member_artifact_provisioner.py	acquire_member_stage_pack	clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/registry.py	LiveDeploymentRegistry.__init__	self._clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/router_port.py	LiveRouterPort.recover_full_context	clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/router_port.py	_RecoveryDeadlineGuard.__init__	self._clock_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/token_path_owner.py	OwnerTokenPath.__init__	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/token_path_owner.py	OwnerTokenPath.__init__	self._refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_live/token_path_owner.py	OwnerTokenPath.__init__	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_m16_runtime.py	M16RuntimeCoordinator.__init__	lease_clock	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_m16_runtime.py	M16RuntimeCoordinator.__init__	self._lease_clock	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_m16_runtime.py	M16RuntimeCoordinator.admit	lease_now	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_m16_runtime.py	M16RuntimeCoordinator.reserve_recovery_successor	lease_now	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_m16_runtime.py	build_live_m16_runtime	lease_clock	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_m21_heterogeneous.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_membership/contracts.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_node/__main__.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_node/__main__.py	_renew_lease	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_node/membership.py	NodeMembershipSession.__init__	self._heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_node/membership.py	NodeMembershipSession._emit_liveness	heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_node/process.py	PrivateDirectoryLease.revalidate	retained_entry	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_node/process.py	PrivateDirectoryLease.revalidate	retained_parent	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_node/token_admission.py	EntryAdmissionPolicy.__init__	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_admission.py	EntryAdmissionPolicy.__init__	self._refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_admission.py	EntryAdmissionPolicy.__init__	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_participants.py	ParticipantAdmissionPolicy.__init__	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_participants.py	ParticipantAdmissionPolicy.__init__	self._refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_participants.py	ParticipantAdmissionPolicy.__init__	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	InstalledRoutePolicy._make_policy	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	InstalledRoutePolicy._make_policy	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	RoutePolicyTrust.__init__	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	RoutePolicyTrust.__init__	self._refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	RoutePolicyTrust.__init__	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	load_host_trust	refresh_lease	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_node/token_provisioning.py	load_host_trust	unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_physical_runner/assembly.py	build_production_runner	clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_platform_neutral/migration.py	<module>	windows_native_iroh	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_platform_neutral/primitives.py	<module>	windows_native_provider	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_platform_neutral/windows_provider.py	<module>	windows_accelerated_physical_positive	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_product_spine/app.py	ProductEvidenceApplication.__init__	self._clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_product_spine/projector.py	ProductProjector._build	lease_freshness	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_qualification/authority.py	QualificationAuthority.__init__	self._clock_unix_ms	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_request_gateway/cli.py	stream_prompt	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_router/routing.py	ProgressivePathBuilder.advance	lease_now	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/routing.py	ProgressivePathBuilder.lock	lease_now	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/terminal_kv_retention.py	TerminalKVRetention.__init__	self.retained_total	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/terminal_kv_retention.py	TerminalKVRetention.snapshot	retained_count	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/terminal_kv_retention.py	TerminalKVRetention.snapshot	retained_kv_bytes	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/terminal_kv_retention.py	TerminalKVRetention.snapshot	retained_total	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport	stall_event_observer	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+mycelium_router/transports/iroh.py	IrohTransport.__init__	self._prefill_send_lock_stalls	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.__init__	self._prefill_stall_failures	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.__init__	self._prefill_stall_resends	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport._acquire_send_operation	window_started	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.diagnostic_state	send_lock_stalls	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.diagnostic_state	stall_failures	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.diagnostic_state	stall_resends	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.prefill_progress	send_lock_stalls	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.prefill_progress	stall_resends	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.stall_recovery_snapshot	send_lock_stalls	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.stall_recovery_snapshot	stall_failures	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	IrohTransport.stall_recovery_snapshot	stall_resends	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	_PrefillProgress	send_lock_stalls	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_router/transports/iroh.py	_PrefillProgress	stall_resends	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+mycelium_seed/coordinator.py	SeedCoordinator.__init__	last_heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/coordinator.py	SeedCoordinator._accept_join	retry_nonce	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/coordinator.py	SeedCoordinator._receive_member_message	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/coordinator.py	SeedCoordinator._receive_member_message	heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/coordinator.py	_Member	last_heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/coordinator.py	_Member.projection	last_heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/invite_batch.py	mint_invite_batch	output_lease	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_seed/operator.py	backup_seed_state	output_lease	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_seed/operator.py	restore_seed_state	backup_lease	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_seed/operator.py	restore_seed_state	target_lease	filesystem-handle	Filesystem ownership handle, descriptor, path or stat result; lease spelling does not define a time lease.
+mycelium_seed/operator.py	seed_inventory	lease_freshness	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_seed/state.py	SqliteSeedState._decode_heartbeat_renewal_row	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/state.py	SqliteSeedState._decode_heartbeat_renewal_row	heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/state.py	SqliteSeedState._decode_member_row	heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/state.py	SqliteSeedState._decode_member_row	last_heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_seed/state.py	SqliteSeedState.commit_heartbeat_renewal	heartbeat_sequence	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_service_package.py	<module>	windows_service	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_service_package.py	<module>	windows_service_per_user	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+mycelium_swarm_directory/directory.py	Directory._heartbeat	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_swarm_directory/directory.py	Directory._public	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_swarm_directory/directory.py	Directory._put_record	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_swarm_directory/directory.py	Directory._status	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+mycelium_ui_gateway/app.py	BrowserRequestError.__init__	self.retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_ui_gateway/app.py	ProductGatewayASGIApplication.__call__	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_ui_gateway/app.py	ProductGatewayASGIApplication._coordinator_call	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_ui_gateway/app.py	ProductGatewayASGIApplication._raise_upstream_error	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_ui_gateway/app.py	ProductGatewayASGIApplication._send_error	retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+mycelium_ui_gateway/coordinator.py	CoordinatorError.__init__	self.retryable	status-projection	Status/error classification or permitted retry-reason set, not a retry duration/count or new authority.
+physical_inference_node.py	PhysicalNodeService._start	transport.stall_event_observer	callback	Callable or clock-provider object, not a duration. Returned deadline/caller enforcement is inventoried separately.
+scripts/a8_run_rehearsal_peer.py	main	heartbeat	message-identity	Protocol message/nonce or monotonic sequence state; no configured time, retry or storage ceiling at this value slot.
+scripts/build_a13_windows.py	build_frozen_input	windows_python	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+scripts/build_a13_windows.py	build_windows_bundle	windows_service_member	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.
+scripts/quiet_host_guard.py	GuardReport.to_json	load_average_window	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+scripts/run_a11_route_benchmark.py	run_local	window_order	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+scripts/run_a4_physical_idle_staleness_gate.py	run_gate	node_pids_stalled	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+scripts/run_a4_physical_idle_staleness_gate.py	run_gate	stall_signal	observation-state	Observed timestamp, diagnostic counter, measurement label/order or receipt detail; not a configured limit.
+scripts/run_a9_gate.py	cmd_windows_benchmark	windows_host	platform-metadata	Platform/backend identity, native function ABI or packaging metadata; not a time window.

@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+[dependencies]
+budgets = { path = "../budgets" }
+protocol = { path = "../protocol" }
+serde_json = { version = "=1.0.154", features = ["arbitrary_precision"] }
+[lints]
+workspace = true

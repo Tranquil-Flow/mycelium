@@ -1,0 +1,2228 @@
+{
+ "schema": "mycelium.journeys.twohost.v1",
+ "oracle": {
+  "source_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "executable_sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f"
+ },
+ "claims": [
+  "CL-L3-02",
+  "CL-L3-03",
+  "CL-L3-05",
+  "CL-L3-06",
+  "CL-L3-07",
+  "CL-L3-08",
+  "CL-L3-09",
+  "CL-L3-10",
+  "CL-L1-04"
+ ],
+ "budgets_allowed": [
+  "WorkerStartup",
+  "ModelSelection",
+  "OwnerPoll",
+  "Compile",
+  "RelayWindow",
+  "ObservedStart",
+  "ObservedStop",
+  "HarnessOwnerStatusCheck"
+ ],
+ "targets": {
+  "certified": {
+   "label": "v0.1.4 f4e366e9",
+   "sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f",
+   "source_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+   "path": "runs/v2/l2-final-f4e366e98a1f705dfaf182897044500d290dbd7f/package/out/0.1.0-preview.2/Mycelium A13 Demo.app"
+  },
+  "v013": {
+   "label": "v0.1.3 ff8299ac (saved-2GB origin; F3/F5 RED)",
+   "sha256": "5f2cdcfd82ec164d0e44e2915e2e4f1c71fca0ce32d97969a20563cfb43332eb",
+   "source_sha": "ff8299acdf813fa5648dc4b6df7d5a7f78b1e2c0",
+   "path": "runs/v2/release/v0.1.3/mycelium-0.1.3-macos-arm64.zip",
+   "zip_sha256": "0acb875469e1d26a2189a6afef4822f110a71d12498e55e208e1efcf73076ace"
+  },
+  "hist-2596efc0": {
+   "label": "2596efc0 (F14 RED, F15 RED)",
+   "sha256": "5dca86312a1adc20e55ddb8902df7518f0a98023cdeb8320fdc492e0ebaf2e1a",
+   "path": "runs/v2/l2-final-2596efc07b4c7b3a12fb90f1d8d293eea58ea9ce"
+  },
+  "hist-5e88fe75": {
+   "label": "5e88fe75 (F15 RED; F14 GREEN)",
+   "sha256": "01be1d5b59959fd12b769f89e4dcfd9495d7e9d7f483f1943f3bdc98bd3e7909",
+   "path": "runs/v2/l2-final-5e88fe75e0bf929225408fdbf9d049197c06ed40"
+  },
+  "hist-076ffaa4": {
+   "label": "076ffaa4 (F15b RED; F14/F15 GREEN)",
+   "sha256": "ae24305167aa553c110fcde0297fba5fd796f21bb73944e1f492bf4b311f05fe",
+   "path": "runs/v2/l2-final-076ffaa497a8ca358ff278b080dc5d6197d1fdd9"
+  },
+  "hist-52d1b69f": {
+   "label": "52d1b69f (GREEN for all five)",
+   "sha256": "238e954e46c719b97f79755f0ac7b04ca11f8577cb7fc5fe5bae56a22634c95d",
+   "path": "runs/v2/l2-final-52d1b69fb98e85529537500133ce6301c612d093"
+  },
+  "rust": {
+   "label": "Rust target (NOT_RUN until a launcher exists)",
+   "sha256": null,
+   "path": null
+  }
+ },
+ "defaults": {
+  "owner_storage_bytes": 4000000000,
+  "member_storage_bytes": 2000000000,
+  "member_memory_bytes": 4294967296,
+  "member_wall_seconds": 600,
+  "member_max_commands": 5000,
+  "window_ttl_seconds": 600,
+  "relay_max_seconds": 1800,
+  "model_choice": "a9-route",
+  "chat_tokens": 16,
+  "chat_tokens_long": 512,
+  "member_power": "ac_only",
+  "owner_power": "ac_only"
+ },
+ "scenarios": [
+  {
+   "id": "fresh-4gb-default",
+   "title": "Fresh HOME: the page defaults to 4 GB and the created owner keeps it",
+   "claims": [
+    "CL-L3-04",
+    "CL-L3-06"
+   ],
+   "steps": [
+    {
+     "id": "fresh_index_default_4gb",
+     "who": "fresh",
+     "op": "http",
+     "method": "GET",
+     "path": "/",
+     "raw_text": true,
+     "expect": [
+      {
+       "text_contains": "value=\"4000000000\" selected"
+      }
+     ],
+     "source": "web/index.html:9 (4000000000 selected); L3-JOURNEYS.md onboarding_default_fields @ f4e366e9",
+     "provenance": "EXECUTED:L3-JOURNEYS-run-03 (loopback)"
+    },
+    {
+     "id": "fresh_create_4gb",
+     "who": "fresh",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "ac_only",
+       "storage_bytes": 4000000000,
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      }
+     },
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/membership_state"
+     ],
+     "source": "app.py:1589-1625 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#owner_create"
+    },
+    {
+     "id": "fresh_policy_4gb",
+     "who": "fresh",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "expect": [
+      {
+       "ptr": "/resource_policy/storage_bytes",
+       "eq": 4000000000
+      },
+      {
+       "ptr": "/installation_role",
+       "eq": "owner"
+      }
+     ],
+     "observe": [
+      "/resource_policy/storage_bytes",
+      "/resource_policy/power",
+      "/installation_role"
+     ],
+     "source": "app.py:282-300 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-v013-upgrade.out.json"
+    }
+   ],
+   "instances": [
+    "fresh"
+   ]
+  },
+  {
+   "id": "saved-2gb-cross-version",
+   "title": "Saved 2 GB written by v0.1.3 survives the move to v0.1.4; 4 GB is not silently adopted",
+   "claims": [
+    "CL-L3-06"
+   ],
+   "steps": [
+    {
+     "id": "legacy_v013_create_2gb",
+     "who": "legacy",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "ac_only",
+       "storage_bytes": 2000000000,
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      }
+     },
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/membership_state"
+     ],
+     "source": "v0.1.3 web/index.html:9 (2000000000 default); probes/probe_v013_upgrade.py ",
+     "provenance": "EXECUTED:probes/probe-v013-upgrade.out.json#v013_create"
+    },
+    {
+     "id": "legacy_upgrade_to_v014",
+     "who": "legacy",
+     "op": "control",
+     "action": "upgrade_legacy",
+     "source": "Orchestrator quits v0.1.3 (exact pid), moves its Library into a NEW fresh HOME and launches the certified v0.1.4 executable (installer/launchd NOT run) ",
+     "provenance": "EXECUTED:probes/probe_v013_upgrade.py"
+    },
+    {
+     "id": "upgraded_policy_preserved",
+     "who": "legacy",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "expect": [
+      {
+       "ptr": "/resource_policy/storage_bytes",
+       "eq": 2000000000
+      },
+      {
+       "ptr": "/authority/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/resource_policy/storage_bytes",
+      "/authority/membership_state",
+      "/installation_role"
+     ],
+     "source": "app.py:282-300 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-v013-upgrade.out.json#v014_after_upgrade"
+    },
+    {
+     "id": "upgraded_no_silent_4gb",
+     "who": "legacy",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "status": 400,
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "ac_only",
+       "storage_bytes": 4000000000,
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      }
+     },
+     "expect": [
+      {
+       "ptr": "/error",
+       "eq": "consent_retry_changed"
+      }
+     ],
+     "observe": [
+      "/error"
+     ],
+     "source": "app.py:1601 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-v013-upgrade.out.json#v014_create_4gb_over_saved_2gb"
+    },
+    {
+     "id": "upgraded_same_2gb_ok",
+     "who": "legacy",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "ac_only",
+       "storage_bytes": 2000000000,
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      }
+     },
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/membership_state"
+     ],
+     "source": "app.py:1601 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-v013-upgrade.out.json#v014_create_2gb_same"
+    }
+   ],
+   "instances": [
+    "legacy"
+   ]
+  },
+  {
+   "id": "relay-window",
+   "title": "Relay started, owner created, join window opened with the full pinned link; bad member caps refused",
+   "claims": [
+    "CL-L3-05",
+    "CL-L3-06"
+   ],
+   "steps": [
+    {
+     "id": "relay_external_start",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/network/start",
+     "method": "POST",
+     "when": {
+      "relay_mode": "external"
+     },
+     "body": {
+      "relay_acknowledged": true,
+      "max_seconds": "{{relay_max_seconds}}",
+      "provider": "external",
+      "public_origin": "{{relay_public_origin}}",
+      "proxy_port": "{{relay_proxy_port}}"
+     },
+     "expect": [
+      {
+       "ptr": "/state",
+       "eq": "relay_process_running"
+      },
+      {
+       "ptr": "/provider",
+       "eq": "external"
+      },
+      {
+       "ptr": "/public_origin",
+       "eq": "{{relay_public_origin}}"
+      },
+      {
+       "ptr": "/relay_host_trust",
+       "eq": "public_webpki"
+      }
+     ],
+     "observe": [
+      "/state",
+      "/provider",
+      "/seed_bound",
+      "/relay_host_trust",
+      "/auto_renew",
+      "/long_lived",
+      "/renewal_cap_seconds"
+     ],
+     "source": "mycelium_a13_macos/app.py:676-735,1476; public_relay.py:263-274,322-366,418-440 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#external_relay_start (relay BEFORE create is the product order, app.py:1593-1600: seed_bound is false until /api/create binds it; seen in the rehearsal run 2026-10-28 14:50)"
+    },
+    {
+     "id": "owner_create",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{owner_power}}",
+       "storage_bytes": "{{owner_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      }
+     },
+     "when": {
+      "relay_mode": "external"
+     },
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/membership_state",
+      "/lifecycle_state",
+      "/route_ready"
+     ],
+     "source": "mycelium_a13_macos/app.py:1589-1625 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#owner_create"
+    },
+    {
+     "id": "owner_create_with_quick_relay",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/create",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{owner_power}}",
+       "storage_bytes": "{{owner_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      },
+      "relay_acknowledged": true,
+      "max_seconds": "{{relay_max_seconds}}"
+     },
+     "when": {
+      "relay_mode": "quick"
+     },
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe": [
+      "/membership_state",
+      "/route_ready"
+     ],
+     "source": "mycelium_a13_macos/app.py:1589-1600; public_relay.py:322-358 (cloudflared tunnel --url, http2, isolated HOME) @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "owner_relay_status",
+     "who": "owner",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "capture": {
+      "relay_public_origin_seen": "/network/public_origin"
+     },
+     "expect": [
+      {
+       "ptr": "/network/state",
+       "eq": "relay_process_running"
+      },
+      {
+       "ptr": "/network/seed_bound",
+       "eq": true
+      },
+      {
+       "ptr": "/network/relay_host_trust",
+       "eq": "public_webpki"
+      }
+     ],
+     "observe": [
+      "/network/state",
+      "/network/provider",
+      "/network/seed_bound",
+      "/installation_role"
+     ],
+     "source": "mycelium_a13_macos/app.py:1278; public_relay.py:418-440 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#owner_network_block_keys"
+    },
+    {
+     "id": "member_disclosure",
+     "who": "member",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "capture": {
+      "disclosure_digest": "/join_flow/standing_disclosure/digest"
+     },
+     "expect": [
+      {
+       "ptr": "/installation_role",
+       "eq": "owner"
+      }
+     ],
+     "source": "mycelium_a13_macos/standing_consent.py:34-46; web/app.js (join_flow.standing_disclosure) @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#member_status_disclosure_location"
+    },
+    {
+     "id": "owner_open_window",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/pair/window/open",
+     "method": "POST",
+     "body": {
+      "ttl_seconds": "{{window_ttl_seconds}}"
+     },
+     "capture": {
+      "join_link": "/join_link",
+      "window_id": "/window_id"
+     },
+     "expect": [
+      {
+       "ptr": "/state",
+       "eq": "open"
+      },
+      {
+       "ptr": "/join_link",
+       "prefix": "mycelium-join:"
+      }
+     ],
+     "observe": [
+      "/state"
+     ],
+     "source": "mycelium_a13_macos/app.py:1699-1722; pairing.py:661-708 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#window_open_keys"
+    },
+    {
+     "id": "member_join_bad_caps_refused",
+     "who": "member",
+     "op": "http",
+     "path": "/api/join/window",
+     "method": "POST",
+     "status": 400,
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{member_power}}",
+       "storage_bytes": "{{member_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      },
+      "standing_consent": {
+       "acknowledged": true,
+       "disclosure_digest": "{{disclosure_digest}}",
+       "caps": {
+        "storage_bytes": "{{member_storage_bytes}}",
+        "max_memory_bytes": "{{member_memory_bytes}}",
+        "max_wall_seconds": 30,
+        "max_commands": "{{member_max_commands}}"
+       }
+      },
+      "join": "{{join_link}}"
+     },
+     "expect": [
+      {
+       "ptr": "/error",
+       "eq": "standing_consent_caps_invalid"
+      }
+     ],
+     "observe": [
+      "/error"
+     ],
+     "source": "mycelium_a13_macos/standing_consent.py:97-111; app.py:1742-1777 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#member_caps_wall30"
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ]
+  },
+  {
+   "id": "loopback-offline-refusal",
+   "title": "Rehearsal only: with no reachable public relay the member join is refused with a closed code",
+   "claims": [
+    "CL-L3-05"
+   ],
+   "steps": [
+    {
+     "id": "member_join_offline_refusal",
+     "who": "member",
+     "op": "http",
+     "path": "/api/join/window",
+     "method": "POST",
+     "status": 409,
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{member_power}}",
+       "storage_bytes": "{{member_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      },
+      "standing_consent": {
+       "acknowledged": true,
+       "disclosure_digest": "{{disclosure_digest}}",
+       "caps": {
+        "storage_bytes": "{{member_storage_bytes}}",
+        "max_memory_bytes": "{{member_memory_bytes}}",
+        "max_wall_seconds": "{{member_wall_seconds}}",
+        "max_commands": "{{member_max_commands}}"
+       }
+      },
+      "join": "{{join_link}}"
+     },
+     "expect": [
+      {
+       "ptr": "/error",
+       "eq": "pairing_window_dns_failed"
+      }
+     ],
+     "observe": [
+      "/error"
+     ],
+     "source": "mycelium_a13_macos/pairing.py:834-917 (JoinWindowClient talks only to the public HTTPS origin); app.py:1742-1777 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#member_join_submit_offline"
+    }
+   ],
+   "instances": [
+    "member"
+   ],
+   "depends_on": "relay-window"
+  },
+  {
+   "id": "joined-bringup",
+   "title": "Member joins with explicit 10 min / 2 GB standing consent, owner approves, route serving",
+   "claims": [
+    "CL-L3-05",
+    "CL-L3-06"
+   ],
+   "steps": [
+    {
+     "id": "member_join_with_consent",
+     "who": "member",
+     "op": "http",
+     "path": "/api/join/window",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{member_power}}",
+       "storage_bytes": "{{member_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      },
+      "standing_consent": {
+       "acknowledged": true,
+       "disclosure_digest": "{{disclosure_digest}}",
+       "caps": {
+        "storage_bytes": "{{member_storage_bytes}}",
+        "max_memory_bytes": "{{member_memory_bytes}}",
+        "max_wall_seconds": "{{member_wall_seconds}}",
+        "max_commands": "{{member_max_commands}}"
+       }
+      },
+      "join": "{{join_link}}"
+     },
+     "expect": [
+      {
+       "ptr": "/state",
+       "eq": "waiting_for_owner"
+      },
+      {
+       "ptr": "/pinned",
+       "eq": true
+      }
+     ],
+     "observe": [
+      "/state",
+      "/pinned"
+     ],
+     "source": "mycelium_a13_macos/app.py:1742-1777; pairing.py:543-590 (full link pins seed key; short typed form only for *.trycloudflare.com) @ f4e366e9",
+     "provenance": "SOURCE (offline refusal pairing_window_dns_failed EXECUTED: probes/probe-relay-join.out.json#member_join_submit_offline)",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "owner_sees_claim",
+     "who": "owner",
+     "op": "poll",
+     "method": "POST",
+     "path": "/api/pair/window/list",
+     "body": {},
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/windows/0/state",
+       "eq": "claimed"
+      }
+     ],
+     "capture": {
+      "request_digest": "/windows/0/pending/request_digest"
+     },
+     "observe": [
+      "/windows/0/state",
+      "/windows/0/pending/peer_class",
+      "/windows/0/pending/quota/storage_bytes",
+      "/windows/0/pending/quota/background_allowed"
+     ],
+     "source": "mycelium_a13_macos/pairing.py:709-716,725-760 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "owner_approves",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/pair/window/approve",
+     "method": "POST",
+     "body": {
+      "window_id": "{{window_id}}",
+      "request_digest": "{{request_digest}}"
+     },
+     "observe": [
+      "/state"
+     ],
+     "source": "mycelium_a13_macos/app.py:1713-1730; pairing.py:762-790 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "member_joined",
+     "who": "member",
+     "op": "poll",
+     "method": "POST",
+     "path": "/api/join/window/poll",
+     "body": {},
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/state",
+       "eq": "joined"
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/membership_state",
+       "eq": "current"
+      },
+      {
+       "ptr": "/route_ready",
+       "eq": false
+      }
+     ],
+     "observe": [
+      "/state",
+      "/membership_state",
+      "/route_ready"
+     ],
+     "source": "mycelium_a13_macos/app.py:1779-1812 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "member_consent_bound",
+     "who": "member",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "observe_tree": [
+      {
+       "ptr": "/join_flow",
+       "name": "member_join_flow"
+      },
+      {
+       "ptr": "/resource_policy",
+       "name": "member_policy"
+      },
+      {
+       "ptr": "/demo_target",
+       "name": "member_target"
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/resource_policy/storage_bytes",
+       "eq": "{{member_storage_bytes}}"
+      },
+      {
+       "ptr": "/installation_role",
+       "eq": "target"
+      }
+     ],
+     "source": "mycelium_a13_macos/standing_consent.py:139-181 (bind at join) @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "owner_sees_member",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/authority/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe_tree": [
+      {
+       "ptr": "/swarm",
+       "name": "owner_swarm"
+      },
+      {
+       "ptr": "/owner_run",
+       "name": "owner_run_pre"
+      }
+     ],
+     "source": "mycelium_a13_macos/app.py:1262-1290 @ f4e366e9",
+     "provenance": "RECORDED",
+     "requires": [
+      "public_relay"
+     ],
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ]
+    },
+    {
+     "id": "owner_choose_model",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/run-model",
+     "method": "POST",
+     "body": {
+      "choice": "{{model_choice}}"
+     },
+     "observe": [
+      "/selected",
+      "/source",
+      "/locked"
+     ],
+     "source": "mycelium_a13_macos/run_model.py:34-43; app.py:855-868 @ f4e366e9; observed 2026-10-28 window: answer is run_model.document() {selected,source,locked,...}",
+     "provenance": "EXECUTED",
+     "requires": [
+      "public_relay"
+     ]
+    },
+    {
+     "id": "owner_model_download",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/model/download",
+     "method": "POST",
+     "body": {
+      "consent": {
+       "download_acknowledged": true,
+       "max_download_bytes": "{{owner_storage_bytes}}",
+       "storage_limit_bytes": "{{owner_storage_bytes}}"
+      }
+     },
+     "observe": [
+      "/state"
+     ],
+     "source": "mycelium_a13_macos/app.py:1551-1575 @ f4e366e9 (POST /api/model/download needs {consent:{download_acknowledged,max_download_bytes,storage_limit_bytes}}); owner_run step 'model' refuses owner_model_not_prepared unless acquisition is prepared (demo_chain.py:_step_model); found in the 2026-10-28 window: without this step owner_run failed at 'model' and the poll ran 3600 s",
+     "provenance": "SOURCE",
+     "timing": "model_download_issued",
+     "requires": [
+      "public_relay",
+      "model"
+     ]
+    },
+    {
+     "id": "owner_model_prepared",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "Compile",
+     "max_polls_budget": "Compile",
+     "until": [
+      {
+       "ptr": "/acquisition/state",
+       "eq": "prepared"
+      }
+     ],
+     "fail_when": [
+      {
+       "ptr": "/acquisition/state",
+       "in": [
+        "failed",
+        "cancelled"
+       ]
+      }
+     ],
+     "trace": [
+      "/acquisition/state",
+      "/acquisition/downloaded_bytes",
+      "/acquisition/total_bytes",
+      "/acquisition/error_code",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal"
+     ],
+     "observe": [
+      "/acquisition/state"
+     ],
+     "source": "mycelium_a13_macos/app.py:1268 (status.acquisition); scripts/a13_operator/round14_bootstrap_compile.py:223-241 @ f4e366e9",
+     "provenance": "SOURCE",
+     "timing": "model_prepared",
+     "requires": [
+      "public_relay",
+      "model"
+     ]
+    },
+    {
+     "id": "owner_demo_start",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/demo/start",
+     "method": "POST",
+     "body": {},
+     "source": "mycelium_a13_macos/demo_app.py:109-130 (relay_gate: members joined need the relay up) @ f4e366e9",
+     "provenance": "SOURCE",
+     "timing": "start_issued",
+     "requires": [
+      "public_relay",
+      "model"
+     ]
+    },
+    {
+     "id": "owner_serving",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "Compile",
+     "max_polls_budget": "Compile",
+     "until": [
+      {
+       "ptr": "/owner_run/state",
+       "eq": "serving"
+      },
+      {
+       "ptr": "/owner_run/route_ready",
+       "eq": true
+      }
+     ],
+     "capture": {
+      "registry_origin": "/owner_run/registry_origin"
+     },
+     "timing": "start_to_serving",
+     "observe_tree": [
+      {
+       "ptr": "/owner_run",
+       "name": "owner_run_serving"
+      },
+      {
+       "ptr": "/demo_target",
+       "name": "owner_target"
+      }
+     ],
+     "source": "mycelium_a13_macos/swarm_publish.py:94-104; chat.py:477-500 @ f4e366e9; window 2026-10-28: v0.1.3/2596efc0 owners blocked /api/status past the 5 s read budget (recorded as latency, judged by f5_status_during_slow_work) or failed placement (F14: judged by f14_shares_fit_consent)",
+     "provenance": "RECORDED",
+     "requires": [
+      "public_relay",
+      "model"
+     ],
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ],
+     "timeout_is_latency": true,
+     "red_tolerant": true
+    },
+    {
+     "id": "member_serving_view",
+     "who": "member",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "observe_tree": [
+      {
+       "ptr": "/demo_target",
+       "name": "member_target_serving"
+      },
+      {
+       "ptr": "/serving",
+       "name": "member_serving"
+      },
+      {
+       "ptr": "/sharing",
+       "name": "member_sharing"
+      }
+     ],
+     "source": "mycelium_a13_macos/demo_target.py @ f4e366e9",
+     "provenance": "RECORDED",
+     "requires": [
+      "public_relay",
+      "model"
+     ]
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "relay-window"
+  },
+  {
+   "id": "stage-observations",
+   "title": "Actual stage assignment / reservation / worker + rollover deadline fields on the public status",
+   "claims": [
+    "CL-L3-07"
+   ],
+   "steps": [
+    {
+     "id": "stage_assignment_reservation",
+     "who": "owner",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "observe_tree": [
+      {
+       "ptr": "/owner_run",
+       "name": "stage_owner_run"
+      },
+      {
+       "ptr": "/acquisition",
+       "name": "stage_owner_acq"
+      }
+     ],
+     "source": "mycelium_a13_macos/layer_split.py; chain_compile.py:251-272; swarm_stats.py:77-128 (stage_projection) @ f4e366e9",
+     "provenance": "RECORDED",
+     "claims": [
+      "CL-L3-07"
+     ]
+    },
+    {
+     "id": "stage_member_view",
+     "who": "member",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "observe_tree": [
+      {
+       "ptr": "/acquisition",
+       "name": "stage_member_acq"
+      },
+      {
+       "ptr": "/resource_observation",
+       "name": "stage_member_res"
+      }
+     ],
+     "source": "mycelium_a13_macos/model_resources.py; peer_model_source.py @ f4e366e9",
+     "provenance": "RECORDED",
+     "claims": [
+      "CL-L3-07"
+     ]
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup"
+  },
+  {
+   "id": "chat-sse-cancel",
+   "title": "Chat, active cancel, product SSE on a serving joined route",
+   "claims": [
+    "CL-L3-05"
+   ],
+   "steps": [
+    {
+     "id": "chat_state_ready",
+     "who": "owner",
+     "op": "http",
+     "method": "POST",
+     "path": "/chat/api/state",
+     "headers": {
+      "X-Mycelium-Chat": "1"
+     },
+     "body": {},
+     "expect": [
+      {
+       "ptr": "/available",
+       "eq": true
+      }
+     ],
+     "observe": [
+      "/available",
+      "/busy",
+      "/model_id"
+     ],
+     "source": "mycelium_a13_macos/chat.py:477-500,556-580 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "chat_send",
+     "who": "owner",
+     "op": "http",
+     "method": "POST",
+     "path": "/chat/api/send",
+     "headers": {
+      "X-Mycelium-Chat": "1"
+     },
+     "body": {
+      "prompt": "Say hello in one short sentence.",
+      "max_new_tokens": "{{chat_tokens}}"
+     },
+     "capture": {
+      "chat_id": "/request_id"
+     },
+     "timing": "chat_send",
+     "source": "mycelium_a13_macos/chat.py:300-330 @ f4e366e9",
+     "provenance": "SOURCE",
+     "observe": []
+    },
+    {
+     "id": "chat_events_until_done",
+     "who": "owner",
+     "op": "poll",
+     "method": "POST",
+     "path": "/chat/api/events",
+     "headers": {
+      "X-Mycelium-Chat": "1"
+     },
+     "body": {
+      "request_id": "{{chat_id}}",
+      "after": 0
+     },
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/done",
+       "eq": true
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/error",
+       "eq": null
+      }
+     ],
+     "timing": "chat_total",
+     "observe": [
+      "/done",
+      "/error",
+      "/terminal"
+     ],
+     "source": "mycelium_a13_macos/chat.py:460-476 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "chat_public_relay_probe",
+     "who": "owner",
+     "op": "control",
+     "action": "public_chat_probe",
+     "source": "public_relay.py:27-63 (/chat is relayed); window-run.sh curl https://<relay>/chat/api/state @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "registry_bootstrap",
+     "who": "registry",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/v1/bootstrap",
+     "auth": false,
+     "capture": {
+      "csrf_header": "/session/csrf_header",
+      "csrf_token": "/session/csrf_token"
+     },
+     "capture_header": {
+      "registry_cookie": "set-cookie"
+     },
+     "source": "mycelium_a13_macos/chat.py:104-125 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "registry_qualification",
+     "who": "registry",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/v1/qualification/current",
+     "auth": false,
+     "headers": {
+      "Cookie": "{{registry_cookie}}"
+     },
+     "capture": {
+      "qualification": "/binding"
+     },
+     "expect": [
+      {
+       "ptr": "/route_ready",
+       "eq": true
+      }
+     ],
+     "source": "mycelium_a13_macos/chat.py:112-125 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "registry_inference_long",
+     "who": "registry",
+     "op": "http",
+     "method": "POST",
+     "path": "/api/v1/inference",
+     "auth": false,
+     "headers": {
+      "Cookie": "{{registry_cookie}}",
+      "{{csrf_header}}": "{{csrf_token}}",
+      "Origin": "{{registry_origin}}"
+     },
+     "body": {
+      "protocol": "mycelium.request_gateway.v2",
+      "prompt": "Count slowly from one to one hundred.",
+      "max_new_tokens": "{{chat_tokens_long}}",
+      "qualification": "{{qualification}}",
+      "workload_profile_id": "interactive_chat_v1",
+      "qos_class": "interactive"
+     },
+     "capture": {
+      "inference_event_path": "/event_path",
+      "inference_cancel_path": "/cancel_path"
+     },
+     "source": "mycelium_a13_macos/chat.py:119-124 @ f4e366e9",
+     "provenance": "SOURCE",
+     "status_any": [
+      200,
+      202
+     ]
+    },
+    {
+     "id": "registry_cancel_active",
+     "who": "registry",
+     "op": "http",
+     "method": "DELETE",
+     "path": "{{inference_cancel_path}}",
+     "auth": false,
+     "headers": {
+      "Cookie": "{{registry_cookie}}",
+      "{{csrf_header}}": "{{csrf_token}}",
+      "Origin": "{{registry_origin}}"
+     },
+     "observe": [],
+     "source": "mycelium_a13_macos/chat.py:46,156-170 @ f4e366e9",
+     "provenance": "SOURCE",
+     "status_any": [
+      200,
+      202,
+      204
+     ]
+    },
+    {
+     "id": "registry_sse_to_terminal",
+     "who": "registry",
+     "op": "sse",
+     "method": "GET",
+     "path": "{{inference_event_path}}",
+     "auth": false,
+     "headers": {
+      "Cookie": "{{registry_cookie}}",
+      "Accept": "text/event-stream"
+     },
+     "budget": "WorkerStartup",
+     "sse_expect": {
+      "last_event_in": [
+       "cancelled",
+       "completed",
+       "failed"
+      ],
+      "min_events": 1
+     },
+     "source": "mycelium_a13_macos/chat.py:126-140 (SSE kinds token|completed|cancelled|failed) @ f4e366e9",
+     "provenance": "SOURCE",
+     "expect": []
+    }
+   ],
+   "instances": [
+    "owner",
+    "registry"
+   ],
+   "depends_on": "joined-bringup"
+  },
+  {
+   "id": "directory-stats",
+   "title": "Owner publishes to a LOCAL test directory (never the public one); stats document is recorded",
+   "claims": [
+    "CL-L3-05"
+   ],
+   "steps": [
+    {
+     "id": "directory_publish",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/swarm/publish",
+     "method": "POST",
+     "requires": [
+      "directory"
+     ],
+     "body": {
+      "directory": "{{directory_origin}}",
+      "name": "v02-l3c-test",
+      "access_mode": "request",
+      "description": "v0.2 two-host window test; not a public swarm",
+      "open_quota": null
+     },
+     "observe": [
+      "/enabled",
+      "/mode"
+     ],
+     "source": "mycelium_a13_macos/swarm_publish.py:205-260 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "directory_stats_document",
+     "who": "directory",
+     "op": "http",
+     "method": "GET",
+     "path": "/swarms/api/v1/swarms",
+     "auth": false,
+     "requires": [
+      "directory"
+     ],
+     "timing": "directory_stats",
+     "observe_tree": [
+      {
+       "ptr": "/swarms",
+       "name": "directory_listing"
+      }
+     ],
+     "source": "mycelium_swarm_directory/server.py (GET /swarms/api/v1/swarms); swarm_publish.py:415-424 (POST /stats) @ f4e366e9",
+     "provenance": "RECORDED"
+    }
+   ],
+   "instances": [
+    "owner",
+    "directory"
+   ],
+   "depends_on": "joined-bringup",
+   "requires": [
+    "directory"
+   ]
+  },
+  {
+   "id": "unknown-member-rules",
+   "title": "Unknown member / unknown route refusals are preserved",
+   "claims": [
+    "CL-L3-08"
+   ],
+   "steps": [
+    {
+     "id": "unknown_wrong_code",
+     "who": "member",
+     "op": "http",
+     "path": "/api/join/window",
+     "method": "POST",
+     "status_any": [
+      400,
+      401,
+      403,
+      404,
+      409,
+      423,
+      429
+     ],
+     "body": {
+      "consent": {
+       "peer_visibility": true,
+       "power": "{{member_power}}",
+       "storage_bytes": "{{member_storage_bytes}}",
+       "network": "unmetered_only",
+       "background": false,
+       "diagnostics": false,
+       "thermal": "stop_on_serious"
+      },
+      "standing_consent": {
+       "acknowledged": true,
+       "disclosure_digest": "{{disclosure_digest}}",
+       "caps": {
+        "storage_bytes": "{{member_storage_bytes}}",
+        "max_memory_bytes": "{{member_memory_bytes}}",
+        "max_wall_seconds": "{{member_wall_seconds}}",
+        "max_commands": "{{member_max_commands}}"
+       }
+      },
+      "join": "mycelium-join:AAAA"
+     },
+     "observe": [
+      "/error"
+     ],
+     "source": "mycelium_a13_macos/pairing.py:543-590 (join_code_invalid) @ f4e366e9",
+     "provenance": "RECORDED",
+     "requires": [
+      "fresh_target"
+     ]
+    },
+    {
+     "id": "unknown_relay_route",
+     "who": "owner",
+     "op": "control",
+     "action": "public_get_status",
+     "path": "/other",
+     "source": "mycelium_a13_macos/public_relay.py:96,103 (relay_route_unknown 404; Cookie/Authorization/Transfer-Encoding refused 400 relay_headers_invalid) @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#relay_proxy_unknown_route"
+    },
+    {
+     "id": "unknown_member_window_poll",
+     "who": "owner",
+     "op": "http",
+     "path": "/pairing-window/XXXX/poll",
+     "method": "POST",
+     "auth": false,
+     "status_any": [
+      404
+     ],
+     "source": "public_relay.py:32 @ f4e366e9",
+     "provenance": "EXECUTED:probes/probe-relay-join.out.json#relay_proxy_local_route_probe",
+     "requires": [
+      "relay_proxy_port"
+     ],
+     "client": "relay_proxy"
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup"
+  },
+  {
+   "id": "f3-owner-restart-rereport",
+   "title": "F3: owner-only restart, member capability re-reported without member restart/re-consent",
+   "claims": [
+    "CL-L3-09"
+   ],
+   "steps": [
+    {
+     "id": "f3_owner_only_restart",
+     "who": "owner",
+     "op": "control",
+     "action": "restart_owner",
+     "key": true,
+     "source": "c8aa0528:mycelium_a13_macos/demo_target.py (member reports refresh on owner-incarnation change); L2B-INCIDENTS.md F3 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "f3_relay_restore",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/network/start",
+     "method": "POST",
+     "when": {
+      "relay_mode": "external"
+     },
+     "body": {
+      "relay_acknowledged": true,
+      "max_seconds": "{{relay_max_seconds}}",
+      "provider": "external",
+      "public_origin": "{{relay_public_origin}}",
+      "proxy_port": "{{relay_proxy_port}}"
+     },
+     "expect": [
+      {
+       "ptr": "/state",
+       "eq": "relay_process_running"
+      },
+      {
+       "ptr": "/seed_bound",
+       "eq": true
+      }
+     ],
+     "source": "mycelium_a13_macos/app.py:677-735,789-800 (a restarted owner reopens the SAME external address; retained authority answers on it) @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "f3_owner_start",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/start",
+     "method": "POST",
+     "body": {},
+     "source": "mycelium_a13_macos/app.py:1632-1646 (rebinds the seed; target members get _auto_report) @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "f3_member_settles",
+     "who": "member",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "RelayWindow",
+     "until": [
+      {
+       "ptr": "/demo_target/state",
+       "in": [
+        "idle",
+        "stopped",
+        "joined"
+       ]
+      }
+     ],
+     "trace": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/authority/membership_state"
+     ],
+     "timing": "f3_member_settle",
+     "requires": [
+      "stable_origin"
+     ],
+     "source": "mycelium_a13_macos/demo_target.py:431-459 (a member whose previous slice thread is alive reports cleaning_up for the next run) @ f4e366e9; window 2026-10-28 21:4x: after an owner-only restart + Start + a new demo Start the member stayed cleaning_up for the whole 180 s descriptors budget and the owner run failed two_macs_required; observed 2026-10-29 window: an idle target agent is reported as 'joined' while membership is current (demo_app.py:191-196 target_status)",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "f3_owner_demo_start",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/demo/start",
+     "method": "POST",
+     "body": {},
+     "source": "mycelium_a13_macos/demo_app.py:109-130,owner_status (a restarted owner has no owner_run: status owner_run.state=idle until Start); executed 2026-10-28 window: after restart+network/start+api/start the owner_run stayed idle for 420 s",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin",
+      "public_relay",
+      "model"
+     ]
+    },
+    {
+     "id": "f3_member_pid_unchanged",
+     "who": "member",
+     "op": "control",
+     "action": "assert_pid_unchanged",
+     "source": "L2B-INCIDENTS.md F3 (zero member restarts/reconsents) ",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "f3_owner_serving_again",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "Compile",
+     "until": [
+      {
+       "ptr": "/owner_run/state",
+       "eq": "serving"
+      }
+     ],
+     "key": true,
+     "observe_tree": [
+      {
+       "ptr": "/owner_run",
+       "name": "f3_owner_run"
+      }
+     ],
+     "source": "L2B-INCIDENTS.md F3 GREEN (2 chats, recovered request, reports delivered) ",
+     "provenance": "RECORDED",
+     "requires": [
+      "stable_origin"
+     ],
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ]
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup",
+   "incident": "F3"
+  },
+  {
+   "id": "f5-status-responsive",
+   "title": "F5: status reads stay under the 500 ms discriminator while a run operation is in flight",
+   "claims": [
+    "CL-L3-09"
+   ],
+   "steps": [
+    {
+     "id": "f5_status_during_slow_work",
+     "who": "owner",
+     "op": "assert_latency",
+     "of_step": "owner_serving",
+     "per_poll_budget": "OwnerPoll",
+     "key": true,
+     "source": "68119358:L5-STATUS.md:17-27,42-53 (500 ms loopback discriminator); L2B-INCIDENTS.md F5 ",
+     "provenance": "SOURCE"
+    }
+   ],
+   "instances": [
+    "owner"
+   ],
+   "depends_on": "joined-bringup",
+   "incident": "F5"
+  },
+  {
+   "id": "f14-placement",
+   "title": "F14: owner/member shares fit each consent (owner consent 2 GB variant)",
+   "claims": [
+    "CL-L3-09",
+    "CL-L3-07"
+   ],
+   "steps": [
+    {
+     "id": "f14_shares_fit_consent",
+     "who": "owner",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "key": true,
+     "observe_tree": [
+      {
+       "ptr": "/owner_run",
+       "name": "f14_owner_run"
+      },
+      {
+       "ptr": "/acquisition",
+       "name": "f14_acq"
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/owner_run/state",
+       "eq": "serving"
+      }
+     ],
+     "source": "d42e4100:mycelium_a13_macos/layer_split.py; L2B-INCIDENTS.md F14 (owner share 2,227,449,134 > 2,000,000,000 refused; fixed shares 1,997,798,421/1,735,338,491)  | trigger pair for Qwen2.5-0.5B (a9-route, owner 48 GiB, member 16 GiB, member consent 2 GB): owner consent 1,110,000,000 B (>= owner_storage_requirement 1,099,564,539 so the owner pre-check passes, < the 23-layer owner share max_disk 1,132,496,359): 2596efc0 keeps the 23-layer split, f4e366e9 re-partitions to 22 layers (1,099,689,114). Executed with the oracle code (model_resources.plan_for_members), see L3C-evidence/probes/f14_pair_probe.py",
+     "provenance": "SOURCE"
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup",
+   "incident": "F14"
+  },
+  {
+   "id": "f15-member-deadline",
+   "title": "F15: member 600 s wall bounds the worker; automatic rollover keeps service",
+   "claims": [
+    "CL-L3-09",
+    "CL-L3-07"
+   ],
+   "steps": [
+    {
+     "id": "f15_wait_first_rollover",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "RelayWindow",
+     "requires": [
+      "long"
+     ],
+     "until": [
+      {
+       "ptr": "/owner_run/rollover/state",
+       "in": [
+        "switching",
+        "backoff"
+       ]
+      }
+     ],
+     "key": true,
+     "observe_tree": [
+      {
+       "ptr": "/owner_run/rollover",
+       "name": "f15_rollover"
+      }
+     ],
+     "source": "57e8d356:mycelium_a13_macos/demo_chain.py (member consented wall bounds worker deadline); chat.py:492 rollover.state; L2B-INCIDENTS.md F15 ",
+     "provenance": "SOURCE",
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ]
+    },
+    {
+     "id": "f15_serving_after_rollover",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "Compile",
+     "requires": [
+      "long"
+     ],
+     "until": [
+      {
+       "ptr": "/owner_run/state",
+       "eq": "serving"
+      }
+     ],
+     "key": true,
+     "source": "L2B-INCIDENTS.md F15 GREEN (3 chats, 2 automatic rollovers) ",
+     "provenance": "SOURCE",
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ]
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup",
+   "incident": "F15",
+   "requires": [
+    "long"
+   ]
+  },
+  {
+   "id": "f15b-owner-local-deadline",
+   "title": "F15b: owner worker is not clamped to the 60 s unknown-member fallback",
+   "claims": [
+    "CL-L3-09",
+    "CL-L3-07"
+   ],
+   "steps": [
+    {
+     "id": "f15b_wait_beyond_unknown_member_fallback",
+     "who": "owner",
+     "op": "sleep",
+     "budget": "WorkerStartup",
+     "times": 3,
+     "requires": [
+      "long"
+     ],
+     "source": "L2B-INCIDENTS.md F15b (fallback 60 s must not govern the owner worker) ",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "f15b_owner_worker_still_serving",
+     "who": "owner",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "key": true,
+     "observe_tree": [
+      {
+       "ptr": "/owner_run",
+       "name": "f15b_owner_run"
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/owner_run/state",
+       "eq": "serving"
+      }
+     ],
+     "source": "2513f28a:mycelium_a13_macos/demo_chain.py (owner-local proposal); L2B-INCIDENTS.md F15b ",
+     "provenance": "SOURCE"
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup",
+   "incident": "F15b",
+   "requires": [
+    "long"
+   ]
+  },
+  {
+   "id": "owner-restart-persist",
+   "title": "Owner restart keeps the joined member and re-binds the relay",
+   "claims": [
+    "CL-L3-05"
+   ],
+   "steps": [
+    {
+     "id": "owner_full_restart",
+     "who": "owner",
+     "op": "control",
+     "action": "restart_owner",
+     "source": "L3-JOURNEYS.md restart; app.py:1815-1863 ",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "owner_restart_relay_restore",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/network/start",
+     "method": "POST",
+     "when": {
+      "relay_mode": "external"
+     },
+     "body": {
+      "relay_acknowledged": true,
+      "max_seconds": "{{relay_max_seconds}}",
+      "provider": "external",
+      "public_origin": "{{relay_public_origin}}",
+      "proxy_port": "{{relay_proxy_port}}"
+     },
+     "expect": [
+      {
+       "ptr": "/state",
+       "eq": "relay_process_running"
+      }
+     ],
+     "source": "mycelium_a13_macos/app.py:677-735 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "owner_restart_start",
+     "who": "owner",
+     "op": "http",
+     "path": "/api/start",
+     "method": "POST",
+     "body": {},
+     "source": "mycelium_a13_macos/app.py:1632-1646 @ f4e366e9",
+     "provenance": "SOURCE",
+     "requires": [
+      "stable_origin"
+     ]
+    },
+    {
+     "id": "owner_restart_member_preserved",
+     "who": "owner",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/authority/membership_state",
+       "eq": "current"
+      }
+     ],
+     "observe_tree": [
+      {
+       "ptr": "/swarm",
+       "name": "restart_owner_swarm"
+      }
+     ],
+     "source": "app.py:1632-1646 (/api/start rebinds seed) ",
+     "provenance": "RECORDED",
+     "requires": [
+      "stable_origin"
+     ],
+     "trace": [
+      "/owner_run/state",
+      "/owner_run/step",
+      "/owner_run/error_code",
+      "/owner_run/failed_step",
+      "/acquisition_policy_error",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/demo_target/state",
+      "/demo_target/detail"
+     ],
+     "fail_when": [
+      {
+       "ptr": "/owner_run/state",
+       "in": [
+        "failed",
+        "failing"
+       ]
+      }
+     ],
+     "trace_who": "member",
+     "trace_remote": [
+      "/demo_target/state",
+      "/demo_target/detail",
+      "/resource_observation/power",
+      "/resource_observation/network",
+      "/resource_observation/thermal",
+      "/authority/membership_state"
+     ]
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup"
+  },
+  {
+   "id": "member-leave",
+   "title": "Smooth leave of the joined member; owner sees it",
+   "claims": [
+    "CL-L3-05"
+   ],
+   "steps": [
+    {
+     "id": "member_leave_smooth",
+     "who": "member",
+     "op": "http",
+     "path": "/api/leave",
+     "method": "POST",
+     "body": {
+      "mode": "smooth",
+      "confirm": true
+     },
+     "observe": [
+      "/state"
+     ],
+     "source": "mycelium_a13_macos/member_leave.py:278-302 @ f4e366e9",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "member_left",
+     "who": "member",
+     "op": "poll",
+     "method": "GET",
+     "path": "/api/status",
+     "budget": "WorkerStartup",
+     "until": [
+      {
+       "ptr": "/leave/state",
+       "eq": "left"
+      }
+     ],
+     "expect": [
+      {
+       "ptr": "/leave/mode",
+       "eq": "smooth"
+      },
+      {
+       "ptr": "/leave/fallback",
+       "eq": null
+      }
+     ],
+     "observe": [
+      "/leave/state",
+      "/leave/mode",
+      "/leave/handoff"
+     ],
+     "source": "test-support/journeys/src/boundaries.rs:21-37 (validate_leave) ",
+     "provenance": "SOURCE"
+    },
+    {
+     "id": "owner_view_after_member_leave",
+     "who": "owner",
+     "op": "http",
+     "method": "GET",
+     "path": "/api/status",
+     "observe": [
+      "/authority/member_count",
+      "/authority/membership_state"
+     ],
+     "observe_tree": [
+      {
+       "ptr": "/authority/members",
+       "name": "after_leave_owner_members"
+      }
+     ],
+     "source": "mycelium_a13_macos/member_leave.py:16-18 @ f4e366e9 (a member cannot sign a seed-side revocation of itself; the owner sees the loss through lease expiry / control loss); observed 2026-10-29 window: member_count did not drop within 30 s of the leave, so the step records the owner's view instead of waiting for a drop",
+     "provenance": "EXECUTED:window-runs/window-20261029T022019 (owner_sees_member_gone deadline_after_44_polls, member_count stayed above 2)"
+    }
+   ],
+   "instances": [
+    "owner",
+    "member"
+   ],
+   "depends_on": "joined-bringup"
+  }
+ ],
+ "sessions": [
+  {
+   "id": "rehearsal-loopback",
+   "target": "certified",
+   "expect": "green",
+   "scenarios": [
+    "relay-window",
+    "loopback-offline-refusal"
+   ]
+  },
+  {
+   "id": "unjoined",
+   "target": "certified",
+   "expect": "green",
+   "scenarios": [
+    "fresh-4gb-default",
+    "saved-2gb-cross-version"
+   ]
+  },
+  {
+   "id": "certified-joined",
+   "target": "certified",
+   "expect": "green",
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "stage-observations",
+    "chat-sse-cancel",
+    "directory-stats",
+    "unknown-member-rules",
+    "f3-owner-restart-rereport",
+    "f5-status-responsive",
+    "owner-restart-persist",
+    "member-leave"
+   ]
+  },
+  {
+   "id": "certified-joined-long",
+   "target": "certified",
+   "expect": "green",
+   "requires": [
+    "long"
+   ],
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f15-member-deadline",
+    "f15b-owner-local-deadline"
+   ]
+  },
+  {
+   "id": "certified-f14-2gb",
+   "overrides": {
+    "owner_storage_bytes": 2000000000
+   },
+   "target": "certified",
+   "expect": "green",
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f14-placement"
+   ]
+  },
+  {
+   "id": "red-f3-f5",
+   "target": "v013",
+   "expect": "red",
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f3-owner-restart-rereport",
+    "f5-status-responsive"
+   ],
+   "overrides": {
+    "model_choice": "qwen3-0.6b"
+   }
+  },
+  {
+   "id": "red-f14",
+   "overrides": {
+    "owner_storage_bytes": 2000000000
+   },
+   "target": "hist-2596efc0",
+   "expect": "red",
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f14-placement"
+   ]
+  },
+  {
+   "id": "red-f15",
+   "target": "hist-5e88fe75",
+   "expect": "red",
+   "requires": [
+    "long"
+   ],
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f15-member-deadline"
+   ]
+  },
+  {
+   "id": "red-f15b",
+   "target": "hist-076ffaa4",
+   "expect": "red",
+   "requires": [
+    "long"
+   ],
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f15b-owner-local-deadline"
+   ]
+  },
+  {
+   "id": "green-52d1b69f",
+   "target": "hist-52d1b69f",
+   "expect": "green",
+   "requires": [
+    "long",
+    "extra"
+   ],
+   "scenarios": [
+    "relay-window",
+    "joined-bringup",
+    "f3-owner-restart-rereport",
+    "f14-placement",
+    "f15-member-deadline",
+    "f15b-owner-local-deadline"
+   ]
+  }
+ ]
+}

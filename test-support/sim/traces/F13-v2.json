@@ -1,0 +1,290 @@
+{
+  "schema_version": 2,
+  "build_id": "sha256:67eb23cca6807d0009eeed18571e588dfd2313b23c797aeedf8ad81f34850feb",
+  "cargo_lock_sha256": "fc4ad41d8a28a63f1ddb839015569d96c4565d1185cc6cf7f4043b91ce88b4a0",
+  "simulator_version": "mycelium-sim-v2",
+  "prng_version": "splitmix64-keyed-v1",
+  "seed": 17,
+  "config": {
+    "incident": "F13",
+    "mode": "Historical",
+    "rollovers": 2,
+    "close_multiplier": 1,
+    "owner_local_allowed": true,
+    "member_granted": true,
+    "authority_until_ms": 86400000
+  },
+  "profile_id": "section7-policy-model-v1-NOT-MEASURED",
+  "profile_snapshot": "section7-policy-model-v1-NOT-MEASURED",
+  "budget_snapshot": {
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "QuickRelayMaximumWindow": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/app.py:704 @ f5bfb709\")"
+    },
+    "RelayGrantedWindowCap": {
+      "value": "Duration(Span(86400000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:285 @ f5bfb709\")"
+    },
+    "RelayMinimumWindow": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:324 @ f5bfb709\")"
+    },
+    "RelayRenewalLead": {
+      "value": "Duration(Span(60000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:287 @ f5bfb709\")"
+    },
+    "RelayWindow": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:322 @ f5bfb709\")"
+    },
+    "RenewalDivisor": {
+      "value": "Count(Entries(3))",
+      "unit": "entries",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:395 @ f5bfb709\")"
+    }
+  },
+  "corrected_budget_snapshot": {
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "QuickRelayMaximumWindow": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/app.py:704 @ f5bfb709\")"
+    },
+    "RelayGrantedWindowCap": {
+      "value": "Duration(Span(86400000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:285 @ f5bfb709\")"
+    },
+    "RelayMinimumWindow": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:324 @ f5bfb709\")"
+    },
+    "RelayRenewalLead": {
+      "value": "Duration(Span(60000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:287 @ f5bfb709\")"
+    },
+    "RelayWindow": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:322 @ f5bfb709\")"
+    },
+    "RenewalDivisor": {
+      "value": "Count(Entries(3))",
+      "unit": "entries",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/public_relay.py:395 @ f5bfb709\")"
+    }
+  },
+  "corrected_outcome": {
+    "metrics": {
+      "closed_at_ms": 83580000,
+      "granted_ms": 86400000,
+      "process_starts": 1,
+      "renewals": 47,
+      "requests_after_first_window": 47,
+      "url_changes": 0
+    },
+    "transitions": {
+      "chat_success": 49,
+      "cross_window_request": 1,
+      "relay_close": 1,
+      "relay_start": 1,
+      "renewal_attempt": 48,
+      "start_attempt": 1
+    },
+    "log": [
+      "0:start_attempt",
+      "0:relay_start",
+      "0:chat_success",
+      "1740000:renewal_attempt",
+      "1740500:chat_success",
+      "1800500:cross_window_request",
+      "1800500:chat_success",
+      "3480000:renewal_attempt",
+      "3480500:chat_success",
+      "5220000:renewal_attempt",
+      "5220500:chat_success",
+      "6960000:renewal_attempt",
+      "6960500:chat_success",
+      "8700000:renewal_attempt",
+      "8700500:chat_success",
+      "10440000:renewal_attempt",
+      "10440500:chat_success",
+      "12180000:renewal_attempt",
+      "12180500:chat_success",
+      "13920000:renewal_attempt",
+      "13920500:chat_success",
+      "15660000:renewal_attempt",
+      "15660500:chat_success",
+      "17400000:renewal_attempt",
+      "17400500:chat_success",
+      "19140000:renewal_attempt",
+      "19140500:chat_success",
+      "20880000:renewal_attempt",
+      "20880500:chat_success",
+      "22620000:renewal_attempt",
+      "22620500:chat_success",
+      "24360000:renewal_attempt",
+      "24360500:chat_success",
+      "26100000:renewal_attempt",
+      "26100500:chat_success",
+      "27840000:renewal_attempt",
+      "27840500:chat_success",
+      "29580000:renewal_attempt",
+      "29580500:chat_success",
+      "31320000:renewal_attempt",
+      "31320500:chat_success",
+      "33060000:renewal_attempt",
+      "33060500:chat_success",
+      "34800000:renewal_attempt",
+      "34800500:chat_success",
+      "36540000:renewal_attempt",
+      "36540500:chat_success",
+      "38280000:renewal_attempt",
+      "38280500:chat_success",
+      "40020000:renewal_attempt",
+      "40020500:chat_success",
+      "41760000:renewal_attempt",
+      "41760500:chat_success",
+      "43500000:renewal_attempt",
+      "43500500:chat_success",
+      "45240000:renewal_attempt",
+      "45240500:chat_success",
+      "46980000:renewal_attempt",
+      "46980500:chat_success",
+      "48720000:renewal_attempt",
+      "48720500:chat_success",
+      "50460000:renewal_attempt",
+      "50460500:chat_success",
+      "52200000:renewal_attempt",
+      "52200500:chat_success",
+      "53940000:renewal_attempt",
+      "53940500:chat_success",
+      "55680000:renewal_attempt",
+      "55680500:chat_success",
+      "57420000:renewal_attempt",
+      "57420500:chat_success",
+      "59160000:renewal_attempt",
+      "59160500:chat_success",
+      "60900000:renewal_attempt",
+      "60900500:chat_success",
+      "62640000:renewal_attempt",
+      "62640500:chat_success",
+      "64380000:renewal_attempt",
+      "64380500:chat_success",
+      "66120000:renewal_attempt",
+      "66120500:chat_success",
+      "67860000:renewal_attempt",
+      "67860500:chat_success",
+      "69600000:renewal_attempt",
+      "69600500:chat_success",
+      "71340000:renewal_attempt",
+      "71340500:chat_success",
+      "73080000:renewal_attempt",
+      "73080500:chat_success",
+      "74820000:renewal_attempt",
+      "74820500:chat_success",
+      "76560000:renewal_attempt",
+      "76560500:chat_success",
+      "78300000:renewal_attempt",
+      "78300500:chat_success",
+      "80040000:renewal_attempt",
+      "80040500:chat_success",
+      "81780000:renewal_attempt",
+      "81780500:chat_success",
+      "83520000:renewal_attempt",
+      "83580000:relay_close"
+    ],
+    "starts": 1,
+    "served": 49,
+    "rollovers": 0,
+    "successful_chats": 49,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  },
+  "execution_pin": "[{\"incident\":\"F13\",\"mode\":\"Historical\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":86400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "corrected_execution_pin": "[{\"incident\":\"F13\",\"mode\":\"Corrected\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":86400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "commands": [
+    {
+      "at_ms": 0,
+      "task": 1,
+      "command": "Begin"
+    }
+  ],
+  "expected_failure": [
+    "quick_relay_expired_while_serving"
+  ],
+  "expected_outcome": {
+    "metrics": {
+      "closed_at_ms": 1800000,
+      "granted_ms": 1800000,
+      "process_starts": 1,
+      "relay_service_losses": 1,
+      "renewals": 0,
+      "url_changes": 0
+    },
+    "transitions": {
+      "chat_success": 1,
+      "cross_window_request": 1,
+      "relay_close": 1,
+      "relay_start": 1,
+      "renewal_attempt": 1,
+      "start_attempt": 1
+    },
+    "log": [
+      "0:start_attempt",
+      "0:relay_start",
+      "0:chat_success",
+      "1740000:renewal_attempt",
+      "1800000:relay_close",
+      "1800500:cross_window_request"
+    ],
+    "starts": 1,
+    "served": 1,
+    "rollovers": 0,
+    "successful_chats": 1,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  }
+}

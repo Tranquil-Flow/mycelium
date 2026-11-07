@@ -1,0 +1,875 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Production ownership: one CLIENT journal per seed, fresh factory per run.
+use super::*;
+use api::managed_carrier::{HostClock, LocalMailboxCarrier};
+use api::observation_host::{ObservationBackend, VerifiedObservationHost};
+use budgets::{MonoInstant, Span};
+use control_runtime::mailbox::{Limits, Mailbox, StagePolicy, StagePublication};
+use runtime::{
+    managed_owner::{
+        ManagedControlOwner, OwnerError, OwnerHost,
+        session::{CallFence, ManagedSessionFactory, SessionHost, SharedManagedOwner},
+    },
+    observe::{HelloSessions, ObservationContext, ObservationError, Offer},
+    observe_owner::ObserveAdapter,
+};
+use std::sync::{MutexGuard, Weak};
+use transport::Clock;
+#[path = "observation/target.rs"]
+pub(super) mod target;
+#[cfg(test)]
+#[path = "observation_tests.rs"]
+mod tests;
+
+type OResult<T> = Result<T, OwnerError>;
+fn owner_error(error: control_runtime::Error) -> OwnerError {
+    match error {
+        control_runtime::Error::Refused(code) => OwnerError(code),
+        _ => OwnerError("managed_mailbox_unavailable"),
+    }
+}
+fn observe(error: OwnerError) -> ObservationError {
+    ObservationError::new(error.0)
+}
+fn locked<T>(m: &Mutex<T>) -> OResult<MutexGuard<'_, T>> {
+    m.lock().map_err(|_| OwnerError("managed_host_unavailable"))
+}
+fn managed_time_limits() -> OResult<protocol::TimeLimits> {
+    let seconds = |id: BudgetId| {
+        id.span(Entries::ZERO)
+            .map(|v| v.millis() as f64 / 1000.0)
+            .map_err(|_| OwnerError("budget_unavailable"))
+    };
+    Ok(protocol::TimeLimits {
+        max_ttl_seconds: seconds(BudgetId::ControlTtl)?,
+        clock_skew_seconds: seconds(BudgetId::ControlClockSkew)?,
+    })
+}
+fn nonce() -> OResult<String> {
+    random(16)
+        .map(|b| hex(&b))
+        .map_err(|_| OwnerError("managed_control_entropy_unavailable"))
+}
+
+pub(super) type Adapter =
+    ObserveAdapter<VerifiedObservationHost<Backend>, fn() -> f64, fn() -> String>;
+pub(super) fn adapter(core: Weak<Mutex<Core>>) -> Adapter {
+    ObserveAdapter::new(
+        VerifiedObservationHost {
+            backend: Backend {
+                core,
+                published: BTreeMap::new(),
+            },
+        },
+        now,
+        || nonce().unwrap_or_default(),
+    )
+}
+pub(super) struct Backend {
+    core: Weak<Mutex<Core>>,
+    // Live effect handles only; durable truth stays in the actual mailbox.
+    published: BTreeMap<String, Offer>,
+}
+/// Only weak authority references; the immutable signer is not authority.
+#[derive(Clone)]
+struct PinnedHost {
+    core: Weak<Mutex<Core>>,
+    seed: Weak<SeedRuntime>,
+    clock: HostClock,
+    signer: Arc<Identity>,
+}
+impl PinnedHost {
+    fn pin(&self) -> OResult<Arc<SeedRuntime>> {
+        let core = self
+            .core
+            .upgrade()
+            .ok_or(OwnerError("managed_owner_closed"))?;
+        let seed = self
+            .seed
+            .upgrade()
+            .ok_or(OwnerError("managed_owner_closed"))?;
+        {
+            let core = locked(&core)?;
+            if !core.running
+                || core.target
+                || !core.seed.as_ref().is_some_and(|s| Arc::ptr_eq(s, &seed))
+            {
+                return Err(OwnerError("managed_owner_closed"));
+            }
+        }
+        if *locked(&seed.managed_closed)? {
+            return Err(OwnerError("managed_owner_closed"));
+        }
+        Ok(seed)
+    }
+    fn member(&self, node: &str) -> OResult<Value> {
+        let seed = self.pin()?;
+        let descriptor = seed
+            .coordinator
+            .with_current_member(node, |m, now| {
+                if !matches!(
+                    m["lifecycle_state"].as_str(),
+                    Some("NEW" | "CONFIGURED" | "RUNNING")
+                ) || m["lease_expires_at"].as_f64().is_none_or(|end| now >= end)
+                {
+                    return Err(seed::SeedError::new("managed_control_member_stale"));
+                }
+                Ok(m.clone())
+            })
+            .map_err(|_| OwnerError("managed_control_member_stale"))?;
+        self.pin()?;
+        Ok(descriptor)
+    }
+    /// Core is never held through coordinator, mailbox or transport operations.
+    /// Fresh binding is synchronized only under CURRENT coordinator authority.
+    fn guarded<T>(
+        &self,
+        node: &str,
+        run: &Value,
+        deployment: &Value,
+        f: impl FnOnce(&mut Mailbox, &Value, f64) -> OResult<T>,
+    ) -> OResult<T> {
+        let seed = self.pin()?;
+        // Reuse the actual RunExchange report, not a second semantic journal.
+        // Descriptor crypto and all snapshot preparation precede authority guard.
+        let card = seed.exchange.reports()[node]["descriptor"].clone();
+        let discovery = run == "stage-discovery" && deployment == "stage-discovery";
+        if !discovery
+            && (card["statement"]["run_id"] != *run
+                || card["statement"]["deployment_id"] != *deployment)
+        {
+            return Err(OwnerError("managed_control_run_binding_mismatch"));
+        }
+        let snapshot = self.member(node)?;
+        api::installation_descriptor::verify_installation_descriptor(
+            &card,
+            &snapshot,
+            seed.coordinator.swarm_id(),
+            card["statement"]["run_id"]
+                .as_str()
+                .ok_or(OwnerError("managed_control_run_invalid"))?,
+            card["statement"]["deployment_id"]
+                .as_str()
+                .ok_or(OwnerError("managed_control_deployment_invalid"))?,
+            self.wall_seconds(),
+        )
+        .map_err(|_| OwnerError("managed_control_descriptor_unavailable"))?;
+        let expected = binding(&snapshot, run, deployment)?;
+        let key = card["verification_key"].clone();
+        let result = {
+            let closed = locked(&seed.managed_closed)?;
+            if *closed {
+                return Err(OwnerError("managed_owner_closed"));
+            }
+            let managed = locked(&seed.managed)?
+                .as_ref()
+                .cloned()
+                .ok_or(OwnerError("managed_owner_unavailable"))?;
+            seed.coordinator
+                .with_current_member(node, |current, now| {
+                    let effect = (|| {
+                        if !matches!(
+                            current["lifecycle_state"].as_str(),
+                            Some("NEW" | "CONFIGURED" | "RUNNING")
+                        ) || current["lease_expires_at"]
+                            .as_f64()
+                            .is_none_or(|end| now >= end)
+                        {
+                            return Err(OwnerError("managed_control_member_stale"));
+                        }
+                        let binding = binding(current, run, deployment)?;
+                        if binding != expected {
+                            return Err(OwnerError("managed_control_member_stale"));
+                        }
+                        let mut mailbox = locked(&managed.mailbox)?;
+                        mailbox
+                            .bind_member(
+                                &binding,
+                                &key,
+                                current["lease_expires_at"]
+                                    .as_f64()
+                                    .ok_or(OwnerError("managed_control_member_stale"))?,
+                            )
+                            .map_err(owner_error)?;
+                        f(&mut mailbox, &binding, now)
+                    })();
+                    Ok(effect)
+                })
+                .map_err(|_| OwnerError("managed_control_member_stale"))??
+        };
+        self.pin()?;
+        Ok(result)
+    }
+    fn raw(&self, prepared: &Value, end: MonoInstant, fence: Option<&CallFence>) -> OResult<Value> {
+        let seed = self.pin()?;
+        let managed = locked(&seed.managed)?
+            .as_ref()
+            .cloned()
+            .ok_or(OwnerError("managed_owner_unavailable"))?;
+        let statement = &prepared["envelope"]["statement"];
+        let node = statement["target_node_id"]
+            .as_str()
+            .ok_or(OwnerError("managed_control_member_stale"))?;
+        let expected = binding(
+            &self.member(node)?,
+            &statement["run_id"],
+            &statement["deployment_id"],
+        )?;
+        if expected
+            .as_object()
+            .ok_or(OwnerError("managed_control_member_stale"))?
+            .iter()
+            .any(|(k, v)| statement[k] != *v)
+        {
+            return Err(OwnerError("managed_control_member_stale"));
+        }
+        let bytes = protocol::canonical::to_bytes(&prepared["envelope"])
+            .map_err(|_| OwnerError("managed_control_json_invalid"))?;
+        let reply = managed.carrier.call(&self.clock, &bytes, end, fence)?;
+        self.pin()?;
+        if binding(
+            &self.member(node)?,
+            &statement["run_id"],
+            &statement["deployment_id"],
+        )? != expected
+        {
+            return Err(OwnerError("managed_control_member_stale"));
+        }
+        protocol::strict::object(&reply, protocol::managed::MAX_FRAME_BYTES)
+            .map_err(|_| OwnerError("managed_control_json_invalid"))
+    }
+}
+fn binding(member: &Value, run: &Value, deployment: &Value) -> OResult<Value> {
+    let b = json!({"target_node_id":member["node_id"], "target_endpoint_id":member["endpoint_id"],
+        "target_key_digest":member["verification_key_digest"], "membership_generation":member["generation"],
+        "member_incarnation":member["incarnation"], "run_id":run, "deployment_id":deployment});
+    protocol::managed::validate_binding(&b).map_err(OwnerError::from)?;
+    Ok(b)
+}
+type Factory = Box<dyn Fn() -> OResult<PinnedHost> + Send + Sync>;
+/// Seed-owned capabilities. No Runner, Core, or temporary ports are retained.
+pub(super) struct Managed {
+    owner: Arc<SharedManagedOwner<Factory>>,
+    mailbox: Arc<Mutex<Mailbox>>,
+    carrier: LocalMailboxCarrier,
+    wake: Arc<target::Wake>,
+}
+impl Managed {
+    pub(super) fn close(&self) -> OResult<()> {
+        self.carrier.revoke();
+        // This releases the durable journal lock, NEVER claims remote Stop.
+        let owner = self.owner.close();
+        let carrier = self.carrier.close();
+        owner.and(carrier)
+    }
+}
+fn limits() -> OResult<Limits> {
+    Ok(Limits {
+        pending: BudgetId::PyMyceliumA13MacosManagedControlMaxPendingCommandsL106
+            .count()
+            .map_err(|_| OwnerError("budget_unavailable"))?,
+        active_control: active_control()?,
+        active_work: active_work()?,
+    })
+}
+fn policy() -> OResult<StagePolicy> {
+    Ok(StagePolicy {
+        preposition_file_bytes: BudgetId::PyUpperGuardMyceliumA13MacosManagedOffersL58C52
+            .bytes()
+            .map_err(|_| OwnerError("budget_unavailable"))?,
+        path_characters: path_characters()?,
+    })
+}
+// Exact f4e366e9 semantic Count producers (L1b r25); no unrelated aliases.
+fn active_control() -> OResult<Entries> {
+    BudgetId::PyManagedControlMaxActiveControl
+        .count()
+        .map_err(|_| OwnerError("budget_unavailable"))
+}
+fn active_work() -> OResult<Entries> {
+    BudgetId::PyManagedControlMaxActiveWork
+        .count()
+        .map_err(|_| OwnerError("budget_unavailable"))
+}
+fn path_characters() -> OResult<Entries> {
+    BudgetId::PyStagePrepositionPathCharacters
+        .count()
+        .map_err(|_| OwnerError("budget_unavailable"))
+}
+
+impl Backend {
+    pub(super) fn teardown(&mut self) -> Result<(), String> {
+        let mut first = None;
+        for offer in self.published.values().cloned().collect::<Vec<_>>() {
+            let result = self.request_stage_cleanup(&offer).and_then(|()| {
+                if let Some(core) = self.core.upgrade() {
+                    target::close(&core).map_err(observe)?;
+                }
+                self.retire_offer(&offer)
+            });
+            match result {
+                Ok(_) => {
+                    self.published.remove(&offer.offer_id);
+                }
+                Err(error) => {
+                    if first.is_none() {
+                        first = Some(error.0);
+                    }
+                }
+            }
+        }
+        first.map_or(Ok(()), Err)
+    }
+    fn host(&self) -> OResult<PinnedHost> {
+        let core = self
+            .core
+            .upgrade()
+            .ok_or(OwnerError("managed_owner_closed"))?;
+        let seed = {
+            let core = locked(&core)?;
+            core.seed
+                .clone()
+                .ok_or(OwnerError("managed_owner_closed"))?
+        };
+        let host = PinnedHost {
+            core: self.core.clone(),
+            seed: Arc::downgrade(&seed),
+            clock: seed.clock.clone(),
+            signer: seed.coordinator.shared_signer(),
+        };
+        host.pin()?;
+        Ok(host)
+    }
+    fn managed(&self, host: &PinnedHost) -> OResult<Arc<Managed>> {
+        let seed = host.pin()?;
+        // This is a creation lock, not the Core or the publication lock.
+        let _creation = locked(&seed.managed_init)?;
+        host.pin()?;
+        if let Some(managed) = locked(&seed.managed)?.as_ref() {
+            return Ok(managed.clone());
+        }
+        fs::create_dir_all(&seed.managed_path)
+            .map_err(|_| OwnerError("managed_mailbox_unavailable"))?;
+        fs::set_permissions(
+            &seed.managed_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .map_err(|_| OwnerError("managed_mailbox_unavailable"))?;
+        let sqlite_busy =
+            BudgetId::PyMyceliumA13MacosManagedControlManagedcontrolmailboxConnectTimeoutL823
+                .span(Entries::ZERO)
+                .map_err(|_| OwnerError("budget_unavailable"))?;
+        let store = control_runtime::Store::open_with_policy(
+            &seed.managed_path.join("mailbox.sqlite"),
+            None,
+            sqlite_busy,
+        )
+        .map_err(owner_error)?;
+        let mailbox = Arc::new(Mutex::new(
+            Mailbox::new_shared(
+                store,
+                seed.coordinator.shared_signer(),
+                seed.coordinator.swarm_id(),
+                seed.coordinator.seed_node_id(),
+                limits()?,
+            )
+            .map_err(owner_error)?
+            .with_stage_policy(policy()?)
+            .map_err(owner_error)?,
+        ));
+        let journal = ManagedControlOwner::open(
+            &seed.managed_path.join("owner"),
+            &host.signer,
+            seed.coordinator.swarm_id(),
+            seed.coordinator.seed_node_id(),
+            runtime::managed_owner::Limits::registered()?,
+        )?;
+        let weak_host = host.clone();
+        let factory: Factory = Box::new(move || {
+            weak_host.pin()?;
+            Ok(weak_host.clone())
+        });
+        let owner = SharedManagedOwner::new(journal, factory);
+        let wake = Arc::new(target::Wake::default());
+        let dispatch_wake = wake.clone();
+        let dispatch_host = host.clone();
+        let carrier = LocalMailboxCarrier::start(move |raw| {
+            let value = protocol::strict::object(raw, protocol::managed::MAX_FRAME_BYTES)
+                .map_err(|_| OwnerError("invalid_control_call"))?;
+            let statement = &value["statement"];
+            let node = statement["target_node_id"]
+                .as_str()
+                .ok_or(OwnerError("invalid_control_call"))?;
+            // Entropy and parsing happen before the coordinator transaction.
+            let token = nonce()?;
+            let result = dispatch_host.guarded(
+                node,
+                &statement["run_id"],
+                &statement["deployment_id"],
+                |mailbox, _, now| {
+                    if statement["protocol"]
+                        .as_str()
+                        .is_some_and(|p| p.starts_with("mycelium.managed_stage_"))
+                    {
+                        mailbox.dispatch_stage(raw, || now).map_err(owner_error)
+                    } else {
+                        mailbox
+                            .dispatch(raw, || now, || Ok(token))
+                            .map_err(owner_error)
+                    }
+                },
+            );
+            if statement["protocol"] == "mycelium.managed_control.owner_command.v1" {
+                dispatch_wake.notify()?;
+            }
+            result
+        })?;
+        host.pin()?;
+        let managed = Arc::new(Managed {
+            owner,
+            mailbox,
+            carrier,
+            wake,
+        });
+        {
+            let closed = locked(&seed.managed_closed)?;
+            if *closed {
+                return Err(OwnerError("managed_owner_closed"));
+            }
+            *locked(&seed.managed)? = Some(managed.clone());
+        }
+        host.pin()?;
+        Ok(managed)
+    }
+    fn offer_effect<T>(
+        &self,
+        offer: &Offer,
+        f: impl FnOnce(&mut Mailbox, f64) -> OResult<T>,
+    ) -> OResult<T> {
+        let node = offer.raw["target_node_id"]
+            .as_str()
+            .ok_or(OwnerError("offer_fields_invalid"))?;
+        self.host()?.guarded(
+            node,
+            &offer.raw["run_id"],
+            &offer.raw["deployment_id"],
+            |mailbox, _, now| f(mailbox, now),
+        )
+    }
+}
+impl Clock for PinnedHost {
+    fn monotonic(&self) -> MonoInstant {
+        self.clock.monotonic()
+    }
+    fn wall_seconds(&self) -> f64 {
+        self.clock.wall_seconds()
+    }
+}
+impl OwnerHost for PinnedHost {
+    fn check_local(&self) -> OResult<()> {
+        self.pin().map(drop)
+    }
+    fn signer(&self) -> &Identity {
+        &self.signer
+    }
+    fn nonce(&mut self) -> OResult<String> {
+        self.pin()?;
+        nonce()
+    }
+    fn current_member(&mut self, node: &str) -> OResult<Value> {
+        self.member(node)
+    }
+    fn exchange(&mut self, prepared: &Value, end: MonoInstant) -> OResult<Value> {
+        self.raw(prepared, end, None)
+    }
+    fn wait(&mut self, allowance: Span, end: MonoInstant) -> OResult<()> {
+        self.pin()?;
+        let remaining = end
+            .remaining(self.monotonic())
+            .map_err(|_| OwnerError("managed_control_timeout"))?;
+        thread::sleep(Duration::from_millis(allowance.min(remaining).millis()));
+        self.pin().map(drop)
+    }
+}
+impl SessionHost for PinnedHost {
+    fn exchange_fenced(
+        &mut self,
+        prepared: &Value,
+        end: MonoInstant,
+        fence: &CallFence,
+    ) -> OResult<Value> {
+        fence.check()?;
+        self.raw(prepared, end, Some(fence))
+    }
+    fn wait_fenced(&mut self, allowance: Span, end: MonoInstant, fence: &CallFence) -> OResult<()> {
+        self.pin()?;
+        let remaining = end
+            .remaining(self.monotonic())
+            .map_err(|_| OwnerError("managed_control_timeout"))?;
+        fence.wait_for(allowance.min(remaining))?;
+        self.pin().map(drop)
+    }
+}
+fn read_offer(
+    host: &PinnedHost,
+    signer: &Identity,
+    member: &Value,
+    offer_id: Option<&str>,
+    offset: u64,
+) -> OResult<Value> {
+    let seed = host.pin()?;
+    let scope = binding(member, &json!("stage-discovery"), &json!("stage-discovery"))?;
+    let mut statement = scope.clone();
+    let now = host.wall_seconds();
+    let ttl = BudgetId::PyQuantityMyceliumA13MacosManagedOffersL371C28
+        .span(Entries::ZERO)
+        .map_err(|_| OwnerError("budget_unavailable"))?;
+    let request_id = nonce()?;
+    for (k, v) in
+        json!({"protocol":"mycelium.managed_stage_read.v1", "swarm_id":seed.coordinator.swarm_id(),
+        "request_id":request_id, "sequence":1, "nonce":nonce()?, "issued_at":now,
+        "expires_at":now+ttl.millis() as f64/1000.0, "offer_id":offer_id, "offset":offset})
+        .as_object()
+        .ok_or(OwnerError("invalid_control_call"))?
+    {
+        statement[k] = v.clone();
+    }
+    let envelope = json!({"protocol":protocol::managed::SIGNED_ENVELOPE_PROTOCOL,
+        "signature":signer.sign(&statement).map_err(|_| OwnerError("managed_control_sign_failed"))?,
+        "verification_key":signer.public_key_record(), "statement":statement});
+    let timeout = BudgetId::PyMyceliumA13MacosManagedControlManagedcontrolclientInitTimeoutL1933
+        .span(Entries::ZERO)
+        .map_err(|_| OwnerError("budget_unavailable"))?;
+    let end = host
+        .monotonic()
+        .checked_add(timeout)
+        .map_err(|_| OwnerError("managed_control_timeout"))?;
+    let response = host.raw(&json!({"envelope":envelope}), end, None)?;
+    let body = protocol::managed::verify(
+        &response,
+        "mycelium.managed_stage_bytes.v1",
+        &host.signer.public_key_record(),
+        host.signer.endpoint_id(),
+        host.wall_seconds(),
+        managed_time_limits()?,
+    )
+    .map_err(OwnerError::from)?;
+    let allowed = [
+        "protocol",
+        "request_id",
+        "swarm_id",
+        "owner_node_id",
+        "owner_endpoint_id",
+        "issued_at",
+        "expires_at",
+        "target_node_id",
+        "target_endpoint_id",
+        "target_key_digest",
+        "membership_generation",
+        "member_incarnation",
+        "run_id",
+        "deployment_id",
+        "offer",
+        "offset",
+        "data",
+    ];
+    let object = body
+        .as_object()
+        .ok_or(OwnerError("offer_response_invalid"))?;
+    if object.len() != allowed.len()
+        || allowed.iter().any(|k| !object.contains_key(*k))
+        || body["request_id"] != request_id
+        || body["swarm_id"] != seed.coordinator.swarm_id()
+        || body["owner_node_id"] != seed.coordinator.seed_node_id()
+        || body["owner_endpoint_id"] != host.signer.endpoint_id()
+        || body["offset"] != offset
+        || (offer_id.is_none() && !body["data"].is_null())
+        || scope
+            .as_object()
+            .ok_or(OwnerError("offer_response_invalid"))?
+            .iter()
+            .any(|(k, v)| body[k] != *v)
+    {
+        return Err(OwnerError("offer_response_invalid"));
+    }
+    if end
+        .remaining(host.monotonic())
+        .map_err(|_| OwnerError("managed_control_timeout"))?
+        == Span::ZERO
+    {
+        return Err(OwnerError("managed_control_timeout"));
+    }
+    if binding(
+        &host.member(
+            member["node_id"]
+                .as_str()
+                .ok_or(OwnerError("managed_control_member_stale"))?,
+        )?,
+        &json!("stage-discovery"),
+        &json!("stage-discovery"),
+    )? != scope
+    {
+        return Err(OwnerError("managed_control_member_stale"));
+    }
+    Ok(body)
+}
+
+/// Exercise the real signed staging-discovery carrier before naming the absent
+/// native collaborator. A receipt or offer alone MUST NOT promote the local agent.
+pub(super) fn bootstrap(
+    core: &Shared,
+    node: &str,
+    run: &str,
+    deployment: &str,
+    offer_id: &str,
+) -> OResult<()> {
+    let backend = Backend {
+        core: Arc::downgrade(core),
+        published: BTreeMap::new(),
+    };
+    let host = backend.host()?;
+    let seed = host.pin()?;
+    let signer = {
+        let core = locked(core)?;
+        let local = core
+            .contributor
+            .as_ref()
+            .ok_or(OwnerError("managed_control_member_stale"))?;
+        if local.node != node {
+            return Err(OwnerError("managed_control_member_stale"));
+        }
+        local.signer.clone()
+    };
+    let member = host.member(node)?;
+    if signer.verification_key_digest() != member["verification_key_digest"] {
+        return Err(OwnerError("managed_control_member_stale"));
+    }
+    let body = read_offer(&host, &signer, &member, None, 0)?;
+    let actual = &body["offer"];
+    let expected = binding(&member, &json!(run), &json!(deployment))?;
+    if actual["offer_id"] != offer_id
+        || actual["expires_at"]
+            .as_f64()
+            .is_none_or(|t| t <= host.wall_seconds())
+        || expected
+            .as_object()
+            .ok_or(OwnerError("offer_response_invalid"))?
+            .iter()
+            .any(|(k, v)| actual[k] != *v)
+    {
+        return Err(OwnerError("offer_response_invalid"));
+    }
+    // This model-free archive is the exact canonical source-produced input:
+    // digest/scope are not permission to execute any peer-supplied program.
+    let wanted = runtime::observe::bootstrap_archive(run, deployment);
+    if actual.as_object().is_none_or(|o| o.len() != 11)
+        || actual["archive_bytes"].as_u64() != Some(wanted.len() as u64)
+        || actual["archive_digest"] != protocol::artifact_grant::range_digest(&wanted)
+    {
+        return Err(OwnerError("offer_archive_digest_mismatch"));
+    }
+    let authorize = || -> OResult<()> {
+        host.pin()?;
+        let demo = locked(core)?.demo.clone();
+        if !demo.active() {
+            return Err(OwnerError("owner_run_not_active"));
+        }
+        if let Some(code) = resource_check(core) {
+            return Err(OwnerError(code));
+        }
+        let announcement = seed.exchange.announcement(Some(node)).to_value();
+        if announcement["run_id"] != run
+            || announcement["deployment_id"] != deployment
+            || announcement["bootstrap_offer_id"] != offer_id
+            || announcement["phase"] != "observe"
+            || binding(&host.member(node)?, &json!(run), &json!(deployment))? != expected
+        {
+            return Err(OwnerError("offer_transfer_not_authorized"));
+        }
+        Ok(())
+    };
+    let chunk = BudgetId::PyMyceliumA13MacosManagedOffersChunkL31
+        .bytes()
+        .map_err(|_| OwnerError("budget_unavailable"))?
+        .get();
+    let mut archive = Vec::with_capacity(wanted.len());
+    while archive.len() < wanted.len() {
+        authorize()?;
+        let result = read_offer(
+            &host,
+            &signer,
+            &member,
+            Some(offer_id),
+            archive.len() as u64,
+        )?;
+        if result["offer"] != *actual {
+            return Err(OwnerError("offer_changed"));
+        }
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(
+                result["data"]
+                    .as_str()
+                    .ok_or(OwnerError("offer_response_invalid"))?,
+            )
+            .map_err(|_| OwnerError("offer_response_invalid"))?;
+        if data.len() as u64 != chunk.min((wanted.len() - archive.len()) as u64) {
+            return Err(OwnerError("offer_response_invalid"));
+        }
+        archive.extend(data);
+    }
+    authorize()?;
+    if archive != wanted
+        || protocol::artifact_grant::range_digest(&archive) != actual["archive_digest"]
+    {
+        return Err(OwnerError("offer_archive_digest_mismatch"));
+    }
+    if actual["expires_at"]
+        .as_f64()
+        .is_none_or(|t| t <= host.wall_seconds())
+    {
+        return Err(OwnerError("offer_expired"));
+    }
+    target::start(core, host, signer, expected, actual.clone(), archive)
+}
+
+impl ObservationBackend for Backend {
+    fn is_owner(&self) -> bool {
+        self.core
+            .upgrade()
+            .is_some_and(|c| c.lock().is_ok_and(|c| !c.target && c.swarm.is_some()))
+    }
+    fn running(&self) -> bool {
+        self.host().is_ok()
+    }
+    fn swarm_id(&self) -> String {
+        self.host()
+            .and_then(|h| h.pin())
+            .map_or(String::new(), |s| s.coordinator.swarm_id().into())
+    }
+    fn wall_clock(&self) -> f64 {
+        now()
+    }
+    fn member(&self, node: &str) -> Option<Value> {
+        self.host().and_then(|h| h.member(node)).ok()
+    }
+    fn prepared_manifest_digest(&mut self) -> Result<String, ObservationError> {
+        let core = self
+            .core
+            .upgrade()
+            .ok_or_else(|| ObservationError::new("managed_owner_closed"))?;
+        let acquisition = locked(&core)
+            .map_err(observe)?
+            .acquisition
+            .clone()
+            .ok_or_else(|| ObservationError::new("prepared_source_unavailable"))?;
+        acquisition
+            .prepared_source()
+            .map(|(_, f)| f.manifest_digest)
+            .map_err(|e| ObservationError::new(e.code()))
+    }
+    fn session_factory(
+        &mut self,
+        run: &str,
+        deployment: &str,
+        members: &[Value],
+    ) -> Result<Box<dyn HelloSessions>, ObservationError> {
+        let host = self.host().map_err(observe)?;
+        for member in members {
+            let node = member["node_id"]
+                .as_str()
+                .ok_or_else(|| ObservationError::new("managed_session_factory_members_invalid"))?;
+            if binding(
+                &host.member(node).map_err(observe)?,
+                &json!(run),
+                &json!(deployment),
+            )
+            .map_err(observe)?
+                != binding(member, &json!(run), &json!(deployment)).map_err(observe)?
+            {
+                return Err(ObservationError::new(
+                    "managed_session_factory_member_not_current",
+                ));
+            }
+        }
+        let managed = self.managed(&host).map_err(observe)?;
+        let factory = ManagedSessionFactory::new(managed.owner.clone(), run, deployment, members)
+            .map_err(|e| ObservationError(e.0))?;
+        host.pin().map_err(observe)?;
+        Ok(Box::new(factory))
+    }
+    fn publish_offer(
+        &mut self,
+        member: &Value,
+        run: &str,
+        deployment: &str,
+        archive: &[u8],
+    ) -> Result<Offer, ObservationError> {
+        let host = self.host().map_err(observe)?;
+        let node = member["node_id"]
+            .as_str()
+            .ok_or_else(|| ObservationError::new("managed_control_member_stale"))?;
+        let expected = binding(member, &json!(run), &json!(deployment)).map_err(observe)?;
+        let id = format!("stage-{}", nonce().map_err(observe)?);
+        let ttl = BudgetId::PyFinalMyceliumA13MacosManagedOffersTtlSecondsL107C77
+            .span(Entries::ZERO)
+            .map_err(|_| ObservationError::new("budget_unavailable"))?;
+        let raw = host
+            .guarded(
+                node,
+                &json!(run),
+                &json!(deployment),
+                |mailbox, binding, now| {
+                    if binding != &expected {
+                        return Err(OwnerError("managed_control_member_stale"));
+                    }
+                    let raw = mailbox
+                        .publish_stage(
+                            StagePublication {
+                                binding,
+                                id: &id,
+                                archive,
+                                ttl,
+                                preposition: None,
+                            },
+                            || now,
+                        )
+                        .map_err(owner_error)?;
+                    self.published.insert(
+                        id.clone(),
+                        Offer {
+                            offer_id: id.clone(),
+                            raw: raw.clone(),
+                        },
+                    );
+                    Ok(raw)
+                },
+            )
+            .map_err(observe)?;
+        Ok(Offer { offer_id: id, raw })
+    }
+    fn retire_offer(&mut self, offer: &Offer) -> Result<Value, ObservationError> {
+        self.offer_effect(offer, |m, now| {
+            m.retire_stage(&offer.raw, || now).map_err(owner_error)
+        })
+        .map_err(observe)
+    }
+    fn request_stage_cleanup(&mut self, offer: &Offer) -> Result<(), ObservationError> {
+        self.offer_effect(offer, |m, now| {
+            m.request_stage_cleanup(&offer.raw, || now)
+                .map_err(owner_error)
+        })
+        .map_err(observe)
+    }
+    fn rebuild_observation(
+        &mut self,
+        _: &mut Option<ObservationContext>,
+        _: &str,
+        _: &str,
+        _: &[Value],
+    ) -> Result<String, owner_run::chain::PortError> {
+        Err(owner_run::chain::PortError::Failed {
+            code: Some("NP-L10-observation-rebuild".into()),
+            text: "ManagedServingWorkflow source/stop/cleanup is not mounted".into(),
+        })
+    }
+}

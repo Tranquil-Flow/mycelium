@@ -1,0 +1,26 @@
+[
+  {
+    "path": "Contents/Frameworks/libjaccl.dylib",
+    "kind": "Dylib",
+    "bytes": 2131216,
+    "sha256": "645a45cd177916b5c71890dd7ebb270ec1a5254eed72821ede1540dd36a4d2a4"
+  },
+  {
+    "path": "Contents/Frameworks/libmlx.dylib",
+    "kind": "Dylib",
+    "bytes": 21549136,
+    "sha256": "e70c48ea5da63b86d4e11408f83cc5396d6228fd84ae4857d383d7480654dac3"
+  },
+  {
+    "path": "Contents/Frameworks/libmlxc.dylib",
+    "kind": "Dylib",
+    "bytes": 1018736,
+    "sha256": "8117d43fcd12f4af9a76b948e792803b151f8f46c28a2042a5bdff3fd0e4247d"
+  },
+  {
+    "path": "Contents/Frameworks/mlx.metallib",
+    "kind": "Metal",
+    "bytes": 146876416,
+    "sha256": "d70ab213d4cfa9f2673e4db2c2a4474c86ad9cc7674564bec4dd4ac9409da675"
+  }
+]

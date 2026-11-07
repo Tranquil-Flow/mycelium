@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "baseline": {"sha256": "f24c93a66de74bdfcb5e8cbae2a3805fff9e49c404fd74cd951c1ef0299364b3", "source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e"},
+  "approvers": ["integrator", "owner"],
+  "rows": [
+    {"old": "py:test_alpha.py::test_one", "disposition": "mapped", "new": ["rs:crates/x/tests/alpha.rs::replaces_one_and_two"],
+     "obligation": "O:path:test_alpha.py", "approver": "integrator", "approved": "2026-10-28", "evidence": ["EV-20261028-0004"]},
+    {"old": "py:test_alpha.py::test_two", "disposition": "mapped", "new": ["rs:crates/x/tests/alpha.rs::replaces_one_and_two"],
+     "obligation": "O:path:test_alpha.py", "approver": "integrator", "approved": "2026-10-28", "evidence": ["EV-20261028-0004"]},
+    {"old": "py:test_alpha.py::test_three", "disposition": "retired", "new": [], "obligation": "O:path:test_alpha.py",
+     "approver": "owner", "approved": "2026-10-28", "evidence": ["EV-20261028-0004"],
+     "reason": "asserts a Python-only helper that has no Rust counterpart", "rollback": "tests/test_alpha.py @ f5bfb709 (archived read-only)",
+     "mutation_verified": false},
+    {"old_file": "test_beta.py", "disposition": "mapped", "new": ["rs:crates/x/tests/alpha.rs::nested::inner"],
+     "obligation": "O:path:test_beta.py", "approver": "integrator", "approved": "2026-10-28", "evidence": ["EV-20261028-0004"]}
+  ]
+}

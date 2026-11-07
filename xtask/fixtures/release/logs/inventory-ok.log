@@ -1,0 +1,11 @@
+     Running tests/python_inventory.rs (/t/debug/deps/python_inventory-0123456789abcdef)
+
+running 5 tests
+test t0 ... ok
+test t1 ... ok
+test t2 ... ok
+test t3 ... ok
+test t4 ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

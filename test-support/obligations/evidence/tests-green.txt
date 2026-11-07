@@ -1,0 +1,66 @@
+     Locking 12 packages to latest Rust 1.95 compatible versions
+      Adding itoa v1.0.18
+      Adding memchr v2.8.3
+      Adding proc-macro2 v1.0.107
+      Adding quote v1.0.47
+      Adding serde v1.0.229
+      Adding serde_core v1.0.229
+      Adding serde_derive v1.0.229
+      Adding serde_json v1.0.154
+      Adding syn v2.0.119 (available: v3.0.9)
+      Adding syn v3.0.9
+      Adding unicode-ident v1.0.27
+      Adding zmij v1.0.23
+   Compiling serde_json v1.0.154
+   Compiling obligations v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l0/test-support/obligations)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.38s
+     Running unittests src/lib.rs (target/debug/deps/obligations-a26b8715e3a197d1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/baseline.rs (target/debug/deps/baseline-28186c0f694a7bf2)
+
+running 7 tests
+test contract_crosswalk_preserves_all_original_fixture_and_owner_pins ... ok
+test supported_cells_separate_registered_models_from_reachable_schemas ... ok
+test incident_inventory_is_not_a_red_or_release_claim ... ok
+inventory: 2469 paths, 725 packaged sources, 1336 A6 paths, 87 contracts, 1337 test/support groups, 10 escapes; zero unmapped
+test complete_provisional_inventory_is_consistent ... ok
+test removing_a_real_shipped_path_is_rejected ... ok
+test every_baseline_path_is_a_real_obligation_not_a_family_wildcard ... ok
+test a6_is_reconciled_as_changed_source_not_mislabelled_as_shipped_closure ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/validation.rs (target/debug/deps/validation-11b7b03664e6fff9)
+
+running 16 tests
+test rejects_missing_f15b_without_confusing_f15 ... ok
+test rejects_dangling_module ... ok
+test rejects_duplicate_id ... ok
+test rejects_dangling_obligation ... ok
+test positive_control ... ok
+test rejects_retirement_without_reason ... ok
+test accepts_reviewed_retirement_with_replacement ... ok
+test rejects_missing_contract_crosswalk ... ok
+test rejects_empty_distinguishing_observation ... ok
+test rejects_missing_test_group_crosswalk ... ok
+test rejects_duplicate_path_with_distinct_id ... ok
+test rejects_retirement_without_replacement ... ok
+test rejects_source_revision_mismatch ... ok
+test rejects_unmapped_supplied_path ... ok
+test rejects_unreviewed_retirement ... ok
+test rejects_every_missing_escape ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests obligations
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+EXIT=0

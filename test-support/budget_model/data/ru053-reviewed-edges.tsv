@@ -1,0 +1,4 @@
+from	to	path	line	sha256	text
+crates/protocol/src/artifact_grant.rs:verify_chunk_receipt	crates/protocol/src/artifact_grant.rs:806	crates/protocol/src/artifact_grant.rs	806	289bacd7329b7eb4860f5f43a6e7eb7c2243261c2907778bfc36085a59fdbba6	        && !data.is_empty()
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch	crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once	crates/runtime/src/iroh_artifact.rs	60	a3aa775faf126abb6bf6d95b74c284299ee15f4660a86e0b77cc489931c8594f	        let result = self.fetch_once(envelope, request, grant, deadline);
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once	crates/protocol/src/artifact_grant.rs:verify_chunk_receipt	crates/runtime/src/iroh_artifact.rs	126	a3aa775faf126abb6bf6d95b74c284299ee15f4660a86e0b77cc489931c8594f	        protocol::artifact_grant::verify_chunk_receipt(&header["receipt"], request, grant, data)

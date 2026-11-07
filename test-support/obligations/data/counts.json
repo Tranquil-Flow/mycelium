@@ -1,0 +1,32 @@
+{
+  "all_paths": 2469,
+  "packaged_source": 725,
+  "a6": 1336,
+  "tests": 1337,
+  "tests_under_tests": 1239,
+  "root_tests": 98,
+  "test_files": 1185,
+  "support_files": 152,
+  "static_test_definitions": 10334,
+  "contracts": 87,
+  "escapes": 10,
+  "destinations": 115,
+  "obligations": 2556,
+  "dispositions": {
+    "rust": 2397,
+    "external oracle only": 72
+  },
+  "closure_dispositions": {
+    "rust": 721,
+    "external oracle only": 4
+  },
+  "test_tiers": {
+    "unit": 1132,
+    "journey": 81,
+    "device": 56,
+    "property": 4,
+    "sim": 64
+  },
+  "unmapped": 0,
+  "retired": 0
+}

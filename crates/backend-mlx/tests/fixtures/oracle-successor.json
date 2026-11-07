@@ -1,0 +1,14 @@
+{
+  "schema": "l8-oracle-successor-v1",
+  "recorded_oracle": "941765e882ed3eea9a5576cc53e525c4caa20300",
+  "accepted_oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "compute_sources_unchanged": true,
+  "sources": {
+    "mycelium_router/mlx_runtime.py": "b248c09612e0bb10b238f0a00f84b1eaa8e1fd3c30f5864e77b82ee88d4b30c5",
+    "numpy_runtime.py": "be114e492dade23735247ea94cac77b54eac6b70e04fb52307b15386755b46a4",
+    "runtime_loader.py": "bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1",
+    "weight_quantization.py": "dd53ba72c07ea2571c6345f50ededd97d5c8cf3995df6d1a6b5afaec0f737999",
+    "qwen35_mlx.py": "f0676b2364f2f5ca383ee5a774537f3eeb18c6f06bb0f5532c504febf896342d",
+    "qwen35_shapes.py": "51a41233cfa697c132d3ce0d2890482d95fdf1360f921b8845eba1e1c22a0538"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "file_sha256": "aac49ba38c2b247ef4c1af80dd50f1bde997123545f9d8df8c55a916caccf613",
+  "probe_sha256": "ba1b1d2422826198562cde34504ac2a810ee71799587b9ebb70560802d98e3ee",
+  "scope": "Executed two pinned constant assignments only; no owner journal, native/device/session or transport execution",
+  "rows": [
+    [
+      "ManagedOwnerSequenceReservationBlock",
+      "_SEQUENCE_BLOCK",
+      "38",
+      "64",
+      "reservation increment, not maximum sequence"
+    ],
+    [
+      "ManagedOwnerConfirmedLedgerTail",
+      "_COMMAND_LEDGER_TAIL",
+      "130",
+      "256",
+      "confirmed-retention target only; unresolved rows are never dropped"
+    ]
+  ]
+}

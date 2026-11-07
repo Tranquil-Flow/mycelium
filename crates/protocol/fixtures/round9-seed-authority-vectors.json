@@ -1,0 +1,572 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "cases": [
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "6ebfd7c69bf737f55ec011649d4482a915337c2ac3be04f5cba1a1d72d90c3d0"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "8b31fdbbb8a70f161e92d65e02038821afd7175612f6b43281057f9c6194263a"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "42f0c4f98f97080d2e4068833d806128c19fead3b4062bf98848a51022237cf5"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "ed8138fcb9e6dd427a24571319b3f3557c488aa5fd8fa526877a3d10f78018e4"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "732cb89364404aed51fa27f6fd0e3a5fb95af389c5af3d9695d8f5ec3503d9f0"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "2e3229836c0f3600073fbd32e7d01e3fe3619018eba859b3eff919775083c2eb"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "52e6c3c040ea39281b1d0578707cb16fa8215a23fd9693a5b47e109e4a75b932"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "50a9b6b241ba4e9c2ce7322eee0a6e21f9576c9063640945bb182aeb8a96085d"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "fb872062f6fef02b26c41b62ab7f188685c074414bd6c0340e390a2c89e46cbc"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "52058ed6db7426de59ba5bb61e28b136e2ccaa91e1c038d0df41613d1e434c10"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "ac987f61529d1761d70fbf5f4b0ff1b45ec491dc938033fa248a3bf2cb1fb8be"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "88166e23dcdf45aba0e6ade0870c6fec812fb69f9c7f60ec000d9ac8d46f1600"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "28ee6c7ce901445969fe63f4e1555f3d928e7af0b02ca9ce89e96658ce4581b9"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "0555e20e99a034ef88925228c39a9bbb2261cc9955a524d9d9511090fc4ea3fb"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "05b1af03fbff43064420bf61cf82d20952beb28bf3d05a7b61a279d79822997f"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "other-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "0dc84116099f36527a6f6b70e80469b95333cd46a33b2277b8b6ca26dfd201a4"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "208be04b9e5785061be9137670a3857702e5c888caf880d2fe43a69c41c5ea40"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "2a1347d999fe867b26375b55968e54a02bf188642e4c09fdc5e54809a4008127"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "e9843976459d56b3f714c739531023170f71af2771183b78b88f279c6ca37add"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "202c68207814eeadb0cb8816ef44f727985e4bff5bd1337478f5399564e0b1fb"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "ce627e605dd524e25d77e20d202e199514efa8e73ff3c94be25debefd88b37f9"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "1f7723420a853fc70572413319f2c5f940ef2897a598bc7da3f5d40f9e00a492"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "fe5955f843817637c41bfbf3c651de7171283ec84bac5c870842df10d15408a0"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "d7e105dce1e072bc082e2e455f7b1270ffac39e20d89c1894b24eb5357cf53ba"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "a25f4e82643bfff3d1f57b1d7134353c23cc23b87aea491dd737180b66f4aefc"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "f3ae2ec3b2e2719e4e2eb034077540003dddcfbfc2f77c404cbe2c363620e658"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "57f1461e228b60ac2760dad67b17f0a45494ae5e5abd7b428d134b40cfc93e14"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "36aab5197c1e6f4e3673711aab99c5ac39f63131ae6cbc2aa59b32e53410e7f7"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "5eda383bc9059e86aa1a13bce45e7462a1f6ccf14defb3b457a655742f8ed657"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "3b3e0cd247f08056ef70f3aca917d280df1d0bb399586a1e06841ed9194a5290"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "25e2b850ed2eb37fd7092894d8b52d97e613ab83d730589ade9ce52d08149cd0"
+  },
+  {
+   "secret_byte": 102,
+   "endpoint": "other-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "5d95e2c665b56b20bca026d5ce15249b254fcf636d8d7e4fe2ffb4f747f1e290"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "ef1215fd509578bdeeee08dd83cc7646ee6dc829114b42d1b84e5b6b0a4c2284"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "fd548293b5d9df5372dacb9ff333910300d9f80e8a96e709f580c24de9e23c0b"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "e38f18e3a100d36f986d677b5f7e6080808cb8cbae560eefb2e215a746ceef3d"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "f5f460a82f1ef5ad9d64e7d009795f2aabbe00446ab2abbe7246768dd1847692"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "bf8a3440a52eee56e958f4a45d659fca4a6d2ed2a2181831d925e4e58b7bb08b"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "4b661d70a3e48d1c1e48ebf79296f86249a8645043394b0720a4353dda46f22d"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "ef503cc02d529d12e25483b2acb63629d6bc524fe427a190df68ea69d8595e06"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "2c24969eb9f2db82f2494d7b6f130f0f231439444b2746875ffea7b2db393329"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "bdaccaf4eebc59237e8c3d8f1f3e4584f34a4f025a57492a2ccacb85e5d17592"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "17744fe3cc76343fe2e8ff2cb56bd6d95f1683c19b9639e3a067cb7120443d2c"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "057f2ff76b544999f30a8f2bc6fc647daeec4f4e819b7fffd415bdad183437ab"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "bffe18a7e15b960f06891c0841070587affcba61ff6f4c489bc3ff9f2ea8742c"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "5187905dd0cc4b180ea68c3e02c62adca0bfce248e516182cf05e640ad5536d5"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "56d1c565521eb796dcbe6e29cb6c051aba3c861dc146a701dc68564b8a36ed0b"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "3b71b186925a1ef48a09977cce763b090b43cc5c4c4d4164bdeeee7a5f8de168"
+  },
+  {
+   "secret_byte": 103,
+   "endpoint": "other-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "e6e21409b20889f236dac0f0b836f9733595db47312aeeb7b87e14136f7d8b3b"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "e7ffccb27ebd3762a817339acdb5159315803350c4eb72f5ad171bbfaaa04221"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "7d34b6361a0099dfd0bb66ab4b72bd5466c1a7c53df58e872245c7d3269f3829"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "3e24770935ac88430979c14ed811c0ad1f3e2fa3c909383e00d4d75b2e77b526"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "17dbbd7693993dffb976963d5478cb343a1950a945c17be938119fbfa1fbb298"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "c09fc3cb20a4c1d3fb925c331652fddb5a32b80fce3eeabc25bbd312ba585e65"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "c213b94c2641dcda1b1bdb88f6ec3f69d4ab5bca0ab3dda8d7837ccce1c87e87"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "ef28273de6a58641f3eb4de831d33e1351dbe1af2badec53b43bc957d19e9f91"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "b74331421a3cecfab7f35611ae3ac1f47adfdeb27871e30d4c89a1fe0a7db06d"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "ae9f29a6cb9a27b54cd82a92e587840414fc91408e360dae564d225faf4f4509"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "d0fd7b2001493798382e4d0288c12146dc2daf341babfa89459eaaef6a9171bb"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "dc71c156992ec4411d9fb3a6ad7961abda4f344b22c3e826a183ad9f687d5112"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "e9f7e334ee8b1605768849715f574982ac463b02cfc4c1773e7f11177312dbf7"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "2affab507f18cf55ed6b15f4aafc464923de8e3d777e7b4fb844029212580166"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "75d654b127acb3b4fb22a57aae366f8693e4d9648509a7d874f74bb097a600b4"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "71546990b381c65abd68c64d3f10e8a72d1f8c06e5fcd06e0d8f51a599d5b87d"
+  },
+  {
+   "secret_byte": 1,
+   "endpoint": "other-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "ab179a41a143686bdf339a0198edb2b9a5aa581b944509dd2644f8a101f36029"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "6af31bbf5d89f2c9984cca3f5f73885ee3087585493748e56e0802a3dd3411b5"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "028d887d88674d8fbb3065879355288ce76a3c175c8e7c7833cd2792dc5de06e"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "feb615bd5e129f6b1ee470de4a79fd2be8921d0177a4045f33f8ef4ddfd66ff6"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "ace43dbb6883c710b6d2b70ec9f206ae46bee1df402ea0c3e5967faa0e69528e"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "d375c9fd09135a54466a173bdb9f95eae062238d1609e2ceb2f9e5ef2e329724"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "6d92e4eea853a08ca6f991cb9745ef3fdb415e2df8e624b80216e7ec44151e01"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "59fdbd934d68b75897ed51eb6f9e695b1dc3596bed04ab24f7a7c8927a606e72"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "seed-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "bab601aedb091e63721e4de098fcbac1ac03bd58c1e5e22c7c374c4730f64031"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-a",
+   "accepted": true,
+   "salt_hex": "7c4aa0235aefb0df51cfad9a35a2d0f3820ae1660e21fbd5be4375248729f56b"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "swarm-b",
+   "accepted": true,
+   "salt_hex": "b30abdf6b23dbee7c91d88f248a564891ea1d94b2b92b952ef2b1ffce273f48a"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "",
+   "accepted": true,
+   "salt_hex": "fd698f93ff501f85be29c44247f4d800bf29284f732f2c5ec4b3206ef68c90a6"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u00e9",
+   "accepted": true,
+   "salt_hex": "1634a6ecdf2eb33f376f125211b5e65a216c96687c5d7a3e2dee3f5b53f569d7"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "accepted": true,
+   "salt_hex": "ae449e0683982fc23c3659f9a38161b8e58a35ef2a83b346f03a8fcc729d9abd"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "with space",
+   "accepted": true,
+   "salt_hex": "654b97f2b97564015e5a2bcd266710586814a11d1998e6fb126d3788834769c5"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "\u2603\ud83d\ude00",
+   "accepted": true,
+   "salt_hex": "b366a6ea9ad82586861e83eb261272227651fc714d377cc2cf892a8ba11b315a"
+  },
+  {
+   "secret_byte": 255,
+   "endpoint": "other-endpoint",
+   "swarm_id": "x\ny",
+   "accepted": true,
+   "salt_hex": "66f3bde31b9749fd835ad6f2da059a54af010f90a68115488017b13a1a147671"
+  },
+  {
+   "secret_byte": 101,
+   "endpoint": "seed-endpoint",
+   "swarm_id_escape": "lone_surrogate_d800",
+   "accepted": false,
+   "python_exception": "EvidenceSigningError"
+  }
+ ]
+}

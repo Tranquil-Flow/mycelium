@@ -1,0 +1,190 @@
+{
+  "schema_version": 2,
+  "build_id": "sha256:67eb23cca6807d0009eeed18571e588dfd2313b23c797aeedf8ad81f34850feb",
+  "cargo_lock_sha256": "fc4ad41d8a28a63f1ddb839015569d96c4565d1185cc6cf7f4043b91ce88b4a0",
+  "simulator_version": "mycelium-sim-v2",
+  "prng_version": "splitmix64-keyed-v1",
+  "seed": 17,
+  "config": {
+    "incident": "F14",
+    "mode": "Historical",
+    "rollovers": 2,
+    "close_multiplier": 1,
+    "owner_local_allowed": true,
+    "member_granted": true,
+    "authority_until_ms": 14400000
+  },
+  "profile_id": "section7-policy-model-v1-NOT-MEASURED",
+  "profile_snapshot": "section7-policy-model-v1-NOT-MEASURED",
+  "budget_snapshot": {
+    "CorrectedOwnerShare": {
+      "value": "Storage(Bytes(1997798421))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Measured(\"measured: runs/v2/v014/L10-SPLIT.md:31 (planner output, NOT physical bytes)\")"
+    },
+    "FreshStorageConsent": {
+      "value": "Storage(Bytes(4000000000))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Source(\"mycelium_a13_macos/web/index.html:8 @ f5bfb709\")"
+    },
+    "HistoricalOwnerShare": {
+      "value": "Storage(Bytes(2227449134))",
+      "unit": "bytes",
+      "purpose": "HistoricalFault",
+      "provenance": "Source(\"tests/a13_macos/test_consent_layer_split.py:26 @ f5bfb709\")"
+    },
+    "MemberChosenWall": {
+      "value": "Duration(Span(600000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"tests/a13_macos/test_consented_wall_limits.py:75 @ f5bfb709\")"
+    },
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "SavedStorageConsent": {
+      "value": "Storage(Bytes(2000000000))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Source(\"tests/a13_macos/test_consent_layer_split.py:18 @ f5bfb709\")"
+    }
+  },
+  "corrected_budget_snapshot": {
+    "CorrectedOwnerShare": {
+      "value": "Storage(Bytes(1997798421))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Measured(\"measured: runs/v2/v014/L10-SPLIT.md:31 (planner output, NOT physical bytes)\")"
+    },
+    "FreshStorageConsent": {
+      "value": "Storage(Bytes(4000000000))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Source(\"mycelium_a13_macos/web/index.html:8 @ f5bfb709\")"
+    },
+    "HistoricalOwnerShare": {
+      "value": "Storage(Bytes(2227449134))",
+      "unit": "bytes",
+      "purpose": "HistoricalFault",
+      "provenance": "Source(\"tests/a13_macos/test_consent_layer_split.py:26 @ f5bfb709\")"
+    },
+    "MemberChosenWall": {
+      "value": "Duration(Span(600000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"tests/a13_macos/test_consented_wall_limits.py:75 @ f5bfb709\")"
+    },
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "SavedStorageConsent": {
+      "value": "Storage(Bytes(2000000000))",
+      "unit": "bytes",
+      "purpose": "Resource",
+      "provenance": "Source(\"tests/a13_macos/test_consent_layer_split.py:18 @ f5bfb709\")"
+    }
+  },
+  "corrected_outcome": {
+    "metrics": {
+      "fresh_default_bytes": 4000000000,
+      "member_reserved_bytes": 1735338491,
+      "member_selected_bytes": 1735338491,
+      "member_staged_bytes": 1735338491,
+      "member_storage_cap": 2000000000,
+      "member_wall_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_storage_cap": 2000000000,
+      "reserved_bytes": 1997798421,
+      "selected_share_bytes": 1997798421,
+      "staged_bytes": 1997798421
+    },
+    "transitions": {
+      "chat_success": 1,
+      "placement": 1,
+      "reservation_attempt": 1,
+      "staging_attempt": 1,
+      "start_attempt": 1
+    },
+    "log": [
+      "0:start_attempt",
+      "0:placement",
+      "0:reservation_attempt",
+      "500:staging_attempt",
+      "1000:chat_success"
+    ],
+    "starts": 1,
+    "served": 1,
+    "rollovers": 0,
+    "successful_chats": 1,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  },
+  "execution_pin": "[{\"incident\":\"F14\",\"mode\":\"Historical\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "corrected_execution_pin": "[{\"incident\":\"F14\",\"mode\":\"Corrected\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "commands": [
+    {
+      "at_ms": 0,
+      "task": 1,
+      "command": "Begin"
+    }
+  ],
+  "expected_failure": [
+    "authorized_progress_unreached",
+    "owner_share_exceeds_storage_consent"
+  ],
+  "expected_outcome": {
+    "metrics": {
+      "fresh_default_bytes": 4000000000,
+      "member_reserved_bytes": 0,
+      "member_selected_bytes": 1505687777,
+      "member_staged_bytes": 0,
+      "member_storage_cap": 2000000000,
+      "member_wall_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_storage_cap": 2000000000,
+      "reserved_bytes": 0,
+      "selected_share_bytes": 2227449134,
+      "staged_bytes": 0
+    },
+    "transitions": {
+      "placement": 1,
+      "reservation_attempt": 1,
+      "staging_attempt": 1,
+      "start_attempt": 1
+    },
+    "log": [
+      "0:start_attempt",
+      "0:placement",
+      "0:reservation_attempt",
+      "500:staging_attempt"
+    ],
+    "starts": 1,
+    "served": 0,
+    "rollovers": 0,
+    "successful_chats": 0,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [
+      "member_storage_cap_below_share:OwnerLocalStorage"
+    ],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  }
+}

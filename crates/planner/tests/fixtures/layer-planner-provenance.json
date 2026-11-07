@@ -1,0 +1,52 @@
+{
+  "claim": "actual oracle plan_snapshot / replan_for_event / simulate_bundle outputs and exceptions; seeded synthetic fleets, no model loaded; cases with non-finite JSON excluded",
+  "counts": {
+    "g12": 300,
+    "plans": 719,
+    "plans_ok": 299,
+    "replans": 1059,
+    "replans_ok": 904,
+    "set_orders": 5984,
+    "simulations": 40,
+    "simulations_ok": 30,
+    "sums": 200
+  },
+  "excluded": {
+    "non_finite": 0,
+    "oracle_timeout_15s": 1
+  },
+  "generator_sha256": "3aaac46f98b2a991cf8dea6013bacab10b363738c3df5e9fdeb8128506f78228",
+  "imported_sources": {
+    "mycelium_a6_recovery.py": "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3",
+    "mycelium_layer_planner/__init__.py": "950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf",
+    "mycelium_layer_planner/allocation.py": "2c7e64ab6aea252075392a29e24a840d063a04a3b8081589514e50e5065dbf44",
+    "mycelium_layer_planner/contracts.py": "038b579c1d7779598aca2303b6cecb3126926b897db0f051feac1d0aa1da3b90",
+    "mycelium_layer_planner/cycle_search.py": "bea863d4e4928f3ec31251602bff808e3589271389948371f31587716136e675",
+    "mycelium_layer_planner/flow.py": "38297c7229ee3053641c86e196aefb34277e973b086bd77c09b7c6f4d6892c10",
+    "mycelium_layer_planner/network_cost.py": "2619c0506d51ee92d653c7eb945ffa8c3e5581f3c88832e2472766c56160ccae",
+    "mycelium_layer_planner/phase_score.py": "b78053ce4bb224a47b0a4be8fca1d8bc135cf4d1092b0cc6211f6eacd3d01f57",
+    "mycelium_layer_planner/physical_graph.py": "e299f4c9ea9f2581e63ca5fda74dc6579d80a2cf9d720a5d55266900f774a98d",
+    "mycelium_layer_planner/planner.py": "2c3b152aef10ac9e865de9ad2c0250eb52c91018041b7aad92cce82e1f28d33c",
+    "mycelium_layer_planner/primary_plan.py": "997b76db4254a338eb7a4a47fb64c213ae3686fec41da990ddef56a6f28ef938",
+    "mycelium_layer_planner/recovery_intent.py": "3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9",
+    "mycelium_layer_planner/replan_simulator.py": "21546475e2ba4e66f6e1e1153fa39ec2dffcfad25a2bf2c12805503f69e92d97",
+    "mycelium_layer_planner/replanning.py": "35fe72d9bd10597de7c2898c76a674a341492830f3ea598893dff9beee80ced7",
+    "mycelium_layer_planner/replication.py": "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5",
+    "mycelium_layer_planner/serialization.py": "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c",
+    "mycelium_layer_planner/speculative.py": "2e47662403dc8d701cc83661b37951a04c64affab2fe773ac0cd35d0cbbf4d51",
+    "mycelium_layer_planner/validation.py": "84f688f4e3fbb12ec109c782352cb12b5baa199225fac9a6b46edaad09e775e3",
+    "mycelium_layer_planner/workload.py": "2c1d7080039ed06c856fdbfbbd6ea0d6d9d8cad9c3140cd47c36d6b383d8aa73"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": "a9b4bed2793fa30a2be094a81b2090ddeb63acb5d5e74af3b1b0c922ef4bb39e",
+  "python": "3.14.8",
+  "scenario_sha256": {
+    "hypothetical-ram-vs-hop.json": "ed061e1a83022b68a399ea28eda9e907da1f06f9bbdd05de8c8b8f58fc098ef5",
+    "hypothetical-six-node.json": "c33478eb3d138bcefdeb45d6982e62551b7454dbb73563a1b47e36782bbb8662",
+    "product-v1-replanning.json": "447887a69c47272f972fc8b0d1426b5b61ce1d29906845ee08813fcaadbeeea7",
+    "product-v1-replicated.json": "bcffce2553f385102a060c820854924875cf1562ea7255ff4cd979706937d461",
+    "product-v1-speculative.json": "dfd6a5aacb23c452efd23277b8e9417de350717629a04f1dd55329d2f75677f2",
+    "product-v1-tiny-directed.json": "bd637d74959ce46fbe943c59efe51f0a857a048c43a19dc9fbaf0b392da5a2c7"
+  },
+  "seed": 6102
+}

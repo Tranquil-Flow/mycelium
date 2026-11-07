@@ -1,0 +1,6 @@
+constant	value	source	probe
+CANCEL_AND_CLEANUP_BUDGET_SECONDS	8.0	mycelium_deadlines.py:234 (input of COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS)	probe_deadlines.py
+COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS	8000	mycelium_deadlines.py:234	probe_deadlines.py
+reservation_lease_seconds	30.0	mycelium_router/contracts.py:156 (RouterConfig default)	probe_lease.py
+kv_lease_ceiling_seconds(30.0)	420.0	mycelium_router/transports/iroh.py:248-266	probe_lease.py
+maximum_imported_lease_seconds	425.0	physical_inference_node.py:473-478 (kv_lease_ceiling_seconds(reservation_lease_seconds) + MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS 5.0)	probe_lease.py

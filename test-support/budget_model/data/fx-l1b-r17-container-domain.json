@@ -1,0 +1,51 @@
+{
+  "pin": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "path": "mycelium_platform_neutral/primitives.py",
+  "source_sha256": "a0a13c28620968a884b586db147a5cf5a2811f294da712f0adf2e10e7866d886",
+  "probe_sha256": "3aa3a7d77b85cf1649e21d6d6246be25a00a8069f8e30c7faea21d5263b4ecce",
+  "cases": [
+    [
+      "nullable_text",
+      "builtin-str",
+      "9",
+      "refused",
+      "-"
+    ],
+    [
+      "nullable_text",
+      "str-subclass",
+      "1",
+      "accepted",
+      "9"
+    ],
+    [
+      "bounded_list",
+      "builtin-list",
+      "9",
+      "refused",
+      "-"
+    ],
+    [
+      "bounded_list",
+      "list-subclass",
+      "1",
+      "accepted",
+      "9"
+    ],
+    [
+      "bounded_list",
+      "builtin-tuple",
+      "9",
+      "refused",
+      "-"
+    ],
+    [
+      "bounded_list",
+      "tuple-subclass",
+      "1",
+      "accepted",
+      "9"
+    ]
+  ],
+  "scope": "direct Python helpers; magnitude claim limited to builtin str/list/tuple, no signed/wire bypass claimed"
+}

@@ -1,0 +1,16 @@
+case	input_type	input_value	observed	returned_count
+negative	int	-1	omitted	-
+zero	int	0	omitted	-
+one	int	1	present	1
+near-upper	int	4095	present	4095
+upper	int	4096	present	4096
+over-upper	int	4097	omitted	-
+bool	bool	True	omitted	-
+float	float	1.0	omitted	-
+string	str	'1'	omitted	-
+int-subclass	OverrideInt	4096	omitted	-
+stale-identity	int	4096	omitted	-
+stopped	int	4096	omitted	-
+epoch-float	int	4096	omitted	-
+epoch-mismatch	int	4096	omitted	-
+absent-workflow	int	4096	omitted	-

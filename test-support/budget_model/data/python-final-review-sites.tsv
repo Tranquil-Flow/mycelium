@@ -1,0 +1,153 @@
+key	source_sha	source
+mycelium_interactive/swarm.py:327:45:comparison:1	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_peers) is not int or not 1 <= max_peers <= 1_024:
+mycelium_interactive/swarm.py:327:45:comparison-lower:max_peers.minimum	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_peers) is not int or not 1 <= max_peers <= 1_024:
+mycelium_interactive/swarm.py:327:50:validated-field:max_peers	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_peers) is not int or not 1 <= max_peers <= 1_024:
+mycelium_interactive/swarm.py:333:19:comparison-lower-reference:max_peers	f4e366e98a1f705dfaf182897044500d290dbd7f	or not max_peers <= max_peer_history <= 4_096
+mycelium_interactive/swarm.py:311:25:parameter:max_peers	f4e366e98a1f705dfaf182897044500d290dbd7f	max_peers: int = 16,
+mycelium_interactive/swarm.py:329:52:comparison:1	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_pending_jobs) is not int or not 1 <= max_pending_jobs <= 4_096:
+mycelium_interactive/swarm.py:329:52:comparison-lower:max_pending_jobs.minimum	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_pending_jobs) is not int or not 1 <= max_pending_jobs <= 4_096:
+mycelium_interactive/swarm.py:329:57:validated-field:max_pending_jobs	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(max_pending_jobs) is not int or not 1 <= max_pending_jobs <= 4_096:
+mycelium_interactive/swarm.py:338:19:comparison-lower-reference:max_pending_jobs	f4e366e98a1f705dfaf182897044500d290dbd7f	or not max_pending_jobs <= max_job_history <= 65_536
+mycelium_interactive/swarm.py:315:32:parameter:max_pending_jobs	f4e366e98a1f705dfaf182897044500d290dbd7f	max_pending_jobs: int = 64,
+physical_inference_qualification.py:737:25:validated-field:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	or not 0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
+physical_inference_qualification.py:749:16:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	timeout=float(timeout_seconds),
+physical_inference_qualification.py:785:25:validated-field:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	or not 0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
+physical_inference_qualification.py:795:8:assignment:self.timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	self.timeout_seconds = float(timeout_seconds)
+physical_inference_qualification.py:864:16:positional-timeout:select.select.timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	remaining,
+physical_inference_qualification.py:853:8:assignment:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = time.monotonic() + self.timeout_seconds
+mycelium_a13_macos/a13_test_seams.py:78:56:dict-field:clock_offset_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	print(json.dumps({'event': 'a13_test_seams_active', 'clock_offset_seconds': offset, 'warning': warning},
+mycelium_a13_macos/a13_test_seams.py:83:42:dict-field:clock_offset_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	return {'active': offset is not None, 'clock_offset_seconds': offset}
+mycelium_a13_macos/join_page.py:85:4:assignment:(window_id, code)	f4e366e98a1f705dfaf182897044500d290dbd7f	window_id, code = match.groups()
+mycelium_a13_macos/pairing.py:587:4:assignment:(window_id, code)	f4e366e98a1f705dfaf182897044500d290dbd7f	window_id, code = _normalized_code(code_text)
+mycelium_a13_macos/pairing.py:813:8:assignment:(window_id, _slash, action)	f4e366e98a1f705dfaf182897044500d290dbd7f	window_id, _slash, action = rest.partition("/")
+mycelium_a13_macos/pairing.py:872:12:assignment:skew	f4e366e98a1f705dfaf182897044500d290dbd7f	skew = round(parsedate_to_datetime(value).timestamp() - self._clock())
+mycelium_a13_macos/managed_control.py:65:0:assignment:_REQUEST_DEADLINE	f4e366e98a1f705dfaf182897044500d290dbd7f	_REQUEST_DEADLINE = ContextVar("managed_control_request_deadline", default=None)
+mycelium_a13_macos/managed_control.py:1903:12:dict-field:/managed-control/poll	f4e366e98a1f705dfaf182897044500d290dbd7f	"/managed-control/poll": self.poll,
+mycelium_a13_macos/managed_control.py:1088:8:assignment:self._retention_signer	f4e366e98a1f705dfaf182897044500d290dbd7f	self._retention_signer = "" if other is None else other[0]
+mycelium_layer_planner/network_cost.py:69:8:keyword:base_one_way_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	base_one_way_ms=base,
+mycelium_layer_planner/network_cost.py:70:8:keyword:serialization_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	serialization_ms=serialization,
+mycelium_layer_planner/network_cost.py:71:8:keyword:jitter_guard_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	jitter_guard_ms=jitter,
+mycelium_layer_planner/phase_score.py:103:8:keyword:prefill_network_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	prefill_network_ms=prefill_network,
+mycelium_layer_planner/phase_score.py:111:8:keyword:expected_response_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	expected_response_ms=expected_response_ms(ttft, tpot, workload.output_tokens),
+mycelium_layer_planner/phase_score.py:88:43:comparison:bottleneck	f4e366e98a1f705dfaf182897044500d290dbd7f	saturated_tps = 1000.0 / bottleneck if bottleneck > 0 else math.inf
+runtime_contracts.py:383:4:assignment:interval	f4e366e98a1f705dfaf182897044500d290dbd7f	interval = text.get("full_attention_interval")
+runtime_contracts.py:385:8:assignment:interval	f4e366e98a1f705dfaf182897044500d290dbd7f	interval = _positive_int(interval, "full_attention_interval")
+runtime_contracts.py:387:32:comparison:(index + 1) % interval	f4e366e98a1f705dfaf182897044500d290dbd7f	"full_attention" if (index + 1) % interval == 0 else "linear_attention"
+mycelium_m16_runtime.py:318:12:assignment:reserved_memory	f4e366e98a1f705dfaf182897044500d290dbd7f	reserved_memory = sum(item.memory_bytes for item in active)
+mycelium_m16_runtime.py:319:12:assignment:reserved_kv	f4e366e98a1f705dfaf182897044500d290dbd7f	reserved_kv = sum(item.kv_bytes for item in active)
+mycelium_m16_runtime.py:320:12:assignment:reserved_workspace	f4e366e98a1f705dfaf182897044500d290dbd7f	reserved_workspace = sum(item.workspace_bytes for item in active)
+mycelium_m16_runtime.py:1038:16:dict-field:retry_after_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	"retry_after_seconds": retry_after_seconds,
+mycelium_capacity_profiles/catalog.py:213:12:keyword:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	expires_at=entry.expires_at,
+mycelium_capacity_profiles/catalog.py:232:12:keyword:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	expires_at=entry.expires_at,
+mycelium_capacity_profiles/contracts.py:223:12:keyword:thermal_throttled	f4e366e98a1f705dfaf182897044500d290dbd7f	thermal_throttled=observation.thermal_throttled,
+mycelium_capacity_profiles/contracts.py:238:12:keyword:thermal_throttled	f4e366e98a1f705dfaf182897044500d290dbd7f	thermal_throttled=self.thermal_throttled,
+mycelium_capacity_profiles/document.py:130:16:keyword:thermal_throttled	f4e366e98a1f705dfaf182897044500d290dbd7f	thermal_throttled=point["thermal_throttled"],
+mycelium_node/process.py:51:0:assignment:_CWD_LEASE_LOCK	f4e366e98a1f705dfaf182897044500d290dbd7f	_CWD_LEASE_LOCK = threading.RLock()
+mycelium_node/process.py:278:12:keyword:budget_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	budget_ms=int(budget_seconds * 1000),
+mycelium_node/process.py:2249:16:dict-field:budget_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"budget_ms": int(_LAUNCH_HANDSHAKE_SECONDS * 1000),
+mycelium_request_gateway/backend.py:752:8:assignment:cancel_with_deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	cancel_with_deadline = getattr(self._router, "cancel_with_deadline", None)
+mycelium_request_gateway/service.py:1330:12:assignment:cancel_with_deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	cancel_with_deadline = getattr(
+mycelium_layer_planner/memory_tier_ab.py:226:24:dict-field:fast_memory_limit_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	"fast_memory_limit_bytes": node.fast_memory_bytes
+physical_inference_node.py:1248:12:assignment:publication['dropped_interval_count']	f4e366e98a1f705dfaf182897044500d290dbd7f	publication["dropped_interval_count"] = source_dropped[0] + (
+physical_inference_node.py:2998:16:assignment:window_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	window_ms = round(float(seconds) * 1_000.0, 3)
+physical_inference_node.py:3001:16:keyword:command_timeout_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	command_timeout_ms=int(round(self.command_timeout * 1_000.0)),
+physical_inference_node.py:3002:16:keyword:collection_window_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	collection_window_ms=window_ms,
+physical_inference_node.py:6385:12:dict-field:collection_window_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"collection_window_ms": round(
+mycelium_node/process.py:2925:35:ceiling-operand:term_deadline.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	time.monotonic() + min(0.25, remaining / 2),
+mycelium_node/process.py:2923:8:assignment:term_deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	term_deadline = min(
+mycelium_node/process.py:2963:65:ceiling-operand:graceful_deadline.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	graceful_deadline = min(deadline, time.monotonic() + 0.05)
+mycelium_node/process.py:2963:12:assignment:graceful_deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	graceful_deadline = min(deadline, time.monotonic() + 0.05)
+mycelium_node/process.py:3325:20:ceiling-operand:stop_timeout.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	0.5,
+mycelium_node/process.py:3323:16:assignment:stop_timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	stop_timeout = min(
+mycelium_a13_macos/managed_runtime.py:463:53:ceiling-operand:self._outbound_retry_backoff.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))
+mycelium_a13_macos/managed_runtime.py:463:20:assignment:self._outbound_retry_backoff	f4e366e98a1f705dfaf182897044500d290dbd7f	self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))
+mycelium_a13_macos/managed_runtime.py:463:61:comparison-lower:outbound_retry_backoff.minimum	f4e366e98a1f705dfaf182897044500d290dbd7f	self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))
+mycelium_a13_macos/owner_run.py:379:48:ceiling-operand:deadline.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = self._clock() + (min(60.0, self.rollover_backoff_seconds * 2 ** (failures - 1))
+mycelium_a13_macos/owner_run.py:379:16:assignment:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = self._clock() + (min(60.0, self.rollover_backoff_seconds * 2 ** (failures - 1))
+mycelium_node/process.py:3330:43:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	self._command_stop(timeout=stop_timeout)
+mycelium_a13_macos/authority.py:1213:16:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"expires_at": message["expires_at"],
+mycelium_a13_macos/target_app.py:319:12:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	'expires_at': result['report']['message']['expires_at']}
+mycelium_a13_macos/managed_provisioning.py:605:8:dict-field:max_combined_rss_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	"max_combined_rss_bytes": int(profile.max_combined_rss_bytes),
+mycelium_a13_macos/managed_provisioning.py:606:8:dict-field:max_wall_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	"max_wall_seconds": int(profile.max_wall_seconds),
+mycelium_a13_macos/managed_provisioning.py:608:8:dict-field:freshness_window_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	"freshness_window_seconds": int(profile.freshness_window_seconds),
+mycelium_a13_macos/managed_provisioning.py:612:8:dict-field:owner_lease_expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"owner_lease_expires_at": owner_lease,
+mycelium_a13_macos/managed_provisioning.py:684:8:dict-field:max_combined_rss_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	"max_combined_rss_bytes": admission.max_combined_rss_bytes,
+mycelium_a13_macos/managed_provisioning.py:685:8:dict-field:max_wall_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	"max_wall_seconds": admission.max_wall_seconds,
+mycelium_a13_macos/managed_provisioning.py:687:8:dict-field:freshness_window_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	"freshness_window_seconds": admission.freshness_window_seconds,
+mycelium_a13_macos/managed_provisioning.py:691:8:dict-field:owner_lease_expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"owner_lease_expires_at": admission.owner_lease_expires_at,
+mycelium_a13_macos/swarm_publish.py:308:20:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	'expires_at': grant['expires_at']}
+mycelium_a13_macos/worker.py:857:24:dict-field:max_rss_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	"max_rss_bytes": int(self.limits.max_rss_bytes),
+mycelium_assignment_cache.py:117:38:dict-field:max_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	return {"protocol": PROTOCOL, "max_bytes": self.max_bytes, "entries": {}}
+mycelium_interactive/server.py:280:32:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"expires_at": invite.expires_at,
+mycelium_interactive/server.py:295:32:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"expires_at": grant.expires_at,
+mycelium_layer_planner/public_projection.py:114:8:dict-field:valid_until_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"valid_until_unix_ms": authority.get("valid_until_unix_ms"),
+mycelium_layer_planner/gossip_adapter.py:411:8:dict-field:valid_until_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"valid_until_unix_ms": validated.statement["valid_until_unix_ms"],
+mycelium_topology_evidence.py:236:16:dict-field:fresh_until_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"fresh_until_unix_ms": item["fresh_until_unix_ms"],
+mycelium_topology_evidence.py:338:16:dict-field:fresh_until_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"fresh_until_unix_ms": validated["fresh_until_unix_ms"],
+mycelium_node/__main__.py:848:20:dict-field:renewal_deadline_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+mycelium_node/__main__.py:879:20:dict-field:renewal_deadline_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+mycelium_node/__main__.py:1168:12:dict-field:renewal_deadline_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+mycelium_candidate_promotion.py:129:8:dict-field:maximum_peak_rss_bytes_by_member	f4e366e98a1f705dfaf182897044500d290dbd7f	"maximum_peak_rss_bytes_by_member": {
+mycelium_m19_recovery.py:112:60:dict-field:last_fresh_unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	"subject_id": subject_id, "state": "fresh", "last_fresh_unix_ms": now,
+mycelium_layer_planner/recovery_intent.py:29:8:keyword:retained_path_ids	f4e366e98a1f705dfaf182897044500d290dbd7f	retained_path_ids=retained_path_ids,
+mycelium_service_package.py:662:41:keyword:include_windows_member	f4e366e98a1f705dfaf182897044500d290dbd7f	value, package_root=output_root, include_windows_member=include_windows_member
+mycelium_node/process.py:3268:12:keyword:terminate_on_timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	terminate_on_timeout=terminate_on_timeout,
+mycelium_a15_run_intake.py:758:4:assignment:result['expired']	f4e366e98a1f705dfaf182897044500d290dbd7f	result["expired"] = expired_any
+mycelium_m16_runtime.py:80:8:assignment:self.retry_after_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	self.retry_after_seconds = retry_after_seconds
+mycelium_m16_runtime.py:476:16:keyword:retry_after_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	retry_after_seconds=exc.retry_after_seconds,
+mycelium_m16_runtime.py:480:16:keyword:retry_after_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	retry_after_seconds=exc.retry_after_seconds,
+mycelium_a13_macos/owner_run.py:383:38:keyword:retry_at	f4e366e98a1f705dfaf182897044500d290dbd7f	retry_at=deadline if failures else None)
+mycelium_node/token_admission.py:61:8:assignment:self._unix_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	self._unix_ms = unix_ms
+physical_inference_node.py:2676:16:keyword:kv_lease_renewal_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	kv_lease_renewal_seconds=self._kv_lease_window_seconds,
+physical_inference_node.py:2689:16:keyword:kv_lease_renewal_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	kv_lease_renewal_seconds=self._kv_lease_window_seconds,
+physical_inference_node.py:3540:12:keyword:kv_lease_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	kv_lease_seconds=self._kv_lease_window_seconds,
+mycelium_a13_macos/control_session.py:569:65:validated-field:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= MAX_SESSION_TIMEOUT_SECONDS):
+mycelium_a13_macos/control_session.py:574:8:assignment:self.timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	self.timeout_seconds = float(timeout_seconds)
+mycelium_a13_macos/control_session.py:364:12:keyword:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	timeout_seconds=timeout_seconds)
+mycelium_a13_macos/control_session.py:596:12:keyword:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline=time.monotonic() + self.timeout_seconds)
+physical_inference_qualification.py:1149:11:validated-field:_stage_timeout_seconds.return	f4e366e98a1f705dfaf182897044500d290dbd7f	return min(
+physical_inference_qualification.py:2824:16:assignment:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	timeout = _stage_timeout_seconds(
+physical_inference_qualification.py:2829:63:keyword:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	preposition_digest=preposition_digest, timeout_seconds=timeout)
+physical_inference_qualification.py:2832:53:keyword:timeout_seconds	f4e366e98a1f705dfaf182897044500d290dbd7f	capture = self._runner.run(argv, timeout_seconds=timeout,
+mycelium_a10_batch_policy_control.py:114:32:validated-field:window	f4e366e98a1f705dfaf182897044500d290dbd7f	or not 0 <= window <= MAXIMUM_WINDOW_MS
+mycelium_a10_batch_policy_control.py:120:55:dict-field:window_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	extra = {} if "window_ms" not in request else {"window_ms": window}
+mycelium_a13_macos/clock_offset.py:21:0:assignment:SAMPLES	f4e366e98a1f705dfaf182897044500d290dbd7f	SAMPLES = 8
+mycelium_a13_macos/clock_offset.py:27:81:parameter:samples	f4e366e98a1f705dfaf182897044500d290dbd7f	def __init__(self, *, clock: Callable[[], float] = time.time, samples: int = SAMPLES,
+mycelium_a13_macos/clock_offset.py:31:8:assignment:self._samples	f4e366e98a1f705dfaf182897044500d290dbd7f	self._samples = samples
+mycelium_a13_macos/clock_offset.py:52:58:keyword:maxlen	f4e366e98a1f705dfaf182897044500d290dbd7f	row = self._offsets.setdefault(node_id, deque(maxlen=self._samples))
+mycelium_a13_macos/acquisition.py:507:44:comparison:0	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(size) is not int or not 0 < size <= _MAX_FILE_BYTES:
+mycelium_a13_macos/acquisition.py:666:19:comparison:0	f4e366e98a1f705dfaf182897044500d290dbd7f	or not 0 < size <= _MAX_FILE_BYTES
+mycelium_router/a10_live_publication.py:292:41:comparison:len(intervals)	f4e366e98a1f705dfaf182897044500d290dbd7f	if not isinstance(intervals, list) or len(intervals) > MAXIMUM_INTERVALS:
+mycelium_a13_macos/managed_runtime.py:469:20:positional-call:self._stop.wait	f4e366e98a1f705dfaf182897044500d290dbd7f	self._stop.wait(delay)
+mycelium_a13_macos/managed_control.py:2231:20:positional-call:time.sleep	f4e366e98a1f705dfaf182897044500d290dbd7f	time.sleep(wait)
+mycelium_a13_macos/managed_control.py:2236:24:positional-call:wake.wait	f4e366e98a1f705dfaf182897044500d290dbd7f	wake.wait(wait)
+mycelium_a13_macos/managed_control.py:2208:12:assignment:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = min(deadline, parent)
+mycelium_a13_macos/managed_control.py:2226:19:comparison:attempt + 1	f4e366e98a1f705dfaf182897044500d290dbd7f	if attempt + 1 == HTTP_RETRY_ATTEMPTS or remaining <= 0:
+mycelium_a13_macos/demo_target.py:591:16:assignment:self._retry_delay	f4e366e98a1f705dfaf182897044500d290dbd7f	self._retry_delay = min(_RETRY_MAX_SECONDS, self._retry_delay * 2) if self._retry_delay else \
+mycelium_a13_macos/demo_target.py:593:16:assignment:self._retry_at	f4e366e98a1f705dfaf182897044500d290dbd7f	self._retry_at = now + self._retry_delay
+mycelium_a13_macos/chain_compile.py:426:12:positional-call:thread.join	f4e366e98a1f705dfaf182897044500d290dbd7f	thread.join(max(0.0,min(CLEANUP_RECEIPT_POLL_SECONDS,deadline-clock())))
+mycelium_a13_macos/demo_chain.py:1220:8:assignment:grace	f4e366e98a1f705dfaf182897044500d290dbd7f	grace = self.budgets['member_restart_grace']
+mycelium_a13_macos/local_contributor.py:38:12:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	timeout=self._timeout)
+mycelium_a13_macos/local_contributor.py:62:61:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	swarm_id=c.swarm_id,owner_node_id=c.seed_node_id,timeout=self._timeout,clock=self._clock,
+mycelium_a13_macos/managed_control.py:2181:16:positional-call:sock.settimeout	f4e366e98a1f705dfaf182897044500d290dbd7f	sock.settimeout(self._transport_timeout())
+mycelium_a13_macos/managed_control.py:2253:44:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	with self._opener.open(request, timeout=self._transport_timeout()) as response:
+mycelium_a13_macos/public_relay.py:395:72:comparison:left	f4e366e98a1f705dfaf182897044500d290dbd7f	elif self._auto_renew and self._renewal_stopped is None and left<=min(RENEWAL_MARGIN_SECONDS,self._window/3):
+mycelium_a13_macos/swarm_publish.py:442:22:positional-call:self._stop.wait	f4e366e98a1f705dfaf182897044500d290dbd7f	while not self._stop.wait(interval):
+mycelium_a13_macos/token_policy.py:44:8:keyword:clock_uncertainty_ms	f4e366e98a1f705dfaf182897044500d290dbd7f	clock_uncertainty_ms=int(MAX_CLOCK_SKEW_SECONDS*1000))
+physical_inference_node.py:967:8:assignment:self.limit_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	self.limit_bytes = int(limit_bytes)
+physical_inference_node.py:2094:8:assignment:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = time.monotonic() + max(0.0, self.socket_conflict_grace_seconds)
+mycelium_interactive/swarm.py:702:12:assignment:deadline	f4e366e98a1f705dfaf182897044500d290dbd7f	deadline = now + timeout
+mycelium_interactive/swarm.py:757:41:keyword:timeout	f4e366e98a1f705dfaf182897044500d290dbd7f	self._condition.wait(timeout=remaining)
+mycelium_a13_macos/adaptive_host.py:877:16:dict-field:expires_at	f4e366e98a1f705dfaf182897044500d290dbd7f	"expires_at": issued + self._timings["stale_after_s"],
+mycelium_a13_macos/adaptive_host.py:1045:8:assignment:interval	f4e366e98a1f705dfaf182897044500d290dbd7f	interval = resolve_timings(policy)["sample_interval_s"]
+mycelium_a13_macos/token_owner.py:79:35:comparison:previous[0]	f4e366e98a1f705dfaf182897044500d290dbd7f	if previous is None or previous[0] != lease:
+mycelium_a13_macos/token_policy.py:52:11:comparison:previous.get('lease_expires_at_unix_ms')	f4e366e98a1f705dfaf182897044500d290dbd7f	if previous.get('lease_expires_at_unix_ms') != int(lease*1000):
+mycelium_node/token_provisioning.py:157:11:comparison:latest['lease_expires_at_unix_ms']	f4e366e98a1f705dfaf182897044500d290dbd7f	if latest['lease_expires_at_unix_ms'] != retained_lease[0]:
+mycelium_node/token_progress.py:24:0:assignment:MAX_PROGRESS_BYTES	f4e366e98a1f705dfaf182897044500d290dbd7f	MAX_PROGRESS_BYTES = MAX_RECEIPT_BYTES + 1024
+mycelium_node/identity.py:79:60:keyword:max_bytes	f4e366e98a1f705dfaf182897044500d290dbd7f	private_bytes = parent.read_file(key_path.name, max_bytes=_KEY_BYTES + 1)
+mycelium_a13_macos/demo_target.py:363:44:comparison:_CLEANUP_RESERVE_SECONDS	f4e366e98a1f705dfaf182897044500d290dbd7f	if type(wall) is not int or not _CLEANUP_RESERVE_SECONDS < wall <= 3600:
+mycelium_a13_macos/managed_control.py:104:0:assignment:_MAX_ACTIVE_WORK	f4e366e98a1f705dfaf182897044500d290dbd7f	_MAX_ACTIVE_WORK = 1
+mycelium_a13_macos/managed_control.py:105:0:assignment:_MAX_ACTIVE_CONTROL	f4e366e98a1f705dfaf182897044500d290dbd7f	_MAX_ACTIVE_CONTROL = 2
+mycelium_a13_macos/managed_offers.py:61:59:manual-bound:maximum_preposition_path_characters	f4e366e98a1f705dfaf182897044500d290dbd7f	_require(isinstance(text,str) and 0<len(text)<=4096 and '\x00' not in text,'offer_preposition_invalid')
+mycelium_a13_macos/managed_runtime.py:461:16:assignment:delay	f4e366e98a1f705dfaf182897044500d290dbd7f	delay=.05
+mycelium_a13_macos/workflow.py:206:66:manual-bound:verified_challenge_token_limit.maximum	f4e366e98a1f705dfaf182897044500d290dbd7f	or type(limit) is not int or not 0 < limit <= 4096):

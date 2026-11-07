@@ -1,0 +1,18 @@
+{
+  "accepted_incarnation": "incarnation-fixture",
+  "accepted_node_id": "node-a",
+  "expires_at": 1300.0,
+  "generation": 2,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "lease_expires_at": 1300.0,
+  "membership_generation": 2,
+  "message_id": "resume_acceptance-fixture",
+  "previous_membership_generation": 1,
+  "protocol": "mycelium.membership.resume_acceptance.v1",
+  "recipient_node_id": "node-a",
+  "request_message_id": "resume-request-fixture",
+  "sender_endpoint_id": "endpoint-seed",
+  "sender_node_id": "seed-node",
+  "swarm_id": "swarm-fixture"
+}

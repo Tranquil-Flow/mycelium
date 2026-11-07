@@ -1,0 +1,125 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "cases": [
+  {
+   "label": "escape_high_alone",
+   "hex": "7b226b223a22615c756438303062227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud800b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_low_alone",
+   "hex": "7b226b223a22615c756463303062227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\udc00b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_valid_pair",
+   "hex": "7b226b223a22615c75643833645c756465303062227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud83d\\ude00b\"}",
+   "utf8_encodable": true
+  },
+  {
+   "label": "escape_reversed_pair",
+   "hex": "7b226b223a22615c75646530305c756438336462227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ude00\\ud83db\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_high_then_ascii_escape",
+   "hex": "7b226b223a225c75643830305c7530303431227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"\\ud800A\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_high_at_end",
+   "hex": "7b226b223a225c7564383030227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"\\ud800\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_two_highs",
+   "hex": "7b226b223a225c75643830305c7564383030227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"\\ud800\\ud800\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_in_key",
+   "hex": "7b225c7564383030223a317d",
+   "parsed_type": "object",
+   "answer": "{\"\\ud800\":1}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "escape_in_nested",
+   "hex": "7b226b223a7b226e223a5b225c7564666666225d7d7d",
+   "parsed_type": "object",
+   "answer": "{\"k\":{\"n\":[\"\\udfff\"]}}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "surrogatepass_utf8_high",
+   "hex": "7b226b223a2261eda08062227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud800b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "surrogatepass_utf8_low",
+   "hex": "7b226b223a2261edb08062227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\udc00b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "surrogatepass_utf8_pair_bytes",
+   "hex": "7b226b223a22eda0bdedb880227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"\\ud83d\\ude00\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "utf16le_lone_high",
+   "hex": "7b0022006b0022003a002200610000d8620022007d00",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud800b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "utf16le_bom_lone_low",
+   "hex": "fffe7b0022006b0022003a002200610000dc620022007d00",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\udc00b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "utf16be_lone_high",
+   "hex": "007b0022006b0022003a00220061d80000620022007d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud800b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "utf32le_lone_high",
+   "hex": "7b000000220000006b000000220000003a000000220000006100000000d8000062000000220000007d000000",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ud800b\"}",
+   "utf8_encodable": false
+  },
+  {
+   "label": "control_replacement_char",
+   "hex": "7b226b223a2261efbfbd62227d",
+   "parsed_type": "object",
+   "answer": "{\"k\":\"a\\ufffdb\"}",
+   "utf8_encodable": true
+  }
+ ]
+}

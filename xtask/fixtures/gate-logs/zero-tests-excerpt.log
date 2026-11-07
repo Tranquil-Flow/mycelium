@@ -1,0 +1,8 @@
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/api)
+    Finished `test` profile [unoptimized] target(s) in 14.95s
+     Running unittests src/lib.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/api-09ab1ec457d67ac4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

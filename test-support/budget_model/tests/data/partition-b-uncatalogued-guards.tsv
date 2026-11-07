@@ -1,0 +1,2 @@
+key	path	line	column	scope	symbol	expression	kind	source	sha256	oracle
+mycelium_router/mlx_runtime.py:2770:19:comparison:floor	mycelium_router/mlx_runtime.py	2770	19	MLXRuntimePort._execute_bound	floor	floor <= item.position <= ceiling + 1	comparison	if not floor <= item.position <= ceiling + 1:	b248c09612e0bb10b238f0a00f84b1eaa8e1fd3c30f5864e77b82ee88d4b30c5	f4e366e98a1f705dfaf182897044500d290dbd7f

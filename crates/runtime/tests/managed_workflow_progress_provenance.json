@@ -1,0 +1,24 @@
+[
+  {
+    "file": "managed_workflow_progress_oracle.json",
+    "kind": "oracle",
+    "oracle_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+    "source_sha256": "78061c846354953010b0ac603aebc5d5f5c1192baafe48c97a3f3e4b51516b51",
+    "probe": "external:progress_oracle.py",
+    "probe_sha256": "d9d22af9c77b595f4b88c01c8d6bcda2a6a13674feea9ee80c870322a0bf12bb",
+    "case_count": 9,
+    "fixture_sha256": "040d05f6bc35e1fd1d3580e43f96c195b85ad7c62501b95bc9c39aae84af0558",
+    "scope": "Original ManagedServingWorkflow class with scripted launch; no native verifier/model/current host publication"
+  },
+  {
+    "file": "managed_workflow_numeric_oracle.json",
+    "kind": "oracle",
+    "oracle_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+    "source_sha256": "78061c846354953010b0ac603aebc5d5f5c1192baafe48c97a3f3e4b51516b51",
+    "probe": "external:numeric_oracle_r21.py",
+    "probe_sha256": "342c5745cb6a77e728428771344bc06e2509e5a48c65fd0cc221557a26e632a7",
+    "case_count": 6,
+    "fixture_sha256": "ff5a070afe179a6b16e63785f45c478d5245cff37c7a480912c166fdd8c5347a",
+    "scope": "Original ManagedServingWorkflow class with scripted launch; no native verifier/model/current host publication"
+  }
+]

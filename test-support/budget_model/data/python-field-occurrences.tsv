@@ -1,0 +1,83 @@
+field	path	line	verdict	witness	alias
+disk_reserve_bytes	mycelium_gate_requirements/spec.py	43	other-document	"disk_reserve_bytes"})	-
+disk_reserve_bytes	mycelium_gate_requirements/spec.py	183	other-document	need = fit + int(policy["disk_reserve_bytes"]) if fit else 0	need@180-184
+disk_reserve_bytes	mycelium_gate_requirements/spec.py	208	other-document	and _int(policy["memory_reserve_bytes"]) and _int(policy["disk_reserve_bytes"])	-
+disk_reserve_bytes	mycelium_live/artifact_provisioner.py	915	read	+ checked_policy["disk_reserve_bytes"]	required_space@823-1173
+disk_reserve_bytes	mycelium_live/artifact_provisioner.py	917	relative	if self._disk_free(self.store.root) < required_space:	-
+disk_reserve_bytes	mycelium_live/local_preparer.py	1098	write	"disk_reserve_bytes": _ARTIFACT_DISK_RESERVE_BYTES,	-
+disk_reserve_bytes	mycelium_swarm_artifacts.py	214	declare	"disk_reserve_bytes",	-
+disk_reserve_bytes	mycelium_swarm_artifacts.py	1069	type-guard	reserve = _integer(value.get("disk_reserve_bytes"), "artifact_policy_invalid")	reserve@1032-1116
+disk_reserve_bytes	mycelium_swarm_artifacts.py	1109	floor	or reserve < 0	-
+max_load_proof_age_ms	mycelium_qualification/authority.py	231	read	max_age_ms = challenge["max_load_proof_age_ms"]	max_age_ms@209-250
+max_load_proof_age_ms	mycelium_qualification/authority.py	248	floor	if type(max_age_ms) is not int or max_age_ms < 1:	-
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	273	read	max_age = challenge.get("max_load_proof_age_ms")	max_age@211-320
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	278	relative	and now_unix_ms - captured <= max_age,	-
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	424	relative	and now_unix_ms - generated <= challenge["max_load_proof_age_ms"],	-
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	660	read	max_age = challenge["max_load_proof_age_ms"]	max_age@527-718
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	664	relative	and now_unix_ms - generated <= max_age,	-
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	2032	read	"valid_until_unix_ms", "max_load_proof_age_ms", "deployment_id",	-
+max_load_proof_age_ms	mycelium_qualification/qualifier.py	2065	read	max_age = challenge.get("max_load_proof_age_ms")	max_age@1977-2235
+maximum_recovery_attempts	mycelium_m19_recovery.py	323	floor	self._maximum = _integer(maximum_recovery_attempts, "maximum_recovery_attempts", minimum=1)	-
+maximum_recovery_attempts	mycelium_m19_recovery.py	336	read	maximum_recovery_attempts=status["maximum_recovery_attempts"],	ledger@330-344
+maximum_recovery_attempts	mycelium_m19_recovery.py	468	read	"maximum_recovery_attempts": self._maximum,	-
+maximum_recovery_attempts	mycelium_m19_recovery.py	481	declare	_RUNTIME_FIELDS = frozenset({"protocol", "binding", "maximum_recovery_attempts", "requests", "breaker", "reconciliation", "runtime_digest"})	-
+maximum_recovery_attempts	mycelium_m19_recovery.py	495	floor	_integer(result["maximum_recovery_attempts"], "maximum_recovery_attempts", minimum=1)	-
+maximum_total_bytes	mycelium_live/artifact_provisioner.py	868	relative	type(grant.get("maximum_total_bytes")) is not int	-
+maximum_total_bytes	mycelium_live/artifact_provisioner.py	869	relative	or checked_manifest["total_size_bytes"] > grant["maximum_total_bytes"]	-
+maximum_total_bytes	mycelium_live/local_preparer.py	1571	read	"maximum_total_bytes": manifest["total_size_bytes"],	-
+maximum_total_bytes	mycelium_live/member_transport.py	1041	read	"maximum_total_bytes": frozen_manifest["total_size_bytes"],	-
+maximum_total_bytes	mycelium_mobile/artifact_grant.py	61	declare	"maximum_total_bytes",	-
+maximum_total_bytes	mycelium_mobile/artifact_grant.py	235	other-document	"maximum_total_bytes": sum({t["sha256"]: t["size_bytes"] for t in verified["tensors"]}.values()),	-
+maximum_total_bytes	mycelium_mobile/artifact_grant.py	275	floor	_int(g["maximum_total_bytes"], code, minimum=1)	-
+maximum_total_bytes	mycelium_swarm_artifacts.py	158	declare	"maximum_total_bytes",	-
+maximum_total_bytes	mycelium_swarm_artifacts.py	831	type-guard	value.get("maximum_total_bytes"), "artifact_grant_invalid", minimum=1	maximum_bytes@788-873
+maximum_total_bytes	mycelium_swarm_artifacts.py	865	floor	or maximum_bytes < 1	-
+restart_delay_seconds	mycelium_a13_linux/service_install.py	111	write	"restart_delay_seconds": 60,	-
+restart_delay_seconds	mycelium_a13_windows/service_install.py	118	write	"restart_delay_seconds": 60,	-
+restart_delay_seconds	mycelium_a13_windows/service_lifecycle.py	94	declare	{"restart_limit", "restart_delay_seconds", "stop_timeout_seconds"}	-
+restart_delay_seconds	mycelium_a13_windows/service_lifecycle.py	179	floor	("restart_delay_seconds", 1),	-
+restart_delay_seconds	mycelium_a13_windows/service_lifecycle.py	232	read	"restart_delay_seconds": int(value["restart_policy"]["restart_delay_seconds"]),	-
+restart_delay_seconds	mycelium_service_package.py	106	declare	"restart_delay_seconds",	-
+restart_delay_seconds	mycelium_service_package.py	151	declare	"restart_delay_seconds",	-
+restart_delay_seconds	mycelium_service_package.py	197	read	"ThrottleInterval": int(config["restart_delay_seconds"]),	-
+restart_delay_seconds	mycelium_service_package.py	253	read	f"RestartSec={config['restart_delay_seconds']}",	-
+restart_delay_seconds	mycelium_service_package.py	321	read	f"  <RestartDelaySeconds>{int(config['restart_delay_seconds'])}</RestartDelaySeconds>\n"	document@279-326
+restart_delay_seconds	mycelium_service_package.py	454	read	f"      <Interval>{_task_duration_minutes(config['restart_delay_seconds'])}</Interval>\n"	-
+restart_delay_seconds	mycelium_service_package.py	512	read	delay_ms = int(math.ceil(float(config["restart_delay_seconds"]) * 1000))	delay_ms@470-553
+restart_delay_seconds	scripts/build_a13_windows.py	133	write	"restart_delay_seconds": 5,	-
+restart_delay_seconds	scripts/finalize_a13_macos.py	142	write	"restart_delay_seconds": 60, "stop_timeout_seconds": 30,	-
+stop_timeout_seconds	mycelium_a13_linux/service_install.py	112	write	"stop_timeout_seconds": 30,	-
+stop_timeout_seconds	mycelium_a13_windows/service_install.py	119	write	"stop_timeout_seconds": 30,	-
+stop_timeout_seconds	mycelium_a13_windows/service_lifecycle.py	94	declare	{"restart_limit", "restart_delay_seconds", "stop_timeout_seconds"}	-
+stop_timeout_seconds	mycelium_a13_windows/service_lifecycle.py	180	floor	("stop_timeout_seconds", 1),	-
+stop_timeout_seconds	mycelium_a13_windows/service_lifecycle.py	233	read	"stop_timeout_seconds": int(value["restart_policy"]["stop_timeout_seconds"]),	-
+stop_timeout_seconds	mycelium_service_package.py	107	declare	"stop_timeout_seconds",	-
+stop_timeout_seconds	mycelium_service_package.py	152	declare	"stop_timeout_seconds",	-
+stop_timeout_seconds	mycelium_service_package.py	255	read	f"TimeoutStopSec={config['stop_timeout_seconds']}",	-
+stop_timeout_seconds	mycelium_service_package.py	322	read	f"  <StopTimeoutSeconds>{int(config['stop_timeout_seconds'])}</StopTimeoutSeconds>\n"	document@279-326
+stop_timeout_seconds	mycelium_service_package.py	646	read	"stop_timeout_seconds": config["stop_timeout_seconds"],	-
+stop_timeout_seconds	scripts/build_a13_windows.py	134	write	"stop_timeout_seconds": 30,	-
+stop_timeout_seconds	scripts/finalize_a13_macos.py	142	write	"restart_delay_seconds": 60, "stop_timeout_seconds": 30,	-
+total_size_bytes	mycelium_live/artifact_provisioner.py	203	read	total == manifest["total_size_bytes"]	-
+total_size_bytes	mycelium_live/artifact_provisioner.py	530	read	total = int(manifest["total_size_bytes"])	total@519-585
+total_size_bytes	mycelium_live/artifact_provisioner.py	869	relative	or checked_manifest["total_size_bytes"] > grant["maximum_total_bytes"]	-
+total_size_bytes	mycelium_live/artifact_provisioner.py	913	read	else checked_manifest["total_size_bytes"]	required_space@823-1173
+total_size_bytes	mycelium_live/artifact_provisioner.py	917	relative	if self._disk_free(self.store.root) < required_space:	-
+total_size_bytes	mycelium_live/local_preparer.py	1571	read	"maximum_total_bytes": manifest["total_size_bytes"],	-
+total_size_bytes	mycelium_live/member_transport.py	927	read	manifest["total_size_bytes"]	deadline@912-970
+total_size_bytes	mycelium_live/member_transport.py	929	relative	while pending and time.monotonic() < deadline:	-
+total_size_bytes	mycelium_live/member_transport.py	1041	read	"maximum_total_bytes": frozen_manifest["total_size_bytes"],	-
+total_size_bytes	mycelium_live/stage_pack_builder.py	334	other-document	"total_size_bytes": offset,	-
+total_size_bytes	mycelium_qualification/evidence.py	23	other-document	"total_size_bytes",	-
+total_size_bytes	mycelium_qualification/evidence.py	182	other-document	"total_size_bytes": total_size,	-
+total_size_bytes	mycelium_qualification/evidence.py	245	other-document	isinstance(document["total_size_bytes"], int)	-
+total_size_bytes	mycelium_qualification/evidence.py	246	other-document	and not isinstance(document["total_size_bytes"], bool)	-
+total_size_bytes	mycelium_qualification/evidence.py	247	other-document	and document["total_size_bytes"] == expected_total,	-
+total_size_bytes	mycelium_qualification/sealer.py	259	other-document	total_size_bytes=int(manifest["total_size_bytes"]),	-
+total_size_bytes	mycelium_qualification/sealer.py	326	other-document	and manifest_value.get("total_size_bytes") == descriptor.total_size_bytes,	-
+total_size_bytes	mycelium_release_bundle/verifier.py	68	other-document	"total_size_bytes",	-
+total_size_bytes	mycelium_release_bundle/verifier.py	187	other-document	"total_size_bytes",	-
+total_size_bytes	mycelium_release_bundle/verifier.py	721	other-document	total_size = body["total_size_bytes"]	total_size@654-741
+total_size_bytes	mycelium_release_bundle/verifier.py	735	other-document	if total_size > MAX_TOTAL_BYTES:	-
+total_size_bytes	mycelium_swarm_artifacts.py	103	declare	"total_size_bytes",	-
+total_size_bytes	mycelium_swarm_artifacts.py	511	type-guard	value.get("total_size_bytes"), "stage_pack_manifest_invalid", minimum=1	total_size@448-625

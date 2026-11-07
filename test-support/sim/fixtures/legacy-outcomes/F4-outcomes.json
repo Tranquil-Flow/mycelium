@@ -1,0 +1,162 @@
+{
+  "corrected": {
+    "cleanup_proofs": 2,
+    "deadlines": [
+      [
+        1800000,
+        1800000,
+        1680000
+      ],
+      [
+        3513000,
+        3513000,
+        3393000
+      ],
+      [
+        5226000,
+        5226000,
+        5106000
+      ]
+    ],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 2,
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "1679500:crossing_chat",
+      "1680000:stop",
+      "1680000:chat_interrupted_explicitly",
+      "1713000:close_completion",
+      "1713000:cleanup_proven",
+      "1713000:replacement_attempt",
+      "1713000:fresh_run",
+      "1713000:start_attempt",
+      "1790000:stale_completion_ignored",
+      "1800000:stale_completion_ignored",
+      "1873000:serving",
+      "1873000:chat_success",
+      "3392500:crossing_chat",
+      "3393000:stop",
+      "3393000:chat_interrupted_explicitly",
+      "3426000:close_completion",
+      "3426000:cleanup_proven",
+      "3426000:replacement_attempt",
+      "3426000:fresh_run",
+      "3426000:start_attempt",
+      "3503000:stale_completion_ignored",
+      "3513000:stale_completion_ignored",
+      "3586000:serving",
+      "3586000:chat_success"
+    ],
+    "rollovers": 2,
+    "served": 3,
+    "starts": 3,
+    "successful_chats": 3,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_interrupted_explicitly": 2,
+      "chat_success": 3,
+      "cleanup_proven": 2,
+      "close_completion": 2,
+      "crossing_chat": 2,
+      "fresh_run": 2,
+      "replacement_attempt": 2,
+      "serving": 3,
+      "stale_completion_ignored": 4,
+      "start_attempt": 3,
+      "stop": 2
+    },
+    "workers": [
+      {
+        "cleanup_by_ms": 1790000,
+        "closed_at_ms": 1713000,
+        "generation": 1,
+        "member_expiry_ms": 1800000,
+        "member_origin_ms": 0,
+        "owner_expiry_ms": 1800000,
+        "owner_origin_ms": 0
+      },
+      {
+        "cleanup_by_ms": 3503000,
+        "closed_at_ms": 3426000,
+        "generation": 2,
+        "member_expiry_ms": 3513000,
+        "member_origin_ms": 1713000,
+        "owner_expiry_ms": 3513000,
+        "owner_origin_ms": 1713000
+      },
+      {
+        "cleanup_by_ms": 5216000,
+        "closed_at_ms": null,
+        "generation": 3,
+        "member_expiry_ms": 5226000,
+        "member_origin_ms": 3426000,
+        "owner_expiry_ms": 5226000,
+        "owner_origin_ms": 3426000
+      }
+    ]
+  },
+  "historical": {
+    "cleanup_proofs": 1,
+    "deadlines": [
+      [
+        1800000,
+        1800000,
+        1800000
+      ]
+    ],
+    "diagnostics": [
+      "rollover_cleanup_unproven:StopDeadline",
+      "replacement_forbidden:CleanupUnproven"
+    ],
+    "expiry_losses": 1,
+    "forbidden_replacements": 1,
+    "interrupted_chats": 1,
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "1799500:crossing_chat",
+      "1800000:worker_expired",
+      "1800000:stop",
+      "1800000:chat_interrupted_explicitly",
+      "1800000:outer_wait_expired",
+      "1800000:replacement_attempt",
+      "1833000:close_completion",
+      "1833000:cleanup_proven"
+    ],
+    "rollovers": 0,
+    "served": 1,
+    "starts": 1,
+    "successful_chats": 1,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_interrupted_explicitly": 1,
+      "chat_success": 1,
+      "cleanup_proven": 1,
+      "close_completion": 1,
+      "crossing_chat": 1,
+      "outer_wait_expired": 1,
+      "replacement_attempt": 1,
+      "serving": 1,
+      "start_attempt": 1,
+      "stop": 1,
+      "worker_expired": 1
+    },
+    "workers": [
+      {
+        "cleanup_by_ms": 1790000,
+        "closed_at_ms": 1833000,
+        "generation": 1,
+        "member_expiry_ms": 1800000,
+        "member_origin_ms": 0,
+        "owner_expiry_ms": 1800000,
+        "owner_origin_ms": 0
+      }
+    ]
+  },
+  "source_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582"
+}

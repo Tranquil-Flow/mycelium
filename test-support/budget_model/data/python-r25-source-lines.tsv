@@ -1,0 +1,24 @@
+path	line	full_source_sha256	source
+mycelium_a13_macos/managed_control.py	104	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	_MAX_ACTIVE_WORK = 1
+mycelium_a13_macos/managed_control.py	105	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	_MAX_ACTIVE_CONTROL = 2
+mycelium_a13_macos/managed_control.py	1480	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	            _require(isinstance(active, dict) and len(active) <= _MAX_ACTIVE_WORK + _MAX_ACTIVE_CONTROL,
+mycelium_a13_macos/managed_control.py	1554	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	                        _require(work_count <= _MAX_ACTIVE_WORK and control_count <= _MAX_ACTIVE_CONTROL,
+mycelium_a13_macos/managed_control.py	1574	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	                            if concurrent and ((work and work_count >= _MAX_ACTIVE_WORK)
+mycelium_a13_macos/managed_control.py	1575	6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457	                                    or (not work and control_count >= _MAX_ACTIVE_CONTROL)):
+mycelium_a13_macos/managed_offers.py	48	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	def _preposition(value):
+mycelium_a13_macos/managed_offers.py	59	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	        for key in ('source_path','destination_path'):
+mycelium_a13_macos/managed_offers.py	60	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            text=row[key]
+mycelium_a13_macos/managed_offers.py	61	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            _require(isinstance(text,str) and 0<len(text)<=4096 and '\x00' not in text,'offer_preposition_invalid')
+mycelium_a13_macos/managed_offers.py	62	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            path=Path(text)
+mycelium_a13_macos/managed_offers.py	63	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            _require(str(path)==text and '..' not in path.parts and '.' not in path.parts,'offer_preposition_invalid')
+mycelium_a13_macos/managed_offers.py	64	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            _require(path.is_absolute()==(key=='source_path'),'offer_preposition_invalid')
+mycelium_a13_macos/managed_offers.py	67	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	    return json.loads(_preposition_bytes(value))
+mycelium_a13_macos/managed_offers.py	75	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	        preposition=_preposition(offer['preposition'])
+mycelium_a13_macos/managed_offers.py	112	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	        preposition=_preposition(preposition)
+mycelium_a13_macos/managed_offers.py	219	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	    def read_offer(self,envelope):
+mycelium_a13_macos/managed_offers.py	242	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	    def _stage_ack(offer,ack):
+mycelium_a13_macos/managed_offers.py	246	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	        _require(isinstance(root,str) and len(root)<=4096 and
+mycelium_a13_macos/managed_offers.py	248	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            '..' not in PurePosixPath(root).parts,'offer_ack_invalid')
+mycelium_a13_macos/managed_offers.py	287	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	    @staticmethod
+mycelium_a13_macos/managed_offers.py	294	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            isinstance(root,str) and len(root)<=4096 and PurePosixPath(root).is_absolute() and
+mycelium_a13_macos/managed_offers.py	295	f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771	            str(PurePosixPath(root))==root and '..' not in PurePosixPath(root).parts,'offer_cleanup_ack_invalid')

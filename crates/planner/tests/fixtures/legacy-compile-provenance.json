@@ -1,0 +1,15 @@
+{
+  "claim": "actual oracle outputs/exceptions of layer_assignment.compile_layer_assignments on the two recorded legacy-shape inputs and mutations; synthetic documents, no model loaded",
+  "counts": {
+    "cases": 1699,
+    "ok": 115,
+    "refused": 1584
+  },
+  "generator_sha256": "b2299ddbe58e7fff39c3bf93e4ff1f32b1ee425a7f77f058ed086e38afbbaa96",
+  "imported_sources": {
+    "layer_assignment.py": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": "c2bf3374d7992071f2b46b624e7542d245aba29011e76284c858faa06f54dbe0",
+  "python": "3.14.8"
+}

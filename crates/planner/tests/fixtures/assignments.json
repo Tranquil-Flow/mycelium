@@ -1,0 +1,592 @@
+[
+  {
+    "expected": [
+      {
+        "artifact_cache_root": "/fixture/cache-a",
+        "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+        "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+        "component_aliases": {},
+        "component_tensor_keys": {
+          "decoder": [
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "input_embedding": [
+            "model.embed_tokens.weight"
+          ]
+        },
+        "components": [
+          "input_embedding",
+          "decoder"
+        ],
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "expected_tensor_keys": [
+          "model.embed_tokens.weight",
+          "model.layers.0.self_attn.q_proj.weight"
+        ],
+        "expected_tensor_prefixes": [
+          "model.layers.0."
+        ],
+        "files": [
+          {
+            "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "node_id": "a",
+        "protocol": "mycelium.layer_assignment.v2",
+        "range": {
+          "end_layer_exclusive": 1,
+          "layer_count": 1,
+          "start_layer": 0
+        },
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "route_ready": false,
+        "runtime": {
+          "architecture": "qwen2",
+          "backend": "mlx",
+          "dtype": "float32",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": false,
+            "vocab_size": 8
+          },
+          "quantization": "int8-weight-only"
+        }
+      },
+      {
+        "artifact_cache_root": "/fixture/cache-b",
+        "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+        "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+        "component_aliases": {},
+        "component_tensor_keys": {
+          "decoder": [
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight"
+          ],
+          "final_norm": [
+            "model.norm.weight"
+          ],
+          "lm_head": [
+            "lm_head.weight"
+          ]
+        },
+        "components": [
+          "decoder",
+          "final_norm",
+          "lm_head"
+        ],
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "expected_tensor_keys": [
+          "lm_head.weight",
+          "model.layers.1.self_attn.q_proj.weight",
+          "model.layers.2.self_attn.q_proj.weight",
+          "model.norm.weight"
+        ],
+        "expected_tensor_prefixes": [
+          "model.layers.1.",
+          "model.layers.2."
+        ],
+        "files": [
+          {
+            "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "node_id": "b",
+        "protocol": "mycelium.layer_assignment.v2",
+        "range": {
+          "end_layer_exclusive": 3,
+          "layer_count": 2,
+          "start_layer": 1
+        },
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "route_ready": false,
+        "runtime": {
+          "architecture": "qwen2",
+          "backend": "mlx",
+          "dtype": "float32",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": false,
+            "vocab_size": 8
+          },
+          "quantization": "int8-weight-only"
+        }
+      }
+    ],
+    "input": {
+      "cache_roots": {
+        "a": "/fixture/cache-a",
+        "b": "/fixture/cache-b"
+      },
+      "deployment_epoch": 7,
+      "deployment_id": "12345678-1234-5678-9234-567812345678",
+      "manifest": {
+        "architecture": "qwen2",
+        "block_prefix_template": "model.layers.{layer}.",
+        "component_aliases": {},
+        "component_files": {
+          "final_norm": [
+            "toy.safetensors"
+          ],
+          "input_embedding": [
+            "toy.safetensors"
+          ],
+          "lm_head": [
+            "toy.safetensors"
+          ]
+        },
+        "component_tensor_keys": {
+          "final_norm": [
+            "model.norm.weight"
+          ],
+          "input_embedding": [
+            "model.embed_tokens.weight"
+          ],
+          "lm_head": [
+            "lm_head.weight"
+          ]
+        },
+        "components": {
+          "decoder": [
+            "model.layers.{layer}."
+          ],
+          "final_norm": [
+            "model.norm."
+          ],
+          "input_embedding": [
+            "model.embed_tokens."
+          ],
+          "lm_head": [
+            "lm_head."
+          ]
+        },
+        "files": [
+          {
+            "content_digest": {
+              "algorithm": "sha256",
+              "value": "1111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "format": "safetensors_sharded",
+        "index_file": "model.safetensors.index.json",
+        "layer_files": {
+          "0": [
+            "toy.safetensors"
+          ],
+          "1": [
+            "toy.safetensors"
+          ],
+          "2": [
+            "toy.safetensors"
+          ]
+        },
+        "manifest_digest": {
+          "algorithm": "sha256",
+          "value": "0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e"
+        },
+        "model_id": "fixture/qwen2",
+        "num_layers": 3,
+        "protocol": "mycelium.model_manifest.v1",
+        "requested_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime_model": {
+          "architecture": "qwen2",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": false,
+            "vocab_size": 8
+          }
+        },
+        "source": "huggingface",
+        "tensor_keys_by_layer": {
+          "0": [
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "1": [
+            "model.layers.1.self_attn.q_proj.weight"
+          ],
+          "2": [
+            "model.layers.2.self_attn.q_proj.weight"
+          ]
+        }
+      },
+      "route_plan": {
+        "claim_boundary": "metadata only; not a loaded route",
+        "model": {
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "num_layers": 3,
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "ok": true,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "route": [
+          {
+            "node_id": "a",
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            }
+          },
+          {
+            "node_id": "b",
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            }
+          }
+        ]
+      },
+      "runtime_by_node": {
+        "a": {
+          "backend": "mlx",
+          "dtype": "float32",
+          "quantization": "int8-weight-only"
+        },
+        "b": {
+          "backend": "mlx",
+          "dtype": "float32",
+          "quantization": "int8-weight-only"
+        }
+      }
+    }
+  },
+  {
+    "expected": [
+      {
+        "artifact_cache_root": "/fixture/cache-a",
+        "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+        "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+        "component_aliases": {},
+        "component_tensor_keys": {
+          "decoder": [
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "input_embedding": [
+            "model.embed_tokens.weight"
+          ]
+        },
+        "components": [
+          "input_embedding",
+          "decoder"
+        ],
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "expected_tensor_keys": [
+          "model.embed_tokens.weight",
+          "model.layers.0.self_attn.q_proj.weight"
+        ],
+        "expected_tensor_prefixes": [
+          "model.layers.0."
+        ],
+        "files": [
+          {
+            "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "node_id": "a",
+        "protocol": "mycelium.layer_assignment.v2",
+        "range": {
+          "end_layer_exclusive": 1,
+          "layer_count": 1,
+          "start_layer": 0
+        },
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "route_ready": false,
+        "runtime": {
+          "architecture": "qwen2",
+          "backend": "mlx",
+          "dtype": "float32",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": true,
+            "vocab_size": 8
+          },
+          "quantization": "int8-weight-only"
+        }
+      },
+      {
+        "artifact_cache_root": "/fixture/cache-b",
+        "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+        "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+        "component_aliases": {
+          "lm_head": "input_embedding"
+        },
+        "component_tensor_keys": {
+          "decoder": [
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight"
+          ],
+          "final_norm": [
+            "model.norm.weight"
+          ],
+          "lm_head": [
+            "model.embed_tokens.weight"
+          ]
+        },
+        "components": [
+          "decoder",
+          "final_norm",
+          "lm_head"
+        ],
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "expected_tensor_keys": [
+          "model.embed_tokens.weight",
+          "model.layers.1.self_attn.q_proj.weight",
+          "model.layers.2.self_attn.q_proj.weight",
+          "model.norm.weight"
+        ],
+        "expected_tensor_prefixes": [
+          "model.layers.1.",
+          "model.layers.2."
+        ],
+        "files": [
+          {
+            "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "node_id": "b",
+        "protocol": "mycelium.layer_assignment.v2",
+        "range": {
+          "end_layer_exclusive": 3,
+          "layer_count": 2,
+          "start_layer": 1
+        },
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "route_ready": false,
+        "runtime": {
+          "architecture": "qwen2",
+          "backend": "mlx",
+          "dtype": "float32",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": true,
+            "vocab_size": 8
+          },
+          "quantization": "int8-weight-only"
+        }
+      }
+    ],
+    "input": {
+      "cache_roots": {
+        "a": "/fixture/cache-a",
+        "b": "/fixture/cache-b"
+      },
+      "deployment_epoch": 7,
+      "deployment_id": "12345678-1234-5678-9234-567812345678",
+      "manifest": {
+        "architecture": "qwen2",
+        "block_prefix_template": "model.layers.{layer}.",
+        "component_aliases": {
+          "lm_head": "input_embedding"
+        },
+        "component_files": {
+          "final_norm": [
+            "toy.safetensors"
+          ],
+          "input_embedding": [
+            "toy.safetensors"
+          ],
+          "lm_head": [
+            "toy.safetensors"
+          ]
+        },
+        "component_tensor_keys": {
+          "final_norm": [
+            "model.norm.weight"
+          ],
+          "input_embedding": [
+            "model.embed_tokens.weight"
+          ],
+          "lm_head": [
+            "model.embed_tokens.weight"
+          ]
+        },
+        "components": {
+          "decoder": [
+            "model.layers.{layer}."
+          ],
+          "final_norm": [
+            "model.norm."
+          ],
+          "input_embedding": [
+            "model.embed_tokens."
+          ],
+          "lm_head": [
+            "lm_head."
+          ]
+        },
+        "files": [
+          {
+            "content_digest": {
+              "algorithm": "sha256",
+              "value": "1111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "path": "toy.safetensors",
+            "size_bytes": 128
+          }
+        ],
+        "format": "safetensors_sharded",
+        "index_file": "model.safetensors.index.json",
+        "layer_files": {
+          "0": [
+            "toy.safetensors"
+          ],
+          "1": [
+            "toy.safetensors"
+          ],
+          "2": [
+            "toy.safetensors"
+          ]
+        },
+        "manifest_digest": {
+          "algorithm": "sha256",
+          "value": "349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7"
+        },
+        "model_id": "fixture/qwen2",
+        "num_layers": 3,
+        "protocol": "mycelium.model_manifest.v1",
+        "requested_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtime_model": {
+          "architecture": "qwen2",
+          "model_config": {
+            "activation_function": "silu",
+            "head_dim": 4,
+            "n_embd": 4,
+            "n_head": 1,
+            "n_inner": 8,
+            "n_kv_head": 1,
+            "n_layer": 3,
+            "n_positions": 16,
+            "rms_norm_epsilon": 1e-06,
+            "rope_theta": 10000.0,
+            "tie_word_embeddings": true,
+            "vocab_size": 8
+          }
+        },
+        "source": "huggingface",
+        "tensor_keys_by_layer": {
+          "0": [
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "1": [
+            "model.layers.1.self_attn.q_proj.weight"
+          ],
+          "2": [
+            "model.layers.2.self_attn.q_proj.weight"
+          ]
+        }
+      },
+      "route_plan": {
+        "claim_boundary": "metadata only; not a loaded route",
+        "model": {
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "num_layers": 3,
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "ok": true,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "route": [
+          {
+            "node_id": "a",
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            }
+          },
+          {
+            "node_id": "b",
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            }
+          }
+        ]
+      },
+      "runtime_by_node": {
+        "a": {
+          "backend": "mlx",
+          "dtype": "float32",
+          "quantization": "int8-weight-only"
+        },
+        "b": {
+          "backend": "mlx",
+          "dtype": "float32",
+          "quantization": "int8-weight-only"
+        }
+      }
+    }
+  }
+]

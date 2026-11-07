@@ -1,0 +1,12 @@
+{
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "source_sha256": {
+    "native/iroh_transport/src/remote.rs": "5219c340d47c45fae8d66690248cde604ac528d73c282273b64fea77e571a0b5",
+    "native/iroh_transport/src/sidecar.rs": "b3c4b75a445562f93956b0bff30d12c6ae4f07d9d46510a37a2b6a5686de7d54"
+  },
+  "recorder_sha256": "4ea91ad28c88d0ae463ec3ed51b1f7caecb69518bd1870f9c5849456f2ae9397",
+  "corpus_sha256": "f393ba5fe860fa12da22ae4b4702f0d96c6d7cb94ce16e9eb99b19cd3f114f5a",
+  "rows": 42,
+  "scope": "Directly compiled pinned native remote.rs codec; sidecar SendAttempt decision transcribed from sidecar.rs:2682-2700. No Iroh/QUIC, TLS, retry lifecycle or cleanup execution.",
+  "format": "TSV name, hexadecimal wire bytes, decode error code or ok, numeric RemoteKind or -, sidecar SendAttempt for request ID [5;16]. generation_transfer is an outbound byte vector; SendAttempt applies only when misused as a response."
+}

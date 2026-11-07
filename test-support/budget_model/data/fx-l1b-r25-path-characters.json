@@ -1,0 +1,56 @@
+{
+  "actual_constants": {
+    "_MAX_ACTIVE_CONTROL": 2,
+    "_MAX_ACTIVE_WORK": 1
+  },
+  "cases": [
+    {
+      "input_characters": 4095,
+      "input_utf8_bytes": 8189,
+      "key": "source_path",
+      "outcome": "accepted",
+      "output_characters": 4095,
+      "output_utf8_bytes": 8189
+    },
+    {
+      "input_characters": 4096,
+      "input_utf8_bytes": 8191,
+      "key": "source_path",
+      "outcome": "accepted",
+      "output_characters": 4096,
+      "output_utf8_bytes": 8191
+    },
+    {
+      "error": "offer_preposition_invalid",
+      "input_characters": 4097,
+      "input_utf8_bytes": 8193,
+      "key": "source_path",
+      "outcome": "refused",
+      "type": "ManagedControlError"
+    },
+    {
+      "input_characters": 4095,
+      "input_utf8_bytes": 8190,
+      "key": "destination_path",
+      "outcome": "accepted",
+      "output_characters": 4095,
+      "output_utf8_bytes": 8190
+    },
+    {
+      "input_characters": 4096,
+      "input_utf8_bytes": 8192,
+      "key": "destination_path",
+      "outcome": "accepted",
+      "output_characters": 4096,
+      "output_utf8_bytes": 8192
+    },
+    {
+      "error": "offer_preposition_invalid",
+      "input_characters": 4097,
+      "input_utf8_bytes": 8194,
+      "key": "destination_path",
+      "outcome": "refused",
+      "type": "ManagedControlError"
+    }
+  ]
+}

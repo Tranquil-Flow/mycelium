@@ -1,0 +1,325 @@
+key	unit	canonical	case	input	status	result
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:104:78:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	floor	1	accepted	1
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:119:90:validator-keyword:minimum	milliseconds	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	floor	1	accepted	1
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:120:70:validator-keyword:minimum	milliseconds	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:121:64:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:122:70:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	floor	1	accepted	1
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:123:74:validator-keyword:minimum	milliseconds	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:127:20:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:129:68:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	ceiling	9223372036854775807	accepted	9223372036854775807
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	above	9223372036854775808	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_live/liveness.py:130:70:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture must be an integer in [1, 9223372036854775807]
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	ceiling	4294967296	accepted	4294967296
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	above	4294967297	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:198:24:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	below	-1	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	floor	0	accepted	0
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	ceiling	4294967296	accepted	4294967296
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	above	4294967297	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/acceleration_profile.py:199:24:validator-keyword:maximum	entries	4294967296	none	None	refused	r17_fixture
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/activation_codec.py:344:64:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:251:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:252:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:260:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:261:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	floor	0	accepted	0
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	ceiling	1152921504606846976	accepted	1152921504606846976
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	above	1152921504606846977	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:57:validator-keyword:minimum	bytes	0	none	None	accepted	None
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	below	-1	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	floor	0	accepted	0
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	ceiling	1152921504606846976	accepted	1152921504606846976
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	above	1152921504606846977	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:367:68:validator-keyword:maximum	bytes	1152921504606846976	none	None	accepted	None
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:57:validator-keyword:minimum	entries	0	none	None	accepted	None
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	below	-1	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	floor	0	accepted	0
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/capability_report.py:369:68:validator-keyword:maximum	entries	1099511627776	none	None	accepted	None
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:219:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:220:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:229:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/class_qualification.py:230:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:174:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/eligibility.py:179:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/migration.py:434:76:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/migration.py:529:88:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:64:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/migration.py:702:75:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/migration_executor.py:214:82:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	ceiling	1048576	accepted	1048576
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	above	1048577	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:181:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	ceiling	1048576	accepted	1048576
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	above	1048577	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:182:24:validator-keyword:maximum	entries	1048576	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	ceiling	1073741824	accepted	1073741824
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	above	1073741825	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:241:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	ceiling	1073741824	accepted	1073741824
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	above	1073741825	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:242:24:validator-keyword:maximum	entries	1073741824	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:348:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/peer_profile.py:349:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	ceiling	1073741824	accepted	1073741824
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	above	1073741825	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:207:20:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	ceiling	1073741824	accepted	1073741824
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	above	1073741825	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:208:20:validator-keyword:maximum	entries	1073741824	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	ceiling	1024	accepted	1024
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	above	1025	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:86:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	ceiling	1024	accepted	1024
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	above	1025	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:211:97:validator-keyword:maximum	entries	1024	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	ceiling	1024	accepted	1024
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	above	1025	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:86:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	ceiling	1024	accepted	1024
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	above	1025	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:214:97:validator-keyword:maximum	entries	1024	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:219:20:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:220:20:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:247:103:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:249:88:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:252:83:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:255:83:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:328:24:validator-keyword:minimum	entries	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	below	-1	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	floor	0	accepted	0
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:329:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:347:24:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	below	0	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	floor	1	accepted	1
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:348:24:validator-keyword:maximum	entries	1099511627776	none	None	refused	r17_fixture
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	below	0	refused	r17_fixture
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	floor	1	accepted	1
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	ceiling	1099511627776	accepted	1099511627776
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	above	1099511627777	refused	r17_fixture
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/seed_migration.py:149:98:validator-keyword:minimum	entries	1	none	None	refused	r17_fixture

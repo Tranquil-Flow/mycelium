@@ -1,0 +1,325 @@
+{
+  "schema": 1,
+  "baseline": {
+    "sha256": "851d2ba3571f0f0cf363a4598c94191f8a633fa2302a0bf34347d03abf8e2875",
+    "source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e"
+  },
+  "approvers": [
+    "integrator",
+    "owner"
+  ],
+  "rows": [
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_the_script_clears_quarantine_from_the_app_only_then_runs_the_installer",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::the_script_clears_quarantine_from_the_app_only_then_runs_the_installer"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_a_document_that_does_not_match_the_sums_stops_everything_before_any_trust_is_extended",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::a_document_that_does_not_match_the_sums_stops_everything_before_any_trust_is_extended"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_an_app_that_is_not_a_plain_bundle_inside_this_folder_is_refused",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::an_app_that_is_not_a_plain_bundle_inside_this_folder_is_refused"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_the_script_refuses_when_fake_quarantine_removal_fails",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::the_script_refuses_when_quarantine_removal_fails"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_fake_marks_include_the_link_itself",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::the_mark_on_a_link_itself_is_cleared_too"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_the_installer_refusal_is_passed_through_and_never_reported_as_installed",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::the_installer_refusal_is_passed_through_and_never_reported_as_installed"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_the_script_uses_no_network_no_admin_and_no_global_trust_changes",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::the_script_uses_no_network_no_admin_and_no_global_trust_changes"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/a13_macos/test_install_command.py::test_sums_cover_the_documents_the_script_checks",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/desktop/tests/install_command.rs::sums_cover_the_documents_the_script_checks_and_every_regular_app_file"
+      ],
+      "obligation": "O:path:tests/a13_macos/test_install_command.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0230"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_create_and_list_shows_every_swarm_with_public_fields",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::create_and_list_shows_every_swarm_with_public_fields"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_only_the_owner_updates_and_seq_must_grow",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::only_the_owner_updates_and_seq_must_grow"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_delete_by_owner_and_old_record_cannot_be_replayed",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::delete_by_owner_retires_the_id_and_removes_requests_offers_and_grants"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_heartbeat_with_skewed_clock_is_refused",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::heartbeat_with_skewed_clock_is_refused"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_access_request_owner_inbox_grant_and_deny",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::access_request_owner_inbox_grant_and_deny"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_query_replay_is_refused",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::query_replay_is_refused_and_expired_grants_disappear"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_entry_offer_then_owner_attaches_entry",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::entry_offer_then_owner_attaches_entry_and_expired_offers_hide"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_entry_origin_must_be_https_unless_loopback_enabled",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::entry_origin_must_be_public_https_unless_loopback_enabled"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_size_caps_and_per_owner_and_total_caps",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::size_caps_owner_cap_and_directory_cap"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_per_ip_and_per_key_write_rate_limits",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::per_ip_and_per_key_write_rate_limits_with_one_minute_window"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_sqlite_store_is_durable_across_restart",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::sqlite_store_is_durable_across_restart_mode_0600_and_oracle_text_compatible"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_core.py::test_unknown_routes_and_methods",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::unknown_routes_and_methods"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_core.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_write_budgets.py::test_700_junk_posts_from_30_addresses_do_not_starve_a_valid_heartbeat",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::junk_posts_do_not_starve_a_valid_heartbeat_and_only_signed_writes_spend_the_global_budget"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_write_budgets.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_write_budgets.py::test_valid_signed_writes_are_what_spends_the_global_write_budget",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::junk_posts_do_not_starve_a_valid_heartbeat_and_only_signed_writes_spend_the_global_budget"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_write_budgets.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_write_budgets.py::test_a_spent_write_budget_does_not_stop_heartbeats",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::spent_write_budget_does_not_stop_heartbeats_and_heartbeats_have_their_own_budget"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_write_budgets.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    },
+    {
+      "old": "py:tests/swarm_directory/test_directory_write_budgets.py::test_heartbeats_have_their_own_bounded_budget",
+      "disposition": "mapped",
+      "new": [
+        "rs:crates/api/tests/swarm_directory.rs::spent_write_budget_does_not_stop_heartbeats_and_heartbeats_have_their_own_budget"
+      ],
+      "obligation": "O:path:tests/swarm_directory/test_directory_write_budgets.py",
+      "approver": "integrator",
+      "approved": "2026-10-28",
+      "evidence": [
+        "EV-20261028-0406"
+      ]
+    }
+  ]
+}

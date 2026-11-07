@@ -1,0 +1,1327 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "rows": [
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "op": "snapshot"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": null,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {}
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": 0,
+        "signed_at": 1030
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.0,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": 30.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": 2,
+        "signed_at": 1031
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 2.0,
+          "samples": 2,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": 60,
+        "signed_at": 950
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.0,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": 30.0,
+          "rtt_seconds": 60.0,
+          "samples": 3,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": null,
+        "signed_at": 1050
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 60.0,
+          "samples": 4,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 32.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": 61,
+        "signed_at": 1030
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 32.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 32.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 32.0,
+          "rtt_seconds": 60.0,
+          "samples": 5,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 46.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": -1,
+        "signed_at": 1030
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 46.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 46.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 46.0,
+          "rtt_seconds": 60.0,
+          "samples": 6,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 32.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": true,
+        "signed_at": 1000
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 32.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 32.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 32.0,
+          "rtt_seconds": 60.0,
+          "samples": 7,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": "bad",
+        "signed_at": 1000
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 60.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "rtt_seconds": 0,
+        "signed_at": 1001
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "signed_at": true
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "signed_at": null
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "signed_at": "bad"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": null
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0,
+        "two": -88.0
+      },
+      "exceeded_order": [
+        "one",
+        "two"
+      ],
+      "input": {
+        "node": "two",
+        "op": "observe",
+        "received_at": 990,
+        "rtt_seconds": 4,
+        "signed_at": 900
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": -88.0
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0,
+        "two": -88.0
+      },
+      "exceeded_order": [
+        "one",
+        "two"
+      ],
+      "input": {
+        "now": 1300,
+        "op": "snapshot"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": -88.0
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 300.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 300.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "now": 1300.001,
+        "op": "snapshot"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": null,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 300.001,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 300.001,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 31.0,
+        "two": -88.0
+      },
+      "exceeded_order": [
+        "one",
+        "two"
+      ],
+      "input": {
+        "now": 900,
+        "op": "snapshot"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 31.0,
+        "two": -88.0
+      },
+      "only_one": {
+        "one": 31.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": -100.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": -100.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "now": 1400,
+        "op": "snapshot"
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": null,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 400.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": 31.0,
+          "rtt_seconds": 0.0,
+          "samples": 8,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 400.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "signed_at": 1401
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 1.0,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": 1.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 400.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "now": 1701.0,
+        "op": "observe",
+        "signed_at": 1731.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.0,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": 30.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 701.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 30.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 2002.0,
+        "op": "observe",
+        "signed_at": 2032.0001
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.000099999999975,
+        "two": null
+      },
+      "only_one": {
+        "one": 30.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 30.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 1002.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 30.001
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 2303.0,
+        "op": "observe",
+        "signed_at": 2333.0005
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.000500000000102,
+        "two": null
+      },
+      "only_one": {
+        "one": 30.001
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 30.001,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 1303.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": 30.001
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 2604.0,
+        "op": "observe",
+        "signed_at": 2634.0015
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": 30.00149999999985,
+        "two": null
+      },
+      "only_one": {
+        "one": 30.001
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 30.001,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 1604.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "now": 2905.0,
+        "op": "observe",
+        "signed_at": 2875.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -30.0,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": -30.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 1905.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": -30.0
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 3206.0,
+        "op": "observe",
+        "signed_at": 3175.9999
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -30.000100000000202,
+        "two": null
+      },
+      "only_one": {
+        "one": -30.0
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -30.0,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2206.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": -30.001
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 3507.0,
+        "op": "observe",
+        "signed_at": 3476.9995
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -30.000500000000102,
+        "two": null
+      },
+      "only_one": {
+        "one": -30.001
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -30.001,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2507.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": -30.001
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "now": 3808.0,
+        "op": "observe",
+        "signed_at": 3777.9985
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -30.00149999999985,
+        "two": null
+      },
+      "only_one": {
+        "one": -30.001
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -30.001,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2808.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "one": -30.001
+      },
+      "exceeded_order": [
+        "one"
+      ],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "received_at": true,
+        "signed_at": 3808.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -30.00149999999985,
+        "two": null
+      },
+      "only_one": {
+        "one": -30.001
+      },
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -30.001,
+          "rtt_seconds": 0.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2808.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {},
+      "exceeded_order": [],
+      "input": {
+        "node": "one",
+        "op": "observe",
+        "received_at": null,
+        "signed_at": 3808.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -15.000749999999925,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": -15.001,
+          "rtt_seconds": 0.0,
+          "samples": 2,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2808.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "zebra": 40.0
+      },
+      "exceeded_order": [
+        "zebra"
+      ],
+      "input": {
+        "node": "zebra",
+        "op": "observe",
+        "signed_at": 3848.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -15.000749999999925,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": -15.001,
+          "rtt_seconds": 0.0,
+          "samples": 2,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2808.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "zebra": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 40.0,
+          "rtt_seconds": null,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    },
+    {
+      "exceeded": {
+        "alpha": -40.0,
+        "zebra": 40.0
+      },
+      "exceeded_order": [
+        "zebra",
+        "alpha"
+      ],
+      "input": {
+        "node": "alpha",
+        "op": "observe",
+        "signed_at": 3768.0
+      },
+      "missing": {
+        "exceeds_tolerance": false,
+        "offset_seconds": null,
+        "samples": 0,
+        "tolerance_seconds": 30.0
+      },
+      "offsets": {
+        "missing": null,
+        "one": -15.000749999999925,
+        "two": null
+      },
+      "only_one": {},
+      "snapshot": {
+        "alpha": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": -40.0,
+          "rtt_seconds": null,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "one": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": false,
+          "fresh": true,
+          "offset_seconds": -15.001,
+          "rtt_seconds": 0.0,
+          "samples": 2,
+          "tolerance_seconds": 30.0
+        },
+        "two": {
+          "age_seconds": 2808.0,
+          "exceeds_tolerance": false,
+          "fresh": false,
+          "offset_seconds": -88.0,
+          "rtt_seconds": 4.0,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        },
+        "zebra": {
+          "age_seconds": 0.0,
+          "exceeds_tolerance": true,
+          "fresh": true,
+          "offset_seconds": 40.0,
+          "rtt_seconds": null,
+          "samples": 1,
+          "tolerance_seconds": 30.0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,581 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "now": 1761700000.125,
+ "cases": [
+  {
+   "label": "policy_invalid_utf8",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "resource-policy.json": "fffefd7b7d"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "UnicodeDecodeError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "policy_json_garbage",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "resource-policy.json": "6e6f74206a736f6e"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "JSONDecodeError",
+    "exception_module": "json.decoder"
+   }
+  },
+  {
+   "label": "policy_json_truncated",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "resource-policy.json": "7b226261636b67726f756e64223a2066616c73652c2022646961676e6f7374696373223a2066616c73652c20226e6574776f726b223a2022756e6d6574657265645f6f6e6c79222c2022706565725f7669736962696c697479223a20747275652c2022706f776572223a202261635f6f6e6c79222c202273746f726167655f6279746573223a20313030303030303030302c2022746865726d616c223a202273746f705f6f6e5f736572696f75"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "JSONDecodeError",
+    "exception_module": "json.decoder"
+   }
+  },
+  {
+   "label": "policy_empty",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "resource-policy.json": ""
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "JSONDecodeError",
+    "exception_module": "json.decoder"
+   }
+  },
+  {
+   "label": "policy_symlink",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "sym",
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "OSError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "policy_unreadable",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "unreadable",
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "PermissionError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "policy_is_directory",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "policy_dir",
+   "err": {
+    "status": 400,
+    "code": "resource_policy_invalid"
+   }
+  },
+  {
+   "label": "policy_bad_mode",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "bad_mode",
+   "err": {
+    "status": 400,
+    "code": "resource_policy_invalid"
+   }
+  },
+  {
+   "label": "policy_bom_twice",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "resource-policy.json": "efbbbfefbbbf7b226261636b67726f756e64223a2066616c73652c2022646961676e6f7374696373223a2066616c73652c20226e6574776f726b223a2022756e6d6574657265645f6f6e6c79222c2022706565725f7669736962696c697479223a20747275652c2022706f776572223a202261635f6f6e6c79222c202273746f726167655f6279746573223a20313030303030303030302c2022746865726d616c223a202273746f705f6f6e5f736572696f7573227d"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "JSONDecodeError",
+    "exception_module": "json.decoder"
+   }
+  },
+  {
+   "label": "withdraw_corrupt",
+   "path": "/api/consent/standing/withdraw",
+   "body": {
+    "confirm": true
+   },
+   "opts": {
+    "role": "target"
+   },
+   "files": {
+    "standing-consent.json": "6e6f74206a736f6e"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "authority_state_invalid"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/consent/standing/withdraw",
+    "public_code": "authority_state_invalid",
+    "exception_type": "DemoAuthorityError",
+    "exception_module": "mycelium_a13_macos.authority",
+    "error_code": "authority_state_invalid"
+   }
+  },
+  {
+   "label": "withdraw_missing",
+   "path": "/api/consent/standing/withdraw",
+   "body": {
+    "confirm": true
+   },
+   "opts": {
+    "role": "target"
+   },
+   "files": {},
+   "setup": null,
+   "err": {
+    "status": 400,
+    "code": "standing_consent_missing"
+   }
+  },
+  {
+   "label": "cancel_unlink_directory",
+   "path": "/api/join/window/cancel",
+   "body": {},
+   "opts": {
+    "role": "target"
+   },
+   "files": {},
+   "setup": "joindir",
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/window/cancel",
+    "public_code": "action_not_completed",
+    "exception_type": "PermissionError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "poll_corrupt",
+   "path": "/api/join/window/poll",
+   "body": {},
+   "opts": {
+    "role": "target"
+   },
+   "files": {
+    "join-window.json": "6e6f74206a736f6e"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "authority_state_invalid"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/window/poll",
+    "public_code": "authority_state_invalid",
+    "exception_type": "DemoAuthorityError",
+    "exception_module": "mycelium_a13_macos.authority",
+    "error_code": "authority_state_invalid"
+   }
+  },
+  {
+   "label": "run_model_invalid_choice",
+   "path": "/api/run-model",
+   "body": {
+    "choice": "nope"
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": null,
+   "err": {
+    "status": 400,
+    "code": "run_model_choice_invalid"
+   }
+  },
+  {
+   "label": "run_model_corrupt_state",
+   "path": "/api/run-model",
+   "body": {
+    "choice": "qwen3-0.6b"
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "run-model.json": "6e6f74206a736f6e"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/run-model",
+    "public_code": "action_not_completed",
+    "exception_type": "ValueError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "fast_mode_corrupt",
+   "path": "/api/fast-mode",
+   "body": {
+    "enabled": true
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {
+    "fast-mode.json": "6e6f74206a736f6e"
+   },
+   "setup": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/fast-mode",
+    "public_code": "action_not_completed",
+    "exception_type": "ValueError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "role_write_readonly_root",
+   "path": "/api/join/request",
+   "body": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 1000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "ro_root",
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/join/request",
+    "public_code": "action_not_completed",
+    "exception_type": "PermissionError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "fast_mode_write_readonly_root",
+   "path": "/api/fast-mode",
+   "body": {
+    "enabled": true
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "ro_root",
+   "err": {
+    "status": 409,
+    "code": "authority_state_write_failed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/fast-mode",
+    "public_code": "authority_state_write_failed",
+    "exception_type": "DemoAuthorityError",
+    "exception_module": "mycelium_a13_macos.authority",
+    "error_code": "authority_state_write_failed"
+   }
+  },
+  {
+   "label": "run_model_write_readonly_root",
+   "path": "/api/run-model",
+   "body": {
+    "choice": "qwen3-0.6b"
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "files": {},
+   "setup": "ro_root",
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/run-model",
+    "public_code": "action_not_completed",
+    "exception_type": "AttributeError",
+    "exception_module": "builtins"
+   }
+  },
+  {
+   "label": "preview_not_object",
+   "path": "/api/pair/preview",
+   "body": {
+    "request": "x"
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "err": {
+    "status": 409,
+    "code": "pairing_request_invalid"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/pair/preview",
+    "public_code": "pairing_request_invalid",
+    "exception_type": "PairingError",
+    "exception_module": "mycelium_a13_macos.pairing",
+    "error_code": "pairing_request_invalid"
+   }
+  },
+  {
+   "label": "preview_empty",
+   "path": "/api/pair/preview",
+   "body": {
+    "request": {}
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "err": {
+    "status": 409,
+    "code": "pairing_request_invalid"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/pair/preview",
+    "public_code": "pairing_request_invalid",
+    "exception_type": "PairingError",
+    "exception_module": "mycelium_a13_macos.pairing",
+    "error_code": "pairing_request_invalid"
+   }
+  },
+  {
+   "label": "preview_bad_fields",
+   "path": "/api/pair/preview",
+   "body": {
+    "request": {
+     "protocol": "mycelium.pairing_request.v1"
+    }
+   },
+   "opts": {
+    "role": "owner"
+   },
+   "err": {
+    "status": 409,
+    "code": "pairing_request_invalid"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/pair/preview",
+    "public_code": "pairing_request_invalid",
+    "exception_type": "PairingError",
+    "exception_module": "mycelium_a13_macos.pairing",
+    "error_code": "pairing_request_invalid"
+   }
+  }
+ ]
+}

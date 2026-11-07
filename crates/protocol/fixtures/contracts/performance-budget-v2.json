@@ -1,0 +1,23 @@
+{
+  "admission_latency_budget_state": "deferred_to_m16",
+  "batch_shape_budget_state": "deferred_to_m16",
+  "budget_id": "m15-interactive-sequential-v1",
+  "concurrency_budget_state": "deferred_to_m16",
+  "energy_thermal_budget_state": "approved_exclusion",
+  "execution_scope": "sequential_observed",
+  "maximum_frames_per_request": 64,
+  "maximum_relative_model_error": {
+    "throughput": 1.0,
+    "tpot": 1.0,
+    "ttft": 1.0
+  },
+  "minimum_output_tokens_per_second": 0.5,
+  "minimum_sample_size": 1,
+  "peak_memory_budget_state": "approved_exclusion",
+  "profile_id": "interactive_chat_v1",
+  "protocol": "mycelium.performance_budget.v2",
+  "queueing_budget_state": "deferred_to_m16",
+  "reconnect_budget_state": "approved_exclusion",
+  "tpot_ms_maximum": 2000.0,
+  "ttft_ms_maximum": 5000.0
+}

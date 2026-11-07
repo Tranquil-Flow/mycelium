@@ -1,0 +1,85 @@
+{
+  "corrected": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:placement",
+      "0:reservation_attempt",
+      "500:staging_attempt",
+      "1000:chat_success"
+    ],
+    "metrics": {
+      "fresh_default_bytes": 4000000000,
+      "member_reserved_bytes": 1735338491,
+      "member_selected_bytes": 1735338491,
+      "member_staged_bytes": 1735338491,
+      "member_storage_cap": 2000000000,
+      "member_wall_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_storage_cap": 2000000000,
+      "reserved_bytes": 1997798421,
+      "selected_share_bytes": 1997798421,
+      "staged_bytes": 1997798421
+    },
+    "rollovers": 0,
+    "served": 1,
+    "starts": 1,
+    "successful_chats": 1,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_success": 1,
+      "placement": 1,
+      "reservation_attempt": 1,
+      "staging_attempt": 1,
+      "start_attempt": 1
+    },
+    "workers": []
+  },
+  "historical": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [
+      "member_storage_cap_below_share:OwnerLocalStorage"
+    ],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:placement",
+      "0:reservation_attempt",
+      "500:staging_attempt"
+    ],
+    "metrics": {
+      "fresh_default_bytes": 4000000000,
+      "member_reserved_bytes": 0,
+      "member_selected_bytes": 1505687777,
+      "member_staged_bytes": 0,
+      "member_storage_cap": 2000000000,
+      "member_wall_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_storage_cap": 2000000000,
+      "reserved_bytes": 0,
+      "selected_share_bytes": 2227449134,
+      "staged_bytes": 0
+    },
+    "rollovers": 0,
+    "served": 0,
+    "starts": 1,
+    "successful_chats": 0,
+    "swallowed_errors": 0,
+    "transitions": {
+      "placement": 1,
+      "reservation_attempt": 1,
+      "staging_attempt": 1,
+      "start_attempt": 1
+    },
+    "workers": []
+  },
+  "source_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582"
+}

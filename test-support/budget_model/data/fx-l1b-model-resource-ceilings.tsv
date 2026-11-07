@@ -1,0 +1,7 @@
+model_id	whole_model_member_max_rss_bytes	whole_model_member_max_disk_bytes	proposal_max_combined_rss_bytes	proposal_additional_disk_bytes	proposal_max_wall_seconds	measured_anchor	source
+Qwen/Qwen2.5-7B-Instruct	8477702554	12427070003	16955405108	24854140006	1800	True	model_resources.whole_model_member / model_resource_proposal executed from v0.1.4 @ f4e366e9 (probe_resources.py)
+Qwen/Qwen2.5-0.5B-Instruct	2802849734	1464801818	5605699468	2929603636	1800	False	model_resources.whole_model_member / model_resource_proposal executed from v0.1.4 @ f4e366e9 (probe_resources.py)
+Qwen/Qwen3-0.6B	4406023148	2074306151	8812046296	4148612302	1800	False	model_resources.whole_model_member / model_resource_proposal executed from v0.1.4 @ f4e366e9 (probe_resources.py)
+Qwen/Qwen3-8B	21500325294	18098051277	43000650588	36196102554	1800	False	model_resources.whole_model_member / model_resource_proposal executed from v0.1.4 @ f4e366e9 (probe_resources.py)
+Qwen/Qwen3-14B	36813347745	32568709325	73626695490	65137418650	1800	False	model_resources.whole_model_member / model_resource_proposal executed from v0.1.4 @ f4e366e9 (probe_resources.py)
+MAX	36813347745	32568709325	73626695490	65137418650	1800	-	max over the registered models

@@ -1,0 +1,31 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "cases": [
+  {
+   "label": "state_like",
+   "pairs": "{\"ready\": true, \"history\": [{\"role\": \"user\", \"text\": \"zebra\"}, {\"text\": \"\\u03b1 \\u03b2\", \"role\": \"assistant\"}], \"busy\": false, \"limits\": {\"max_new_tokens\": 256, \"prompt_chars\": 4000}}",
+   "bytes": "{\"ready\":true,\"history\":[{\"role\":\"user\",\"text\":\"zebra\"},{\"text\":\"\\u03b1 \\u03b2\",\"role\":\"assistant\"}],\"busy\":false,\"limits\":{\"max_new_tokens\":256,\"prompt_chars\":4000}}"
+  },
+  {
+   "label": "send_like",
+   "pairs": "{\"id\": \"m-1\", \"accepted\": true, \"queue\": 0, \"estimate_s\": 1.5}",
+   "bytes": "{\"id\":\"m-1\",\"accepted\":true,\"queue\":0,\"estimate_s\":1.5}"
+  },
+  {
+   "label": "events_like",
+   "pairs": "{\"events\": [{\"seq\": 2, \"kind\": \"token\", \"text\": \"\\u00e9\\u2014\\ud83d\\ude00\"}, {\"kind\": \"done\", \"seq\": 3}], \"next\": 3, \"done\": true}",
+   "bytes": "{\"events\":[{\"seq\":2,\"kind\":\"token\",\"text\":\"\\u00e9\\u2014\\ud83d\\ude00\"},{\"kind\":\"done\",\"seq\":3}],\"next\":3,\"done\":true}"
+  },
+  {
+   "label": "reverse_sorted",
+   "pairs": "{\"z\": 1, \"y\": {\"b\": 1, \"a\": [3, {\"d\": 0, \"c\": null}]}, \"x\": \"\\u03bb\"}",
+   "bytes": "{\"z\":1,\"y\":{\"b\":1,\"a\":[3,{\"d\":0,\"c\":null}]},\"x\":\"\\u03bb\"}"
+  },
+  {
+   "label": "empty",
+   "pairs": "{}",
+   "bytes": "{}"
+  }
+ ]
+}

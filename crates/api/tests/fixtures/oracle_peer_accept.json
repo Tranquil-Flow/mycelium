@@ -1,0 +1,1296 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "wall": 1761700000.25,
+ "digests": {
+  "h1": "sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821",
+  "h2": "sha256:f848deb51faae15022d2fd247329d639e893c1e68d1ad16a0fc0689461aa93b9"
+ },
+ "cases": [
+  {
+   "label": "not_started",
+   "started": false,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {},
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_not_started"
+   },
+   "files": {},
+   "binding": null
+  },
+  {
+   "label": "handoff_list",
+   "started": true,
+   "handoff": [
+    1
+   ],
+   "files_in": {},
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "pairing_handoff_invalid"
+   },
+   "files": {},
+   "binding": null
+  },
+  {
+   "label": "handoff_none",
+   "started": true,
+   "handoff": null,
+   "files_in": {},
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "pairing_handoff_invalid"
+   },
+   "files": {},
+   "binding": null
+  },
+  {
+   "label": "retained_same_digest",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "retained",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_same_digest_rejoin_unlinked",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "rejoin.pending.json": "{\"protocol\":\"mycelium.remote_mac_rejoin_pending.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "retained",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_other_digest",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 2
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "pairing_handoff_changed"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_other_digest_with_rejoin_falls_through",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 2
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "rejoin.pending.json": "{\"x\":1}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_pairing_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    },
+    "pairing.handoff.json": {
+     "text": "{\"n\":2,\"protocol\":\"mycelium.demo_pairing_handoff.v1\"}",
+     "mode": "0o600"
+    },
+    "rejoin.pending.json": {
+     "text": "{\"x\":1}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_without_membership",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_bad_protocol",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"x\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"x\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_extra_field",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"extra\":1,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"extra\":1,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_mode_0644",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {
+    "accepted.json": "0o644"
+   },
+   "err": {
+    "type": "DemoAuthorityError",
+    "module": "mycelium_a13_macos.authority",
+    "code": "authority_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o644"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_not_canonical",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\n \"protocol\": \"mycelium.remote_mac_accepted.v1\",\n \"handoff_digest\": \"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\n \"quota\": {\n  \"storage_bytes\": 1\n },\n \"accepted_at\": 5.0\n}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DemoAuthorityError",
+    "module": "mycelium_a13_macos.authority",
+    "code": "authority_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\n \"protocol\": \"mycelium.remote_mac_accepted.v1\",\n \"handoff_digest\": \"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\n \"quota\": {\n  \"storage_bytes\": 1\n },\n \"accepted_at\": 5.0\n}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "accepted_empty",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DemoAuthorityError",
+    "module": "mycelium_a13_macos.authority",
+    "code": "authority_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_missing_field",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_bad_protocol",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"nope\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"nope\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_bad_node_id",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"bad id\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"bad id\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_empty_seed_url",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_padded_seed_url",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\" https://x \",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\" https://x \",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_bad_digest",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:zz\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:zz\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_two_records",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"},{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"},{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_record_digest_mismatch",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_generation_zero",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":0,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":0,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_generation_bool",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":true,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":true,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_restart_negative",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":-1,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":-1,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_restart_float",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":1.0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":1.0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_not_canonical",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\n \"protocol\": \"mycelium.node.membership_state.v1\",\n \"node_id\": \"remote-mac-0123456789abcdef01234567\",\n \"swarm_id\": \"sw-1234\",\n \"seed_node_id\": \"seed-1\",\n \"seed_url\": \"https://owner.example\",\n \"seed_key_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\n \"seed_key_records\": [\n  {\n   \"verification_key_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\"\n  }\n ],\n \"endpoint_id\": \"ep-1\",\n \"incarnation\": \"remote-incarnation-ab\",\n \"membership_generation\": 3,\n \"restart_count\": 0\n}"
+   },
+   "modes": {},
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\n \"protocol\": \"mycelium.node.membership_state.v1\",\n \"node_id\": \"remote-mac-0123456789abcdef01234567\",\n \"swarm_id\": \"sw-1234\",\n \"seed_node_id\": \"seed-1\",\n \"seed_url\": \"https://owner.example\",\n \"seed_key_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\n \"seed_key_records\": [\n  {\n   \"verification_key_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\"\n  }\n ],\n \"endpoint_id\": \"ep-1\",\n \"incarnation\": \"remote-incarnation-ab\",\n \"membership_generation\": 3,\n \"restart_count\": 0\n}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_mode_0644",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {
+    "membership.state.json": "0o644"
+   },
+   "err": {
+    "type": "DurableMembershipError",
+    "module": "mycelium_node.durable_membership",
+    "code": "node_membership_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o644"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "membership_other_generation",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":9,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "retained",
+    "membership_generation": 9,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":9,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_with_consent",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "consent.json": "{\"consent\":{\"contribution_enabled\":false,\"cooperative_peer_visibility_acknowledged\":true,\"resource_use_acknowledged\":true},\"protocol\":\"mycelium.remote_mac_consent.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "retained",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "consent.json": {
+     "text": "{\"consent\":{\"contribution_enabled\":false,\"cooperative_peer_visibility_acknowledged\":true,\"resource_use_acknowledged\":true},\"protocol\":\"mycelium.remote_mac_consent.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_consent_invalid",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "consent.json": "{\"consent\":{\"resource_use_acknowledged\":true},\"protocol\":\"mycelium.remote_mac_consent.v1\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "consent.json": {
+     "text": "{\"consent\":{\"resource_use_acknowledged\":true},\"protocol\":\"mycelium.remote_mac_consent.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_consent_bad_protocol",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "consent.json": "{\"consent\":{\"contribution_enabled\":false,\"cooperative_peer_visibility_acknowledged\":true,\"resource_use_acknowledged\":true},\"protocol\":\"x\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "consent.json": {
+     "text": "{\"consent\":{\"contribution_enabled\":false,\"cooperative_peer_visibility_acknowledged\":true,\"resource_use_acknowledged\":true},\"protocol\":\"x\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_expired",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"expired\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "expired",
+    "membership_generation": 3,
+    "lease_state": "expired",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"expired\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_revoked",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"revoked\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "revoked",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"revoked\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_stale",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"stale\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "stale",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"stale\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_unknown",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"unknown\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "unknown",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"unknown\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_invalid_state",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"current\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"current\",\"observed_at\":7.0,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_disposition_bool_time",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "membership.disposition.json": "{\"membership_state\":\"expired\",\"observed_at\":true,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_state_invalid"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "membership.disposition.json": {
+     "text": "{\"membership_state\":\"expired\",\"observed_at\":true,\"protocol\":\"mycelium.remote_mac_membership_disposition.v1\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "retained_with_capability_and_handoff",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "capability.evidence.json": "{\"x\":1}",
+    "pairing.handoff.json": "{\"n\":1,\"protocol\":\"mycelium.demo_pairing_handoff.v1\"}"
+   },
+   "modes": {},
+   "ok": {
+    "protocol": "mycelium.remote_mac_membership_result.v1",
+    "membership_state": "retained",
+    "membership_generation": 3,
+    "lease_state": "unknown",
+    "serving_state": "not_yet_serving",
+    "route_ready": false
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "capability.evidence.json": {
+     "text": "{\"x\":1}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    },
+    "pairing.handoff.json": {
+     "text": "{\"n\":1,\"protocol\":\"mycelium.demo_pairing_handoff.v1\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "checkpoint_other_digest",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 2
+   },
+   "files_in": {
+    "join.pending.json": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "pairing_handoff_changed"
+   },
+   "files": {
+    "join.pending.json": {
+     "text": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "checkpoint_other_digest_with_retained_other",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 2
+   },
+   "files_in": {
+    "accepted.json": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+    "membership.state.json": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+    "join.pending.json": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "pairing_handoff_changed"
+   },
+   "files": {
+    "accepted.json": {
+     "text": "{\"accepted_at\":5.0,\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\",\"protocol\":\"mycelium.remote_mac_accepted.v1\",\"quota\":{\"storage_bytes\":1}}",
+     "mode": "0o600"
+    },
+    "join.pending.json": {
+     "text": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}",
+     "mode": "0o600"
+    },
+    "membership.state.json": {
+     "text": "{\"endpoint_id\":\"ep-1\",\"incarnation\":\"remote-incarnation-ab\",\"membership_generation\":3,\"node_id\":\"remote-mac-0123456789abcdef01234567\",\"protocol\":\"mycelium.node.membership_state.v1\",\"restart_count\":0,\"seed_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"seed_key_records\":[{\"verification_key_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"}],\"seed_node_id\":\"seed-1\",\"seed_url\":\"https://owner.example\",\"swarm_id\":\"sw-1234\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "checkpoint_same_digest_falls_through",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "join.pending.json": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}"
+   },
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_pairing_state_invalid"
+   },
+   "files": {
+    "join.pending.json": {
+     "text": "{\"handoff_digest\":\"sha256:0b8bc0960802f7a88f722adca6b7bcb0dfda382890a0bb2d8c8f0e8441d96821\"}",
+     "mode": "0o600"
+    },
+    "pairing.handoff.json": {
+     "text": "{\"n\":1,\"protocol\":\"mycelium.demo_pairing_handoff.v1\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "checkpoint_unreadable",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {
+    "join.pending.json": "not json"
+   },
+   "modes": {},
+   "err": {
+    "type": "DemoAuthorityError",
+    "module": "mycelium_a13_macos.authority",
+    "code": "authority_state_invalid"
+   },
+   "files": {
+    "join.pending.json": {
+     "text": "not json",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  },
+  {
+   "label": "nothing_retained_falls_through",
+   "started": true,
+   "handoff": {
+    "protocol": "mycelium.demo_pairing_handoff.v1",
+    "n": 1
+   },
+   "files_in": {},
+   "modes": {},
+   "err": {
+    "type": "RemoteMacMemberError",
+    "module": "mycelium_a13_macos.peer",
+    "code": "peer_pairing_state_invalid"
+   },
+   "files": {
+    "pairing.handoff.json": {
+     "text": "{\"n\":1,\"protocol\":\"mycelium.demo_pairing_handoff.v1\"}",
+     "mode": "0o600"
+    }
+   },
+   "binding": null
+  }
+ ]
+}

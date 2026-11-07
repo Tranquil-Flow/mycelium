@@ -1,0 +1,327 @@
+{
+  "schema_version": 1,
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "scope": "Round3 integrity inventory; NOT foundation exit, product GREEN, package execution or physical authorization",
+  "tested_code_head": "6e3ae8d685f9fbefb2bd7af17d3221af2f22028f",
+  "rerun_head": "edee89e6bca0938a544d3d230bf16411b6f4a4a2",
+  "sealed_at": "2026-10-27T23:53:12Z",
+  "note": "interrupted/ subdirectory (pre-limit partial run, no completion receipts) and workspace-tests.log (killed mid-run) are NOT authoritative; final-* receipts are. Report/status are not hashed here (circular); repository_files pins the committed round3 data/tests at edee89e6.",
+  "files": [
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/acquire-source-objects.rb",
+      "bytes": 1374,
+      "sha256": "acb5e1b6df8486cc6fd03aaad51634c050106cccabccbcd53b291e2a82cddb9d"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/busy-policy-controls.json",
+      "bytes": 915,
+      "sha256": "bcb85d993ff3d6906a295812345ff46de142c669ac9528b0710d6f99c044fbc3"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/busy-policy-controls.rb",
+      "bytes": 2107,
+      "sha256": "c29d2627a1a293a5fd6967148ab8955401c1703e7e3a62aca18023d2de9aa20b"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/cargo-guard.rb",
+      "bytes": 2943,
+      "sha256": "cff99b88373e711ebff5544626ac23fa1bb9bcbad0e99840fa6a91f683eef569"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/census.rb",
+      "bytes": 4225,
+      "sha256": "e2456b437c2d57aa322451603bcef25d8256041db031c1334664b4612ce23427"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/embedded-census.json",
+      "bytes": 729353,
+      "sha256": "d5d4e0334c7fdfd60dd610bdd5511d407da901ef13eb5ff6ba5a1b9ab5940de5"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/embedded.log",
+      "bytes": 6656,
+      "sha256": "17ff47e56054576c0fcac0c57ea2a40eca6bb10dce5b9f2a5985f7e5f2a47abb"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/embedded.rb",
+      "bytes": 4255,
+      "sha256": "4a9aaf98c128ed4b212d50e1d9576fb48785427a80ecb20cc1360becf028717a"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/evidence-green.json",
+      "bytes": 921,
+      "sha256": "acda4ad01a378ee0b4d735e3ac4759b38c5d9243766361904361b041970ff9aa"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/evidence-green.log",
+      "bytes": 824,
+      "sha256": "7ed2629eab6056e81b346f078712d536ba4347b0b5c03ed3cbf24de68feef8f1"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/evidence-red.json",
+      "bytes": 923,
+      "sha256": "df656f79f82eeb9611ac83f50f609e1b455923a062765ed9d4ee5e671eb7e7e2"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/evidence-red.log",
+      "bytes": 1831,
+      "sha256": "26d57f07ee4a9b5e66762a31264e6cf3604909fd15f588af9cb3892722598dbd"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-clippy.json",
+      "bytes": 903,
+      "sha256": "ae0046268c0e7a2bf7f5db8ffb44b920e6931262b0742dbeb668eabe0f1729d4"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-clippy.log",
+      "bytes": 303,
+      "sha256": "00cfce8bd8bdaff9b63c0eef433efeae6a43077480a980713600b1c8b9ea3a82"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-focused-fmt.json",
+      "bytes": 814,
+      "sha256": "337f81189ba1c8091d6d678ea68da6479fdba0f7e9bbfaa9127a4fbe98d5f3b0"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-focused-fmt.log",
+      "bytes": 186,
+      "sha256": "4737c7012749213abc077bbdd72062bb4e6d23294a8382d4104cd7a3f1448e0c"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-focused-tests.json",
+      "bytes": 877,
+      "sha256": "96c6c03855e9723624cdf4e03de382c111efc924c35df786927bb67a5ff159aa"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-focused-tests.log",
+      "bytes": 4234,
+      "sha256": "489c1b39261580d79c69235e4768e8e4715f78836eefb4684d36a2806039850e"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-lint.json",
+      "bytes": 868,
+      "sha256": "20010814e11391b12524659a130c26031be8b2edebf93f04b3896755a06a6a7a"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-lint.log",
+      "bytes": 1756,
+      "sha256": "985452708356a9640e868c891e39cf8b14eab717945864436af4c376502f3041"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-package-gate.json",
+      "bytes": 890,
+      "sha256": "f480204b5b36c8539f87ecb2066dba1fec28228cacbbe2e43a4ef90bae25fa30"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-package-gate.log",
+      "bytes": 552,
+      "sha256": "bc853313ec51d34a04342d5da96dc48cfe458b8928979579b9b491440cd2702f"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-process-safety-rerun.json",
+      "bytes": 894,
+      "sha256": "d02abec16327b34b2e9b80d06ec0b19f9698f6d0da5f1009c23a2fcf9eb64165"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-process-safety-rerun.log",
+      "bytes": 1334,
+      "sha256": "9924adccd2c500f703295dcbb9f5ad87c2467aed18058936da98f100136d5f14"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-workspace-fmt.json",
+      "bytes": 800,
+      "sha256": "86111e91d3707123eda8ab100d46a3ace3d78a41c599a410718e259da64faace"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-workspace-fmt.log",
+      "bytes": 8465,
+      "sha256": "1d04b582dafd3dac4dcc8b5fded8f2048a08f566b4dd8b9f864339d218aa8b2f"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-workspace-tests.json",
+      "bytes": 870,
+      "sha256": "95861e096dec136e26c1553bb935b6f9a619dbd35b1617fbd391c2d4b780dd9c"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/final-workspace-tests.log",
+      "bytes": 150805,
+      "sha256": "2567138e394d7ee4cfb87c7fdbebf39ba5a34e5609f3a5140b58eba151a01b8a"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-fmt.json",
+      "bytes": 816,
+      "sha256": "12268467a7d062666ff7e999160e43e03e7c21a9629639e70598383976d2071b"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-fmt.log",
+      "bytes": 186,
+      "sha256": "98c325d05c4591cdf2b4aebebdccc8ebebc98c3acf270423ab3662cb64fa1c5f"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-format.json",
+      "bytes": 801,
+      "sha256": "fb42581fab6ea177729ffe449b8655300fcf2f744af081d1488a06571e8fd22a"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-format.log",
+      "bytes": 176,
+      "sha256": "5146dbf0ae6b77f8202fd2bb14fbda6fa7c69a2dd80d464d521c75bba50b2b0d"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-tests.json",
+      "bytes": 877,
+      "sha256": "bfd868d02946d1f8dbd102f1ee4fa3168efdc5a731b3c78dda783bf09295cc63"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/focused-tests.log",
+      "bytes": 4341,
+      "sha256": "ccfda2eb6b9bb91c5a50e4463ec5b8c59fdc2149177dcadd3c86dbd111089e27"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/independent-verification-final.json",
+      "bytes": 1796,
+      "sha256": "3ffdfe73b2feffeb9eb4b0549d52aed7bea65ef79776ccf4aac05e5f393f7953"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/independent-verification-final.log",
+      "bytes": 1545,
+      "sha256": "ab291d6354c6120e3649a85a251b0709c1b1a6556d29744411e6dae27c141188"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/independent-verification.json",
+      "bytes": 1796,
+      "sha256": "c46e68273e1872956b33744874cf08e93403c4ecdbe73effbb8a24e5079ee5f4"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/independent-verification.log",
+      "bytes": 1545,
+      "sha256": "9b44dca5b05df1ce86b8bd02f839a33669e817174bad7e2e24642b10f6c5d8dd"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/lint.json",
+      "bytes": 869,
+      "sha256": "1613d40f83b85d710e19296bc6cf5ebe085dfef194ef7f31af092eca78cb25b5"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/lint.log",
+      "bytes": 1813,
+      "sha256": "669dd8ae3a020d3bc38859309d0759008ab5803dde2689f614a1492948bf0066"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/native-import-review.json",
+      "bytes": 36702,
+      "sha256": "e1eed17443f43c48d1d7143f30302be46a56468d2e2eaf3a886c0cefa39e7778"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/native-import-review.rb",
+      "bytes": 3151,
+      "sha256": "b1f40c3ec1af8e915daeebe68c730191f6e193322a3155645c433d9fddf45739"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/package-gate.json",
+      "bytes": 890,
+      "sha256": "e3834d4107ef03d5146b2c260dd44a3bc2e8a8f009202e3a599b958e8af8ed4c"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/package-gate.log",
+      "bytes": 659,
+      "sha256": "e67338fb74f40751f590db85aef971b13c5f03070fb3c5985b0ed39fed8f0bf5"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/run-final.sh",
+      "bytes": 608,
+      "sha256": "361d35779f0d423245886a90593774409885e03b4b7fb88f2b286c1c6390720e"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/summarize.rb",
+      "bytes": 3101,
+      "sha256": "fff154b05637af02039a79e5b943b027193ad1883d420069417b5c823810707d"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/verify.rb",
+      "bytes": 5876,
+      "sha256": "dab97ed1fa03b0bd185f77908a02209b1ca8920397f2c636e706ad899facbdaf"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/workspace-clippy.json",
+      "bytes": 903,
+      "sha256": "e56c49dc7e37ad481e3a68077ddf57d45173bd83c0f5d0bf7592928472933159"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/workspace-clippy.log",
+      "bytes": 907,
+      "sha256": "e542c681c9fe9c50917f982de5555fe6e0a51bb25f036bb0d7a1ad3fa3d14c82"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/workspace-fmt.json",
+      "bytes": 800,
+      "sha256": "e0a910096125279d380f622e33ad29ccdf75d147b4010397da3d77d52f081166"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/workspace-fmt.log",
+      "bytes": 8465,
+      "sha256": "1909276564cbfc518fe817c778dcf2327f56b11b0e3bcb4ec1aa7b6262a7b5a2"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round3/workspace-tests.log",
+      "bytes": 119684,
+      "sha256": "acb2dea406bd81e5f35dfb5776f12019af91ab30d091c438ed8984134d1dad05"
+    }
+  ],
+  "repository_files": [
+    {
+      "path": "evidence/foundation-exit/package-disposition-review.md",
+      "bytes": 7726,
+      "sha256": "6c8923733184ff61565cc23b7bb58d1983662aeb6ad38cdd5f72b3cee3c03cb7",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/package-native-import-review.json",
+      "bytes": 36702,
+      "sha256": "e1eed17443f43c48d1d7143f30302be46a56468d2e2eaf3a886c0cefa39e7778",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/package-verification.json",
+      "bytes": 1796,
+      "sha256": "3ffdfe73b2feffeb9eb4b0549d52aed7bea65ef79776ccf4aac05e5f393f7953",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/data/package-census.json",
+      "bytes": 1691591,
+      "sha256": "2f17888f957e899de6ff501a96fa64f0926645d40839caaf22eb15d7c1e806ed",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/data/package-dispositions.json",
+      "bytes": 1894454,
+      "sha256": "86c32d1966506d6c0047440f96456bb4b9e7da04d594a99ac203092e67e50b70",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/examples/package_gate.rs",
+      "bytes": 1113,
+      "sha256": "264dbe4a62831b6e38cd5f984a2fbbf01db53ab6951e8c7085317ae87f93d8c8",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/src/package.rs",
+      "bytes": 15942,
+      "sha256": "edeb7af33d2e6d65ab7c51a16806c01309607951b79e08f72187af018bc5807a",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/tests/package_dispositions.rs",
+      "bytes": 11724,
+      "sha256": "6fb3a0833271157215d7401d585b76131d68bd392509e1883ff99927ffdd021d",
+      "path_base": "repository"
+    },
+    {
+      "path": "test-support/obligations/tests/package_evidence.rs",
+      "bytes": 1597,
+      "sha256": "26e3feb1722eb9d1569b678653ee1945704c758b80e95985a346ca76d0a9f3e3",
+      "path_base": "repository"
+    }
+  ]
+}

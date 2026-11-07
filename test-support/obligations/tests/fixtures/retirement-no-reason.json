@@ -1,0 +1,169 @@
+{
+  "registry": {
+    "source_sha": "1111111111111111111111111111111111111111",
+    "destinations": [
+      {
+        "id": "control::authority",
+        "plan": "V02-PLAN.md:41",
+        "lane": "L5"
+      }
+    ],
+    "paths": [
+      {
+        "id": "P:a.py",
+        "path": "a.py",
+        "disposition": {
+          "kind": "retire",
+          "reason": " ",
+          "replacement": "O:a",
+          "reviewer": "L12"
+        },
+        "obligation_id": "O:a",
+        "citation": "a.py:1 @ fixture"
+      }
+    ],
+    "obligations": [
+      {
+        "id": "O:a",
+        "description": "Preserve signed authority and reject stale generations.",
+        "destination": "control::authority",
+        "tier": "property"
+      }
+    ],
+    "contracts": [
+      {
+        "id": "C:fixture",
+        "source": "mycelium.fixture.v1",
+        "destination": "control::authority",
+        "obligation_id": "O:a",
+        "citation": "fixture:1"
+      }
+    ],
+    "test_groups": [
+      {
+        "id": "T:a",
+        "source": "a.py",
+        "destination": "control::authority",
+        "obligation_id": "O:a",
+        "citation": "fixture:1"
+      }
+    ],
+    "escapes": [
+      {
+        "id": "F1",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F2",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F3",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F4",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F5",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F13",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F14",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F15",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F15b",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      },
+      {
+        "id": "F16",
+        "historical_target": "fixture target",
+        "recipe": "injected historical fault",
+        "observation": "independent distinguishing observation",
+        "owners": "L1/L2",
+        "citation": "V02-PLAN.md:221-230",
+        "status": "inventory_only"
+      }
+    ],
+    "supported_cells": [
+
+    ]
+  },
+  "snapshot": {
+    "source_sha": "1111111111111111111111111111111111111111",
+    "files": [
+      {
+        "path": "a.py",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "size_bytes": 1
+      }
+    ],
+    "packaged_source_paths": [
+      "a.py"
+    ],
+    "a6_paths": [
+
+    ],
+    "test_paths": [
+      "a.py"
+    ],
+    "contract_protocols": [
+      "mycelium.fixture.v1"
+    ]
+  }
+}

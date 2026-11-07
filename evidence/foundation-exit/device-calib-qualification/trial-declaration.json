@@ -1,0 +1,62 @@
+{
+ "attempts": [
+  {
+   "events_sha256": "a405bd1bfc9f93be1ad4ab9f2bfeaf4566fdcdb6dd67dd115e3744c77b32c48e",
+   "name": "attempt1",
+   "result_sha256": "8ee9a10eac168cd0840b02915acc4aaf52f8adef4c3b7fe325fe6d06d4c7f4b8"
+  },
+  {
+   "events_sha256": "68a767bdf3bccc450d587c7644f602a1a5e9943bae2231588d0afdcc6097804b",
+   "name": "attempt2",
+   "result_sha256": "2768e8b0dc79e38772bcdb7114d8a1e6a5642f75cade6d5d93faa14dae23b3af"
+  },
+  {
+   "events_sha256": "2b0ac7754fc02bfe3fa9d2e491e4c795e9dcc43a9fd957118c687b6c6d5267ef",
+   "name": "attempt3",
+   "result_sha256": "c4fae1a6bfb248ce40da896b8e79c190bab318a1c3434b979e8420ecc379aa75"
+  },
+  {
+   "events_sha256": "43b8c53b174fa6a7bca9e2ccee6d17a4d80987d1b8f877dcec5f1ad4cbf1ba74",
+   "name": "attempt4",
+   "result_sha256": "a2f4c087d43ee54ae63a399428b878fffa75ebcd4d00ef28967ae581b6ae8479"
+  },
+  {
+   "events_sha256": "b3b6ed1482181e785bfd6afb319aa7001b1f215b39088a1f9f9853ff35e38dab",
+   "name": "attempt5",
+   "result_sha256": "99109afa7ff85096ebc7f8092e109daf15f59e3b2dd0a9a0dab963e80617bfcc"
+  },
+  {
+   "events_sha256": "b35f5922f46b488271a7148e9124a37cdc4916edf0ae76b765f781555686ceb1",
+   "name": "attempt6",
+   "result_sha256": "767f37f5aefa61d564eae32ee265150df86f13bb0d96263a7a9029a2991c13c9"
+  },
+  {
+   "events_sha256": "1613bcf3c3930299fd4cf2e86fc47473c77ee3e37eb95260e5b5d4b5bea65153",
+   "name": "attempt7",
+   "result_sha256": "cb5578b1f3a907acd65e7c38cbd20751cfc344d6639466c56a519df6350e9b2a"
+  }
+ ],
+ "comparable": {
+  "devices": {
+   "laptop": {
+    "hardware": "Mac16,1",
+    "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+    "macos": "15.6.1"
+   },
+   "owner": {
+    "hardware": "Mac16,8",
+    "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+    "macos": "26.5.1"
+   }
+  },
+  "exe_sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f",
+  "method": "v014-oracle-device-harness cycle_driver.py (device-calib 5e0fdd7)",
+  "model": "a9-route",
+  "source_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+ },
+ "independence_basis": "Each chat is one request in a fixed 16 s-spaced series within a separate DEVICE.busy window (seven windows, 00:10-02:41 CET). Declared by the reviewer; NOT statistically tested (no autocorrelation test; shared host load and warm caches possible).",
+ "review_note": "All seven DEVICE-CALIB windows: released v0.1.4 oracle f4e366e9 / exe 8fff4182, model a9-route, owner+laptop pair, same cycle_driver method. Failed windows are kept: their completed chats are valid samples and failed chats are counted, not dropped silently.",
+ "reviewed_by": "foundation-exit lane round 4 (proposed; owner review pending)",
+ "schema_version": 1,
+ "trial_id": "device-calib-v014-a9-route-2026-10-28"
+}

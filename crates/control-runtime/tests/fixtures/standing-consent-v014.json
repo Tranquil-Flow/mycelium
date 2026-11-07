@@ -1,0 +1,10 @@
+{
+  "protocol": "mycelium.a13_standing_consent.v1",
+  "disclosure_digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19",
+  "caps": {"storage_bytes":2000000000,"max_memory_bytes":2147483648,"max_wall_seconds":600,"max_commands":100},
+  "granted_at": 1000.25,
+  "binding": {"swarm_id":"swarm-fixture","node_id":"node-member","seed_key_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "bound_at": 1001.25,
+  "withdrawn_at": null,
+  "state": "granted"
+}

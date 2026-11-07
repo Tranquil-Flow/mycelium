@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "name": "dry-candidate",
+  "require_critical_lanes": [
+    "X"
+  ],
+  "mandatory_claims": [
+    "CL-X-01",
+    "CL-X-02",
+    "CL-X-03",
+    "CL-X-04",
+    "CL-X-05",
+    "CL-X-06"
+  ],
+  "cells": [
+    {
+      "id": "fmt",
+      "state": "preflight",
+      "claim": "CL-X-01",
+      "bind": "source",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "cargo",
+          "fmt",
+          "--check"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "fmt",
+        "--",
+        "--check"
+      ]
+    },
+    {
+      "id": "lint",
+      "state": "preflight",
+      "claim": "CL-X-01",
+      "bind": "source",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "lint"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "run",
+        "-p",
+        "xtask",
+        "--",
+        "lint"
+      ]
+    },
+    {
+      "id": "build",
+      "state": "package",
+      "claim": "CL-X-02",
+      "bind": "bytes",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "cargo",
+          "build",
+          "--release"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "build",
+        "--release",
+        "--locked"
+      ]
+    },
+    {
+      "id": "tests",
+      "state": "cert",
+      "claim": "CL-X-03",
+      "bind": "bytes",
+      "verify": {
+        "runs": "tests",
+        "argv_has": [
+          "cargo",
+          "test",
+          "--workspace"
+        ],
+        "min_passed": 5,
+        "required_targets": [
+          "unittests",
+          "tests/a.rs"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "test",
+        "--offline",
+        "--workspace"
+      ]
+    },
+    {
+      "id": "stranger-install",
+      "state": "device",
+      "claim": "CL-X-04",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "stranger-install"
+      },
+      "hint": [
+        "device-harness",
+        "stranger",
+        "--attempt",
+        "<id>"
+      ]
+    },
+    {
+      "id": "inventory",
+      "state": "inventory",
+      "claim": "CL-X-05",
+      "bind": "bytes",
+      "verify": {
+        "runs": "tests",
+        "argv_has": [
+          "cargo",
+          "test",
+          "-p",
+          "budget-model"
+        ],
+        "min_passed": 5,
+        "required_targets": [
+          "tests/python_inventory.rs"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "test",
+        "--offline",
+        "-p",
+        "budget-model"
+      ]
+    },
+    {
+      "id": "relocation",
+      "state": "proof",
+      "claim": "CL-X-06",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "relocation-receipt"
+      },
+      "hint": [
+        "release_receipts",
+        "--execute"
+      ]
+    }
+  ]
+}

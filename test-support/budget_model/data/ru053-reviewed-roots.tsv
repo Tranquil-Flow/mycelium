@@ -1,0 +1,4 @@
+root	path	line	sha256	text
+crates/runtime/src/iroh_artifact.rs:ArtifactWireLimits::wait	crates/runtime/src/iroh_artifact.rs	132	a3aa775faf126abb6bf6d95b74c284299ee15f4660a86e0b77cc489931c8594f	    pub(crate) fn wait(
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch	crates/runtime/src/iroh_artifact.rs	53	a3aa775faf126abb6bf6d95b74c284299ee15f4660a86e0b77cc489931c8594f	    pub fn fetch(
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once	crates/runtime/src/iroh_artifact.rs	66	a3aa775faf126abb6bf6d95b74c284299ee15f4660a86e0b77cc489931c8594f	    fn fetch_once(

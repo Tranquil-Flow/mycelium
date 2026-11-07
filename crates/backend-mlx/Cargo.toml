@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "backend-mlx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+[features]
+default = []
+metal = ["dep:bindgen"]
+[dependencies]
+budgets = { path = "../budgets" }
+stage-contract = { path = "../stage-contract" }
+model = { path = "../model" }
+node = { path = "../node" }
+sha2 = "=0.10.9"
+serde_json = "=1.0.154"
+[dev-dependencies]
+rustix = { version = "=1.1.4", features = ["process"] }
+[build-dependencies]
+sha2 = "=0.10.9"
+bindgen = { version = "=0.72.1", default-features = false, features = ["runtime"], optional = true }
+[lints]
+workspace = true
+
+[[test]]
+name = "isolated_worker"
+harness = false
+required-features = ["metal"]

@@ -1,0 +1,4 @@
+key	reviewer	verdict	target	record_sha256
+mycelium_seed/state.py:827:16:dict-field:lease_expires_at	L1b-r31-seed-source	source-unbounded	PySourceUnboundedR31SeedDecodedMemberLeaseL827C16	fb180c42e5d7e4bb1bd0ef0295dfc4e9a6b72fde21df0704aac42a7c38536fa8
+mycelium_seed/operator.py:641:19:comparison:member['lease_expires_at']	L1b-r31-seed-source	source-unbounded	PySourceUnboundedR31SeedRotationMemberLeaseL641C19	f16ed9216e819c597050c4da37a79859c0f4ec4e5afeea79a99e997b4664b12f
+mycelium_seed/state.py:830:16:dict-field:next_heartbeat_due_at	L1b-r31-seed-source	source-unbounded	PySourceUnboundedR31SeedDecodedHeartbeatDueL830C16	1c87e07bba1611743957ce8a758691ee5fa5b79b73ed1a659e21e41a4a1ab5d1

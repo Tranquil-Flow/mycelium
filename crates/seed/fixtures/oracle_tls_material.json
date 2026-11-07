@@ -1,0 +1,281 @@
+{
+ "ca": {
+  "extensions": [
+   {
+    "critical": true,
+    "oid": "2.5.29.19",
+    "value_der_hex": "30060101ff020100"
+   },
+   {
+    "critical": false,
+    "oid": "2.5.29.14",
+    "value_der_hex": "04145018216e91d1599fda17c48e66745f02fd4465ec"
+   },
+   {
+    "critical": false,
+    "oid": "2.5.29.35",
+    "value_der_hex": "301680145018216e91d1599fda17c48e66745f02fd4465ec"
+   },
+   {
+    "critical": true,
+    "oid": "2.5.29.15",
+    "value_der_hex": "03020186"
+   }
+  ],
+  "issuer_der_hex": "30293127302506035504030c1e4d7963656c69756d206c6f63616c20696e7374616c6c6174696f6e204341",
+  "not_after": 2015360000,
+  "not_before": 1699999700,
+  "public_exponent": 65537,
+  "public_key_bits": 2048,
+  "public_key_type": "RSAPublicKey",
+  "serial_bit_length": 159,
+  "sha1_of_key_bits_hex": "5018216e91d1599fda17c48e66745f02fd4465ec",
+  "signature_algorithm_der_hex": "300d06092a864886f70d01010b0500",
+  "signature_algorithm_oid": "1.2.840.113549.1.1.11",
+  "signature_hash": "sha256",
+  "spki_algorithm_der_hex": "06092a864886f70d0101010500",
+  "subject_der_hex": "30293127302506035504030c1e4d7963656c69756d206c6f63616c20696e7374616c6c6174696f6e204341",
+  "subject_key_id_is_sha1_of_key_bits": true,
+  "validity_tags": [
+   23,
+   23
+  ],
+  "version": "v3"
+ },
+ "ca_self_signed_issuer_equals_subject": true,
+ "cryptography": "46.0.5",
+ "files": {
+  "dir_mode": "0o700",
+  "modes": {
+   "ca.pem": "0o600",
+   "server.key": "0o600",
+   "server.pem": "0o600"
+  },
+  "names": [
+   "ca.pem",
+   "server.key",
+   "server.pem"
+  ]
+ },
+ "fixture_files_sha256": {
+  "ca.pem": "2674f8c5d96abe2c165bb1ab4425e6c586ecf2ee2d19e03fd644c8580096841a",
+  "server.key": "bab3a9056b4790cffb36a375224562b56ff5189f8c8e748023b4f3943b7b27d1",
+  "server.pem": "173b6f0ed927aea21a71110cc078d565cd16c396df460cff7f7326b120edb439"
+ },
+ "fresh_empty_dir": {
+  "created": [
+   "ca.pem",
+   "server.key",
+   "server.pem"
+  ],
+  "dir_mode": "0o700"
+ },
+ "frozen_now": 1700000000,
+ "nested_root_created": {
+  "dir_mode": "0o700",
+  "parent_mode": "0o755"
+ },
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "pem_certificates_in_file": {
+  "ca": 1,
+  "server": 1
+ },
+ "pem_first_lines": {
+  "ca": "-----BEGIN CERTIFICATE-----",
+  "server": "-----BEGIN CERTIFICATE-----"
+ },
+ "probe_sha256": "e2df732e03173441ec110e6362fdecbb13d0e124b4c1a4847cb54043ed9b3ca5",
+ "python": "3.14.8",
+ "refusals": {
+  "ca_garbage": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "ca_has_two_links": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "ca_is_a_symlink": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "ca_is_the_server_certificate": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "ca_mode_0400": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "ca_of_another_set_is_accepted_by_name_only": {
+   "ok": true
+  },
+  "ca_of_another_set_same_name": {
+   "ok": true
+  },
+  "directory_mode_0755": {
+   "code": "local_tls_path_invalid",
+   "ok": false
+  },
+  "one_file_missing": {
+   "code": "local_tls_material_incomplete",
+   "ok": false
+  },
+  "only_ca_present": {
+   "code": "local_tls_material_incomplete",
+   "ok": false
+  },
+  "root_is_a_file": {
+   "code": "local_tls_path_invalid",
+   "ok": false
+  },
+  "root_is_a_symlink": {
+   "code": "local_tls_path_invalid",
+   "ok": false
+  },
+  "server_certificate_empty": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "server_certificate_mode_0644": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "server_key_garbage": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "server_key_mode_0640": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  },
+  "server_key_of_another_set": {
+   "code": "local_tls_material_invalid",
+   "ok": false
+  }
+ },
+ "reuse": {
+  "files": [
+   "ca.pem",
+   "server.key",
+   "server.pem"
+  ],
+  "unchanged": true
+ },
+ "serial_bit_lengths_12_generations": [
+  [
+   156,
+   157
+  ],
+  [
+   157,
+   158
+  ],
+  [
+   159,
+   158
+  ],
+  [
+   159,
+   158
+  ],
+  [
+   159,
+   157
+  ],
+  [
+   158,
+   159
+  ],
+  [
+   158,
+   156
+  ],
+  [
+   157,
+   159
+  ],
+  [
+   159,
+   156
+  ],
+  [
+   159,
+   159
+  ],
+  [
+   159,
+   159
+  ],
+  [
+   158,
+   158
+  ]
+ ],
+ "serial_max_bit_length": 159,
+ "server": {
+  "extensions": [
+   {
+    "critical": false,
+    "oid": "2.5.29.17",
+    "value_der_hex": "301182096c6f63616c686f737487047f000001"
+   },
+   {
+    "critical": true,
+    "oid": "2.5.29.19",
+    "value_der_hex": "3000"
+   },
+   {
+    "critical": false,
+    "oid": "2.5.29.14",
+    "value_der_hex": "04148cb3b9c11cbcf9fc45194065ac9857026a8ee2de"
+   },
+   {
+    "critical": false,
+    "oid": "2.5.29.35",
+    "value_der_hex": "301680145018216e91d1599fda17c48e66745f02fd4465ec"
+   },
+   {
+    "critical": false,
+    "oid": "2.5.29.37",
+    "value_der_hex": "300a06082b06010505070301"
+   },
+   {
+    "critical": true,
+    "oid": "2.5.29.15",
+    "value_der_hex": "030205a0"
+   }
+  ],
+  "issuer_der_hex": "30293127302506035504030c1e4d7963656c69756d206c6f63616c20696e7374616c6c6174696f6e204341",
+  "not_after": 1771280000,
+  "not_before": 1699999700,
+  "public_exponent": 65537,
+  "public_key_bits": 2048,
+  "public_key_type": "RSAPublicKey",
+  "serial_bit_length": 158,
+  "sha1_of_key_bits_hex": "8cb3b9c11cbcf9fc45194065ac9857026a8ee2de",
+  "signature_algorithm_der_hex": "300d06092a864886f70d01010b0500",
+  "signature_algorithm_oid": "1.2.840.113549.1.1.11",
+  "signature_hash": "sha256",
+  "spki_algorithm_der_hex": "06092a864886f70d0101010500",
+  "subject_der_hex": "3021311f301d06035504030c164d7963656c69756d206c6f6f706261636b2073656564",
+  "subject_key_id_is_sha1_of_key_bits": true,
+  "validity_tags": [
+   23,
+   23
+  ],
+  "version": "v3"
+ },
+ "server_aki_is_ca_ski": true,
+ "server_issuer_equals_ca_subject": true,
+ "server_key": {
+  "bits": 2048,
+  "exponent": 65537,
+  "matches_server_certificate": true,
+  "pem_ends_with_newline": true,
+  "pem_first_line": "-----BEGIN PRIVATE KEY-----",
+  "pem_last_line": "-----END PRIVATE KEY-----",
+  "type": "RSAPrivateKey"
+ },
+ "server_signature_verifies_under_ca_key_pkcs1v15_sha256": true
+}

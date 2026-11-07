@@ -1,0 +1,256 @@
+{
+  "capture_kind": "real_packaged_process_loopback_http",
+  "executable_sha256": "af681b346ef301c7b36bcdfe2f89b5e71053c349f02d2445cd98bafe5fa3e69c",
+  "observations": [
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/authority/swarm_created": false,
+        "/fast_mode/enabled": false,
+        "/fast_mode/locked": false,
+        "/fast_mode/source": "default",
+        "/installation_role": "owner",
+        "/network/state": "private",
+        "/resource_policy": null,
+        "/run_model/locked": false,
+        "/run_model/selected": "a9-route",
+        "/run_model/source": "demo_default",
+        "/serving/route_ready": false,
+        "/swarm/enabled": false
+      },
+      "id": "first_run",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "fresh_storage_bytes": 4000000000,
+        "relay_unchecked": true,
+        "ten_minute_option_present": true
+      },
+      "id": "onboarding_default_fields",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/web/index.html",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/installation_role": "target",
+        "/join_flow/standing_consent": null,
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "saved2_unjoined_target",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "consent_retry_changed"
+      },
+      "id": "saved2_no_silent_upgrade",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/join/request",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/acquisition/state": "closed",
+        "/installation_role": "target",
+        "/join_flow/standing_consent": null,
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "saved2_restart_preserved",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "open_from_native_launcher"
+      },
+      "id": "missing_cookie_refused",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/status",
+      "status": 401
+    },
+    {
+      "fields": {
+        "/error": "origin_rejected"
+      },
+      "id": "wrong_origin_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/create",
+      "status": 403
+    },
+    {
+      "fields": {
+        "/error": "consent_required"
+      },
+      "id": "missing_consent_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/create",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/peer_class": "mac_mlx_iroh"
+      },
+      "id": "valid_signed_request_preview",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/preview",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "pairing_request_signature_invalid"
+      },
+      "id": "tampered_signed_request_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/preview",
+      "status": 409
+    },
+    {
+      "fields": {
+        "/authority/contribution_enabled": false,
+        "/authority/local_tls": "pinned_loopback",
+        "/authority/member_count": 1,
+        "/authority/membership_state": "current",
+        "/authority/swarm_created": true,
+        "/installation_role": "owner",
+        "/network/state": "private",
+        "/resource_policy/storage_bytes": 4000000000
+      },
+      "id": "fresh4_owner_created",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "standing_grant_exists": false
+      },
+      "id": "owner_no_standing_member_grant",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "not_found"
+      },
+      "id": "stats_not_exposed_on_private_app",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/swarm_stats.py",
+      "path": "/api/stats",
+      "status": 404
+    },
+    {
+      "fields": {
+        "/locked": false,
+        "/selected": "qwen3-0.6b",
+        "/source": "saved"
+      },
+      "id": "choose_model_without_download",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/run_model.py",
+      "path": "/api/run-model",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/enabled": true,
+        "/locked": false,
+        "/source": "saved"
+      },
+      "id": "fast_mode_saved",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/fast_mode.py",
+      "path": "/api/fast-mode",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/acquisition/downloaded_bytes": 0,
+        "/acquisition/state": "idle",
+        "/serving/route_ready": false
+      },
+      "id": "model_selection_idle",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/run_model.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "current",
+        "/authority/swarm_created": true,
+        "/fast_mode/enabled": true,
+        "/fast_mode/source": "saved",
+        "/resource_policy/storage_bytes": 4000000000,
+        "/run_model/selected": "qwen3-0.6b",
+        "/run_model/source": "saved"
+      },
+      "id": "fast_restart_preserved",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/fast_mode.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/enabled": false,
+        "/locked": false,
+        "/source": "saved"
+      },
+      "id": "normal_mode_saved",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/fast_mode.py",
+      "path": "/api/fast-mode",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/fast_mode/enabled": false,
+        "/fast_mode/locked": false,
+        "/fast_mode/source": "saved",
+        "/resource_policy/storage_bytes": 4000000000,
+        "/run_model/selected": "qwen3-0.6b"
+      },
+      "id": "normal_restart_preserved",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/fast_mode.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "all_exit_zero": true,
+        "leftover_pids": 0,
+        "no_serving_or_download": true,
+        "scratch_removed": true,
+        "stale_control_files": 0
+      },
+      "id": "clean_teardown",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/__main__.py",
+      "path": "public-observation-relation",
+      "status": 200
+    }
+  ],
+  "schema": "mycelium.journeys.golden.v1",
+  "source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e"
+}

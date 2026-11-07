@@ -1,0 +1,7 @@
+case	size	status	result
+aggregate-edge	9223372036854775806	accepted	9223372036854775807
+aggregate-over	9223372036854775807	refused	model_manifest_invalid
+individual-over	9223372036854775808	refused	model_manifest_invalid
+zero	0	refused	model_manifest_invalid
+boolean	True	refused	model_manifest_invalid
+small	1	accepted	2

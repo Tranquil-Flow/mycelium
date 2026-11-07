@@ -1,0 +1,306 @@
+{
+  "schema_version": 2,
+  "build_id": "sha256:67eb23cca6807d0009eeed18571e588dfd2313b23c797aeedf8ad81f34850feb",
+  "cargo_lock_sha256": "fc4ad41d8a28a63f1ddb839015569d96c4565d1185cc6cf7f4043b91ce88b4a0",
+  "simulator_version": "mycelium-sim-v2",
+  "prng_version": "splitmix64-keyed-v1",
+  "seed": 17,
+  "config": {
+    "incident": "F4",
+    "mode": "Historical",
+    "rollovers": 2,
+    "close_multiplier": 1,
+    "owner_local_allowed": true,
+    "member_granted": true,
+    "authority_until_ms": 14400000
+  },
+  "profile_id": "v014-L13-reported-stop-v1",
+  "profile_snapshot": "{\"id\":\"v014-L13-reported-stop-v1\",\"phase\":\"stop\",\"unit\":\"ms\",\"origin\":\"REPORTED_APPROXIMATE\",\"multiplier\":1,\"build\":\"L13-report-source-f5bfb709\",\"model\":\"a9-route\",\"device\":\"two-Mac-report-hardware-unrecorded\",\"exact\":false,\"samples\":[{\"value\":33000.0,\"source\":\"L13-ROLLSTOP.md:61-64\",\"method\":\"owner-reported single approximate observation; NOT p99; start boundary differs from confirmed serving\",\"host_load\":17.0}],\"statistics\":{\"count\":1,\"p50_ms\":null,\"p99_ms\":null,\"status\":\"BLOCKED\"}}",
+  "budget_snapshot": {
+    "EffectiveRolloverLead": {
+      "value": "Derived(RolloverLead)",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709\")"
+    },
+    "ExecutionCeilingLead": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1111 @ f5bfb709\")"
+    },
+    "HalfWallDivisor": {
+      "value": "Count(Entries(2))",
+      "unit": "entries",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709\")"
+    },
+    "ObservedStart": {
+      "value": "Duration(Span(160000))",
+      "unit": "milliseconds",
+      "purpose": "IncidentObservation",
+      "provenance": "Measured(\"measured: runs/v2/v014/L13-ROLLSTOP.md:61 (approximate single observation, NOT p99)\")"
+    },
+    "ObservedStop": {
+      "value": "Duration(Span(33000))",
+      "unit": "milliseconds",
+      "purpose": "IncidentObservation",
+      "provenance": "Measured(\"measured: runs/v2/v014/L13-ROLLSTOP.md:61 (approximate single observation, NOT p99)\")"
+    },
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "RolloverMargin": {
+      "value": "Duration(Span(120000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:268 @ f5bfb709\")"
+    },
+    "WorkerCleanupReserve": {
+      "value": "Duration(Span(10000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:35 @ f5bfb709\")"
+    },
+    "WorkerDefaultWall": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/model_resources.py:95 @ f5bfb709\")"
+    }
+  },
+  "corrected_budget_snapshot": {
+    "EffectiveRolloverLead": {
+      "value": "Derived(RolloverLead)",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709\")"
+    },
+    "ExecutionCeilingLead": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1111 @ f5bfb709\")"
+    },
+    "HalfWallDivisor": {
+      "value": "Count(Entries(2))",
+      "unit": "entries",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709\")"
+    },
+    "ObservedStart": {
+      "value": "Duration(Span(160000))",
+      "unit": "milliseconds",
+      "purpose": "IncidentObservation",
+      "provenance": "Measured(\"measured: runs/v2/v014/L13-ROLLSTOP.md:61 (approximate single observation, NOT p99)\")"
+    },
+    "ObservedStop": {
+      "value": "Duration(Span(33000))",
+      "unit": "milliseconds",
+      "purpose": "IncidentObservation",
+      "provenance": "Measured(\"measured: runs/v2/v014/L13-ROLLSTOP.md:61 (approximate single observation, NOT p99)\")"
+    },
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "RolloverMargin": {
+      "value": "Duration(Span(120000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:268 @ f5bfb709\")"
+    },
+    "WorkerCleanupReserve": {
+      "value": "Duration(Span(10000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:35 @ f5bfb709\")"
+    },
+    "WorkerDefaultWall": {
+      "value": "Duration(Span(1800000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/model_resources.py:95 @ f5bfb709\")"
+    }
+  },
+  "corrected_outcome": {
+    "transitions": {
+      "chat_interrupted_explicitly": 2,
+      "chat_success": 3,
+      "cleanup_proven": 2,
+      "close_completion": 2,
+      "crossing_chat": 2,
+      "fresh_run": 2,
+      "replacement_attempt": 2,
+      "serving": 3,
+      "stale_completion_ignored": 4,
+      "start_attempt": 3,
+      "stop": 2
+    },
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "1679500:crossing_chat",
+      "1680000:stop",
+      "1680000:chat_interrupted_explicitly",
+      "1713000:close_completion",
+      "1713000:cleanup_proven",
+      "1713000:replacement_attempt",
+      "1713000:fresh_run",
+      "1713000:start_attempt",
+      "1790000:stale_completion_ignored",
+      "1800000:stale_completion_ignored",
+      "1873000:serving",
+      "1873000:chat_success",
+      "3392500:crossing_chat",
+      "3393000:stop",
+      "3393000:chat_interrupted_explicitly",
+      "3426000:close_completion",
+      "3426000:cleanup_proven",
+      "3426000:replacement_attempt",
+      "3426000:fresh_run",
+      "3426000:start_attempt",
+      "3503000:stale_completion_ignored",
+      "3513000:stale_completion_ignored",
+      "3586000:serving",
+      "3586000:chat_success"
+    ],
+    "starts": 3,
+    "served": 3,
+    "rollovers": 2,
+    "successful_chats": 3,
+    "interrupted_chats": 2,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 2,
+    "workers": [
+      {
+        "generation": 1,
+        "member_origin_ms": 0,
+        "owner_origin_ms": 0,
+        "member_expiry_ms": 1800000,
+        "owner_expiry_ms": 1800000,
+        "cleanup_by_ms": 1790000,
+        "closed_at_ms": 1713000
+      },
+      {
+        "generation": 2,
+        "member_origin_ms": 1713000,
+        "owner_origin_ms": 1713000,
+        "member_expiry_ms": 3513000,
+        "owner_expiry_ms": 3513000,
+        "cleanup_by_ms": 3503000,
+        "closed_at_ms": 3426000
+      },
+      {
+        "generation": 3,
+        "member_origin_ms": 3426000,
+        "owner_origin_ms": 3426000,
+        "member_expiry_ms": 5226000,
+        "owner_expiry_ms": 5226000,
+        "cleanup_by_ms": 5216000,
+        "closed_at_ms": null
+      }
+    ],
+    "deadlines": [
+      [
+        1800000,
+        1800000,
+        1680000
+      ],
+      [
+        3513000,
+        3513000,
+        3393000
+      ],
+      [
+        5226000,
+        5226000,
+        5106000
+      ]
+    ]
+  },
+  "execution_pin": "[{\"incident\":\"F4\",\"mode\":\"Historical\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"v014-L13-reported-stop-v1\",\"{\\\"id\\\":\\\"v014-L13-reported-stop-v1\\\",\\\"phase\\\":\\\"stop\\\",\\\"unit\\\":\\\"ms\\\",\\\"origin\\\":\\\"REPORTED_APPROXIMATE\\\",\\\"multiplier\\\":1,\\\"build\\\":\\\"L13-report-source-f5bfb709\\\",\\\"model\\\":\\\"a9-route\\\",\\\"device\\\":\\\"two-Mac-report-hardware-unrecorded\\\",\\\"exact\\\":false,\\\"samples\\\":[{\\\"value\\\":33000.0,\\\"source\\\":\\\"L13-ROLLSTOP.md:61-64\\\",\\\"method\\\":\\\"owner-reported single approximate observation; NOT p99; start boundary differs from confirmed serving\\\",\\\"host_load\\\":17.0}],\\\"statistics\\\":{\\\"count\\\":1,\\\"p50_ms\\\":null,\\\"p99_ms\\\":null,\\\"status\\\":\\\"BLOCKED\\\"}}\"]",
+  "corrected_execution_pin": "[{\"incident\":\"F4\",\"mode\":\"Corrected\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"v014-L13-reported-stop-v1\",\"{\\\"id\\\":\\\"v014-L13-reported-stop-v1\\\",\\\"phase\\\":\\\"stop\\\",\\\"unit\\\":\\\"ms\\\",\\\"origin\\\":\\\"REPORTED_APPROXIMATE\\\",\\\"multiplier\\\":1,\\\"build\\\":\\\"L13-report-source-f5bfb709\\\",\\\"model\\\":\\\"a9-route\\\",\\\"device\\\":\\\"two-Mac-report-hardware-unrecorded\\\",\\\"exact\\\":false,\\\"samples\\\":[{\\\"value\\\":33000.0,\\\"source\\\":\\\"L13-ROLLSTOP.md:61-64\\\",\\\"method\\\":\\\"owner-reported single approximate observation; NOT p99; start boundary differs from confirmed serving\\\",\\\"host_load\\\":17.0}],\\\"statistics\\\":{\\\"count\\\":1,\\\"p50_ms\\\":null,\\\"p99_ms\\\":null,\\\"status\\\":\\\"BLOCKED\\\"}}\"]",
+  "commands": [
+    {
+      "at_ms": 0,
+      "task": 1,
+      "command": "Begin"
+    }
+  ],
+  "expected_failure": [
+    "automatic_rollovers_missing",
+    "crossing_chat_unreached",
+    "expiry_driven_service_loss",
+    "forbidden_replacement_attempt",
+    "cleanup_exceeded_original_deadline"
+  ],
+  "expected_outcome": {
+    "transitions": {
+      "chat_interrupted_explicitly": 1,
+      "chat_success": 1,
+      "cleanup_proven": 1,
+      "close_completion": 1,
+      "crossing_chat": 1,
+      "outer_wait_expired": 1,
+      "replacement_attempt": 1,
+      "serving": 1,
+      "start_attempt": 1,
+      "stop": 1,
+      "worker_expired": 1
+    },
+    "log": [
+      "0:start_attempt",
+      "160000:serving",
+      "160000:chat_success",
+      "1799500:crossing_chat",
+      "1800000:worker_expired",
+      "1800000:stop",
+      "1800000:chat_interrupted_explicitly",
+      "1800000:outer_wait_expired",
+      "1800000:replacement_attempt",
+      "1833000:close_completion",
+      "1833000:cleanup_proven"
+    ],
+    "starts": 1,
+    "served": 1,
+    "rollovers": 0,
+    "successful_chats": 1,
+    "interrupted_chats": 1,
+    "expiry_losses": 1,
+    "forbidden_replacements": 1,
+    "swallowed_errors": 0,
+    "diagnostics": [
+      "rollover_cleanup_unproven:StopDeadline",
+      "replacement_forbidden:CleanupUnproven"
+    ],
+    "cleanup_proofs": 1,
+    "workers": [
+      {
+        "generation": 1,
+        "member_origin_ms": 0,
+        "owner_origin_ms": 0,
+        "member_expiry_ms": 1800000,
+        "owner_expiry_ms": 1800000,
+        "cleanup_by_ms": 1790000,
+        "closed_at_ms": 1833000
+      }
+    ],
+    "deadlines": [
+      [
+        1800000,
+        1800000,
+        1800000
+      ]
+    ]
+  }
+}

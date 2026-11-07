@@ -1,0 +1,70 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "dfc800dc034bd2621c62015bf3f1f0d3731d2173f39b1fb5fb2cf4ed1aaf4904",
+  "rows": [
+    {
+      "key": "mycelium_platform_neutral/primitives.py:199:44:validator-keyword:minimum",
+      "wrapper": "nullable_bounded_int",
+      "value": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "kwargs": {
+        "minimum": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "maximum": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "result": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "status": "accepted"
+    },
+    {
+      "key": "mycelium_platform_neutral/primitives.py:232:39:validator-keyword:minimum",
+      "wrapper": "nullable_finite",
+      "value": "1e+100",
+      "kwargs": {
+        "minimum": "1e+100",
+        "maximum": "1e+101"
+      },
+      "result": "1e+100",
+      "status": "accepted"
+    },
+    {
+      "key": "mycelium_platform_neutral/primitives.py:166:37:validator-keyword:maximum",
+      "wrapper": "nullable_text",
+      "value": "'x'",
+      "kwargs": {
+        "maximum": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "'x'",
+      "status": "accepted"
+    },
+    {
+      "key": "mycelium_platform_neutral/primitives.py:199:61:validator-keyword:maximum",
+      "wrapper": "nullable_bounded_int",
+      "value": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "kwargs": {
+        "minimum": "0",
+        "maximum": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "result": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "status": "accepted"
+    },
+    {
+      "key": "mycelium_platform_neutral/primitives.py:232:56:validator-keyword:maximum",
+      "wrapper": "nullable_finite",
+      "value": "1e+100",
+      "kwargs": {
+        "minimum": "0.0",
+        "maximum": "1e+101"
+      },
+      "result": "1e+100",
+      "status": "accepted"
+    },
+    {
+      "key": "mycelium_platform_neutral/primitives.py:252:46:validator-keyword:maximum",
+      "wrapper": "unique_names",
+      "value": "['entry']",
+      "kwargs": {
+        "maximum": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "result": "('entry',)",
+      "status": "accepted"
+    }
+  ]
+}

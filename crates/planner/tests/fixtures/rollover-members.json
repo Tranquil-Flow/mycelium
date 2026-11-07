@@ -1,0 +1,434 @@
+[
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "ok",
+    "name": "same",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "ok",
+    "name": "reordered",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "removed",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "third",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "added",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 8,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "owner-generation",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "changed",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "owner-incarnation",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "changed"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "owner-verification_key_digest",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "changed",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "owner-endpoint_id",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 8,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "member-generation",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "changed",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "member-incarnation",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "changed"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "member-verification_key_digest",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "current": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "changed",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "expected": "rollover_members_changed",
+    "name": "member-endpoint_id",
+    "previous": [
+      {
+        "endpoint_id": "ep-owner",
+        "generation": 7,
+        "incarnation": "inc-owner",
+        "node_id": "owner",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "endpoint_id": "ep-member",
+        "generation": 7,
+        "incarnation": "inc-member",
+        "node_id": "member",
+        "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  }
+]

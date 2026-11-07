@@ -1,0 +1,68 @@
+{
+ "cases": 4,
+ "id": "FX-SLICE1-quit-after-failure",
+ "observations": {
+  "q1_failed_run_cleanup_proven": {
+   "app_cleanup_error": null,
+   "app_closed": true,
+   "exit_code": 0,
+   "quit_to_exit_s": 0.03,
+   "run_active_at_quit": false,
+   "run_cleanup_unproven": null,
+   "run_error_code": "worker_native_exited",
+   "run_state_at_quit": "failed",
+   "stderr": []
+  },
+  "q2_failed_run_cleanup_unproven": {
+   "app_cleanup_error": null,
+   "app_closed": true,
+   "exit_code": 0,
+   "quit_to_exit_s": 0.0,
+   "run_active_at_quit": false,
+   "run_cleanup_unproven": {
+    "code": "owner_target_cleanup_unproven",
+    "owner_lock_released": true
+   },
+   "run_error_code": "worker_native_exited",
+   "run_state_at_quit": "failed",
+   "stderr": []
+  },
+  "q3_active_run": {
+   "app_cleanup_error": null,
+   "app_closed": true,
+   "exit_code": 0,
+   "quit_to_exit_s": 0.01,
+   "run_active_at_quit": true,
+   "run_state_after": "stopped",
+   "run_state_at_quit": "serving",
+   "stderr": [],
+   "teardown_failed_flags": [
+    false
+   ]
+  },
+  "q4_active_run_teardown_outlasts_join_60": {
+   "app_cleanup_error": null,
+   "app_closed": true,
+   "exit_code": 0,
+   "quit_to_exit_s": 60.01,
+   "run_active_at_quit": true,
+   "run_state_after": "stopping",
+   "run_state_at_quit": "serving",
+   "stderr": [],
+   "teardown_hold_s": 75.0
+  }
+ },
+ "oracle": "mycelium-v014 f4e366e98a1f705dfaf182897044500d290dbd7f (executed from an APFS clone, python3.13; REAL DemoApp.close, demo_app.close, OwnerRun and launcher main(); stub collaborators)",
+ "probes": {
+  "observations": "65be53407901b2fd5d148ed38e34b057928061233a723453f9a324ef74b8567e",
+  "quit_after_failure_probe.py": "62f4e624671cfaf9087a01eed0f7068a4706b5c4939840f1bdccb74c5f3ae3fd",
+  "run-r10-oracle.sh": "a1c25411167ec520973fff8c76a6c78e7e1644061b142bd6b80ceb98b467f983"
+ },
+ "sources": [
+  "app.py:1815-1863 DemoApp.close (cleanup_error only from close-step exceptions)",
+  "demo_app.py:199-209 close (stops only an ACTIVE run, run.join(60))",
+  "owner_run.py:48 _ACTIVE = running/serving/stopping/failing; failed is not active",
+  "owner_run.py:275-282 stop, 328-331 join",
+  "__main__.py:216-223 launcher exit: 3 only if app.cleanup_error"
+ ]
+}

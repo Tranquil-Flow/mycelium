@@ -1,0 +1,17 @@
+{
+  "boundary": "Full validate_loaded_stage_authentication boundary with separately supplied loader binding, not loader execution, tensor/probe hashing or runtime model validation. Never derive the trusted binding from an incoming proof.",
+  "generator_sha256": "44cd0fb74136bf5151e2a0fe361e0ca15ef47dfe53b0ba6d716874ce6be9724f",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "model_adapters.py",
+      "sha256": "6252e45a3fe6c6b41ecf04e12e5d2b68bd7705a4703e2ba3a4a1fd6e8185b61b"
+    },
+    {
+      "path": "runtime_contracts.py",
+      "sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

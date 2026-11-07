@@ -1,0 +1,77 @@
+{
+  "corrected": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:wall_selection",
+      "0:worker_start",
+      "160000:worker_ready",
+      "160000:chat_success",
+      "220000:later_request",
+      "220000:chat_success"
+    ],
+    "metrics": {
+      "member_worker_deadline_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_worker_deadline_ms": 1800000,
+      "proposed_wall_ms": 1800000,
+      "unknown_member_wall_ms": 60000
+    },
+    "rollovers": 0,
+    "served": 2,
+    "starts": 1,
+    "successful_chats": 2,
+    "swallowed_errors": 0,
+    "transitions": {
+      "chat_success": 2,
+      "later_request": 1,
+      "start_attempt": 1,
+      "wall_selection": 1,
+      "worker_ready": 1,
+      "worker_start": 1
+    },
+    "workers": []
+  },
+  "historical": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:wall_selection",
+      "0:worker_start",
+      "160000:worker_ready",
+      "220000:later_request"
+    ],
+    "metrics": {
+      "member_worker_deadline_ms": 600000,
+      "owner_standing_grants": 0,
+      "owner_worker_deadline_ms": 60000,
+      "proposed_wall_ms": 1800000,
+      "unknown_member_wall_ms": 60000,
+      "worker_expiry_losses": 2
+    },
+    "rollovers": 0,
+    "served": 0,
+    "starts": 1,
+    "successful_chats": 0,
+    "swallowed_errors": 0,
+    "transitions": {
+      "later_request": 1,
+      "start_attempt": 1,
+      "wall_selection": 1,
+      "worker_ready": 1,
+      "worker_start": 1
+    },
+    "workers": []
+  },
+  "source_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582"
+}

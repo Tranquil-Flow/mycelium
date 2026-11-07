@@ -1,0 +1,38 @@
+{
+  "canonical_utf8": "{\"float_big\":1e+16,\"float_frac\":1790000000.125,\"float_small\":0.0001,\"float_tiny\":1.5e-05,\"float_whole\":1790000000.0,\"int\":42,\"nested\":{\"a\":{},\"b\":[1,2.5,null,true,false]},\"protocol\":\"mycelium.fixture_statement.v1\",\"text\":\"caf\u00e9 \u2603 \\\"quoted\\\" \\\\ \\n\\t\"}",
+  "endpoint_id": "device-endpoint-1",
+  "public_key_record": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+    "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+  },
+  "seed_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "signature": {
+    "algorithm": "ed25519",
+    "signature": "xdvhubh+BrIFYsNKb9/0S/KgI1XIDX62HBjusHVHweLylGUKXS+Z7nTApBvLr5YBGW/oVpkoYeZ67TfNUk8aBw==",
+    "signed_statement_digest": "sha256:9f9faf86bbdf2c740243b846079071ee8fc442153ab36bbc0a8d6ca7be06a0eb",
+    "signer_endpoint_id": "device-endpoint-1",
+    "verification_key_digest": "sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d"
+  },
+  "statement": {
+    "float_big": 1e+16,
+    "float_frac": 1790000000.125,
+    "float_small": 0.0001,
+    "float_tiny": 1.5e-05,
+    "float_whole": 1790000000.0,
+    "int": 42,
+    "nested": {
+      "a": {},
+      "b": [
+        1,
+        2.5,
+        null,
+        true,
+        false
+      ]
+    },
+    "protocol": "mycelium.fixture_statement.v1",
+    "text": "caf\u00e9 \u2603 \"quoted\" \\ \n\t"
+  }
+}

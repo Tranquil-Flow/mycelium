@@ -1,0 +1,50 @@
+{
+  "batch_concurrency_limit": 1,
+  "evidence_scope": "bounded_local_samples",
+  "interactive_boundary": {
+    "concurrency": 1,
+    "kind": "highest_observed"
+  },
+  "interactive_concurrency_limit": 1,
+  "key": {
+    "backend": "mlx",
+    "context_bucket": "0-4096",
+    "hardware_class": "fixture-arm64",
+    "kv_mode": "stage-local",
+    "model_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "power_mode": "ac",
+    "quantization": "int8",
+    "runtime_build": "fixture-runtime",
+    "source_evidence_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "max_safe_concurrency": 1,
+  "points": [
+    {
+      "aggregate_output_tps": 10.0,
+      "concurrency": 1,
+      "interactive_slo_met": true,
+      "memory_budget_bytes": 2000000000,
+      "oom": false,
+      "p95_tpot_ms": 50.0,
+      "p95_ttft_ms": 500.0,
+      "peak_memory_bytes": 1000000000,
+      "safe": true,
+      "sample_count": 5,
+      "thermal_throttled": false
+    }
+  ],
+  "policy": {
+    "min_samples": 3,
+    "tpot_p95_slo_ms": 100.0,
+    "ttft_p95_slo_ms": 1000.0
+  },
+  "profile_digest": "sha256:c06ca57fe55fbdf5ad20f9274f575c64fa4bfde03131ec84ce1568db7a716cfd",
+  "protocol": "mycelium.capacity_profile.v1",
+  "qualification_evaluated": false,
+  "release_ready": false,
+  "route_ready": false,
+  "safety_boundary": {
+    "concurrency": 1,
+    "kind": "highest_observed"
+  }
+}

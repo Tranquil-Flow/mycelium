@@ -1,0 +1,27 @@
+{
+  "cold_rtt_ms": 5.0,
+  "connection_generation": 1,
+  "connections_opened": 1,
+  "exclusions": [
+    "path_transition_not_observed_within_budget"
+  ],
+  "frames_sent": 8,
+  "fresh_until_unix_ms": 7201000,
+  "jitter_ms": 0.25,
+  "local_endpoint_id": "endpoint-node-a",
+  "local_node_id": "node-a",
+  "loss_ratio": 0.0,
+  "measured_at_unix_ms": 1000,
+  "measurement_source": "iroh_activation_plane",
+  "observed_goodput_Bps": 10000000.0,
+  "path_class": "direct",
+  "protocol": "mycelium.transport_path_observation.v1",
+  "reconnect_count": 0,
+  "relay_identity": null,
+  "relay_region": null,
+  "remote_endpoint_id": "endpoint-node-b",
+  "remote_node_id": "node-b",
+  "sample_count": 8,
+  "selected_path_changes": 0,
+  "warm_rtt_ms": 4.0
+}

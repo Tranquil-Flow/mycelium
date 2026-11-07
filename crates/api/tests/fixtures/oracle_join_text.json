@@ -1,0 +1,4069 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "now": 1761700000.5,
+ "join_text": [
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCDEFGHJKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def abcd efgh jkmn",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "ABC-DEF ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "https://abc-def.trycloudflare.com ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "https://abc-def.trycloudflare.com/ ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def.trycloudflare.com ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def.trycloudflare.com/ ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "https://abc-def/ ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "a ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://a.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "-abc ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc- ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "a--b ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc_def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc.def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def   ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "   abc-def ABCD-EFGH-JKMN   ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "\tabc-def ABCD-EFGH-JKMN\n",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def  ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def\tABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def\nABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKM",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMNP",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKM0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKM1",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMI",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMO",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKML",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMU",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD EFGH JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def AB-CD EF-GH JK-MN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u00a0EFGH\u00a0JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u2003EFGH\u2003JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u001cEFGH\u001cJKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u001fEFGH\u001fJKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u0085EFGH\u0085JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD\u200bEFGH\u200bJKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def \u017fBCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "SBCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKM\u0131",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JK\u00dfN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "\u212a-abc ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://k-abc.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def.trycloudflare.com.trycloudflare.com ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "https://https://abc-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "HTTPS://abc-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "http://abc-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def.trycloudflare.com/x ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def//  ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def/ ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": ".trycloudflare.com ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "trycloudflare.com ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": " ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": " ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "\n",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "\u3000",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "\ud800",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKM\u00e9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "23456789ABCD 23456789ABCD",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://23456789abcd.trycloudflare.com",
+    "window_id": "2345",
+    "code": "6789ABCD",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": null,
+   "text": "mycelium-join:",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "mycelium-join:   ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "mycelium-join:AAAA",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "MYCELIUM-JOIN:abc",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def ABCD-EFGH-JKMN\u0000",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def\u2028ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "abc-def \u0660BCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "ab\u0131-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": null,
+   "text": "Abc-def ABCD-EFGH-JKMN",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": "good",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "good_spaces",
+   "text": "  mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ  \n",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "good_expiry_equal",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDAwMC41fQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700000.5
+   }
+  },
+  {
+   "label": "good_expired",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDAwMC40OTl9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_link_expired"
+   }
+  },
+  {
+   "label": "good_expired_int",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_link_expired"
+   }
+  },
+  {
+   "label": "good_int_expiry",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDAwMX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700001.0
+   }
+  },
+  {
+   "label": "origin_port",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOjg0NDMiLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com:8443",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_port_443",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOjQ0MyIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com:443",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_port_0",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOjAiLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_port_70000",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOjcwMDAwIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_port_leading_zero",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOjA0NDMiLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_ip",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLzEyNy4wLjAuMSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://127.0.0.1",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_ip_port",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLzEyNy4wLjAuMTo5OTk5Iiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://127.0.0.1:9999",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_bad_ip",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLzk5OS4xLjEuMSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://999.1.1.1",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_leading_zero_ip",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLzEyNy4wMDAuMC4xIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://127.000.0.1",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_upper",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL1JlbGF5LkV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_http",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwOi8vcmVsYXkuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_path",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tLyIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_query",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tP3giLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_userinfo",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3VAcmVsYXkuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_trailing_dot",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tLiIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_empty_label",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5Li5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_unicode",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JcdTAwZTlsYXkuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_label_64",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_label_63",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2FhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYS5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "origin_dash_edge",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLy1hLmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_dash_end",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2EtLmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_underscore",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2FfYi5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_space",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2EgYi5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_ctl",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2FcdTAwMDEuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_trailing_space",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tICIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_empty",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiIiLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_scheme_only",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLyIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_colon_only",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovLzoiLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_host_colon",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOiIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_double_colon",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2E6MToyIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_ipv6",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL1s6OjFdIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_arabic_port",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tOlx1MDY2NFx1MDY2NFx1MDY2MyIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_int",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOjUsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_null",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOm51bGwsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "origin_localhost",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL2xvY2FsaG9zdCIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://localhost",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "window_lower",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiYWJjZCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "window_short",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "window_bad_char",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUIwRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "window_int",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoxMjM0LCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "code_lower",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJlZmdoMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "code_short",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "code_long",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NTYiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "code_bad_char",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0MCIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "digest_short",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "digest_upper",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjpBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCQUJBQkFCIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "digest_null",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6bnVsbCwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "digest_noprefix",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6ImFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "digest_trailing_newline",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiXG4iLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "protocol_wrong",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjIiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "protocol_int",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6MSwib3JpZ2luIjoiaHR0cHM6Ly9yZWxheS5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDAuNX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "extra_key",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41LCJleHRyYSI6MX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "missing_key",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "missing_expires",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIn0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "expires_str",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6IjE3NjE3MDAxMDAifQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_bool",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6dHJ1ZX0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_null",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6bnVsbH0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_list",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6WzFdfQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_huge_float",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MWU5OTl9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_huge_int",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDB9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "OverflowError",
+    "module": "builtins"
+   }
+  },
+  {
+   "label": "expires_nan",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6TmFOfQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_inf",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6SW5maW5pdHl9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_neg_inf",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6LUluZmluaXR5fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "expires_exp",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MS43NjE3MDAxZTl9",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.0
+   }
+  },
+  {
+   "label": "expires_float_precise",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDAwMC41MDAwMDAxfQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700000.5
+   }
+  },
+  {
+   "label": "dup_key",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3guZXhhbXBsZS5jb20iLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMH0",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.0
+   }
+  },
+  {
+   "label": "not_object",
+   "text": "mycelium-join:WzEsMl0",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "null_doc",
+   "text": "mycelium-join:bnVsbA",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "string_doc",
+   "text": "mycelium-join:Ingi",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "empty_doc",
+   "text": "mycelium-join:",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "garbage",
+   "text": "mycelium-join:bm90IGpzb24",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "bom_utf8",
+   "text": "mycelium-join:77u_eyJwcm90b2NvbCI6ICJteWNlbGl1bS5hMTNfam9pbl9saW5rLnYxIiwgIm9yaWdpbiI6ICJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwgIndpbmRvd19pZCI6ICJBQkNEIiwgImNvZGUiOiAiRUZHSDIzNDUiLCAic2VlZF9rZXlfZGlnZXN0IjogInNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwgImV4cGlyZXNfYXQiOiAxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "utf16_bom",
+   "text": "mycelium-join:__57ACIAcAByAG8AdABvAGMAbwBsACIAOgAgACIAbQB5AGMAZQBsAGkAdQBtAC4AYQAxADMAXwBqAG8AaQBuAF8AbABpAG4AawAuAHYAMQAiACwAIAAiAG8AcgBpAGcAaQBuACIAOgAgACIAaAB0AHQAcABzADoALwAvAHIAZQBsAGEAeQAuAGUAeABhAG0AcABsAGUALgBjAG8AbQAiACwAIAAiAHcAaQBuAGQAbwB3AF8AaQBkACIAOgAgACIAQQBCAEMARAAiACwAIAAiAGMAbwBkAGUAIgA6ACAAIgBFAEYARwBIADIAMwA0ADUAIgAsACAAIgBzAGUAZQBkAF8AawBlAHkAXwBkAGkAZwBlAHMAdAAiADoAIAAiAHMAaABhADIANQA2ADoAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgAiACwAIAAiAGUAeABwAGkAcgBlAHMAXwBhAHQAIgA6ACAAMQA3ADYAMQA3ADAAMAAxADAAMAAuADUAfQA",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "utf16le",
+   "text": "mycelium-join:ewAiAHAAcgBvAHQAbwBjAG8AbAAiADoAIAAiAG0AeQBjAGUAbABpAHUAbQAuAGEAMQAzAF8AagBvAGkAbgBfAGwAaQBuAGsALgB2ADEAIgAsACAAIgBvAHIAaQBnAGkAbgAiADoAIAAiAGgAdAB0AHAAcwA6AC8ALwByAGUAbABhAHkALgBlAHgAYQBtAHAAbABlAC4AYwBvAG0AIgAsACAAIgB3AGkAbgBkAG8AdwBfAGkAZAAiADoAIAAiAEEAQgBDAEQAIgAsACAAIgBjAG8AZABlACIAOgAgACIARQBGAEcASAAyADMANAA1ACIALAAgACIAcwBlAGUAZABfAGsAZQB5AF8AZABpAGcAZQBzAHQAIgA6ACAAIgBzAGgAYQAyADUANgA6AGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAIgAsACAAIgBlAHgAcABpAHIAZQBzAF8AYQB0ACIAOgAgADEANwA2ADEANwAwADAAMQAwADAALgA1AH0A",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "utf16be",
+   "text": "mycelium-join:AHsAIgBwAHIAbwB0AG8AYwBvAGwAIgA6ACAAIgBtAHkAYwBlAGwAaQB1AG0ALgBhADEAMwBfAGoAbwBpAG4AXwBsAGkAbgBrAC4AdgAxACIALAAgACIAbwByAGkAZwBpAG4AIgA6ACAAIgBoAHQAdABwAHMAOgAvAC8AcgBlAGwAYQB5AC4AZQB4AGEAbQBwAGwAZQAuAGMAbwBtACIALAAgACIAdwBpAG4AZABvAHcAXwBpAGQAIgA6ACAAIgBBAEIAQwBEACIALAAgACIAYwBvAGQAZQAiADoAIAAiAEUARgBHAEgAMgAzADQANQAiACwAIAAiAHMAZQBlAGQAXwBrAGUAeQBfAGQAaQBnAGUAcwB0ACIAOgAgACIAcwBoAGEAMgA1ADYAOgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiAGEAYgBhAGIAYQBiACIALAAgACIAZQB4AHAAaQByAGUAcwBfAGEAdAAiADoAIAAxADcANgAxADcAMAAwADEAMAAwAC4ANQB9",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "utf32",
+   "text": "mycelium-join:__4AAHsAAAAiAAAAcAAAAHIAAABvAAAAdAAAAG8AAABjAAAAbwAAAGwAAAAiAAAAOgAAACAAAAAiAAAAbQAAAHkAAABjAAAAZQAAAGwAAABpAAAAdQAAAG0AAAAuAAAAYQAAADEAAAAzAAAAXwAAAGoAAABvAAAAaQAAAG4AAABfAAAAbAAAAGkAAABuAAAAawAAAC4AAAB2AAAAMQAAACIAAAAsAAAAIAAAACIAAABvAAAAcgAAAGkAAABnAAAAaQAAAG4AAAAiAAAAOgAAACAAAAAiAAAAaAAAAHQAAAB0AAAAcAAAAHMAAAA6AAAALwAAAC8AAAByAAAAZQAAAGwAAABhAAAAeQAAAC4AAABlAAAAeAAAAGEAAABtAAAAcAAAAGwAAABlAAAALgAAAGMAAABvAAAAbQAAACIAAAAsAAAAIAAAACIAAAB3AAAAaQAAAG4AAABkAAAAbwAAAHcAAABfAAAAaQAAAGQAAAAiAAAAOgAAACAAAAAiAAAAQQAAAEIAAABDAAAARAAAACIAAAAsAAAAIAAAACIAAABjAAAAbwAAAGQAAABlAAAAIgAAADoAAAAgAAAAIgAAAEUAAABGAAAARwAAAEgAAAAyAAAAMwAAADQAAAA1AAAAIgAAACwAAAAgAAAAIgAAAHMAAABlAAAAZQAAAGQAAABfAAAAawAAAGUAAAB5AAAAXwAAAGQAAABpAAAAZwAAAGUAAABzAAAAdAAAACIAAAA6AAAAIAAAACIAAABzAAAAaAAAAGEAAAAyAAAANQAAADYAAAA6AAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAAGEAAABiAAAAYQAAAGIAAABhAAAAYgAAACIAAAAsAAAAIAAAACIAAABlAAAAeAAAAHAAAABpAAAAcgAAAGUAAABzAAAAXwAAAGEAAAB0AAAAIgAAADoAAAAgAAAAMQAAADcAAAA2AAAAMQAAADcAAAAwAAAAMAAAADEAAAAwAAAAMAAAAC4AAAA1AAAAfQAAAA",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "bad_utf8",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Iv8ifQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "lone_surrogate_origin",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL1x1ZDgwMC5leGFtcGxlLmNvbSIsIndpbmRvd19pZCI6IkFCQ0QiLCJjb2RlIjoiRUZHSDIzNDUiLCJzZWVkX2tleV9kaWdlc3QiOiJzaGEyNTY6YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsImV4cGlyZXNfYXQiOjE3NjE3MDAxMDB9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "lone_surrogate_protocol",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Ilx1ZDgwMCIsIm9yaWdpbiI6Imh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwfQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "escaped_origin",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczpcL1wvcmVsYXkuZXhhbXBsZS5jb20iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwfQ",
+   "now": 1761700000.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.0
+   }
+  },
+  {
+   "label": "b64_padded",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ==",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_std_alphabet",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tLz8/Pj4iLCJ3aW5kb3dfaWQiOiJBQkNEIiwiY29kZSI6IkVGR0gyMzQ1Iiwic2VlZF9rZXlfZGlnZXN0Ijoic2hhMjU2OmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWIiLCJleHBpcmVzX2F0IjoxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_invalid_char",
+   "text": "mycelium-join:!!!!",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_empty",
+   "text": "mycelium-join:",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_noncanonical_tail",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fB",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_len1",
+   "text": "mycelium-join:A",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "b64_whitespace_inside",
+   "text": "mycelium-join:eyJwcm90b2 NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "scheme_upper",
+   "text": "MYCELIUM-JOIN:eyJwcm90b2NvbCI6ICJteWNlbGl1bS5hMTNfam9pbl9saW5rLnYxIiwgIm9yaWdpbiI6ICJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwgIndpbmRvd19pZCI6ICJBQkNEIiwgImNvZGUiOiAiRUZHSDIzNDUiLCAic2VlZF9rZXlfZGlnZXN0IjogInNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwgImV4cGlyZXNfYXQiOiAxNzYxNzAwMTAwLjV9",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "with_trailing_text",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ extra",
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_NoneType",
+   "text": null,
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_int",
+   "text": 5,
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_float",
+   "text": 1.5,
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_bool",
+   "text": true,
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_list",
+   "text": [],
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_dict",
+   "text": {},
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "type_list",
+   "text": [
+    "abc"
+   ],
+   "now": 1761700000.5,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "join_code_invalid"
+   }
+  },
+  {
+   "label": "now_nan",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": {
+    "float": "nan"
+   },
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "short_now_nan",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": {
+    "float": "nan"
+   },
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "now_inf",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": {
+    "float": "inf"
+   },
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "short_now_inf",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": {
+    "float": "inf"
+   },
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "now_True",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": true,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "short_now_True",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": true,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "now_None",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": null,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "short_now_None",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": null,
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "now_'5'",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": "5",
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "short_now_'5'",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": "5",
+   "err": {
+    "type": "PairingError",
+    "module": "mycelium_a13_macos.pairing",
+    "code": "pairing_time_invalid"
+   }
+  },
+  {
+   "label": "now_1761700100.0",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700100.0,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "short_now_1761700100.0",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": 1761700100.0,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": "now_1761700100",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700100,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "short_now_1761700100",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": 1761700100,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  },
+  {
+   "label": "now_1761700100.5",
+   "text": "mycelium-join:eyJwcm90b2NvbCI6Im15Y2VsaXVtLmExM19qb2luX2xpbmsudjEiLCJvcmlnaW4iOiJodHRwczovL3JlbGF5LmV4YW1wbGUuY29tIiwid2luZG93X2lkIjoiQUJDRCIsImNvZGUiOiJFRkdIMjM0NSIsInNlZWRfa2V5X2RpZ2VzdCI6InNoYTI1NjphYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiIiwiZXhwaXJlc19hdCI6MTc2MTcwMDEwMC41fQ",
+   "now": 1761700100.5,
+   "ok": {
+    "origin": "https://relay.example.com",
+    "window_id": "ABCD",
+    "code": "EFGH2345",
+    "seed_key_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "expires_at": 1761700100.5
+   }
+  },
+  {
+   "label": "short_now_1761700100.5",
+   "text": "abc-def ABCD-EFGH-JKMN",
+   "now": 1761700100.5,
+   "ok": {
+    "origin": "https://abc-def.trycloudflare.com",
+    "window_id": "ABCD",
+    "code": "EFGHJKMN",
+    "seed_key_digest": null,
+    "expires_at": null
+   }
+  }
+ ],
+ "origins": [
+  {
+   "value": "https://relay.example.com",
+   "canonical": {
+    "ok": "https://relay.example.com"
+   },
+   "external": {
+    "ok": "https://relay.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.com:443",
+   "canonical": {
+    "ok": "https://relay.example.com:443"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:8443",
+   "canonical": {
+    "ok": "https://relay.example.com:8443"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://Relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "ok": "https://relay.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.com/",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com.",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:0",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:65535",
+   "canonical": {
+    "ok": "https://relay.example.com:65535"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:65536",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://127.0.0.1",
+   "canonical": {
+    "ok": "https://127.0.0.1"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://127.0.0.1:8000",
+   "canonical": {
+    "ok": "https://127.0.0.1:8000"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://127.0.0.1:8443/",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://[::1]:8443",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://localhost",
+   "canonical": {
+    "ok": "https://localhost"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://localhost:8443",
+   "canonical": {
+    "ok": "https://localhost:8443"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.local",
+   "canonical": {
+    "ok": "https://a.local"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.localhost",
+   "canonical": {
+    "ok": "https://a.localhost"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.internal",
+   "canonical": {
+    "ok": "https://a.internal"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.lan",
+   "canonical": {
+    "ok": "https://a.lan"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.home",
+   "canonical": {
+    "ok": "https://a.home"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.corp",
+   "canonical": {
+    "ok": "https://a.corp"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.invalid",
+   "canonical": {
+    "ok": "https://a.invalid"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.test",
+   "canonical": {
+    "ok": "https://a.test"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.onion",
+   "canonical": {
+    "ok": "https://a.onion"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.arpa",
+   "canonical": {
+    "ok": "https://a.arpa"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.example",
+   "canonical": {
+    "ok": "https://a.example"
+   },
+   "external": {
+    "ok": "https://a.example"
+   }
+  },
+  {
+   "value": "https://a.b.arpa",
+   "canonical": {
+    "ok": "https://a.b.arpa"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://example",
+   "canonical": {
+    "ok": "https://example"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a",
+   "canonical": {
+    "ok": "https://a"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.c",
+   "canonical": {
+    "ok": "https://a.c"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.co",
+   "canonical": {
+    "ok": "https://a.co"
+   },
+   "external": {
+    "ok": "https://a.co"
+   }
+  },
+  {
+   "value": "https://a.c0",
+   "canonical": {
+    "ok": "https://a.c0"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.1com",
+   "canonical": {
+    "ok": "https://a.1com"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.2.3.4",
+   "canonical": {
+    "ok": "https://1.2.3.4"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://999.1.1.1",
+   "canonical": {
+    "ok": "https://999.1.1.1"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.2.3",
+   "canonical": {
+    "ok": "https://1.2.3"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.2.3.4.5",
+   "canonical": {
+    "ok": "https://1.2.3.4.5"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://01.2.3.4",
+   "canonical": {
+    "ok": "https://01.2.3.4"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a-b.example.com",
+   "canonical": {
+    "ok": "https://a-b.example.com"
+   },
+   "external": {
+    "ok": "https://a-b.example.com"
+   }
+  },
+  {
+   "value": "https://-a.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a-.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a_b.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://xn--bcher-kva.example",
+   "canonical": {
+    "ok": "https://xn--bcher-kva.example"
+   },
+   "external": {
+    "ok": "https://xn--bcher-kva.example"
+   }
+  },
+  {
+   "value": "https://xn--bcher-kva.example.com",
+   "canonical": {
+    "ok": "https://xn--bcher-kva.example.com"
+   },
+   "external": {
+    "ok": "https://xn--bcher-kva.example.com"
+   }
+  },
+  {
+   "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+   "canonical": {
+    "ok": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+   },
+   "external": {
+    "ok": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+   }
+  },
+  {
+   "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.com",
+   "canonical": {
+    "ok": "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.com"
+   },
+   "external": {
+    "ok": "https://a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.com"
+   }
+  },
+  {
+   "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+   "canonical": {
+    "ok": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+   },
+   "external": {
+    "ok": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+   }
+  },
+  {
+   "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+   "canonical": {
+    "ok": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "canonical": {
+    "ok": "https://a.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "external": {
+    "ok": "https://a.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   }
+  },
+  {
+   "value": "https://a.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "http://relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "HTTPS://relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "ok": "https://relay.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.com ",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": " https://relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com\n",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com#x",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com?x",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://u:p@relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://u@relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https:///",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://:443",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:4 3",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:+443",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:-1",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:1e3",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:\u0664\u0664\u0663",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:00443",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://r\u00e9lay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": " ",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": null,
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": 5,
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": [
+    "x"
+   ],
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": true,
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://RELAY.EXAMPLE.COM",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "ok": "https://relay.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.COM",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "ok": "https://relay.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.com\u007f",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com\u00a0",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com\u001f",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://a\u0000b.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://\u212a.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "ok": "https://k.example.com"
+   }
+  },
+  {
+   "value": "https://relay.example.c\u00f6m",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay..example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://.relay.example.com",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com..",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://0.0.0.0",
+   "canonical": {
+    "ok": "https://0.0.0.0"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://255.255.255.255",
+   "canonical": {
+    "ok": "https://255.255.255.255"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://256.1.1.1",
+   "canonical": {
+    "ok": "https://256.1.1.1"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.1.1.1:99999",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.1.1.1.",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://127.1",
+   "canonical": {
+    "ok": "https://127.1"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://0x7f.0.0.1",
+   "canonical": {
+    "ok": "https://0x7f.0.0.1"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://1.2.3.4a",
+   "canonical": {
+    "ok": "https://1.2.3.4a"
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com:8443:1",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://relay.example.com\t",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  },
+  {
+   "value": "https://e.comcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcomcom",
+   "canonical": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "origin is invalid"
+    }
+   },
+   "external": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_origin_invalid"
+    }
+   }
+  }
+ ],
+ "ports": [
+  {
+   "value": 1024,
+   "result": {
+    "ok": 1024
+   }
+  },
+  {
+   "value": 1023,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": 65535,
+   "result": {
+    "ok": 65535
+   }
+  },
+  {
+   "value": 65536,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": 0,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": -1,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": 8443,
+   "result": {
+    "ok": 8443
+   }
+  },
+  {
+   "value": true,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": false,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": {
+    "float": 1024.0
+   },
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": "8443",
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": null,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": [
+    1
+   ],
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  },
+  {
+   "value": 1000000000000000000000000000000,
+   "result": {
+    "err": {
+     "type": "ValueError",
+     "module": "builtins",
+     "message": "relay_proxy_port_invalid"
+    }
+   }
+  }
+ ],
+ "relay": [
+  {
+   "label": "plain",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "front_true",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": true
+   },
+   "ok": {
+    "cloudflare_front": true,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "front_false",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": false
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "front_int",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": 1
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "front_str",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": "yes"
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "front_null",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": null
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "auto_renew_false",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "auto_renew": false
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": false,
+    "long_lived": false,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "auto_renew_int",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "auto_renew": 1
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "auto_renew_null",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "auto_renew": null
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "long_lived_true",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "long_lived": true
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": true,
+    "renewal_cap": 86400.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "long_lived_int",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "long_lived": 1
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "long_lived_str",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "long_lived": "x"
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_ok",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 3600
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 3600.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "max_renewed_week",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 604800
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 604800.0,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "max_renewed_over",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 604801
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_zero",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 0
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_neg",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": -5
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_float",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 0.5
+   },
+   "ok": {
+    "cloudflare_front": false,
+    "auto_renew": true,
+    "long_lived": false,
+    "renewal_cap": 0.5,
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   }
+  },
+  {
+   "label": "max_renewed_bool",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": true
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_str",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": "5"
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_null",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": null
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_list",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": [
+     1
+    ]
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "max_renewed_huge",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 1000000000000000000000000000000
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "origin_bad",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://localhost",
+    "proxy_port": 8443
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_origin_invalid"
+   }
+  },
+  {
+   "label": "origin_bad_and_renew_bad",
+   "spec": {
+    "provider": "external",
+    "public_origin": "http://x",
+    "proxy_port": 8443,
+    "auto_renew": 3
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  },
+  {
+   "label": "origin_bad_and_port_bad",
+   "spec": {
+    "provider": "external",
+    "public_origin": "http://x",
+    "proxy_port": 5
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_origin_invalid"
+   }
+  },
+  {
+   "label": "port_bad",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 80
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_proxy_port_invalid"
+   }
+  },
+  {
+   "label": "port_bool",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": true
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_proxy_port_invalid"
+   }
+  },
+  {
+   "label": "origin_int",
+   "spec": {
+    "provider": "external",
+    "public_origin": 5,
+    "proxy_port": 8443
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_origin_invalid"
+   }
+  },
+  {
+   "label": "port_str",
+   "spec": {
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": "8443"
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_proxy_port_invalid"
+   }
+  },
+  {
+   "label": "all_bad",
+   "spec": {
+    "provider": "external",
+    "public_origin": null,
+    "proxy_port": null,
+    "auto_renew": null
+   },
+   "err": {
+    "type": "ValueError",
+    "module": "builtins",
+    "message": "relay_renewal_invalid"
+   }
+  }
+ ]
+}

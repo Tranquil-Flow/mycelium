@@ -1,0 +1,1030 @@
+{
+  "cases": [
+    {
+      "binding_current": {
+        "ok": null
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "unchanged",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 2,
+          "incarnation": "inc-2",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "generation_advanced",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-2",
+            "membership_generation": 2,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-2",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "incarnation_changed",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-2",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "other-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "endpoint_changed",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "other-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "key_changed",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "ok": null
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "lease_expired",
+      "owner_session": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding_current": {
+        "ok": null
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "unmanaged",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "peer_class_invalid",
+      "owner_session": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding_current": {
+        "ok": null
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "STOPPED",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "lifecycle_stopped",
+      "owner_session": {
+        "ok": {
+          "binding": {
+            "deployment_id": "deployment",
+            "member_incarnation": "inc-1",
+            "membership_generation": 1,
+            "run_id": "run",
+            "target_endpoint_id": "member-endpoint",
+            "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "target_node_id": "member"
+          },
+          "timeout_seconds": 30.0
+        }
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": "controlled_member_lookup_failed",
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "member_lookup_error",
+      "owner_session": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding_current": {
+        "ok": null
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": true,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "owner_closed",
+      "owner_session": {
+        "error": "managed_owner_closed"
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "member-endpoint",
+          "generation": 0,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "invalid_generation",
+      "owner_session": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding_current": {
+        "error": "managed_observation_member_not_current"
+      },
+      "binding_restored": {
+        "ok": null
+      },
+      "captured_bindings": {
+        "member": {
+          "deployment_id": "deployment",
+          "member_incarnation": "inc-1",
+          "membership_generation": 1,
+          "run_id": "run",
+          "target_endpoint_id": "member-endpoint",
+          "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "target_node_id": "member"
+        }
+      },
+      "constructor_calls": [],
+      "factory_open": {
+        "error": "managed_session_factory_member_not_current"
+      },
+      "input": {
+        "captured_members": [
+          {
+            "endpoint_id": "member-endpoint",
+            "generation": 1,
+            "incarnation": "inc-1",
+            "lease_expires_at": 1000000.0,
+            "lifecycle_state": "RUNNING",
+            "node_id": "member",
+            "peer_class": "mac_mlx_iroh",
+            "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "current_member": {
+          "endpoint_id": "",
+          "generation": 1,
+          "incarnation": "inc-1",
+          "lease_expires_at": 1000000.0,
+          "lifecycle_state": "RUNNING",
+          "node_id": "member",
+          "peer_class": "mac_mlx_iroh",
+          "verification_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "current_member_error": null,
+        "deployment_id": "deployment",
+        "monotonic_seconds": 100.0,
+        "node_id": "member",
+        "owner_closed": false,
+        "run_id": "run",
+        "timeout_seconds": 30.0,
+        "wall_seconds": 1000.0
+      },
+      "journal_unchanged": true,
+      "member_reads": [
+        [
+          "owner_session",
+          "member"
+        ],
+        [
+          "factory_open",
+          "member"
+        ],
+        [
+          "binding_current",
+          "member"
+        ],
+        [
+          "binding_restored",
+          "member"
+        ]
+      ],
+      "name": "invalid_endpoint",
+      "owner_session": {
+        "error": "managed_control_member_stale"
+      }
+    }
+  ],
+  "scope": "real owner/session/factory/_current_binding; network/process effects forbidden; no send, receipt, mailbox or native proof",
+  "source_hashes": {
+    "authority.py": "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4",
+    "control_session.py": "aac49ba38c2b247ef4c1af80dd50f1bde997123545f9d8df8c55a916caccf613",
+    "durable_requests.py": "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09",
+    "managed_control.py": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+    "managed_observations.py": "6c14f9202db72613b52909878d73e5f667d24b8ac94959010631e3d415362626",
+    "session_factory.py": "62c0e0c1c45a9061fb3970f055319da0357430ad63e1c8b845afdbda69048eae"
+  },
+  "source_pin": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

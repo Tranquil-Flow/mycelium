@@ -1,0 +1,1638 @@
+{
+ "cases": [
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://seed.mycelium.now"
+   },
+   "kind": "text",
+   "label": "text-00",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://seed.mycelium.now"
+   },
+   "text": "https://seed.mycelium.now",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://seed.mycelium.now"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://seed.mycelium.now:8443"
+   },
+   "kind": "text",
+   "label": "text-01",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://seed.mycelium.now:8443"
+   },
+   "text": "https://seed.mycelium.now:8443",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://seed.mycelium.now:8443"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://127.0.0.1"
+   },
+   "kind": "text",
+   "label": "text-02",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://127.0.0.1"
+   },
+   "text": "https://127.0.0.1",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://127.0.0.1"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://127.0.0.1:49152"
+   },
+   "kind": "text",
+   "label": "text-03",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://127.0.0.1:49152"
+   },
+   "text": "https://127.0.0.1:49152",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://127.0.0.1:49152"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://localhost"
+   },
+   "kind": "text",
+   "label": "text-04",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://localhost"
+   },
+   "text": "https://localhost",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://localhost"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://a"
+   },
+   "kind": "text",
+   "label": "text-05",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://a"
+   },
+   "text": "https://a",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://a"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://a-b.c-d.example"
+   },
+   "kind": "text",
+   "label": "text-06",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://a-b.c-d.example"
+   },
+   "text": "https://a-b.c-d.example",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://a-b.c-d.example"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://xn--bcher-kva.example"
+   },
+   "kind": "text",
+   "label": "text-07",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://xn--bcher-kva.example"
+   },
+   "text": "https://xn--bcher-kva.example",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://xn--bcher-kva.example"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://1.2.3.4:1"
+   },
+   "kind": "text",
+   "label": "text-08",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3.4:1"
+   },
+   "text": "https://1.2.3.4:1",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3.4:1"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://seed.example.test:65535"
+   },
+   "kind": "text",
+   "label": "text-09",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://seed.example.test:65535"
+   },
+   "text": "https://seed.example.test:65535",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://seed.example.test:65535"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://sub.seed.example.test"
+   },
+   "kind": "text",
+   "label": "text-10",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://sub.seed.example.test"
+   },
+   "text": "https://sub.seed.example.test",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://sub.seed.example.test"
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-11",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://Seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-12",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://SEED.MYCELIUM.NOW:443",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-13",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now.",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-14",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed..mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-15",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://-seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-16",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed-.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+   },
+   "kind": "text",
+   "label": "text-17",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+   },
+   "text": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-18",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-19",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:0",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-20",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:00443",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-21",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:65536",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-22",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:99999999",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-23",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-24",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:44a",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-25",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:\u0664\u0664\u0663",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-26",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:+443",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-27",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now:44 3",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-28",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now/",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-29",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now/path",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-30",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now?q=1",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-31",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now#f",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-32",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://user@seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-33",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://user:pw@seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-34",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://[::1]",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-35",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://[::1]:8443",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-36",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://::1",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-37",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "http://seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-38",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "HTTPS://seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-39",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-40",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "ftp://seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-41",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https:/seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-42",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-43",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://:443",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-44",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "x",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-45",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "ftp://x",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-46",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "http:/",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-47",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https:/",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-48",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "\u00e9",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-49",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-50",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": " ",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-51",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": " https://seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-52",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now ",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-53",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now\n",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-54",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now\t",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-55",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed .mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-56",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed\u00e9.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-57",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://\u00fcber.example",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-58",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now\u2003",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-59",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now\u0000",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://256.256.256.256"
+   },
+   "kind": "text",
+   "label": "text-60",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://256.256.256.256"
+   },
+   "text": "https://256.256.256.256",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://256.256.256.256"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://01.2.3.4"
+   },
+   "kind": "text",
+   "label": "text-61",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://01.2.3.4"
+   },
+   "text": "https://01.2.3.4",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://01.2.3.4"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://1.2.3"
+   },
+   "kind": "text",
+   "label": "text-62",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3"
+   },
+   "text": "https://1.2.3",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://1.2.3.4.5"
+   },
+   "kind": "text",
+   "label": "text-63",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3.4.5"
+   },
+   "text": "https://1.2.3.4.5",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://1.2.3.4.5"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://0.0.0.0"
+   },
+   "kind": "text",
+   "label": "text-64",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://0.0.0.0"
+   },
+   "text": "https://0.0.0.0",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://0.0.0.0"
+   }
+  },
+  {
+   "canonical": {
+    "ok": true,
+    "value": "https://999.example"
+   },
+   "kind": "text",
+   "label": "text-65",
+   "plain": {
+    "ok": true,
+    "seed_url_after": "https://999.example"
+   },
+   "text": "https://999.example",
+   "tls": {
+    "ok": true,
+    "seed_url_after": "https://999.example"
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "text",
+   "label": "text-66",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed_underscore.example",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "none",
+   "label": "none",
+   "plain": {
+    "note": "none-means-unset",
+    "ok": true
+   },
+   "tls": {
+    "note": "none-means-unset",
+    "ok": true
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "int",
+   "label": "int",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "5",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "bytes",
+   "label": "bytes",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "text": "https://seed.mycelium.now",
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  },
+  {
+   "canonical": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false
+   },
+   "kind": "list",
+   "label": "list",
+   "plain": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   },
+   "tls": {
+    "code": null,
+    "exc": "ValueError",
+    "message": "origin is invalid",
+    "ok": false,
+    "seed_url_after": null
+   }
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "ordering": {
+  "bad_port_and_bad_origin": {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "message": "local_tls_port_invalid",
+   "ok": false
+  }
+ },
+ "probe_sha256": "e23a9a1aa398e4719ff3de3ff734521ea633f4721eff095a86943e1bf578f805",
+ "python": "3.14.8"
+}

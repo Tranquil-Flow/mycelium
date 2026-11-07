@@ -1,0 +1,31 @@
+{
+  "oracle_commit": "27fdd49de7e18b58affa85b8a31e9a734d7b4d1e",
+  "sources": [
+    {
+      "path": "native/mobile_core/src/canonical.rs",
+      "sha256": "41a615316684ce68af79a5d9e56147fcc1605787d71fe8f6f52cc436164870bd",
+      "bytes": 6789
+    },
+    {
+      "path": "native/mobile_core/src/identity.rs",
+      "sha256": "a9f69b0949ece130c5875effc2b6cb03823692199e1f72fee8e714b928f7eff0",
+      "bytes": 6127
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/signature.json",
+      "sha256": "9b6a9cc9491674575457d3d26396fe2468cb7d71b95e3d347f2007b6d951b902",
+      "bytes": 1524
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/join_envelope.json",
+      "sha256": "40557d1ea18dc88d2973e63188dfde7de7864b27d3c868ac3c40d687cf561e81",
+      "bytes": 1549
+    },
+    {
+      "path": "native/mobile_core/tests/fixtures/artifact_grant.json",
+      "sha256": "02269dea40301052f763ecd2667ca7e8c8b6c237dfa1bfe78eb9afe16217dc99",
+      "bytes": 11724
+    }
+  ],
+  "boundary": "Existing native-core code and external Python-derived data; no oracle runtime in product or tests"
+}

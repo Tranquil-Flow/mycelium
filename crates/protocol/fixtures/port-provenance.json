@@ -1,0 +1,78 @@
+{
+  "oracle_commit": "27fdd49de7e18b58affa85b8a31e9a734d7b4d1e",
+  "source_files": [
+    {
+      "path": "native/mobile_core/src/canonical.rs",
+      "sha256": "41a615316684ce68af79a5d9e56147fcc1605787d71fe8f6f52cc436164870bd",
+      "size_bytes": 6789
+    },
+    {
+      "path": "native/mobile_core/src/identity.rs",
+      "sha256": "a9f69b0949ece130c5875effc2b6cb03823692199e1f72fee8e714b928f7eff0",
+      "size_bytes": 6127
+    },
+    {
+      "path": "native/mobile_core/src/artifact_grant.rs",
+      "sha256": "b4507ed70481425fdd03ba6a2ec01bc59738d6a34b1cf3e28d1c0d7141a4b61b",
+      "size_bytes": 16079
+    },
+    {
+      "path": "native/iroh_transport/src/remote.rs",
+      "sha256": "5219c340d47c45fae8d66690248cde604ac528d73c282273b64fea77e571a0b5",
+      "size_bytes": 4247
+    },
+    {
+      "path": "native/iroh_transport/src/sidecar.rs",
+      "sha256": "b3c4b75a445562f93956b0bff30d12c6ae4f07d9d46510a37a2b6a5686de7d54",
+      "size_bytes": 153958
+    },
+    {
+      "path": "native/mobile_core/src/node_control.rs",
+      "sha256": "ac6f379ae6d88c72e68bbd31cbf6c30d8adca099bd23434981c2f52db4c71133",
+      "size_bytes": 83999
+    },
+    {
+      "path": "mycelium_mobile/artifact_grant.py",
+      "sha256": "c999b834ae96e333913475ff4b5b663dfe76c82e0908e27f1081cc8608033b6d",
+      "size_bytes": 16671
+    },
+    {
+      "path": "mycelium_membership/contracts.py",
+      "sha256": "df93138166c4d08fd51c5cedb260e50536b3b3343840caeaab9a1a008d018ab2",
+      "size_bytes": 32968
+    },
+    {
+      "path": "mycelium_a13_macos/managed_control.py",
+      "sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+      "size_bytes": 122419
+    },
+    {
+      "path": "mycelium_qualification/signing.py",
+      "sha256": "62843f064b501553ba45f552a3279789b06485707c9e7c0f8b40112cc4a05aa5",
+      "size_bytes": 7237
+    },
+    {
+      "path": "mycelium_qualification/evidence.py",
+      "sha256": "847f1cec93a523b09ba0926659165e39e56a47df1684b7a538790a6e693c5f0c",
+      "size_bytes": 9740
+    }
+  ],
+  "external_generators": [
+    {
+      "name": "v02-l5-oracle.py",
+      "sha256": "92891f322d93432ada862b72a12c9fe3000988b29e562d408ec2a2dbae6274b3"
+    },
+    {
+      "name": "v02-l5-adversarial.py",
+      "sha256": "b8ab96d2c2a3838efd9b041260351a2988acd5af22478a39607d67f0f111241b"
+    },
+    {
+      "name": "v02-l5-edges.py",
+      "sha256": "5cdc7475c5fd4aa0f0baf21564d92aa6c39b474b9b0abed1ba9086d147a3050e"
+    }
+  ],
+  "python": "3.14.8",
+  "cryptography": "46.0.5",
+  "downloads": 0,
+  "claim_boundary": "Oracle generation is external, disposable and never required by Rust tests/build/release"
+}

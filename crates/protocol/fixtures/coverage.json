@@ -1,0 +1,909 @@
+{
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "claim_boundary": "Fixture-level wire coverage only; not whole-contract/consumer qualification",
+  "contracts": [
+    {
+      "protocol": "mycelium.artifact_verification_report.v1",
+      "obligation_id": "O:contract:mycelium.artifact_verification_report.v1",
+      "fixture_sha256": "cb07ec1c0d5c468d0c494983b640e1972816ab9cf56c752fd35604c21635107e",
+      "coverage": "assignment-report-audit-oracle-corpus",
+      "tests": [
+        "protocol::assignment_contracts::assignment_report_and_audit_match_byte_exact_oracle"
+      ],
+      "remaining": "Pure UUIDv5 identity, provisioning assignment validator, independent report/assignment/route errors and audit derivation only; not acquisition, tensor verification or runtime/physical readiness."
+    },
+    {
+      "protocol": "mycelium.assignment_artifact_cache.v1",
+      "obligation_id": "O:contract:mycelium.assignment_artifact_cache.v1",
+      "fixture_sha256": "54ace05f35bd4dbfd5b44804a28e9dd62fbc799ef37676561961d0a3a3fb8569",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.assignment_materialization.v1",
+      "obligation_id": "O:contract:mycelium.assignment_materialization.v1",
+      "fixture_sha256": "7aaa2c6461f1d499a065200ee4a4b115dba27c458633d16f50e469c360ad6b29",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.candidate_promotion_report.v1",
+      "obligation_id": "O:contract:mycelium.candidate_promotion_report.v1",
+      "fixture_sha256": "2854e33780bb9ecbc091861c3ad4c3de63c6eef21c1a0a3cf2c3890a9138b792",
+      "coverage": "promotion-schema-oracle-corpus",
+      "tests": [
+        "protocol::promotion_contracts::promotion_reconstructs_exact_positive_bytes_and_rejects_forged_claims"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.capacity_profile.v1",
+      "obligation_id": "O:contract:mycelium.capacity_profile.v1",
+      "fixture_sha256": "a550479cf389cb591e7b5a6bb4e38a5d2f6336efc3402be44c4e1fa9f59d55e2",
+      "coverage": "capacity-schema-oracle-corpus",
+      "tests": [
+        "protocol::capacity_contracts::capacity_positive_bytes_rederived_claims_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.coarse_region_evidence.v1",
+      "obligation_id": "O:contract:mycelium.coarse_region_evidence.v1",
+      "fixture_sha256": "0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185",
+      "coverage": "evidence-schema-digest-oracle-corpus",
+      "tests": [
+        "protocol::evidence_contracts::evidence_shapes_digests_freshness_and_reuse_match_pinned_oracle"
+      ],
+      "remaining": "Wire/schema and declared freshness/reuse or digest checks only; not physical measurement, authenticated authority or location projection"
+    },
+    {
+      "protocol": "mycelium.concurrent_request_runtime.v1",
+      "obligation_id": "O:contract:mycelium.concurrent_request_runtime.v1",
+      "fixture_sha256": "ddc31e07ca33c8ce5ef9d188b705e9d6811e018999eb29035b8c7f401c97cbc4",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.control_plane_tranche.v1",
+      "obligation_id": "O:contract:mycelium.control_plane_tranche.v1",
+      "fixture_sha256": "07030c947741389aebf560a2bd84ba75a43f2ec35ab1900bcc0f9ebd07f790e9",
+      "coverage": "planner-seam-oracle-corpus",
+      "tests": [
+        "protocol::planner_contracts::tranche_fixture_is_recompiled_byte_exact_by_the_real_bound_compiler",
+        "protocol::planner_contracts::tranche_oracle_corpus_positive_and_every_refusal_match",
+        "protocol::gossip_contracts::gossip_bundle_refusals_carry_the_oracle_per_field_text"
+      ],
+      "remaining": "Producer/validator is the L7 planner (planner::bound::validate_control_plane_tranche over compile_bound_layer_assignments), consumed unmodified; protocol owns only the evidence-bundle parser it delegates to. 4,092 oracle outcomes (740 accepted / 3,352 refused). The planner surfaces evidence refusals as one message; per-field oracle texts are verified on protocol::gossip::parse_bundle. Not artifact acquisition, runtime loading or physical readiness."
+    },
+    {
+      "protocol": "mycelium.deployment_activation.v1",
+      "obligation_id": "O:contract:mycelium.deployment_activation.v1",
+      "fixture_sha256": "c1c3e945373ca5d9c1ae3afce68fd29f86358182effd855bcefcde67fb602bdd",
+      "coverage": "public-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.deployment_residency_physical_gate.v1",
+      "obligation_id": "O:contract:mycelium.deployment_residency_physical_gate.v1",
+      "fixture_sha256": "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445",
+      "coverage": "reviewed-historical-disposition",
+      "tests": [
+        "protocol::historical_disposition::historical_residency_is_retained_but_cannot_authorize_current_readiness"
+      ],
+      "remaining": "See round4-residency-disposition.json. Historical constant fixture producer only; ships as inert compiler-source data, no runtime caller. Retained unchanged, not an implemented current validator."
+    },
+    {
+      "protocol": "mycelium.evidence_history.v1",
+      "obligation_id": "O:contract:mycelium.evidence_history.v1",
+      "fixture_sha256": "ec888d300a2fdda0f83d9977b5ab990e72948a1a3be7cb46f3ff2882387a2407",
+      "coverage": "history-derivation-oracle-corpus",
+      "tests": [
+        "protocol::projection_contracts::historical_records_are_immutable_deduplicated_bounded_sorted_and_filtered"
+      ],
+      "remaining": "Pure immutable-history derivation from supplied records only; no live registry, authority, persistence or publication."
+    },
+    {
+      "protocol": "mycelium.evidence_projection.v1",
+      "obligation_id": "O:contract:mycelium.evidence_projection.v1",
+      "fixture_sha256": "708e60ce266819e6980c28889aa81fc470625a2169379f0b9400bbccb019adf2",
+      "coverage": "projection-schema-oracle-corpus",
+      "tests": [
+        "protocol::projection_contracts::projection_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.execution_graph.v1",
+      "obligation_id": "O:contract:mycelium.execution_graph.v1",
+      "fixture_sha256": "53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5",
+      "coverage": "execution-graph-oracle-corpus",
+      "tests": [
+        "protocol::graph_contracts::execution_graph_parser_and_semantics_match_oracle"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.full_context_recovery_gate.v1",
+      "obligation_id": "O:contract:mycelium.full_context_recovery_gate.v1",
+      "fixture_sha256": "8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
+      "coverage": "recovery-schema-oracle-corpus",
+      "tests": [
+        "protocol::recovery_contracts::recovery_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.full_context_recovery_intent.v1",
+      "obligation_id": "O:contract:mycelium.full_context_recovery_intent.v1",
+      "fixture_sha256": "1d14e03f0a0d8eea0596ceb28dd470866e8bdb4a91418ff9244c888db3308db0",
+      "coverage": "recovery-schema-oracle-corpus",
+      "tests": [
+        "protocol::recovery_contracts::recovery_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.full_context_recovery_qualification.v1",
+      "obligation_id": "O:contract:mycelium.full_context_recovery_qualification.v1",
+      "fixture_sha256": "f9a91c5bf634029ad05bfa2dbd3dfb73d01fbd1a1cfd90bc1445a18d4163e3db",
+      "coverage": "recovery-schema-oracle-corpus",
+      "tests": [
+        "protocol::recovery_contracts::recovery_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.full_context_recovery_runtime.v1",
+      "obligation_id": "O:contract:mycelium.full_context_recovery_runtime.v1",
+      "fixture_sha256": "b399ad6cf7450e19441b93704b45873c8fcd0598a4dde253a5e69521979c52b5",
+      "coverage": "recovery-schema-oracle-corpus",
+      "tests": [
+        "protocol::recovery_contracts::recovery_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.gossip.allocator_view.v1",
+      "obligation_id": "O:contract:mycelium.gossip.allocator_view.v1",
+      "fixture_sha256": "1f0e93f5d8612cf5aa3917d4f73c7747ae9ae26e8c580f23dd403d683a238543",
+      "coverage": "gossip-view-derivation-oracle-corpus",
+      "tests": [
+        "protocol::gossip_contracts::gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources"
+      ],
+      "remaining": "Pure full document/derivation/signature boundary only; no registry lifecycle, current membership/generation authority, durable replay, transport or consumer qualification."
+    },
+    {
+      "protocol": "mycelium.gossip.evidence_bundle.v1",
+      "obligation_id": "O:contract:mycelium.gossip.evidence_bundle.v1",
+      "fixture_sha256": "d79d954a59d3ec931d2fe2b4679c216509f60c5fb7a6cf0a25b90cf151793253",
+      "coverage": "gossip-bundle-oracle-corpus",
+      "tests": [
+        "protocol::gossip_contracts::gossip_bundle_rejects_forged_views_and_digests",
+        "protocol::gossip_contracts::gossip_bundle_refusals_carry_the_oracle_per_field_text",
+        "protocol::gossip_contracts::gossip_derivation_refusals_carry_the_oracle_evidence_text"
+      ],
+      "remaining": "Pure full document/derivation/signature boundary with the oracle per-field EvidenceBundleError text on every refusal (9,459 bundle + 23,117 builder refusals); signed-envelope wrapper texts are a separate boundary. No registry lifecycle, current membership/generation authority, durable replay, transport or consumer qualification."
+    },
+    {
+      "protocol": "mycelium.gossip.router_view.v1",
+      "obligation_id": "O:contract:mycelium.gossip.router_view.v1",
+      "fixture_sha256": "2e134de5433ded3025c51eafd7acd5070956f762cc42e4d4aa75d53b21eca8cf",
+      "coverage": "gossip-view-derivation-oracle-corpus",
+      "tests": [
+        "protocol::gossip_contracts::gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources"
+      ],
+      "remaining": "Pure full document/derivation/signature boundary only; no registry lifecycle, current membership/generation authority, durable replay, transport or consumer qualification."
+    },
+    {
+      "protocol": "mycelium.governance_readiness.v1",
+      "obligation_id": "O:contract:mycelium.governance_readiness.v1",
+      "fixture_sha256": "8f8d99c07e4842abb5d4f0490d94a2522d5eb2e5a47db75ade5488529f8934a7",
+      "coverage": "operator-projection-oracle-corpus",
+      "tests": [
+        "protocol::operator_projection_contracts::source_projections_match_positive_bytes_and_negative_vectors"
+      ],
+      "remaining": "Output-only pure projection from independently supplied source/authority observations; no gate execution, durable seed operation, live route lifecycle or physical qualification. Incident history/reason limits are explicit source-bound inputs."
+    },
+    {
+      "protocol": "mycelium.internet_activation_observation.v1",
+      "obligation_id": "O:contract:mycelium.internet_activation_observation.v1",
+      "fixture_sha256": "bcf703ead3a422125a79b4f8de1d8cfc0cde6f10dc57b1e147023dc0248e7d3b",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.internet_bootstrap_status.v1",
+      "obligation_id": "O:contract:mycelium.internet_bootstrap_status.v1",
+      "fixture_sha256": "36700b1c145f0e53c8ad898f71e7d70f2b53e42115cfa5ba36f42bf146f15a4a",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.internet_native_qualification.v1",
+      "obligation_id": "O:contract:mycelium.internet_native_qualification.v1",
+      "fixture_sha256": "91c626f44b1067ef516c37b8993ec283c92c56eb9ecbc42ee3e3d5c4fb2dd72d",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.interruptible_stage_command.v1",
+      "obligation_id": "O:contract:mycelium.interruptible_stage_command.v1",
+      "fixture_sha256": "f3b24baf289b21874903af48c1fa52d4719453d954b759b87409650914eea1a8",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.layer_assignment.v2",
+      "obligation_id": "O:contract:mycelium.layer_assignment.v2",
+      "fixture_sha256": "889f91027af2d193ebda162ad47636eaf9ad9ead81f57205f1d2d89dcf3b939b",
+      "coverage": "assignment-report-audit-oracle-corpus",
+      "tests": [
+        "protocol::assignment_contracts::assignment_report_and_audit_match_byte_exact_oracle"
+      ],
+      "remaining": "Pure UUIDv5 identity, provisioning assignment validator, independent report/assignment/route errors and audit derivation only; not acquisition, tensor verification or runtime/physical readiness."
+    },
+    {
+      "protocol": "mycelium.layer_load_proof.v1",
+      "obligation_id": "O:contract:mycelium.layer_load_proof.v1",
+      "fixture_sha256": "2fa57869d5e4e2de0cb3e79f927cc360f3ed5605a59c3e1293d9e6f46bbf55f2",
+      "coverage": "loader-authentication-oracle-corpus",
+      "tests": [
+        "protocol::loaded_proof_contracts::loader_authentication_matches_exact_bytes_and_independent_binding_refusals"
+      ],
+      "remaining": "Complete validate_loaded_stage_authentication boundary only. Independent trusted loader facts and prevalidated normalized runtime required; tensor/probe validation, loading and physical qualification remain L8/L9 work."
+    },
+    {
+      "protocol": "mycelium.layer_planner_snapshot.v1",
+      "obligation_id": "O:contract:mycelium.layer_planner_snapshot.v1",
+      "fixture_sha256": "d5b214938863b3f0b8dcac0a0b5acb7ae33a460a9d91a3c49aec05b088e37388",
+      "coverage": "planner-snapshot-derivation-oracle-corpus",
+      "tests": [
+        "protocol::planner_snapshot_contracts::planner_snapshot_reconstructs_every_field_from_independent_gossip_evidence"
+      ],
+      "remaining": "Complete unsigned deterministic snapshot projection/binding only. Signed capacity-profile admission and planner execution remain consumer work; no live authority is implied."
+    },
+    {
+      "protocol": "mycelium.layer_replan_simulation_report.v1",
+      "obligation_id": "O:contract:mycelium.layer_replan_simulation_report.v1",
+      "fixture_sha256": "107c177a0c4e52d24d9ba656346897822db9ec18070be0d540a942e1f9910551",
+      "coverage": "planner-seam-oracle-corpus",
+      "tests": [
+        "protocol::planner_contracts::replan_report_fixture_is_reproduced_byte_exact_by_the_real_replanner",
+        "protocol::planner_contracts::replan_simulation_oracle_corpus_positive_and_every_refusal_match"
+      ],
+      "remaining": "Producer is the L7 planner (plan_snapshot + replan_for_event + simulate_bundle_file), consumed unmodified; protocol holds no replanner. 540 oracle outcomes (246 reports / 294 refusals). Placement intent only; runtime readiness stays external."
+    },
+    {
+      "protocol": "mycelium.link_state.v1",
+      "obligation_id": "O:contract:mycelium.link_state.v1",
+      "fixture_sha256": "810edcf50b37c1598e535ed9e45e83bffa98f5af8f2de584cb1e3e9ba267a9e5",
+      "coverage": "gossip-link-oracle-corpus",
+      "tests": [
+        "protocol::gossip_contracts::link_state_validates_full_payload_with_origin_binding"
+      ],
+      "remaining": "Pure full document/derivation/signature boundary only; no registry lifecycle, current membership/generation authority, durable replay, transport or consumer qualification."
+    },
+    {
+      "protocol": "mycelium.live_route_incident.v1",
+      "obligation_id": "O:contract:mycelium.live_route_incident.v1",
+      "fixture_sha256": "3261768db8a2a856e98f0cdedfd34be408974964a243375e0fb6316524dc951e",
+      "coverage": "operator-projection-oracle-corpus",
+      "tests": [
+        "protocol::operator_projection_contracts::source_projections_match_positive_bytes_and_negative_vectors"
+      ],
+      "remaining": "Output-only pure projection from independently supplied source/authority observations; no gate execution, durable seed operation, live route lifecycle or physical qualification. Incident history/reason limits are explicit source-bound inputs."
+    },
+    {
+      "protocol": "mycelium.live_route_status.v1",
+      "obligation_id": "O:contract:mycelium.live_route_status.v1",
+      "fixture_sha256": "81a67c0d803cf65f8d4fdb637a880a5e4a82e77030522646eb3a241dfb6c8137",
+      "coverage": "live-status-projection-oracle-corpus",
+      "tests": [
+        "protocol::live_status_contracts::complete_live_projection_matches_pinned_bytes_and_refusals"
+      ],
+      "remaining": "Complete pure public_status/counters/helpers over independently observed route/liveness/swarm inputs; not route execution, process reconciliation, authentication or physical qualification."
+    },
+    {
+      "protocol": "mycelium.m13_placement_projection.v1",
+      "obligation_id": "O:contract:mycelium.m13_placement_projection.v1",
+      "fixture_sha256": "bfcd246ad24cb510fb20cecf4e022df56750fa6c5cd9a527c472909e1de59621",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.m14_topology_projection.v1",
+      "obligation_id": "O:contract:mycelium.m14_topology_projection.v1",
+      "fixture_sha256": "479a830dc622846acfb7b0d5653504896eba7b0d38943fdc50cc13824f08391b",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.m15_plan_comparison.v1",
+      "obligation_id": "O:contract:mycelium.m15_plan_comparison.v1",
+      "fixture_sha256": "59a30e530a512ef2f9133d7e4d9c162cf58895b08bdca12523faa780b204a975",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.m23_heterogeneous_kv_gate.v1",
+      "obligation_id": "O:contract:mycelium.m23_heterogeneous_kv_gate.v1",
+      "fixture_sha256": "21dd576bdcc449c1e5ef8972fef5e0e301b1354b35b6a0390159a4c8a07468fa",
+      "coverage": "remaining-public-schema-oracle-corpus",
+      "tests": [
+        "protocol::remaining_public_contracts::remaining_public_shapes_match_positive_bytes_and_all_negative_vectors"
+      ],
+      "remaining": "Complete pinned public schema only; not authenticated evidence, measurements, cache/materialization IO, planner/runtime lifecycle or physical qualification."
+    },
+    {
+      "protocol": "mycelium.manual_provisioning_route.v1",
+      "obligation_id": "O:contract:mycelium.manual_provisioning_route.v1",
+      "fixture_sha256": "c38e02de62391296be46857132edbcc79ef9ad3f06676a56b45de4ebacf27e3a",
+      "coverage": "manual-route-oracle-corpus",
+      "tests": [
+        "protocol::provisioning_contracts::manual_routes_match_positive_bytes_and_full_mutation_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.membership.assignment_offer.v1",
+      "obligation_id": "O:contract:mycelium.membership.assignment_offer.v1",
+      "fixture_sha256": "6cc2a7ba9aab44c74dc86dcfc9a657fcd577dbe4da3f2f3ec03cb469f0d6633a",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.assignment_result.v1",
+      "obligation_id": "O:contract:mycelium.membership.assignment_result.v1",
+      "fixture_sha256": "e0878ad6e1c51fe0c4e32d8277f8d52ebafabed47bb890839fc91b5024ca625f",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.capability_report.v1",
+      "obligation_id": "O:contract:mycelium.membership.capability_report.v1",
+      "fixture_sha256": "53642168d3a8ef099efc159570802561a709a5148b51dd7bd22da43c015de4fb",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.drain_ack.v1",
+      "obligation_id": "O:contract:mycelium.membership.drain_ack.v1",
+      "fixture_sha256": "55b28a1bb3f7e05e0b5cbc3960a46f4cc85d32612a42d43fc2607d954fda0dda",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.heartbeat.v1",
+      "obligation_id": "O:contract:mycelium.membership.heartbeat.v1",
+      "fixture_sha256": "d1c6302eec3bce8909d68acd40f1877b17deace0972d9e05aa6e7297a361187f",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.join_acceptance.v1",
+      "obligation_id": "O:contract:mycelium.membership.join_acceptance.v1",
+      "fixture_sha256": "8f644836d7d2ac330fab694fb42a5edc98f7a29c14f4121faa0d440f6374d29b",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.join_request.v1",
+      "obligation_id": "O:contract:mycelium.membership.join_request.v1",
+      "fixture_sha256": "68b057a917dc7698e8a0d697dc9effb9906a62d21bac9c132998a734e6b94ca8",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.lease_renewal.v1",
+      "obligation_id": "O:contract:mycelium.membership.lease_renewal.v1",
+      "fixture_sha256": "8edc4dee64b21c31569e69df38b5c7456b21767d4046251d664efb81d6f0ab31",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.link_probe_report.v1",
+      "obligation_id": "O:contract:mycelium.membership.link_probe_report.v1",
+      "fixture_sha256": "798442a92dcbf653e4ee4798bbbeebeaab6596aa5b4ec5e60192ee999abd3075",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.resume_acceptance.v1",
+      "obligation_id": "O:contract:mycelium.membership.resume_acceptance.v1",
+      "fixture_sha256": "a9090196e9309ae0d3516d7e00e4b92a4a425382204357da2145acd2b2a68c7e",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.resume_request.v1",
+      "obligation_id": "O:contract:mycelium.membership.resume_request.v1",
+      "fixture_sha256": "36d259c4ec72678a28e22496a515f1417c1fec3d84888566555020cd4e464cb8",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.seed_rotation_ack.v1",
+      "obligation_id": "O:contract:mycelium.membership.seed_rotation_ack.v1",
+      "fixture_sha256": "4b7a4c9eadf52b053c5d0d6e8aa5542599c1b8258fbe7877f483e174d502ae80",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.membership.signed_message.v1",
+      "obligation_id": "O:contract:mycelium.membership.signed_message.v1",
+      "fixture_sha256": "23285ece7a71bbab99f79f7468bc49bc3ce58b563b9d1324f5671c2e01bcc4f2",
+      "coverage": "membership-wire-schema-signature",
+      "tests": [
+        "protocol::oracle_envelopes::membership_positive_bytes_and_96_oracle_refusals",
+        "protocol::adversarial::oracle_membership_adversarial_shape_corpus",
+        "protocol::edge_parity::registered_signed_message_fixture_verifies"
+      ],
+      "remaining": "consumer durable authority/replay/lease lifecycle not qualified"
+    },
+    {
+      "protocol": "mycelium.model_preparation_authorization.v2",
+      "obligation_id": "O:contract:mycelium.model_preparation_authorization.v2",
+      "fixture_sha256": "808df63a4dd7868872053edf0892ca51c800ed990fb57b6083a19782b1902453",
+      "coverage": "preparation-derivation-oracle-corpus",
+      "tests": [
+        "protocol::provisioning_contracts::preparation_authorization_matches_derived_bytes_and_refusals"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.observatory.event.v1",
+      "obligation_id": "O:contract:mycelium.observatory.event.v1",
+      "fixture_sha256": "e2a42e20f62d6ae95cb5f0d4fe66242aa4b7ec07c725d742fc276a7d03c14f39",
+      "coverage": "observatory-schema-oracle-corpus",
+      "tests": [
+        "protocol::observatory_contracts::observatory_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.observatory.snapshot.v1",
+      "obligation_id": "O:contract:mycelium.observatory.snapshot.v1",
+      "fixture_sha256": "95ff558ebf5fe344341adcb6270f411405164fb4306edf88feaf2997770401c7",
+      "coverage": "observatory-schema-oracle-corpus",
+      "tests": [
+        "protocol::observatory_contracts::observatory_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.path_manifest.v1",
+      "obligation_id": "O:contract:mycelium.path_manifest.v1",
+      "fixture_sha256": "b0f759ec7fb7417ea573ac8b3be828a7ad0a55166ff9596020968d1502b70487",
+      "coverage": "path-manifest-schema-binding-oracle-corpus",
+      "tests": [
+        "protocol::authority_contracts::path_manifest_closed_shape_and_independent_graph_binding_corpus"
+      ],
+      "remaining": "Closed wire parser and relationship check against independently validated graph facts only; graph validation, reservation freshness and execution remain consumers"
+    },
+    {
+      "protocol": "mycelium.performance_budget.v1",
+      "obligation_id": "O:contract:mycelium.performance_budget.v1",
+      "fixture_sha256": "1d1b220eb80d1e35cee2e2375de4bc32849d77148cd437d48a0c942a157c2212",
+      "coverage": "performance-schema-oracle-corpus",
+      "tests": [
+        "protocol::performance_contracts::performance_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.performance_budget.v2",
+      "obligation_id": "O:contract:mycelium.performance_budget.v2",
+      "fixture_sha256": "e1e99bfc62d878fbbd1a64892a32a4905a07f6a15a4fba4e3fd0876817d8f7ee",
+      "coverage": "performance-schema-oracle-corpus",
+      "tests": [
+        "protocol::performance_contracts::performance_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.performance_budget.v3",
+      "obligation_id": "O:contract:mycelium.performance_budget.v3",
+      "fixture_sha256": "0fd60d1236905c39f511121ddab7e4fb88127c92991cca4a7386898a8cbfdec7",
+      "coverage": "performance-schema-oracle-corpus",
+      "tests": [
+        "protocol::performance_contracts::performance_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.private_request_replay_checkpoint.v1",
+      "obligation_id": "O:contract:mycelium.private_request_replay_checkpoint.v1",
+      "fixture_sha256": "b820928148a33a32f8d20f60e72c0907d0f49982f1df1236f5a3ba9cc42805f5",
+      "coverage": "recovery-schema-oracle-corpus",
+      "tests": [
+        "protocol::recovery_contracts::recovery_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+      "obligation_id": "O:contract:mycelium.product_concurrency_liveness_qualification.v1",
+      "fixture_sha256": "e635436fed13e9e4789468606b9db670ddf3d6ae68c3dc6cb3d10a2cdbfc3a6f",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.product_event.v1",
+      "obligation_id": "O:contract:mycelium.product_event.v1",
+      "fixture_sha256": "30872dc0aa48f53ec1de23f1834052ea04deee0ecadb5e8e73db90341491b93d",
+      "coverage": "product-schema-oracle-corpus",
+      "tests": [
+        "protocol::product_contracts::product_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.product_snapshot.v1",
+      "obligation_id": "O:contract:mycelium.product_snapshot.v1",
+      "fixture_sha256": "c59a39e8cc2e0982117b0c0699863d02ba26e032d47b9380875f28083a91d996",
+      "coverage": "product-schema-oracle-corpus",
+      "tests": [
+        "protocol::product_contracts::product_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.product_ui.bootstrap.v1",
+      "obligation_id": "O:contract:mycelium.product_ui.bootstrap.v1",
+      "fixture_sha256": "a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3",
+      "coverage": "bootstrap-primary-schema-corpus",
+      "tests": [
+        "protocol::public_contracts::bootstrap_matches_primary_schema_bytes_and_full_mutation_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.product_ui.swarm.v1",
+      "obligation_id": "O:contract:mycelium.product_ui.swarm.v1",
+      "fixture_sha256": "5a64353ba036a3bb9fe33ac92564a432027256dfe0d5b5efc6084c9f8f611318",
+      "coverage": "public-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.provisioning_audit.v1",
+      "obligation_id": "O:contract:mycelium.provisioning_audit.v1",
+      "fixture_sha256": "fb059043c388b8f8036ce053bd8c699336ca5492823aa02a5e0d241fa7b93013",
+      "coverage": "assignment-report-audit-oracle-corpus",
+      "tests": [
+        "protocol::assignment_contracts::assignment_report_and_audit_match_byte_exact_oracle"
+      ],
+      "remaining": "Pure UUIDv5 identity, provisioning assignment validator, independent report/assignment/route errors and audit derivation only; not acquisition, tensor verification or runtime/physical readiness."
+    },
+    {
+      "protocol": "mycelium.relay_projection.v1",
+      "obligation_id": "O:contract:mycelium.relay_projection.v1",
+      "fixture_sha256": "eb2c378acaadfbcfdbfe6cbcffd05ea824c9da52fd6d8b77d37cc86783336081",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.replica_benchmark.v1",
+      "obligation_id": "O:contract:mycelium.replica_benchmark.v1",
+      "fixture_sha256": "b33c7de2981894c655a44106397e699cb30ea0cee30c84c917c752d951a494a4",
+      "coverage": "replica-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.replica_benchmark.v2",
+      "obligation_id": "O:contract:mycelium.replica_benchmark.v2",
+      "fixture_sha256": "502bd9b19873dbb9dec842b489814aa7c18e780f7dd8884b1581a726feee9bef",
+      "coverage": "replica-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.replica_plan.v1",
+      "obligation_id": "O:contract:mycelium.replica_plan.v1",
+      "fixture_sha256": "1559db8ab48613bf6c5c211a12bb02e7c92fbd4967a1df703d1bfe719d70c17e",
+      "coverage": "replica-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.replica_qualification.v1",
+      "obligation_id": "O:contract:mycelium.replica_qualification.v1",
+      "fixture_sha256": "7522f908edb8656a8faf5d4aa27eb4c2e5e60a4a5dab00d8dcbf3e55c549b895",
+      "coverage": "replica-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.replica_runtime.v1",
+      "obligation_id": "O:contract:mycelium.replica_runtime.v1",
+      "fixture_sha256": "9b34847fd1fe80969fc76f9ab2172f894f2e328f1c949d084697f0c32bffe5ee",
+      "coverage": "replica-schema-oracle-corpus",
+      "tests": [
+        "protocol::public_contracts::public_shapes_match_pinned_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure wire/schema boundary only. Consuming service, authority lifecycle, durable state, physical transport and release qualification remain open."
+    },
+    {
+      "protocol": "mycelium.request_event.v1",
+      "obligation_id": "O:contract:mycelium.request_event.v1",
+      "fixture_sha256": "16893f5355ff65545aa38b36d11f859e7d6afa98417ff040fab09a3cbe92a132",
+      "coverage": "request-event-schema-oracle-corpus",
+      "tests": [
+        "protocol::request_contracts::request_and_cancellation_event_wire_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not request admission, lifecycle, terminal publication or cleanup authority"
+    },
+    {
+      "protocol": "mycelium.request_event.v2",
+      "obligation_id": "O:contract:mycelium.request_event.v2",
+      "fixture_sha256": "e41c51ffe2272cf10a8b821f938d97fffebf4816139d82f958cdca4158929940",
+      "coverage": "request-event-schema-oracle-corpus",
+      "tests": [
+        "protocol::request_contracts::request_and_cancellation_event_wire_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not request admission, lifecycle, terminal publication or cleanup authority"
+    },
+    {
+      "protocol": "mycelium.request_gateway.v1",
+      "obligation_id": "O:contract:mycelium.request_gateway.v1",
+      "fixture_sha256": "06443c0cb7f24fc3d760a5d012f03e3ce23987bc9dec580a7984ab78aa107c1a",
+      "coverage": "request-event-schema-oracle-corpus",
+      "tests": [
+        "protocol::request_contracts::request_and_cancellation_event_wire_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not request admission, lifecycle, terminal publication or cleanup authority"
+    },
+    {
+      "protocol": "mycelium.request_gateway.v2",
+      "obligation_id": "O:contract:mycelium.request_gateway.v2",
+      "fixture_sha256": "fbbdc4342c144c92713c456f2719e1b70f791a2f4e3e32ad856529cb046e82bf",
+      "coverage": "request-event-schema-oracle-corpus",
+      "tests": [
+        "protocol::request_contracts::request_and_cancellation_event_wire_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not request admission, lifecycle, terminal publication or cleanup authority"
+    },
+    {
+      "protocol": "mycelium.route_explorer.v1",
+      "obligation_id": "O:contract:mycelium.route_explorer.v1",
+      "fixture_sha256": "a71747e193b5ad1827fc4f2e8d5878c9efcba64f202b2aeec2f3602394ab6112",
+      "coverage": "product-schema-oracle-corpus",
+      "tests": [
+        "protocol::product_contracts::product_positive_bytes_and_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.route_plan.v2",
+      "obligation_id": "O:contract:mycelium.route_plan.v2",
+      "fixture_sha256": "42501a5a19bc1261ec6429d77724a00b1bd6dc1804d767c75f7afb91e1635166",
+      "coverage": "route-parser-oracle-corpus",
+      "tests": [
+        "protocol::route_contracts::route_parser_and_unqualified_record_match_exact_oracle_outputs"
+      ],
+      "remaining": "Pure source route parser and unqualified qualification record only; no planner execution or qualified/live authority. Source route_ready=true deliberately requires the separate qualifier."
+    },
+    {
+      "protocol": "mycelium.route_qualification.v1",
+      "obligation_id": "O:contract:mycelium.route_qualification.v1",
+      "fixture_sha256": "1adf6b3fcb0231851e11379a30c66ef58918fdb4b6646dea58eacf70048ae916",
+      "coverage": "route-parser-oracle-corpus",
+      "tests": [
+        "protocol::route_contracts::route_parser_and_unqualified_record_match_exact_oracle_outputs"
+      ],
+      "remaining": "Pure source route parser and unqualified qualification record only; no planner execution or qualified/live authority. Source route_ready=true deliberately requires the separate qualifier."
+    },
+    {
+      "protocol": "mycelium.router_wire.v1",
+      "obligation_id": "O:contract:mycelium.router_wire.v1",
+      "fixture_sha256": "ab1f0a8f57629834d1e4b039d1e62204b8d711c277f2125a3e6b374a24633e1b",
+      "coverage": "router-wire-oracle-corpus",
+      "tests": [
+        "protocol::wire_contracts::all_router_messages_match_exact_frames_and_full_negative_corpus"
+      ],
+      "remaining": "Pure finite-JSON wire/schema boundary and bounded oracle mutation corpus only; not consumer lifecycle, authority, persistence, transport or release qualification."
+    },
+    {
+      "protocol": "mycelium.scoped_runtime_incident.v1",
+      "obligation_id": "O:contract:mycelium.scoped_runtime_incident.v1",
+      "fixture_sha256": "106dcd12f2f7dc61f4a07e646137cab6e77c74f1fad93f631193f04c874e4189",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.seed_backup.v1",
+      "obligation_id": "O:contract:mycelium.seed_backup.v1",
+      "fixture_sha256": "ef15ddf5d1133066bcf96a20c0132fe4ffa31ca1ed35e1f7ca2bb012025916df",
+      "coverage": "seed-boundary-projection-oracle-corpus",
+      "tests": [
+        "protocol::seed_projection_contracts::seed_backup_boundary_and_rotation_projection_match_oracle"
+      ],
+      "remaining": "Canonical serialized backup manifest shape/bytes after an independent owner-file gate; read-only rotation status projection over independently supplied durable observations. No backup IO/restore, rotation initiation/acknowledgement/completion or durable authority qualification."
+    },
+    {
+      "protocol": "mycelium.seed_key_transition.v1",
+      "obligation_id": "O:contract:mycelium.seed_key_transition.v1",
+      "fixture_sha256": "508165d6dea086e411aee703cd7d1773bf41689235a849c4320667f657a09455",
+      "coverage": "seed-transition-dual-signature-oracle-corpus",
+      "tests": [
+        "protocol::authority_contracts::seed_transition_dual_signature_pin_and_coercion_corpus"
+      ],
+      "remaining": "Continuity proof only; no key rotation execution, overlap admission, persisted currentness or member migration"
+    },
+    {
+      "protocol": "mycelium.seed_operator_inventory.v1",
+      "obligation_id": "O:contract:mycelium.seed_operator_inventory.v1",
+      "fixture_sha256": "8c964089c5425c121e64fb745b167a2c3ff1b93fc8bb328b6b05e5b146f480b4",
+      "coverage": "operator-projection-oracle-corpus",
+      "tests": [
+        "protocol::operator_projection_contracts::source_projections_match_positive_bytes_and_negative_vectors"
+      ],
+      "remaining": "Output-only pure projection from independently supplied source/authority observations; no gate execution, durable seed operation, live route lifecycle or physical qualification. Incident history/reason limits are explicit source-bound inputs."
+    },
+    {
+      "protocol": "mycelium.seed_operator_revocation.v1",
+      "obligation_id": "O:contract:mycelium.seed_operator_revocation.v1",
+      "fixture_sha256": "d5f658d70ed1cbd4e16325b271a8f71f700c85e353951ab7765c18e80fb71a65",
+      "coverage": "seed-boundary-projection-oracle-corpus",
+      "tests": [
+        "protocol::seed_projection_contracts::seed_backup_boundary_and_rotation_projection_match_oracle"
+      ],
+      "remaining": "Source reason admission and exact output projection over independent binding and already committed member observation. Does not advance generation, validate CAS, own seed authority or establish runtime revocation."
+    },
+    {
+      "protocol": "mycelium.seed_operator_rotation.v1",
+      "obligation_id": "O:contract:mycelium.seed_operator_rotation.v1",
+      "fixture_sha256": "bcbf553b76cff72198eb34cd1a93dcd7e902ffee2960a271be5b00be06134860",
+      "coverage": "seed-boundary-projection-oracle-corpus",
+      "tests": [
+        "protocol::seed_projection_contracts::seed_backup_boundary_and_rotation_projection_match_oracle"
+      ],
+      "remaining": "Canonical serialized backup manifest shape/bytes after an independent owner-file gate; read-only rotation status projection over independently supplied durable observations. No backup IO/restore, rotation initiation/acknowledgement/completion or durable authority qualification."
+    },
+    {
+      "protocol": "mycelium.gossip.signed_evidence_bundle.v1",
+      "obligation_id": "O:contract:mycelium.gossip.signed_evidence_bundle.v1",
+      "fixture_sha256": "fc88193b56f97b04163a6220892dde417c73496d32ec0f8fdefac258b9a36835",
+      "coverage": "gossip-signature-oracle-corpus",
+      "tests": [
+        "protocol::gossip_contracts::signed_gossip_verifies_independent_authority_time_and_complete_payload",
+        "protocol::gossip_contracts::signed_gossip_refusals_carry_the_oracle_text",
+        "protocol::gossip_contracts::signed_gossip_stale_record_text_matches_the_executed_oracle"
+      ],
+      "remaining": "Pure full document/derivation/signature boundary with the exact SignedEvidenceBundleError text on every refusal (11,728 + 231 + 18 recorded, 3 executed probe cases); no registry lifecycle, current membership/generation authority, durable replay, transport or consumer qualification. v0.1.4 surfaces these texts only on operator CLI stderr (offline build scripts), never to a peer."
+    },
+    {
+      "protocol": "mycelium.traffic_liveness.v1",
+      "obligation_id": "O:contract:mycelium.traffic_liveness.v1",
+      "fixture_sha256": "6fb8dd75a03a513626e3cbc413c3ab66918c847bc4d159cb5027baafe4b9876a",
+      "coverage": "closed-schema-oracle-corpus",
+      "tests": [
+        "protocol::continuation::registered_cancellation_liveness_and_internet_schema_corpus"
+      ],
+      "remaining": "Wire/schema boundary only; not lifecycle, physical execution, liveness or qualification authority"
+    },
+    {
+      "protocol": "mycelium.transport_path_observation.v1",
+      "obligation_id": "O:contract:mycelium.transport_path_observation.v1",
+      "fixture_sha256": "b4e0ae55a01ee48ad9a41c04681decac321f1c5e88980a2db50a819370ab535a",
+      "coverage": "evidence-schema-digest-oracle-corpus",
+      "tests": [
+        "protocol::evidence_contracts::evidence_shapes_digests_freshness_and_reuse_match_pinned_oracle"
+      ],
+      "remaining": "Wire/schema and declared freshness/reuse or digest checks only; not physical measurement, authenticated authority or location projection"
+    }
+  ]
+}

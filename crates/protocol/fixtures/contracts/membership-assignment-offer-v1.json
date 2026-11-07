@@ -1,0 +1,30 @@
+{
+  "assignment_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assignment_id": "assignment-fixture",
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "expires_at": 1300.0,
+  "generation": 1,
+  "graph_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "load_generation": 1,
+  "message_id": "assignment_offer-fixture",
+  "peer_endpoint_records": [
+    {
+      "deployment_epoch": 1,
+      "endpoint_id": "endpoint-node-b",
+      "membership_generation": 1,
+      "node_id": "node-b",
+      "valid_from": 1000.0,
+      "valid_until": 1300.0
+    }
+  ],
+  "placement_provenance": "frozen_fixture",
+  "protocol": "mycelium.membership.assignment_offer.v1",
+  "recipient_node_id": "node-a",
+  "sender_endpoint_id": "endpoint-seed",
+  "sender_node_id": "seed-node",
+  "stage_pack_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "swarm_id": "swarm-fixture"
+}

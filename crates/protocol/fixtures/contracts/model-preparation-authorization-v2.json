@@ -1,0 +1,52 @@
+{
+  "authorized_at_unix_ms": 1786810382513,
+  "catalog_generation": 1786809260215,
+  "conversion_authorized": true,
+  "download_authorized": false,
+  "evidence_generation": 1786809260215,
+  "evidence_valid_until_unix_ms": 1786811488160,
+  "feasibility_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "model_id": "Qwen/Qwen2.5-7B-Instruct",
+  "operation_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "owner_decision_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "preparation_binding_digest": "sha256:3bdd08b789c798487146cb39f9a745d227d7a12c78a79869e57cc447de2773f1",
+  "protocol": "mycelium.model_preparation_authorization.v2",
+  "quantizer": "mycelium.rowwise_symmetric_int8.v1",
+  "representation_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "serving_dtype": "float32",
+  "serving_quantization": "int8-weight-only",
+  "source_artifact_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "source_quantization": "bfloat16",
+  "stages": [
+    {
+      "assignment_artifact_bytes": 11674894879,
+      "assignment_files": [
+        "config.json",
+        "model-00001-of-00004.safetensors",
+        "model-00002-of-00004.safetensors",
+        "model-00003-of-00004.safetensors"
+      ],
+      "backend": "mlx",
+      "decode_mode": "complete_context_replay",
+      "end_layer_exclusive": 22,
+      "node_id": "node-0",
+      "stage_index": 0,
+      "start_layer": 0
+    },
+    {
+      "assignment_artifact_bytes": 7421104759,
+      "assignment_files": [
+        "config.json",
+        "model-00003-of-00004.safetensors",
+        "model-00004-of-00004.safetensors"
+      ],
+      "backend": "mlx",
+      "decode_mode": "complete_context_replay",
+      "end_layer_exclusive": 28,
+      "node_id": "reviewer-mac-2",
+      "stage_index": 1,
+      "start_layer": 22
+    }
+  ]
+}

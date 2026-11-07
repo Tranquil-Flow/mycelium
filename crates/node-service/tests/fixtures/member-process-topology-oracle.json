@@ -1,0 +1,33 @@
+{
+ "cases": 1,
+ "id": "FX-SLICE1-member-process-topology",
+ "observations": {
+  "ack_protocol": "mycelium.controller_remote_cleanup_ack.v1",
+  "agent_alive_after_worker_kill": true,
+  "agent_is_the_app_process": true,
+  "agent_sees_pending_cleanup_after_worker_death": true,
+  "agent_signs_cleanup_ack_removing_staged_copy": true,
+  "agent_still_holds_signing_key": true,
+  "owner_accepts_the_agents_signed_receipt": true,
+  "signer_is_the_agent_pid_not_the_worker_pid": true,
+  "worker_cleanup_proven": true,
+  "worker_error_code": "worker_native_exited",
+  "worker_group_differs_from_agent_group": true,
+  "worker_is_direct_child_of_agent": true,
+  "worker_is_own_session_and_group_leader": true,
+  "worker_pid_gone_after_kill": true
+ },
+ "oracle": "mycelium-v014 f4e366e98a1f705dfaf182897044500d290dbd7f (executed from an APFS clone, python3.13)",
+ "probes": {
+  "observations": "ec187c524f4c0c9ba2e2796833ce979c63a948473cc47712bc15c72a952fc5a2",
+  "process_topology_probe.py": "9702bcea38bd03e5af9b20c2397a767ed86652d12067cec266a47bfe60493cd7",
+  "run-r9-oracle.sh": "5d95e2d3d30a84bd7c615dcf99be07c8a9d27a9ad9e0b7f836123b83ea04b1b6"
+ },
+ "sources": [
+  "mycelium_a13_macos/worker.py:1002-1060 ManagedWorker.start (native child via _ConcurrentNativeSession)",
+  "mycelium_a13_macos/worker.py:1459-1479 _watch",
+  "mycelium_a13_macos/worker.py:1590-1638 close/native_main (setsid)",
+  "mycelium_a13_macos/target_app.py:131-153 cleanup_offer (the agent signs/acks stage cleanup)",
+  "mycelium_a13_macos/demo_target.py:700-715 _cleanup_if_requested"
+ ]
+}

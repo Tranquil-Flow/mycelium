@@ -1,0 +1,5045 @@
+{
+ "cases": [
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "two_macs_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "current_member:n1"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "host_id": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "node_id": "n1"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "one_mac_ok",
+    "node_ids": [
+     "n1"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "open:n3:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n3:hello:managed-observation-hello-0000000000000003:{}",
+    "close:n3",
+    "current_member:n1",
+    "current_member:n2",
+    "current_member:n3"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      },
+      {
+       "boot_id": "boot-33333333333333333333333333333333",
+       "host_id": "host-33333333333333333333333333333333",
+       "node_id": "n3"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2",
+     "n3"
+    ],
+    "name": "three_macs_ok",
+    "node_ids": [
+     "n1",
+     "n2",
+     "n3"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     },
+     "n3": {
+      "boot": "boot-33333333333333333333333333333333",
+      "host": "host-33333333333333333333333333333333"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n2",
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n1",
+    "current_member:n2",
+    "current_member:n1"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      },
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "order_follows_node_ids_not_factory",
+    "node_ids": [
+     "n2",
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406999,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.9999
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "fractional_capture_truncates",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_factory_scope_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "other-qwen-20261029T040000Z",
+    "name": "run_id_scope_mismatch",
+    "node_ids": [
+     "n1",
+     "n2"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_factory_scope_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_dep": "dep-2",
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "deployment_scope_mismatch",
+    "node_ids": [
+     "n1",
+     "n2"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-20261029T040000Z",
+    "name": "run_id_no_marker",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-20261029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "Fleet-qwen-20261029T040000Z",
+    "name": "run_id_upper",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "Fleet-qwen-20261029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "-qwen-20261029T040000Z",
+    "name": "run_id_lone_dash_start",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "-qwen-20261029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261029T040000Z\n",
+    "name": "run_id_trailing_newline",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261029T040000Z\n"
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z",
+    "name": "run_id_81_chars_prefix",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z",
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z",
+    "name": "run_id_82_chars_prefix",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-qwen-20261029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261329T040000Z",
+    "name": "run_id_bad_date_month13",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261329T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20260431T040000Z",
+    "name": "run_id_bad_date_day31_in_30",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20260431T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20230229T040000Z",
+    "name": "run_id_bad_date_feb29_non_leap",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20230229T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261029T240000Z",
+    "name": "run_id_bad_date_hour24",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261029T240000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261029T040060Z",
+    "name": "run_id_bad_date_second60",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261029T040060Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261029T046000Z",
+    "name": "run_id_bad_date_minute60",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261029T046000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-00001029T040000Z",
+    "name": "run_id_bad_date_year0000",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-00001029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20260029T040000Z",
+    "name": "run_id_bad_date_month00",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20260029T040000Z"
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "clock": [
+     0.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20261000T040000Z",
+    "name": "run_id_bad_date_day00",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20261000T040000Z"
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20240229T120000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20240229T120000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1709208002000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20240229T120000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1709208001.0,
+     1709208002.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "factory_run": "fleet-qwen-20240229T120000Z",
+    "name": "run_id_leap_day_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "run_id": "fleet-qwen-20240229T120000Z",
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 0,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_deployment_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "deployment_id": "",
+    "factory_dep": "",
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "empty_deployment",
+    "node_ids": [
+     "n1",
+     "n2"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_nodes_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "node_ids_empty",
+    "node_ids": []
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_nodes_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "node_ids_empty_name",
+    "node_ids": [
+     "n1",
+     ""
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_nodes_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "node_ids_duplicate",
+    "node_ids": [
+     "n1",
+     "n1"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_member_not_current"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "node_ids_subset_of_factory",
+    "node_ids": [
+     "n1"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_member_not_current"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "node_ids_superset_of_factory",
+    "node_ids": [
+     "n1",
+     "n2",
+     "n3"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793247001000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793247000.0,
+     1793247001.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "run_age_exactly_600",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_stale"
+   },
+   "spec": {
+    "clock": [
+     1793247000.001,
+     1793247001.001
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "run_age_over_600",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246341000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246340.0,
+     1793246341.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "run_age_skew_minus_60",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_run_id_stale"
+   },
+   "spec": {
+    "clock": [
+     1793246339.999,
+     1793246340.999
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "run_age_skew_minus_60_001",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_clock_invalid"
+   },
+   "spec": {
+    "clock": [
+     "nan"
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "clock_first_nan",
+    "node_ids": [
+     "n1",
+     "n2"
+    ]
+   }
+  },
+  {
+   "calls": [],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_clock_invalid"
+   },
+   "spec": {
+    "clock": [
+     "inf"
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "clock_first_inf",
+    "node_ids": [
+     "n1",
+     "n2"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_clock_invalid"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     "nan"
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "clock_second_nan",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246465000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246465.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "captured_captured_plus_60",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_captured_stale"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246465.001
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "captured_captured_plus_60_001",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793245805000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793245805.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "captured_captured_minus_600",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_captured_stale"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793245804.999
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "captured_captured_minus_600_001",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_control_timeout"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "open_error_with_code",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "open_error": {
+       "code": "managed_control_timeout"
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "open_error_without_code",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "open_error": {}
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "open_error_empty_code",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "open_error": {
+       "code": ""
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_control_timeout"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "send_error_with_code",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "error": {
+        "code": "managed_control_timeout"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "send_error_without_code",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "error": {}
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "x"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "send_error_then_close_error",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "close": "error",
+      "send": {
+       "error": {
+        "code": "x"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "late"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "second_node_send_error_after_first_closed",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "send": {
+       "error": {
+        "code": "late"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "close_error_after_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "close": "error"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "close_error_beats_malformed_response",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "close": "error",
+      "send": {
+       "response": "nope"
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "cleanup_error_set",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "cleanup_error": true
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "stop_response_not_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "stop_response": {
+       "ok": false
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "stop_response_ok_one_not_true",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "stop_response": {
+       "ok": 1
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "stop_response_missing_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "stop_response": {}
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-11111111111111111111111111111111",
+       "host_id": "host-11111111111111111111111111111111",
+       "node_id": "n1"
+      },
+      {
+       "boot_id": "boot-22222222222222222222222222222222",
+       "host_id": "host-22222222222222222222222222222222",
+       "node_id": "n2"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "stop_response_ok",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111",
+      "stop_response": {
+       "ok": true
+      }
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_session_close_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "cleanup_error_and_close_error",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "cleanup_error": true,
+      "close": "error"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_response_not_mapping_str",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": "nope"
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_response_not_mapping_list",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_response_null",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": null
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_ok_false",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": false,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_failed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_ok_false_with_extra_field",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "extra": 1,
+        "node_id": "n1",
+        "ok": false,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_ok_one",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": 1,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_ok_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_ok_null",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": null,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_extra_field",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "extra": 1,
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_missing_protocol",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_wrong_protocol",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.other.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_command_id_mismatch",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "someone-else",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_node_id_mismatch",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n9",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_route_ready_true",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": true
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_route_ready_zero",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": 0
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_route_ready_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_response_malformed"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_not_mapping",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": [
+         1
+        ],
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_protocol_wrong",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "x",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_node_wrong",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n9",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_run_wrong",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "other-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_deployment_wrong",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-9",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_route_ready_true",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": true,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_state_not_new",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "READY"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_mismatch"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_result_state_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_host_identity_missing"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_host_identity_missing"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_null",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": null,
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_boot_identity_missing"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_boot_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_boot_identity_missing"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_boot_null",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": null,
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_host_identity_missing"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_and_boot_missing",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "deployment_id": "dep-1",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_int",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": 5,
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_boot_int",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": 5,
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_upper_hex",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_short",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_long",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_trailing_newline",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_is_boot_prefixed",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "boot-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_boot_is_host_prefixed",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "deployment_id": "dep-1",
+         "host_id": "host-11111111111111111111111111111111",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_identity_synthetic"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_wrong_prefix",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-11111111111111111111111111111111",
+         "deployment_id": "dep-1",
+         "host_id": "node-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "current_member:n1"
+   ],
+   "clock_reads": 2,
+   "kind": "collect",
+   "result": {
+    "ok": {
+     "captured_at_unix_ms": 1793246406000,
+     "deployment_id": "dep-1",
+     "observations": [
+      {
+       "boot_id": "boot-cccccccccccccccccccccccccccccccc",
+       "host_id": "host-cccccccccccccccccccccccccccccccc",
+       "node_id": "n1"
+      }
+     ],
+     "protocol": "mycelium.managed_hello_observations.v1",
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1"
+    ],
+    "name": "hello_host_and_boot_equal_values_ok",
+    "node_ids": [
+     "n1"
+    ],
+    "script": {
+     "n1": {
+      "send": {
+       "response": {
+        "command_id": "managed-observation-hello-0000000000000001",
+        "node_id": "n1",
+        "ok": true,
+        "protocol": "mycelium.physical_node_control.v1",
+        "result": {
+         "boot_id": "boot-cccccccccccccccccccccccccccccccc",
+         "deployment_id": "dep-1",
+         "host_id": "host-cccccccccccccccccccccccccccccccc",
+         "node_id": "n1",
+         "protocol": "mycelium.physical_node_control.v1",
+         "route_ready": false,
+         "run_id": "fleet-qwen-20261029T040000Z",
+         "state": "NEW"
+        },
+        "route_ready": false
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_hosts_not_distinct"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "hosts_not_distinct",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_boots_not_distinct"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "boots_not_distinct",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-dddddddddddddddddddddddddddddddd",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-dddddddddddddddddddddddddddddddd",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_hosts_not_distinct"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "hosts_and_boots_not_distinct",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-dddddddddddddddddddddddddddddddd",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     },
+     "n2": {
+      "boot": "boot-dddddddddddddddddddddddddddddddd",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_hosts_not_distinct"
+   },
+   "spec": {
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2",
+     "n3"
+    ],
+    "name": "same_host_third_node_stops_before_third_open",
+    "node_ids": [
+     "n1",
+     "n2",
+     "n3"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-dddddddddddddddddddddddddddddddd"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_member_not_current"
+   },
+   "spec": {
+    "binding_after": {
+     "n2": "missing"
+    },
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "binding_missing_after",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_member_not_current"
+   },
+   "spec": {
+    "binding_after": {
+     "n1": "advanced"
+    },
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "binding_advanced_after",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "open:n1:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2:():('fleet-qwen-20261029T040000Z', 'dep-1'):30.0",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1"
+   ],
+   "clock_reads": 1,
+   "kind": "collect",
+   "result": {
+    "error": "managed_observation_member_not_current"
+   },
+   "spec": {
+    "binding_after": {
+     "n1": "missing",
+     "n2": "missing"
+    },
+    "clock": [
+     1793246405.0,
+     1793246406.0
+    ],
+    "factory_nodes": [
+     "n1",
+     "n2"
+    ],
+    "name": "binding_missing_first_stops_at_first",
+    "node_ids": [
+     "n1",
+     "n2"
+    ],
+    "script": {
+     "n1": {
+      "boot": "boot-11111111111111111111111111111111",
+      "host": "host-11111111111111111111111111111111"
+     },
+     "n2": {
+      "boot": "boot-22222222222222222222222222222222",
+      "host": "host-22222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n2:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "owner_channel",
+    "factory:fleet-qwen-20261029T040000Z:dep-1:['n1', 'n2']",
+    "publish_offer:n1:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n2:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6"
+   ],
+   "kind": "prepare",
+   "result": {
+    "ok": {
+     "deployment_id": "dep-1",
+     "facts": [
+      "n1",
+      "n2"
+     ],
+     "members": [
+      "n1",
+      "n2"
+     ],
+     "offers": {
+      "n1": "offer-n1",
+      "n2": "offer-n2"
+     },
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n2"
+      }
+     }
+    ],
+    "name": "prepare_ok_two"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "owner_channel",
+    "factory:fleet-qwen-20261029T040000Z:dep-1:['n1']",
+    "publish_offer:n1:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6"
+   ],
+   "kind": "prepare",
+   "result": {
+    "ok": {
+     "deployment_id": "dep-1",
+     "facts": [
+      "n1"
+     ],
+     "members": [
+      "n1"
+     ],
+     "offers": {
+      "n1": "offer-n1"
+     },
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_ok_one"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n0:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n2:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n3:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n4:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n5:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n6:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n7:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "owner_channel",
+    "factory:fleet-qwen-20261029T040000Z:dep-1:['n0', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7']",
+    "publish_offer:n0:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n1:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n2:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n3:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n4:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n5:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n6:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n7:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6"
+   ],
+   "kind": "prepare",
+   "result": {
+    "ok": {
+     "deployment_id": "dep-1",
+     "facts": [
+      "n0",
+      "n1",
+      "n2",
+      "n3",
+      "n4",
+      "n5",
+      "n6",
+      "n7"
+     ],
+     "members": [
+      "n0",
+      "n1",
+      "n2",
+      "n3",
+      "n4",
+      "n5",
+      "n6",
+      "n7"
+     ],
+     "offers": {
+      "n0": "offer-n0",
+      "n1": "offer-n1",
+      "n2": "offer-n2",
+      "n3": "offer-n3",
+      "n4": "offer-n4",
+      "n5": "offer-n5",
+      "n6": "offer-n6",
+      "n7": "offer-n7"
+     },
+     "run_id": "fleet-qwen-20261029T040000Z"
+    }
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n0"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n2"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n3"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n4"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n5"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n6"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n7"
+      }
+     }
+    ],
+    "known": [
+     "n0",
+     "n1",
+     "n2",
+     "n3",
+     "n4",
+     "n5",
+     "n6",
+     "n7"
+    ],
+    "name": "prepare_ok_eight"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_descriptors_invalid"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n0"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n2"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n3"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n4"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n5"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n6"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n7"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n8"
+      }
+     }
+    ],
+    "known": [
+     "n0",
+     "n1",
+     "n2",
+     "n3",
+     "n4",
+     "n5",
+     "n6",
+     "n7",
+     "n8"
+    ],
+    "name": "prepare_nine_descriptors"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_descriptors_invalid"
+   },
+   "spec": {
+    "descriptors": [],
+    "name": "prepare_zero_descriptors"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_descriptors_invalid"
+   },
+   "spec": {
+    "descriptors": {
+     "a": 1
+    },
+    "name": "prepare_descriptors_not_a_list"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_owner_consent_required"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_role_not_owner",
+    "role": "member"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_owner_consent_required"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_not_running",
+    "running": false
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_owner_consent_required"
+   },
+   "spec": {
+    "ack": null,
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_ack_missing"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_owner_consent_required"
+   },
+   "spec": {
+    "ack": 1,
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_ack_one"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ManagedObservationsError",
+    "error": "managed_observation_run_id_invalid"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_run_id_invalid",
+    "run_id": "bad"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ManagedControlError",
+    "error": "managed_control_identifier_invalid"
+   },
+   "spec": {
+    "deployment_id": "a b",
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_deployment_invalid_chars"
+   }
+  },
+  {
+   "calls": [],
+   "kind": "prepare",
+   "result": {
+    "class": "ManagedControlError",
+    "error": "managed_control_identifier_invalid"
+   },
+   "spec": {
+    "deployment_id": "",
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_deployment_empty"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_member_invalid"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "zz"
+      }
+     }
+    ],
+    "name": "prepare_unknown_member"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_member_invalid"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "x": 1
+     }
+    ],
+    "name": "prepare_card_without_statement"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_member_invalid"
+   },
+   "spec": {
+    "descriptors": [
+     "str"
+    ],
+    "name": "prepare_card_not_a_mapping"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_duplicate_member"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     }
+    ],
+    "name": "prepare_duplicate_member"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n2:swarm-1:fleet-qwen-20261029T040000Z:dep-1"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "descriptor invalid"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "bad": true,
+      "statement": {
+       "target_node_id": "n2"
+      }
+     }
+    ],
+    "name": "prepare_descriptor_invalid_second"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n2:swarm-1:fleet-qwen-20261029T040000Z:dep-1"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "ValueError",
+    "error": "bootstrap_model_mismatch"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "statement": {
+       "target_node_id": "n2"
+      }
+     }
+    ],
+    "name": "prepare_model_mismatch_second"
+   }
+  },
+  {
+   "calls": [
+    "prepared_source",
+    "verify:n1:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "verify:n2:swarm-1:fleet-qwen-20261029T040000Z:dep-1",
+    "owner_channel",
+    "factory:fleet-qwen-20261029T040000Z:dep-1:['n1', 'n2']",
+    "publish_offer:n1:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6",
+    "publish_offer:n2:fleet-qwen-20261029T040000Z:dep-1:8510cf6c1cbc58c6aa1ca23dfad8c428edcb46514b2307edad025893382942d6"
+   ],
+   "kind": "prepare",
+   "result": {
+    "class": "RuntimeError",
+    "error": "publish failed"
+   },
+   "spec": {
+    "descriptors": [
+     {
+      "statement": {
+       "target_node_id": "n1"
+      }
+     },
+     {
+      "statement": {
+       "target_node_id": "n2"
+      }
+     }
+    ],
+    "mailbox_fail": {
+     "publish": "n2"
+    },
+    "name": "prepare_publish_fails_second"
+   }
+  },
+  {
+   "calls": [
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2",
+    "request_stage_cleanup:offer-n1",
+    "request_stage_cleanup:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": true,
+   "result": [
+    {
+     "ok": {
+      "captured_at_unix_ms": 1793246406000,
+      "deployment_id": "dep-1",
+      "observations": [
+       {
+        "boot_id": "boot-11111111111111111111111111111111",
+        "host_id": "host-11111111111111111111111111111111",
+        "node_id": "n1"
+       },
+       {
+        "boot_id": "boot-22222222222222222222222222222222",
+        "host_id": "host-22222222222222222222222222222222",
+        "node_id": "n2"
+       }
+      ],
+      "protocol": "mycelium.managed_hello_observations.v1",
+      "route_ready": false,
+      "run_id": "fleet-qwen-20261029T040000Z",
+      "state": "observed"
+     },
+     "step": "collect_ok"
+    },
+    {
+     "error": "observations_already_collected",
+     "step": "collect_ok"
+    }
+   ],
+   "spec": {
+    "name": "post_collect_then_collect",
+    "steps": [
+     "collect_ok",
+     "collect_ok"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2",
+    "request_stage_cleanup:offer-n1",
+    "request_stage_cleanup:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": true,
+   "result": [
+    {
+     "ok": {
+      "captured_at_unix_ms": 1793246406000,
+      "deployment_id": "dep-1",
+      "observations": [
+       {
+        "boot_id": "boot-11111111111111111111111111111111",
+        "host_id": "host-11111111111111111111111111111111",
+        "node_id": "n1"
+       },
+       {
+        "boot_id": "boot-22222222222222222222222222222222",
+        "host_id": "host-22222222222222222222222222222222",
+        "node_id": "n2"
+       }
+      ],
+      "protocol": "mycelium.managed_hello_observations.v1",
+      "route_ready": false,
+      "run_id": "fleet-qwen-20261029T040000Z",
+      "state": "observed"
+     },
+     "step": "collect_ok"
+    }
+   ],
+   "spec": {
+    "name": "post_collect_requests_stage_cleanup_for_every_offer",
+    "steps": [
+     "collect_ok"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000003:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000004:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2",
+    "request_stage_cleanup:offer-n1",
+    "request_stage_cleanup:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": true,
+   "result": [
+    {
+     "error": "managed_control_timeout",
+     "step": "collect_fail"
+    },
+    {
+     "ok": {
+      "captured_at_unix_ms": 1793246406000,
+      "deployment_id": "dep-1",
+      "observations": [
+       {
+        "boot_id": "boot-11111111111111111111111111111111",
+        "host_id": "host-11111111111111111111111111111111",
+        "node_id": "n1"
+       },
+       {
+        "boot_id": "boot-22222222222222222222222222222222",
+        "host_id": "host-22222222222222222222222222222222",
+        "node_id": "n2"
+       }
+      ],
+      "protocol": "mycelium.managed_hello_observations.v1",
+      "route_ready": false,
+      "run_id": "fleet-qwen-20261029T040000Z",
+      "state": "observed"
+     },
+     "step": "collect_ok"
+    }
+   ],
+   "spec": {
+    "name": "post_collect_failure_leaves_offers_and_allows_retry",
+    "steps": [
+     "collect_fail",
+     "collect_ok"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2",
+    "request_stage_cleanup:offer-n1",
+    "request_stage_cleanup:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": true,
+   "result": [
+    {
+     "error": "cleanup failed",
+     "step": "collect_ok"
+    },
+    {
+     "error": "observations_already_collected",
+     "step": "collect_ok"
+    }
+   ],
+   "spec": {
+    "mailbox_fail": {
+     "cleanup": "offer-n2"
+    },
+    "name": "post_cleanup_request_fails_after_observations",
+    "steps": [
+     "collect_ok",
+     "collect_ok"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "retire_offer:offer-n1",
+    "retire_offer:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": false,
+   "result": [
+    {
+     "ok": {
+      "n1": "retired-offer-n1",
+      "n2": "retired-offer-n2"
+     },
+     "step": "retire"
+    }
+   ],
+   "spec": {
+    "name": "post_retire_every_offer",
+    "steps": [
+     "retire"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "retire_offer:offer-n1",
+    "retire_offer:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": false,
+   "result": [
+    {
+     "error": "retire failed",
+     "step": "retire"
+    }
+   ],
+   "spec": {
+    "mailbox_fail": {
+     "retire": "offer-n2"
+    },
+    "name": "post_retire_fails_on_second_offer",
+    "steps": [
+     "retire"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "retire_offer:offer-n1",
+    "retire_offer:offer-n2",
+    "retire_offer:offer-n1",
+    "retire_offer:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": false,
+   "result": [
+    {
+     "ok": {
+      "n1": "retired-offer-n1",
+      "n2": "retired-offer-n2"
+     },
+     "step": "retire"
+    },
+    {
+     "ok": {
+      "n1": "retired-offer-n1",
+      "n2": "retired-offer-n2"
+     },
+     "step": "retire"
+    }
+   ],
+   "spec": {
+    "name": "post_retire_twice",
+    "steps": [
+     "retire",
+     "retire"
+    ]
+   }
+  },
+  {
+   "calls": [
+    "open:n1",
+    "send:n1:hello:managed-observation-hello-0000000000000001:{}",
+    "close:n1",
+    "open:n2",
+    "send:n2:hello:managed-observation-hello-0000000000000002:{}",
+    "close:n2",
+    "current_member:n1",
+    "current_member:n2",
+    "request_stage_cleanup:offer-n1",
+    "request_stage_cleanup:offer-n2",
+    "retire_offer:offer-n1",
+    "retire_offer:offer-n2"
+   ],
+   "kind": "post",
+   "observations_set": true,
+   "result": [
+    {
+     "ok": {
+      "captured_at_unix_ms": 1793246406000,
+      "deployment_id": "dep-1",
+      "observations": [
+       {
+        "boot_id": "boot-11111111111111111111111111111111",
+        "host_id": "host-11111111111111111111111111111111",
+        "node_id": "n1"
+       },
+       {
+        "boot_id": "boot-22222222222222222222222222222222",
+        "host_id": "host-22222222222222222222222222222222",
+        "node_id": "n2"
+       }
+      ],
+      "protocol": "mycelium.managed_hello_observations.v1",
+      "route_ready": false,
+      "run_id": "fleet-qwen-20261029T040000Z",
+      "state": "observed"
+     },
+     "step": "collect_ok"
+    },
+    {
+     "ok": {
+      "n1": "retired-offer-n1",
+      "n2": "retired-offer-n2"
+     },
+     "step": "retire"
+    }
+   ],
+   "spec": {
+    "name": "post_collect_then_retire",
+    "steps": [
+     "collect_ok",
+     "retire"
+    ]
+   }
+  }
+ ],
+ "provenance": {
+  "cases": 130,
+  "method": "EXECUTED python3.14 against the real functions; session boundary and mailbox scripted; each scenario run twice and identical",
+  "oracle": "mycelium_a13_macos/managed_observations.py + chain_observation.py @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe": "L9-evidence/r15/r15-observe-probe.py",
+  "probe_sha256": "ca79e6e25279dfe3a0cedb0b67ba52f0727d44e67ed6a91ed9f1ca12bfac41b8",
+  "run_start_unix": 1793246400.0
+ }
+}

@@ -1,0 +1,41 @@
+    Blocking waiting for file lock on package cache
+   Compiling budget-model v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l1b/test-support/budget_model)
+    Finished `test` profile [unoptimized] target(s) in 3.54s
+     Running tests/inventory_symbolic_upper.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l1b-target/debug/deps/inventory_symbolic_upper-b7c3fae7e9036c93)
+
+running 3 tests
+test a_consistent_mutation_of_edge_target_expression_relation_or_unit_is_refused ... FAILED
+test seven_symbolic_upper_comparisons_derive_from_their_module_constant ... FAILED
+test neighbours_stay_pending_and_the_pending_count_is_pinned ... FAILED
+
+failures:
+
+---- a_consistent_mutation_of_edge_target_expression_relation_or_unit_is_refused stdout ----
+
+thread 'a_consistent_mutation_of_edge_target_expression_relation_or_unit_is_refused' (21470445) panicked at test-support/budget_model/tests/inventory_symbolic_upper.rs:108:28:
+missing row mycelium_live/command_controller.py:95:37:comparison:minimum
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- seven_symbolic_upper_comparisons_derive_from_their_module_constant stdout ----
+
+thread 'seven_symbolic_upper_comparisons_derive_from_their_module_constant' (21470447) panicked at test-support/budget_model/tests/inventory_symbolic_upper.rs:108:28:
+missing row mycelium_a13_macos/pairing.py:666:23:comparison:_WINDOW_TTL_MIN
+
+---- neighbours_stay_pending_and_the_pending_count_is_pinned stdout ----
+
+thread 'neighbours_stay_pending_and_the_pending_count_is_pinned' (21470446) panicked at test-support/budget_model/tests/inventory_symbolic_upper.rs:232:5:
+assertion `left == right` failed
+  left: 747
+ right: 740
+
+
+failures:
+    a_consistent_mutation_of_edge_target_expression_relation_or_unit_is_refused
+    neighbours_stay_pending_and_the_pending_count_is_pinned
+    seven_symbolic_upper_comparisons_derive_from_their_module_constant
+
+test result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+error: test failed, to rerun pass `-p budget-model --test inventory_symbolic_upper`
+error: 1 target failed:
+    `-p budget-model --test inventory_symbolic_upper`

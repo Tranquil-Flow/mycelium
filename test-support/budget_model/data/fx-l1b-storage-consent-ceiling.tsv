@@ -1,0 +1,7 @@
+model	storage_ceiling_bytes
+Qwen/Qwen2.5-7B-Instruct	24854140006
+Qwen/Qwen2.5-0.5B-Instruct	1464801818
+Qwen/Qwen3-0.6B	2074306151
+Qwen/Qwen3-8B	18098051277
+Qwen/Qwen3-14B	32568709325
+MAX(storage_consent_ceiling)	32568709325

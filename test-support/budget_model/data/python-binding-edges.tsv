@@ -1,0 +1,983 @@
+key	target_key	rule	reference
+mycelium_a7_physical_measurement.py:1033:4:assignment:deadline	mycelium_a7_physical_measurement.py:586:4:assignment:ack_timeout_s	reviewed-clock-offset	time.monotonic() + settings.ack_timeout_s
+mycelium_a7_physical_measurement.py:1138:4:assignment:result_deadline	mycelium_a7_physical_measurement.py:587:4:assignment:result_timeout_s	reviewed-clock-offset	time.monotonic() + settings.result_timeout_s
+mycelium_a7_physical_measurement.py:629:4:assignment:deadline	mycelium_a7_physical_measurement.py:586:4:assignment:ack_timeout_s	reviewed-clock-offset	time.monotonic() + settings.ack_timeout_s
+mycelium_a7_physical_measurement.py:976:4:assignment:release_deadline	mycelium_a7_physical_measurement.py:589:4:assignment:settle_timeout_s	reviewed-clock-offset	time.monotonic() + settings.settle_timeout_s
+mycelium_demo/gateway_control_runtime.py:261:20:positional-call:time.sleep	mycelium_demo/gateway_control_runtime.py:228:8:assignment:self.token_delay_seconds	constructor-field	self.token_delay_seconds
+mycelium_demo/gateway_control_runtime.py:563:8:assignment:deadline	mycelium_demo/gateway_control_runtime.py:688:8:assignment:self.response_timeout_seconds	reviewed-clock-offset	time.monotonic() + self._asgi_server.response_timeout_seconds
+mycelium_demo/public_origin_proxy.py:136:4:assignment:directory_max_body_bytes	mycelium_swarm_directory/hosted_defaults.py:25:0:assignment:DIRECTORY_MAX_BODY_BYTES	imported-constant	_hosted.DIRECTORY_MAX_BODY_BYTES
+mycelium_demo/public_origin_proxy.py:149:4:assignment:socket_timeout_seconds	mycelium_swarm_directory/hosted_defaults.py:22:0:assignment:PROXY_SOCKET_TIMEOUT_SECONDS	imported-constant	_hosted.PROXY_SOCKET_TIMEOUT_SECONDS
+mycelium_demo/public_origin_proxy.py:283:8:positional-call:request.settimeout	mycelium_demo/public_origin_proxy.py:149:4:assignment:socket_timeout_seconds	typed-config-field	float(self.proxy_config.socket_timeout_seconds)
+mycelium_demo/public_origin_proxy.py:387:16:keyword:max_bytes	mycelium_demo/public_origin_proxy.py:136:4:assignment:directory_max_body_bytes	typed-config-field	config.directory_max_body_bytes
+mycelium_demo/public_origin_proxy.py:637:12:keyword:timeout	mycelium_demo/public_origin_proxy.py:131:4:assignment:upstream_timeout_seconds	typed-config-field	float(self._config.upstream_timeout_seconds)
+mycelium_demo/public_origin_proxy.py:775:12:keyword:socket_timeout_seconds	mycelium_demo/public_origin_proxy.py:840:64:cli-default:--socket-timeout-seconds	argparse-option	args.socket_timeout_seconds
+mycelium_demo/public_origin_proxy.py:840:64:cli-default:--socket-timeout-seconds	mycelium_swarm_directory/hosted_defaults.py:22:0:assignment:PROXY_SOCKET_TIMEOUT_SECONDS	imported-constant	_hosted.PROXY_SOCKET_TIMEOUT_SECONDS
+mycelium_demo/public_origin_proxy.py:851:48:cli-default:--directory-max-body-bytes	mycelium_swarm_directory/hosted_defaults.py:25:0:assignment:DIRECTORY_MAX_BODY_BYTES	imported-constant	_hosted.DIRECTORY_MAX_BODY_BYTES
+mycelium_demo/public_origin_proxy.py:858:16:dict-field:directory_max_body_bytes	mycelium_demo/public_origin_proxy.py:851:48:cli-default:--directory-max-body-bytes	argparse-option	args.directory_max_body_bytes
+mycelium_demo/public_origin_proxy.py:871:8:dict-field:directory_max_body_bytes	mycelium_demo/public_origin_proxy.py:851:48:cli-default:--directory-max-body-bytes	argparse-option	args.directory_max_body_bytes
+mycelium_platform_neutral/activation_transport.py:322:11:comparison:len(header_bytes) + 1 + len(payload)	mycelium_platform_neutral/activation_transport.py:218:8:assignment:self._max_bytes	comparison-reference-constructor-field	len(header_bytes) + 1 + len(payload) > self._max_bytes
+scripts/a13_operator/round14_rpc.py:675:16:positional-call:time.sleep	scripts/a13_operator/round14_rpc.py:664:8:assignment:sleep_s	same-scope-binding	sleep_s
+scripts/a13_operator/round14_rpc.py:94:12:positional-call:time.sleep	scripts/a13_operator/round14_rpc.py:81:4:assignment:sleep_s	same-scope-binding	sleep_s
+scripts/bench_stage_decode.py:80:30:dict-field:windows	scripts/bench_stage_decode.py:170:47:cli-default:--windows	argparse-option	args.windows
+scripts/m14_transport_probe_host.py:56:16:keyword:timeout	scripts/m14_transport_probe_host.py:121:50:cli-default:--timeout	argparse-option	args.timeout
+scripts/m14_transport_probe_host.py:79:8:assignment:deadline	scripts/m14_transport_probe_host.py:128:47:cli-default:--timeout	reviewed-clock-offset	time.monotonic() + args.timeout
+scripts/run_a4_physical_queue_saturation_gate.py:158:4:assignment:drain_deadline	scripts/run_a4_physical_queue_saturation_gate.py:252:55:cli-default:--drain-timeout	reviewed-clock-offset	time.monotonic() + args.drain_timeout
+scripts/run_a5_benchmark_gate.py:800:12:keyword:deadline	scripts/run_a5_benchmark_gate.py:124:0:assignment:WINDOW_WORKER_CLEANUP_TIMEOUT_SECONDS	monotonic-offset-module-constant	time.monotonic() + WINDOW_WORKER_CLEANUP_TIMEOUT_SECONDS
+scripts/run_a5_benchmark_gate.py:806:12:keyword:deadline	scripts/run_a5_benchmark_gate.py:124:0:assignment:WINDOW_WORKER_CLEANUP_TIMEOUT_SECONDS	monotonic-offset-module-constant	time.monotonic() + WINDOW_WORKER_CLEANUP_TIMEOUT_SECONDS
+scripts/run_a9_gate.py:709:8:keyword:paired_windows	scripts/run_a9_gate.py:975:57:cli-default:--paired-windows	argparse-option	args.paired_windows
+scripts/run_a9_gate.py:806:46:keyword:paired_windows	scripts/run_a9_gate.py:985:49:cli-default:--paired-windows	argparse-option	args.paired_windows
+mycelium_a7_physical_measurement.py:617:8:positional-call:time.sleep	mycelium_a7_physical_measurement.py:594:4:assignment:pause_quiescence_s	typed-config-field	settings.pause_quiescence_s
+mycelium_a7_physical_measurement.py:978:45:keyword:timeout_s	mycelium_a7_physical_measurement.py:589:4:assignment:settle_timeout_s	typed-config-field	settings.settle_timeout_s
+mycelium_a7_physical_measurement.py:978:82:keyword:poll_s	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_a7_physical_measurement.py:1021:66:keyword:timeout_s	mycelium_a7_physical_measurement.py:585:4:assignment:first_tokens_timeout_s	typed-config-field	settings.first_tokens_timeout_s
+mycelium_a7_physical_measurement.py:1040:8:positional-call:time.sleep	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_a7_physical_measurement.py:1092:8:positional-call:time.sleep	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_a7_physical_measurement.py:1147:12:positional-call:time.sleep	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_a7_physical_measurement.py:1185:8:positional-call:time.sleep	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_a7_physical_measurement.py:1224:51:keyword:timeout_s	mycelium_a7_physical_measurement.py:589:4:assignment:settle_timeout_s	typed-config-field	settings.settle_timeout_s
+mycelium_a7_physical_measurement.py:1224:88:keyword:poll_s	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s
+mycelium_m16_runtime.py:626:16:dict-field:maximum_bytes	mycelium_router/contracts.py:160:3:assignment:maximum_pending_bytes	typed-config-field	self._config.maximum_pending_bytes
+mycelium_m16_runtime.py:641:16:dict-field:maximum_runtime_batch_size	mycelium_router/contracts.py:163:3:assignment:maximum_runtime_batch_size	typed-config-field	self._config.maximum_runtime_batch_size
+mycelium_request_gateway/service.py:1429:16:assignment:grace	mycelium_request_gateway/service.py:289:4:assignment:SESSION_EVICTION_GRACE_SECONDS	typed-config-field	RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS
+mycelium_router/leases.py:35:0:assignment:DEFAULT_KV_LEASE_RENEWAL_SECONDS	mycelium_router/contracts.py:156:3:assignment:reservation_lease_seconds	typed-config-field	RouterConfig.reservation_lease_seconds
+mycelium_ui_gateway/app.py:279:12:keyword:ttl_seconds	mycelium_ui_gateway/config.py:57:4:assignment:session_ttl_seconds	typed-config-field	config.session_ttl_seconds
+mycelium_ui_gateway/app.py:281:12:keyword:max_requests_per_session	mycelium_ui_gateway/config.py:59:4:assignment:max_requests_per_session	typed-config-field	config.max_requests_per_session
+mycelium_ui_gateway/app.py:285:12:keyword:timeout_seconds	mycelium_ui_gateway/config.py:65:4:assignment:upstream_timeout_seconds	typed-config-field	config.upstream_timeout_seconds
+mycelium_ui_gateway/app.py:290:12:keyword:startup_timeout_seconds	mycelium_ui_gateway/config.py:65:4:assignment:upstream_timeout_seconds	typed-config-field	config.upstream_timeout_seconds
+mycelium_ui_gateway/app.py:291:12:keyword:stream_timeout_seconds	mycelium_ui_gateway/config.py:64:4:assignment:max_stream_seconds	typed-config-field	config.max_stream_seconds
+mycelium_ui_gateway/app.py:406:34:keyword:timeout	mycelium_ui_gateway/config.py:65:4:assignment:upstream_timeout_seconds	typed-config-field	self._config.upstream_timeout_seconds
+mycelium_ui_gateway/app.py:474:24:keyword:ttl_seconds	mycelium_ui_gateway/config.py:57:4:assignment:session_ttl_seconds	typed-config-field	self._config.session_ttl_seconds
+mycelium_ui_gateway/app.py:949:28:keyword:timeout	mycelium_ui_gateway/config.py:65:4:assignment:upstream_timeout_seconds	typed-config-field	self._config.upstream_timeout_seconds
+mycelium_a11_evidence_control.py:162:20:keyword:deadline_monotonic_s	mycelium_a11_evidence_control.py:129:8:assignment:self._timeout	monotonic-offset-constructor-field	time.monotonic() + self._timeout
+mycelium_a13_macos/acquisition.py:429:50:keyword:timeout	mycelium_a13_macos/acquisition.py:414:8:assignment:self.timeout_seconds	constructor-field	self.timeout_seconds
+mycelium_a7_evidence_control.py:332:16:keyword:deadline_monotonic_s	mycelium_a7_evidence_control.py:233:8:assignment:self._timeout	monotonic-offset-constructor-field	time.monotonic() + self._timeout
+mycelium_live/supervisor.py:1316:8:assignment:deadline	mycelium_live/supervisor.py:587:0:assignment:COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS	monotonic-offset-module-constant	time.monotonic() + COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS
+mycelium_live/supervisor.py:1342:12:assignment:reap_deadline	mycelium_live/supervisor.py:587:0:assignment:COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS	monotonic-offset-module-constant	time.monotonic() + COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS
+mycelium_a11_evidence_control.py:129:8:assignment:self._timeout	mycelium_a11_evidence_control.py:125:35:parameter:command_timeout_s	parameter-bound-float-normalization	float(command_timeout_s)
+mycelium_a13_macos/acquisition.py:414:8:assignment:self.timeout_seconds	mycelium_a13_macos/acquisition.py:405:33:parameter:timeout_seconds	parameter-bound-float-normalization	float(timeout_seconds)
+mycelium_a13_macos/control_pump.py:159:47:keyword:max_bytes	mycelium_a13_macos/control_pump.py:124:4:assignment:_state_max_bytes	class-field	self._state_max_bytes
+mycelium_a13_macos/control_pump.py:162:53:keyword:max_bytes	mycelium_a13_macos/control_pump.py:124:4:assignment:_state_max_bytes	class-field	self._state_max_bytes
+mycelium_a13_macos/control_pump.py:178:53:keyword:max_bytes	mycelium_a13_macos/control_pump.py:124:4:assignment:_state_max_bytes	class-field	self._state_max_bytes
+mycelium_a13_macos/control_pump.py:189:51:keyword:max_bytes	mycelium_a13_macos/control_pump.py:124:4:assignment:_state_max_bytes	class-field	self._state_max_bytes
+mycelium_a13_macos/managed_control.py:759:8:assignment:self.long_poll_hold	mycelium_a13_macos/managed_control.py:730:32:parameter:long_poll_hold	parameter-bound-float-normalization	float(long_poll_hold)
+mycelium_a13_macos/managed_control.py:760:8:assignment:self.long_poll_step	mycelium_a13_macos/managed_control.py:731:32:parameter:long_poll_step	parameter-bound-float-normalization	float(long_poll_step)
+mycelium_a13_macos/owner_run.py:384:51:positional-call:self._session_stop.wait	mycelium_a13_macos/owner_run.py:155:4:assignment:_ceiling_poll_s	class-field	self._ceiling_poll_s
+mycelium_a13_macos/owner_run.py:436:22:positional-call:ctx.stop_event.wait	mycelium_a13_macos/owner_run.py:155:4:assignment:_ceiling_poll_s	class-field	self._ceiling_poll_s
+mycelium_a13_macos/worker.py:883:12:assignment:timeout	mycelium_a13_macos/worker.py:667:4:assignment:_OBSERVATION_TIMEOUT_S	class-field	self._OBSERVATION_TIMEOUT_S
+mycelium_a13_macos/worker.py:903:16:positional-call:time.sleep	mycelium_a13_macos/worker.py:669:4:assignment:_OBSERVATION_BACKOFF_S	class-field	self._OBSERVATION_BACKOFF_S
+mycelium_a13_macos/worker.py:926:12:dict-field:per_attempt_timeout_seconds	mycelium_a13_macos/worker.py:667:4:assignment:_OBSERVATION_TIMEOUT_S	class-field	self._OBSERVATION_TIMEOUT_S
+mycelium_a7_evidence_control.py:233:8:assignment:self._timeout	mycelium_a7_evidence_control.py:228:35:parameter:command_timeout_s	parameter-bound-float-normalization	float(command_timeout_s)
+mycelium_a7_node_wiring.py:238:55:keyword:max_entries	mycelium_router/terminal_kv_retention.py:37:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_ENTRIES	imported-constant	TERMINAL_KV_RETENTION_ENTRIES
+mycelium_gossip/zenoh_transport.py:110:42:dict-field:lease	mycelium_gossip/zenoh_transport.py:62:4:assignment:lease_ms	class-field	self.lease_ms
+mycelium_internet/bootstrap.py:329:16:keyword:max_attempts	mycelium_internet/bootstrap.py:270:4:assignment:max_join_attempts_per_invite	class-field	self.max_join_attempts_per_invite
+mycelium_internet/enrollment.py:147:8:assignment:self._evidence_freshness_seconds	mycelium_internet/enrollment.py:120:44:parameter:evidence_freshness_seconds	parameter-bound-float-normalization	float(evidence_freshness_seconds)
+mycelium_live/route.py:2463:12:keyword:deadline_monotonic_s	mycelium_live/route.py:2445:8:assignment:deadline	same-scope-binding	deadline
+mycelium_live/route.py:2476:12:keyword:deadline_monotonic_s	mycelium_live/route.py:2445:8:assignment:deadline	same-scope-binding	deadline
+mycelium_live/supervisor.py:587:0:assignment:COLD_ROUTE_RESTART_CLOSE_JOIN_SECONDS	mycelium_deadlines.py:188:0:assignment:CANCEL_AND_CLEANUP_BUDGET_SECONDS	imported-float-constant	float(CANCEL_AND_CLEANUP_BUDGET_SECONDS)
+mycelium_router/transports/iroh.py:3671:34:keyword:deadline	mycelium_router/transports/iroh.py:3664:8:assignment:deadline	same-scope-binding	deadline
+mycelium_router/transports/iroh.py:4930:28:keyword:cleanup_deadline_monotonic_s	mycelium_router/transports/iroh.py:4906:8:assignment:shutdown_cleanup_deadline	same-scope-binding	shutdown_cleanup_deadline
+physical_inference_node.py:2105:12:positional-call:time.sleep	physical_inference_node.py:2080:4:assignment:_SOCKET_CONFLICT_POLL_SECONDS	class-field	self._SOCKET_CONFLICT_POLL_SECONDS
+mycelium_gossip/service.py:410:43:keyword:timeout	mycelium_gossip/service.py:403:16:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_gossip/service.py:472:39:keyword:timeout	mycelium_gossip/service.py:430:12:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_request_gateway/service.py:775:30:keyword:timeout	mycelium_request_gateway/service.py:769:8:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_seed/http.py:775:28:keyword:timeout	mycelium_seed/http.py:773:12:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_seed/http.py:797:20:keyword:timeout	mycelium_seed/http.py:773:12:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_a11_node_wiring.py:121:68:keyword:maxlen	mycelium_a11_node_wiring.py:37:0:assignment:BASELINE_WINDOW	module-constant	BASELINE_WINDOW
+mycelium_a13_macos/adaptive_host.py:1151:8:assignment:self._interval	mycelium_a13_macos/adaptive_host.py:1146:28:parameter:interval_s	same-scope-parameter	interval_s
+mycelium_a13_macos/authority.py:231:46:keyword:max_bytes	mycelium_a13_macos/authority.py:225:55:parameter:max_bytes	same-scope-parameter	max_bytes
+mycelium_a13_macos/chain_compile.py:520:21:keyword:timeout	mycelium_a13_macos/chain_compile.py:480:98:parameter:stop_timeout	same-scope-parameter	stop_timeout
+mycelium_a13_macos/chat.py:74:8:assignment:self.timeout	mycelium_a13_macos/chat.py:70:56:parameter:timeout	same-scope-parameter	timeout
+mycelium_a13_macos/control_session.py:145:8:assignment:self.max_commands	mycelium_a13_macos/control_session.py:138:37:parameter:max_commands	same-scope-parameter	max_commands
+mycelium_a13_macos/control_session.py:146:8:assignment:self.max_requests	mycelium_a13_macos/control_session.py:138:77:parameter:max_requests	same-scope-parameter	max_requests
+mycelium_a13_macos/control_session.py:333:45:keyword:timeout_seconds	mycelium_a13_macos/control_session.py:329:41:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+mycelium_a13_macos/control_session.py:356:16:keyword:timeout_seconds	mycelium_a13_macos/control_session.py:335:55:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+mycelium_a13_macos/demo_chain.py:251:8:assignment:self.interval	mycelium_a13_macos/demo_chain.py:247:35:parameter:interval	same-scope-parameter	interval
+mycelium_a13_macos/demo_target.py:187:8:assignment:self._report_interval	mycelium_a13_macos/demo_target.py:177:82:parameter:report_interval	same-scope-parameter	report_interval
+mycelium_a13_macos/managed_control.py:1998:8:assignment:self.max_prepared_requests	mycelium_a13_macos/managed_control.py:1935:37:parameter:max_prepared_requests	same-scope-parameter	max_prepared_requests
+mycelium_a13_macos/managed_control.py:2044:56:keyword:ttl_seconds	mycelium_a13_macos/managed_control.py:2040:29:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/managed_control.py:2369:12:keyword:ttl_seconds	mycelium_a13_macos/managed_control.py:2361:29:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/managed_control.py:2389:67:keyword:ttl_seconds	mycelium_a13_macos/managed_control.py:2386:73:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/managed_control.py:2436:12:keyword:ttl_seconds	mycelium_a13_macos/managed_control.py:2424:29:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/managed_control.py:2519:12:keyword:ttl_seconds	mycelium_a13_macos/managed_control.py:2508:29:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/owner_run.py:124:15:positional-call:self.stop_event.wait	mycelium_a13_macos/owner_run.py:114:37:parameter:interval	same-scope-parameter	interval
+mycelium_a13_macos/owner_run.py:292:12:positional-call:thread.join	mycelium_a13_macos/owner_run.py:284:47:parameter:join_seconds	same-scope-parameter	join_seconds
+mycelium_a13_macos/peer.py:514:20:keyword:ttl_seconds	mycelium_a13_macos/peer.py:484:27:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a13_macos/peer_model_source.py:640:8:assignment:self._timeout	mycelium_a13_macos/peer_model_source.py:633:74:parameter:timeout	same-scope-parameter	timeout
+mycelium_a13_macos/public_relay.py:309:27:assignment:self._lifetime_poll	mycelium_a13_macos/public_relay.py:299:54:parameter:_lifetime_poll	same-scope-parameter	_lifetime_poll
+mycelium_a13_macos/swarm_publish.py:61:8:assignment:self.timeout	mycelium_a13_macos/swarm_publish.py:54:56:parameter:timeout	same-scope-parameter	timeout
+mycelium_a13_macos/tls.py:484:64:keyword:timeout	mycelium_a13_macos/tls.py:478:21:parameter:timeout	same-scope-parameter	timeout
+mycelium_a13_macos/tls.py:516:8:keyword:timeout	mycelium_a13_macos/tls.py:505:21:parameter:timeout	same-scope-parameter	timeout
+mycelium_a13_macos/token_receipt_mailbox.py:244:63:keyword:ttl_seconds	mycelium_a13_macos/token_receipt_mailbox.py:236:87:parameter:ttl_seconds	same-scope-parameter	ttl_seconds
+mycelium_a6_case_observations.py:456:8:assignment:self._settle_seconds	mycelium_a6_case_observations.py:451:41:parameter:settle_seconds	same-scope-parameter	settle_seconds
+mycelium_a6_http_fault_control.py:119:8:assignment:self._timeout	mycelium_a6_http_fault_control.py:104:83:parameter:body_timeout_seconds	same-scope-parameter	body_timeout_seconds
+mycelium_a6_product_fault_seams.py:207:8:assignment:self._wait_seconds	mycelium_a6_product_fault_seams.py:192:30:parameter:wait_seconds	same-scope-parameter	wait_seconds
+mycelium_a6_product_fault_seams.py:208:8:assignment:self._poll	mycelium_a6_product_fault_seams.py:193:30:parameter:poll_seconds	same-scope-parameter	poll_seconds
+mycelium_a7_entry_controller.py:151:6:assignment:self._ack_timeout	mycelium_a7_entry_controller.py:139:35:parameter:ack_timeout_seconds	same-scope-parameter	ack_timeout_seconds
+mycelium_a7_entry_controller.py:152:6:assignment:self._receipt_timeout	mycelium_a7_entry_controller.py:140:39:parameter:receipt_timeout_seconds	same-scope-parameter	receipt_timeout_seconds
+mycelium_a7_entry_controller.py:154:6:assignment:self._poll	mycelium_a7_entry_controller.py:142:28:parameter:poll_seconds	same-scope-parameter	poll_seconds
+mycelium_a7_node_agent.py:200:12:keyword:ttl_ms	mycelium_a7_node_agent.py:177:20:parameter:ttl_ms	same-scope-parameter	ttl_ms
+mycelium_a7_physical_measurement.py:175:72:keyword:timeout	mycelium_a7_physical_measurement.py:172:54:parameter:timeout_s	same-scope-parameter	timeout_s
+mycelium_a7_physical_measurement.py:363:40:keyword:timeout	mycelium_a7_physical_measurement.py:353:163:parameter:timeout	same-scope-parameter	timeout
+mycelium_a7_standby_plan.py:243:6:dict-field:max_retained_checkpoints	mycelium_a7_standby_plan.py:209:35:parameter:max_retained_checkpoints	same-scope-parameter	max_retained_checkpoints
+mycelium_a7_standby_plan.py:272:6:dict-field:ack_timeout_seconds	mycelium_a7_standby_plan.py:210:32:parameter:ack_timeout_seconds	same-scope-parameter	ack_timeout_seconds
+mycelium_a7_standby_plan.py:273:6:dict-field:receipt_timeout_seconds	mycelium_a7_standby_plan.py:211:36:parameter:receipt_timeout_seconds	same-scope-parameter	receipt_timeout_seconds
+mycelium_a7_successor_coordinator.py:145:6:assignment:self._ttl	mycelium_a7_successor_coordinator.py:127:31:parameter:checkpoint_ttl_ms	same-scope-parameter	checkpoint_ttl_ms
+mycelium_deadlines.py:376:8:keyword:budget_seconds	mycelium_deadlines.py:370:28:parameter:budget_seconds	same-scope-parameter	budget_seconds
+mycelium_deadlines.py:377:8:keyword:fallback_reserve_seconds	mycelium_deadlines.py:371:38:parameter:fallback_reserve_seconds	same-scope-parameter	fallback_reserve_seconds
+mycelium_deadlines.py:411:12:keyword:budget_seconds	mycelium_deadlines.py:388:28:parameter:budget_seconds	same-scope-parameter	budget_seconds
+mycelium_deadlines.py:412:12:keyword:fallback_reserve_seconds	mycelium_deadlines.py:389:38:parameter:fallback_reserve_seconds	same-scope-parameter	fallback_reserve_seconds
+mycelium_deadlines.py:1241:12:keyword:advertised_cleanup_ms	mycelium_deadlines.py:1214:8:assignment:advertised_cleanup_ms	same-scope-binding	advertised_cleanup_ms
+mycelium_deadlines.py:1245:12:keyword:cooperative_step_ms	mycelium_deadlines.py:1231:8:assignment:cooperative_step_ms	same-scope-binding	cooperative_step_ms
+mycelium_deadlines.py:1246:12:keyword:interruption_and_cleanup_ms	mycelium_deadlines.py:1233:8:assignment:interruption_and_cleanup_ms	same-scope-binding	interruption_and_cleanup_ms
+mycelium_deadlines.py:1249:12:keyword:qualification_max_age_seconds	mycelium_deadlines.py:1235:8:assignment:qualification_max_age_seconds	same-scope-binding	qualification_max_age_seconds
+mycelium_deadlines.py:1250:12:keyword:requalification_interval_seconds	mycelium_deadlines.py:1237:8:assignment:requalification_interval_seconds	same-scope-binding	requalification_interval_seconds
+mycelium_demo/gateway_control_runtime.py:687:8:assignment:self.max_request_body_bytes	mycelium_demo/gateway_control_runtime.py:668:38:parameter:max_request_body_bytes	same-scope-parameter	max_request_body_bytes
+mycelium_evidence.py:216:8:assignment:self._live_ttl_ms	mycelium_evidence.py:207:27:parameter:live_ttl_ms	same-scope-parameter	live_ttl_ms
+mycelium_gate_requirements/control.py:119:8:assignment:self._wait_seconds	mycelium_gate_requirements/control.py:116:48:parameter:wait_seconds	same-scope-parameter	wait_seconds
+mycelium_gateway/init.py:47:8:keyword:heartbeat_interval	mycelium_gateway/init.py:32:32:parameter:heartbeat_interval	same-scope-parameter	heartbeat_interval
+mycelium_gateway/init.py:48:8:keyword:poll_interval	mycelium_gateway/init.py:33:27:parameter:poll_interval	same-scope-parameter	poll_interval
+mycelium_gateway/init.py:97:12:keyword:heartbeat_interval	mycelium_gateway/init.py:80:32:parameter:heartbeat_interval	same-scope-parameter	heartbeat_interval
+mycelium_gateway/init.py:98:12:keyword:poll_interval	mycelium_gateway/init.py:81:27:parameter:poll_interval	same-scope-parameter	poll_interval
+mycelium_gateway/live_projection.py:170:8:keyword:heartbeat_interval	mycelium_gateway/live_projection.py:155:32:parameter:heartbeat_interval	same-scope-parameter	heartbeat_interval
+mycelium_gateway/live_projection.py:171:8:keyword:poll_interval	mycelium_gateway/live_projection.py:156:27:parameter:poll_interval	same-scope-parameter	poll_interval
+mycelium_gossip/registry.py:108:8:assignment:self._max_records	mycelium_gossip/registry.py:100:27:parameter:max_records	same-scope-parameter	max_records
+mycelium_gossip/service.py:202:8:assignment:self._suspicion_grace_seconds	mycelium_gossip/service.py:178:41:parameter:suspicion_grace_seconds	same-scope-parameter	suspicion_grace_seconds
+mycelium_gossip/service.py:203:8:assignment:self._default_quarantine_seconds	mycelium_gossip/service.py:179:36:parameter:quarantine_seconds	same-scope-parameter	quarantine_seconds
+mycelium_gossip/service.py:204:8:assignment:self._worker_poll_seconds	mycelium_gossip/service.py:180:37:parameter:worker_poll_seconds	same-scope-parameter	worker_poll_seconds
+mycelium_gossip/service.py:205:8:assignment:self._repair_interval_seconds	mycelium_gossip/service.py:181:41:parameter:repair_interval_seconds	same-scope-parameter	repair_interval_seconds
+mycelium_gossip/service.py:206:8:assignment:self._shutdown_timeout_seconds	mycelium_gossip/service.py:182:42:parameter:shutdown_timeout_seconds	same-scope-parameter	shutdown_timeout_seconds
+mycelium_gossip/transport.py:322:8:assignment:self._max_records	mycelium_gossip/transport.py:319:45:parameter:max_records	same-scope-parameter	max_records
+mycelium_interactive/swarm.py:348:8:assignment:self._max_peer_history	mycelium_interactive/swarm.py:316:32:parameter:max_peer_history	same-scope-parameter	max_peer_history
+mycelium_interactive/swarm.py:357:8:assignment:self._max_job_history	mycelium_interactive/swarm.py:317:31:parameter:max_job_history	same-scope-parameter	max_job_history
+mycelium_internet/activation.py:263:8:assignment:self._max_history	mycelium_internet/activation.py:245:27:parameter:max_history	same-scope-parameter	max_history
+mycelium_internet/bootstrap.py:270:4:assignment:max_join_attempts_per_invite	mycelium_internet/bootstrap.py:32:0:assignment:DEFAULT_MAX_JOIN_ATTEMPTS_PER_INVITE	module-constant	DEFAULT_MAX_JOIN_ATTEMPTS_PER_INVITE
+mycelium_internet/enrollment.py:232:12:keyword:backoff_seconds	mycelium_internet/enrollment.py:203:33:parameter:backoff_seconds	same-scope-parameter	backoff_seconds
+mycelium_internet/physical.py:700:34:keyword:timeout	mycelium_internet/physical.py:683:21:parameter:timeout	same-scope-parameter	timeout
+mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	mycelium_iroh_sidecar/client.py:165:25:parameter:timeout	same-scope-parameter	timeout
+mycelium_live/artifact_provisioner.py:219:8:assignment:self.history_limit	mycelium_live/artifact_provisioner.py:215:59:parameter:history_limit	same-scope-parameter	history_limit
+mycelium_live/artifact_transport.py:138:8:assignment:self.maximum_entries	mycelium_live/artifact_transport.py:134:61:parameter:maximum_entries	same-scope-parameter	maximum_entries
+mycelium_live/artifact_transport.py:510:8:assignment:self.timeout_seconds	mycelium_live/artifact_transport.py:499:33:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+mycelium_live/local_preparer.py:1098:12:dict-field:disk_reserve_bytes	mycelium_live/local_preparer.py:50:0:assignment:_ARTIFACT_DISK_RESERVE_BYTES	module-constant	_ARTIFACT_DISK_RESERVE_BYTES
+mycelium_live/route.py:7142:12:keyword:timeout_seconds	mycelium_live/route.py:7123:33:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+mycelium_live/router_port.py:84:0:assignment:_ROTATED_TERMINAL_RECORDS_MAX	mycelium_live/router_port.py:78:0:assignment:_RETAINED_SOURCE_FAILURES_MAX	module-constant	_RETAINED_SOURCE_FAILURES_MAX
+mycelium_m16_runtime.py:381:8:assignment:self._max_concurrent_requests	mycelium_m16_runtime.py:362:39:parameter:max_concurrent_requests	same-scope-parameter	max_concurrent_requests
+mycelium_node/process.py:2001:8:assignment:self.max_frame_bytes	mycelium_node/process.py:1966:31:parameter:max_frame_bytes	same-scope-parameter	max_frame_bytes
+mycelium_platform_neutral/runtime_efficiency.py:56:8:dict-field:max_interactive_p95_ttft_ms	mycelium_platform_neutral/runtime_efficiency.py:50:0:assignment:MAX_INTERACTIVE_P95_TTFT_MS	module-constant	MAX_INTERACTIVE_P95_TTFT_MS
+mycelium_platform_neutral/seed_cutover_transaction.py:91:8:assignment:self._timeout	mycelium_platform_neutral/seed_cutover_transaction.py:86:74:parameter:timeout_s	same-scope-parameter	timeout_s
+mycelium_request_gateway/init.py:80:8:keyword:max_buffered_events	mycelium_request_gateway/init.py:25:31:parameter:max_buffered_events	same-scope-parameter	max_buffered_events
+mycelium_request_gateway/service.py:342:8:assignment:self._max_buffered_events	mycelium_request_gateway/service.py:307:35:parameter:max_buffered_events	same-scope-parameter	max_buffered_events
+mycelium_request_gateway/service.py:344:8:assignment:self._max_concurrent_requests	mycelium_request_gateway/service.py:309:39:parameter:max_concurrent_requests	same-scope-parameter	max_concurrent_requests
+mycelium_request_gateway/service.py:345:8:assignment:self._max_pending_requests	mycelium_request_gateway/service.py:310:36:parameter:max_pending_requests	same-scope-parameter	max_pending_requests
+mycelium_router/a10_live_publication.py:130:53:keyword:maxlen	mycelium_router/a10_live_publication.py:44:0:assignment:MAXIMUM_INTERVALS	module-constant	MAXIMUM_INTERVALS
+mycelium_router/a10_live_publication.py:240:12:dict-field:maximum_intervals	mycelium_router/a10_live_publication.py:44:0:assignment:MAXIMUM_INTERVALS	module-constant	MAXIMUM_INTERVALS
+mycelium_router/a10_live_publication.py:334:6:dict-field:maximum_intervals	mycelium_router/a10_live_publication.py:44:0:assignment:MAXIMUM_INTERVALS	module-constant	MAXIMUM_INTERVALS
+mycelium_router/llama_runtime.py:103:8:assignment:self.timeout_s	mycelium_router/llama_runtime.py:99:36:parameter:timeout_s	same-scope-parameter	timeout_s
+mycelium_router/mlx_runtime.py:1151:55:keyword:maxlen	mycelium_router/mlx_runtime.py:101:0:assignment:KV_RELEASE_LOG_LIMIT	module-constant	KV_RELEASE_LOG_LIMIT
+mycelium_router/openrouter_runtime.py:87:8:assignment:self.timeout_s	mycelium_router/openrouter_runtime.py:83:36:parameter:timeout_s	same-scope-parameter	timeout_s
+mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	mycelium_router/transports/iroh.py:854:42:parameter:delivery_timeout_seconds	same-scope-parameter	delivery_timeout_seconds
+mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	mycelium_router/transports/iroh.py:855:39:parameter:poll_interval_seconds	same-scope-parameter	poll_interval_seconds
+mycelium_router/transports/loopback_socket.py:224:6:assignment:self.connect_timeout_seconds	mycelium_router/transports/loopback_socket.py:203:39:parameter:connect_timeout_seconds	same-scope-parameter	connect_timeout_seconds
+mycelium_seed/http.py:872:12:keyword:timeout	mycelium_seed/http.py:864:25:parameter:timeout	same-scope-parameter	timeout
+mycelium_speculative_decode.py:1186:12:dict-field:consecutive_deadlines	mycelium_speculative_decode.py:80:0:assignment:CIRCUIT_BREAKER_CONSECUTIVE_DEADLINES	module-constant	CIRCUIT_BREAKER_CONSECUTIVE_DEADLINES
+mycelium_speculative_decode.py:1187:12:dict-field:rolling_window_cycles	mycelium_speculative_decode.py:81:0:assignment:CIRCUIT_BREAKER_ROLLING_WINDOW_CYCLES	module-constant	CIRCUIT_BREAKER_ROLLING_WINDOW_CYCLES
+physical_inference_node.py:5235:39:keyword:batch_seconds	physical_inference_node.py:5194:31:parameter:batch_seconds	same-scope-parameter	batch_seconds
+scripts/a12_gate_membership.py:345:62:keyword:timeout	scripts/a12_gate_membership.py:342:82:parameter:timeout	same-scope-parameter	timeout
+scripts/a13_operator/p78r1_evidence.py:36:64:keyword:timeout	scripts/a13_operator/p78r1_evidence.py:30:31:parameter:timeout	same-scope-parameter	timeout
+scripts/a13_operator/ssh_window_evidence.py:659:71:keyword:timeout	scripts/a13_operator/ssh_window_evidence.py:580:55:parameter:timeout	same-scope-parameter	timeout
+scripts/a13_operator/wp8_03_laptop_driver.py:77:41:keyword:timeout	scripts/a13_operator/wp8_03_laptop_driver.py:70:40:parameter:timeout	same-scope-parameter	timeout
+scripts/a13_operator/wp8_03_laptop_driver.py:87:66:keyword:timeout	scripts/a13_operator/wp8_03_laptop_driver.py:81:41:parameter:timeout	same-scope-parameter	timeout
+scripts/a13_operator/wp8_03_laptop_driver.py:143:16:positional-call:time.sleep	scripts/a13_operator/wp8_03_laptop_driver.py:116:37:parameter:sleep	same-scope-parameter	sleep
+scripts/a13_operator/wp8_05_measure_stream.py:127:36:keyword:timeout	scripts/a13_operator/wp8_05_measure_stream.py:62:52:parameter:timeout	same-scope-parameter	timeout
+scripts/capture_member_capacity_snapshot.py:246:16:keyword:valid_for_ms	scripts/capture_member_capacity_snapshot.py:231:33:parameter:resource_valid_for_ms	same-scope-parameter	resource_valid_for_ms
+scripts/quiet_host_guard.py:611:71:keyword:timeout	scripts/quiet_host_guard.py:607:21:parameter:timeout	same-scope-parameter	timeout
+scripts/qwen_phone_builder.py:356:8:assignment:self.timeout	scripts/qwen_phone_builder.py:352:77:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a10_concurrency_probe.py:170:34:keyword:timeout_seconds	scripts/run_a10_concurrency_probe.py:161:29:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+scripts/run_a10_concurrency_probe.py:267:8:keyword:timeout_seconds	scripts/run_a10_concurrency_probe.py:256:29:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+scripts/run_a10_concurrency_probe.py:273:8:keyword:timeout_seconds	scripts/run_a10_concurrency_probe.py:256:29:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+scripts/run_a10_physical_gate.py:1297:6:assignment:self._interval_s	scripts/run_a10_physical_gate.py:1295:88:parameter:interval_s	same-scope-parameter	interval_s
+scripts/run_a10_physical_gate.py:1374:6:assignment:self.timeout_s	scripts/run_a10_physical_gate.py:1359:25:parameter:timeout_s	same-scope-parameter	timeout_s
+scripts/run_a12_mobile_physical_gate.py:228:6:assignment:self.heat_window_seconds	scripts/run_a12_mobile_physical_gate.py:205:35:parameter:heat_window_seconds	same-scope-parameter	heat_window_seconds
+scripts/run_a12_mobile_physical_gate.py:229:6:assignment:self.thermal_probe_interval_seconds	scripts/run_a12_mobile_physical_gate.py:206:46:parameter:thermal_probe_interval_seconds	same-scope-parameter	thermal_probe_interval_seconds
+scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	scripts/run_a12_mobile_physical_gate.py:207:23:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a12_mobile_physical_gate.py:232:6:assignment:self.command_timeout_seconds	scripts/run_a12_mobile_physical_gate.py:210:39:parameter:command_timeout_seconds	same-scope-parameter	command_timeout_seconds
+scripts/run_a2_product_gate.py:120:45:keyword:timeout	scripts/run_a2_product_gate.py:102:25:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a4_physical_queue_saturation_gate.py:133:8:positional-call:time.sleep	scripts/run_a4_physical_queue_saturation_gate.py:41:0:assignment:POLL_INTERVAL	module-constant	POLL_INTERVAL
+scripts/run_a4_product_gate.py:64:46:keyword:timeout	scripts/run_a4_product_gate.py:46:25:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a5_benchmark_gate.py:255:40:keyword:timeout	scripts/run_a5_benchmark_gate.py:235:25:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a5_product_gate.py:84:46:keyword:timeout	scripts/run_a5_product_gate.py:66:25:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a5_replica_loss_gate.py:78:12:keyword:timeout	scripts/run_a5_replica_loss_gate.py:68:68:parameter:timeout	same-scope-parameter	timeout
+scripts/run_a9_withdrawal_browser.py:79:45:keyword:timeout	scripts/run_a9_withdrawal_browser.py:70:37:parameter:timeout_s	same-scope-parameter	timeout_s
+scripts/run_a9_withdrawal_browser.py:238:48:keyword:timeout_s	scripts/run_a9_withdrawal_browser.py:230:78:parameter:timeout_s	same-scope-parameter	timeout_s
+scripts/run_a9_withdrawal_browser.py:238:69:keyword:interval_s	scripts/run_a9_withdrawal_browser.py:230:104:parameter:interval_s	same-scope-parameter	interval_s
+scripts/run_m16_physical_gate.py:64:46:keyword:timeout	scripts/run_m16_physical_gate.py:46:25:parameter:timeout	same-scope-parameter	timeout
+scripts/run_m16_physical_gate.py:138:8:positional-call:time.sleep	scripts/run_m16_physical_gate.py:131:61:parameter:interval	same-scope-parameter	interval
+scripts/run_m23_kv_gate.py:93:45:keyword:timeout	scripts/run_m23_kv_gate.py:75:25:parameter:timeout	same-scope-parameter	timeout
+two_process_runtime_qualification.py:757:8:keyword:timeout_seconds	two_process_runtime_qualification.py:724:54:parameter:timeout_seconds	same-scope-parameter	timeout_seconds
+mycelium_a13_macos/chat.py:98:46:keyword:timeout	mycelium_a13_macos/chat.py:74:8:assignment:self.timeout	constructor-field	self.timeout
+mycelium_a13_macos/demo_chain.py:295:77:keyword:interval	mycelium_a13_macos/demo_chain.py:251:8:assignment:self.interval	constructor-field	self.interval
+mycelium_a13_macos/demo_chain.py:381:69:keyword:interval	mycelium_a13_macos/demo_chain.py:251:8:assignment:self.interval	constructor-field	self.interval
+mycelium_a13_macos/demo_chain.py:454:62:keyword:interval	mycelium_a13_macos/demo_chain.py:251:8:assignment:self.interval	constructor-field	self.interval
+mycelium_a13_macos/demo_chain.py:695:62:keyword:interval	mycelium_a13_macos/demo_chain.py:251:8:assignment:self.interval	constructor-field	self.interval
+mycelium_a13_macos/peer_model_source.py:651:35:keyword:timeout	mycelium_a13_macos/peer_model_source.py:640:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/public_relay.py:383:12:positional-call:time.sleep	mycelium_a13_macos/public_relay.py:309:27:assignment:self._lifetime_poll	constructor-field	self._lifetime_poll
+mycelium_a13_macos/swarm_publish.py:76:44:keyword:timeout	mycelium_a13_macos/swarm_publish.py:61:8:assignment:self.timeout	constructor-field	self.timeout
+mycelium_a7_entry_controller.py:310:9:positional-call:time.sleep	mycelium_a7_entry_controller.py:154:6:assignment:self._poll	constructor-field	self._poll
+mycelium_a7_entry_controller.py:491:9:positional-call:time.sleep	mycelium_a7_entry_controller.py:154:6:assignment:self._poll	constructor-field	self._poll
+mycelium_gate_requirements/control.py:139:38:keyword:timeout	mycelium_gate_requirements/control.py:119:8:assignment:self._wait_seconds	constructor-field	self._wait_seconds
+mycelium_gossip/service.py:641:39:keyword:timeout	mycelium_gossip/service.py:204:8:assignment:self._worker_poll_seconds	constructor-field	self._worker_poll_seconds
+mycelium_gossip/service.py:710:18:positional-call:stop_event.wait	mycelium_gossip/service.py:205:8:assignment:self._repair_interval_seconds	constructor-field	self._repair_interval_seconds
+mycelium_iroh_sidecar/client.py:220:20:keyword:socket_timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_iroh_sidecar/client.py:226:20:keyword:socket_timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_live/artifact_transport.py:573:16:keyword:timeout	mycelium_live/artifact_transport.py:510:8:assignment:self.timeout_seconds	constructor-field	self.timeout_seconds
+mycelium_live/artifact_transport.py:577:46:keyword:timeout	mycelium_live/artifact_transport.py:510:8:assignment:self.timeout_seconds	constructor-field	self.timeout_seconds
+mycelium_m16_runtime.py:634:16:dict-field:maximum_active_requests	mycelium_m16_runtime.py:381:8:assignment:self._max_concurrent_requests	constructor-field	self._max_concurrent_requests
+mycelium_platform_neutral/seed_cutover_transaction.py:95:30:keyword:timeout	mycelium_platform_neutral/seed_cutover_transaction.py:91:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_router/llama_runtime.py:113:45:keyword:timeout	mycelium_router/llama_runtime.py:103:8:assignment:self.timeout_s	constructor-field	self.timeout_s
+mycelium_router/openrouter_runtime.py:111:45:keyword:timeout	mycelium_router/openrouter_runtime.py:87:8:assignment:self.timeout_s	constructor-field	self.timeout_s
+mycelium_router/transports/iroh.py:3171:16:positional-call:self._ack_ready.wait	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	constructor-field	self.poll_interval_seconds
+mycelium_router/transports/iroh.py:3500:44:keyword:timeout	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	constructor-field	self.poll_interval_seconds
+mycelium_router/transports/iroh.py:3607:41:keyword:timeout	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	constructor-field	self.poll_interval_seconds
+mycelium_router/transports/iroh.py:3638:31:keyword:wait_seconds	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	constructor-field	self.poll_interval_seconds
+mycelium_router/transports/iroh.py:3642:31:keyword:timeout	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	constructor-field	self.poll_interval_seconds
+mycelium_router/transports/loopback_socket.py:683:12:keyword:timeout	mycelium_router/transports/loopback_socket.py:224:6:assignment:self.connect_timeout_seconds	constructor-field	self.connect_timeout_seconds
+mycelium_router/transports/loopback_socket.py:731:36:keyword:timeout	mycelium_router/transports/loopback_socket.py:224:6:assignment:self.connect_timeout_seconds	constructor-field	self.connect_timeout_seconds
+scripts/run_a10_physical_gate.py:1318:16:positional-call:self._stop.wait	scripts/run_a10_physical_gate.py:1297:6:assignment:self._interval_s	constructor-field	self._interval_s
+scripts/run_a10_physical_gate.py:1432:34:keyword:timeout	scripts/run_a10_physical_gate.py:1374:6:assignment:self.timeout_s	constructor-field	self.timeout_s
+scripts/run_a12_mobile_physical_gate.py:246:66:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:232:6:assignment:self.command_timeout_seconds	constructor-field	self.command_timeout_seconds
+scripts/run_a12_mobile_physical_gate.py:279:9:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+scripts/run_a12_mobile_physical_gate.py:292:9:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+scripts/run_a12_mobile_physical_gate.py:351:9:positional-call:self.sleep	scripts/run_a12_mobile_physical_gate.py:229:6:assignment:self.thermal_probe_interval_seconds	constructor-field	self.thermal_probe_interval_seconds
+scripts/run_a12_mobile_physical_gate.py:370:38:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+scripts/run_a12_mobile_physical_gate.py:376:100:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+scripts/run_a12_mobile_physical_gate.py:378:36:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+scripts/run_a12_mobile_physical_gate.py:393:9:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:230:6:assignment:self.timeout	constructor-field	self.timeout
+mycelium_a13_macos/managed_runtime.py:319:16:dict-field:max_attempts	mycelium_a13_macos/managed_runtime.py:33:0:assignment:_MAX_WORKER_REPLACEMENTS	module-constant	_MAX_WORKER_REPLACEMENTS
+mycelium_a13_macos/managed_runtime.py:333:56:dict-field:max_attempts	mycelium_a13_macos/managed_runtime.py:33:0:assignment:_MAX_WORKER_REPLACEMENTS	module-constant	_MAX_WORKER_REPLACEMENTS
+mycelium_a13_macos/managed_runtime.py:345:16:dict-field:max_attempts	mycelium_a13_macos/managed_runtime.py:33:0:assignment:_MAX_WORKER_REPLACEMENTS	module-constant	_MAX_WORKER_REPLACEMENTS
+mycelium_a13_macos/managed_runtime.py:354:41:dict-field:max_attempts	mycelium_a13_macos/managed_runtime.py:33:0:assignment:_MAX_WORKER_REPLACEMENTS	module-constant	_MAX_WORKER_REPLACEMENTS
+mycelium_a13_macos/managed_runtime.py:366:12:dict-field:max_attempts	mycelium_a13_macos/managed_runtime.py:33:0:assignment:_MAX_WORKER_REPLACEMENTS	module-constant	_MAX_WORKER_REPLACEMENTS
+mycelium_a13_macos/managed_control.py:1985:8:assignment:self.timeout	mycelium_a13_macos/managed_control.py:1933:25:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_a13_macos/model_resources.py:568:66:dict-field:max_commands	mycelium_a13_macos/model_resources.py:562:82:parameter:max_commands	parameter-integral-normalization	int(max_commands)
+mycelium_a13_macos/pairing.py:846:8:assignment:self._timeout	mycelium_a13_macos/pairing.py:843:56:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	mycelium_a13_macos/peer.py:117:25:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_a7_physical_measurement.py:348:8:assignment:self._timeout	mycelium_a7_physical_measurement.py:337:92:parameter:timeout_s	parameter-float-normalization	float(timeout_s)
+mycelium_a7_physical_measurement.py:543:8:assignment:self._timeout	mycelium_a7_physical_measurement.py:534:91:parameter:timeout_s	parameter-float-normalization	float(timeout_s)
+mycelium_demo/gateway_control_runtime.py:231:8:assignment:self.hold_timeout_seconds	mycelium_demo/gateway_control_runtime.py:212:38:parameter:hold_timeout_seconds	parameter-float-normalization	float(hold_timeout_seconds)
+mycelium_demo/gateway_control_runtime.py:688:8:assignment:self.response_timeout_seconds	mycelium_demo/gateway_control_runtime.py:669:42:parameter:response_timeout_seconds	parameter-float-normalization	float(response_timeout_seconds)
+mycelium_demo/gateway_control_runtime.py:1059:8:assignment:self.upstream_timeout_seconds	mycelium_demo/gateway_control_runtime.py:1033:42:parameter:upstream_timeout_seconds	parameter-float-normalization	float(upstream_timeout_seconds)
+mycelium_demo/gateway_control_runtime.py:1063:8:assignment:self._max_buffered_events	mycelium_demo/gateway_control_runtime.py:1031:35:parameter:max_buffered_events	parameter-integral-normalization	int(max_buffered_events)
+mycelium_gateway/asgi.py:114:8:assignment:self._heartbeat_interval	mycelium_gateway/asgi.py:101:36:parameter:heartbeat_interval	parameter-float-normalization	float(heartbeat_interval)
+mycelium_gateway/asgi.py:115:8:assignment:self._poll_interval	mycelium_gateway/asgi.py:102:31:parameter:poll_interval	parameter-float-normalization	float(poll_interval)
+mycelium_interactive/runtime.py:360:28:keyword:timeout_seconds	mycelium_interactive/runtime.py:304:33:parameter:timeout_seconds	parameter-float-normalization	float(timeout_seconds)
+mycelium_internet/activation.py:262:8:assignment:self._freshness_seconds	mycelium_internet/activation.py:244:35:parameter:freshness_seconds	parameter-float-normalization	float(freshness_seconds)
+mycelium_internet/enrollment.py:146:8:assignment:self._backoff_seconds	mycelium_internet/enrollment.py:119:33:parameter:backoff_seconds	parameter-float-normalization	float(backoff_seconds)
+mycelium_mobile/android_sidecar.py:466:12:positional-call:time.sleep	mycelium_mobile/android_sidecar.py:423:35:parameter:poll_interval_seconds	parameter-float-normalization	float(poll_interval_seconds)
+mycelium_mobile/pixel_client.py:114:8:assignment:self._timeout	mycelium_mobile/pixel_client.py:98:25:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_mobile/termux_bridge.py:54:8:assignment:self._timeout	mycelium_mobile/termux_bridge.py:49:70:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_mobile/termux_bridge.py:178:12:dict-field:timeout_seconds	mycelium_mobile/termux_bridge.py:166:33:parameter:timeout_seconds	parameter-float-normalization	float(timeout_seconds)
+mycelium_node/membership.py:170:8:assignment:self._ttl	mycelium_node/membership.py:137:37:parameter:message_ttl_seconds	parameter-float-normalization	float(message_ttl_seconds)
+mycelium_request_gateway/client.py:164:8:assignment:self._timeout	mycelium_request_gateway/client.py:138:77:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_seed/coordinator.py:240:8:assignment:self._lease_seconds	mycelium_seed/coordinator.py:180:31:parameter:lease_seconds	parameter-float-normalization	float(lease_seconds)
+mycelium_seed/coordinator.py:241:8:assignment:self._message_ttl_seconds	mycelium_seed/coordinator.py:181:37:parameter:message_ttl_seconds	parameter-float-normalization	float(message_ttl_seconds)
+mycelium_seed/coordinator.py:255:8:assignment:self._keepalive_interval_seconds	mycelium_seed/coordinator.py:182:44:parameter:keepalive_interval_seconds	parameter-float-normalization	float(keepalive_interval_seconds)
+mycelium_seed/coordinator.py:256:8:assignment:self._evidence_freshness_seconds	mycelium_seed/coordinator.py:183:44:parameter:evidence_freshness_seconds	parameter-float-normalization	float(evidence_freshness_seconds)
+mycelium_seed/http.py:855:8:assignment:self.timeout	mycelium_seed/http.py:831:25:parameter:timeout	parameter-float-normalization	float(timeout)
+mycelium_a13_macos/pairing.py:889:44:keyword:timeout	mycelium_a13_macos/pairing.py:846:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/peer.py:563:20:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/peer.py:570:20:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/peer.py:584:20:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/peer.py:591:20:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a13_macos/peer.py:677:16:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a7_physical_measurement.py:546:72:keyword:timeout	mycelium_a7_physical_measurement.py:543:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_a7_standby_plan.py:242:6:dict-field:max_checkpoint_bytes	mycelium_a7_standby_plan.py:208:31:parameter:max_checkpoint_bytes	same-scope-parameter	max_checkpoint_bytes
+mycelium_a7_standby_plan.py:255:6:dict-field:max_checkpoint_bytes	mycelium_a7_standby_plan.py:208:31:parameter:max_checkpoint_bytes	same-scope-parameter	max_checkpoint_bytes
+mycelium_demo/gateway_control_runtime.py:256:43:keyword:timeout	mycelium_demo/gateway_control_runtime.py:231:8:assignment:self.hold_timeout_seconds	constructor-field	self.hold_timeout_seconds
+mycelium_demo/gateway_control_runtime.py:1100:12:keyword:max_buffered_events	mycelium_demo/gateway_control_runtime.py:1063:8:assignment:self._max_buffered_events	constructor-field	self._max_buffered_events
+mycelium_demo/gateway_control_runtime.py:1127:16:keyword:upstream_timeout_seconds	mycelium_demo/gateway_control_runtime.py:1059:8:assignment:self.upstream_timeout_seconds	constructor-field	self.upstream_timeout_seconds
+mycelium_gateway/init.py:38:8:keyword:max_payload_bytes	mycelium_gateway/init.py:27:29:parameter:max_payload_bytes	same-scope-parameter	max_payload_bytes
+mycelium_gateway/init.py:87:8:keyword:max_payload_bytes	mycelium_gateway/init.py:75:29:parameter:max_payload_bytes	same-scope-parameter	max_payload_bytes
+mycelium_gateway/live_projection.py:104:12:keyword:max_payload_bytes	mycelium_gateway/live_projection.py:92:33:parameter:max_payload_bytes	same-scope-parameter	max_payload_bytes
+mycelium_gateway/observatory.py:425:8:assignment:self._max_payload_bytes	mycelium_gateway/observatory.py:407:33:parameter:max_payload_bytes	same-scope-parameter	max_payload_bytes
+mycelium_gateway/semantic.py:683:16:keyword:max_payload_bytes	mycelium_gateway/semantic.py:668:33:parameter:max_payload_bytes	same-scope-parameter	max_payload_bytes
+mycelium_mobile/pixel_client.py:155:43:keyword:timeout	mycelium_mobile/pixel_client.py:114:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_mobile/termux_bridge.py:96:43:keyword:timeout	mycelium_mobile/termux_bridge.py:54:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_request_gateway/client.py:370:42:keyword:timeout	mycelium_request_gateway/client.py:164:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_seed/coordinator.py:500:16:keyword:ttl_seconds	mycelium_seed/coordinator.py:241:8:assignment:self._message_ttl_seconds	constructor-field	self._message_ttl_seconds
+mycelium_seed/coordinator.py:641:16:keyword:ttl_seconds	mycelium_seed/coordinator.py:240:8:assignment:self._lease_seconds	constructor-field	self._lease_seconds
+mycelium_seed/coordinator.py:675:20:keyword:ttl_seconds	mycelium_seed/coordinator.py:241:8:assignment:self._message_ttl_seconds	constructor-field	self._message_ttl_seconds
+mycelium_seed/coordinator.py:835:16:keyword:ttl_seconds	mycelium_seed/coordinator.py:240:8:assignment:self._lease_seconds	constructor-field	self._lease_seconds
+mycelium_seed/coordinator.py:869:20:keyword:ttl_seconds	mycelium_seed/coordinator.py:241:8:assignment:self._message_ttl_seconds	constructor-field	self._message_ttl_seconds
+mycelium_seed/coordinator.py:1384:20:keyword:ttl_seconds	mycelium_seed/coordinator.py:240:8:assignment:self._lease_seconds	constructor-field	self._lease_seconds
+mycelium_seed/coordinator.py:1613:20:keyword:ttl_seconds	mycelium_seed/coordinator.py:241:8:assignment:self._message_ttl_seconds	constructor-field	self._message_ttl_seconds
+mycelium_seed/http.py:889:44:keyword:timeout	mycelium_seed/http.py:855:8:assignment:self.timeout	constructor-field	self.timeout
+mycelium_a13_macos/adaptive_drain.py:91:16:keyword:deadline_monotonic_s	mycelium_a13_macos/adaptive_drain.py:49:0:assignment:ABORT_DEADLINE_S	monotonic-offset-module-constant	time.monotonic() + ABORT_DEADLINE_S
+mycelium_a13_macos/managed_control.py:2205:8:assignment:deadline	mycelium_a13_macos/managed_control.py:316:0:assignment:HTTP_RETRY_WINDOW_SECONDS	monotonic-offset-module-constant	time.monotonic() + HTTP_RETRY_WINDOW_SECONDS
+mycelium_a13_macos/token_receipt_mailbox.py:80:8:assignment:deadline	mycelium_a13_macos/token_receipt_mailbox.py:77:30:parameter:timeout	monotonic-offset-same-scope-parameter	time.monotonic() + timeout
+mycelium_a13_macos/workflow.py:496:48:keyword:process_deadline_monotonic_s	mycelium_a13_macos/workflow.py:493:8:assignment:token_deadline	same-scope-binding	token_deadline
+mycelium_a6_http_fault_control.py:144:12:assignment:deadline	mycelium_a6_http_fault_control.py:119:8:assignment:self._timeout	monotonic-offset-constructor-field	time.monotonic() + self._timeout
+mycelium_a7_entry_controller.py:474:6:assignment:deadline	mycelium_a7_entry_controller.py:152:6:assignment:self._receipt_timeout	monotonic-offset-constructor-field	time.monotonic() + self._receipt_timeout
+mycelium_a7_physical_measurement.py:239:8:assignment:deadline	mycelium_a7_physical_measurement.py:238:68:parameter:timeout_s	monotonic-offset-same-scope-parameter	time.monotonic() + timeout_s
+mycelium_demo/public_origin_proxy.py:708:12:assignment:deadline	mycelium_demo/public_origin_proxy.py:31:0:assignment:_LINGER_SECONDS	monotonic-offset-module-constant	time.monotonic() + _LINGER_SECONDS
+mycelium_gossip/service.py:403:16:assignment:deadline	mycelium_gossip/service.py:206:8:assignment:self._shutdown_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self._shutdown_timeout_seconds
+mycelium_gossip/service.py:430:12:assignment:deadline	mycelium_gossip/service.py:206:8:assignment:self._shutdown_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self._shutdown_timeout_seconds
+mycelium_live/route.py:2445:8:assignment:deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:5213:24:assignment:stop_cleanup_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:5242:24:assignment:cancellation_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:5262:20:assignment:cleanup_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/router_port.py:2162:16:keyword:deadline_monotonic_s	mycelium_live/router_port.py:44:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/router_port.py:2440:12:keyword:deadline_monotonic_s	mycelium_live/router_port.py:44:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_request_gateway/service.py:593:12:assignment:session.cancellation_wall_deadline_at	mycelium_request_gateway/service.py:41:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_request_gateway/service.py:769:8:assignment:deadline	mycelium_request_gateway/service.py:41:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	monotonic-offset-module-constant	time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_router/entry.py:1171:6:assignment:deadline	mycelium_router/entry.py:86:0:assignment:_DECODE_REDRIVE_WAIT_SECONDS	monotonic-offset-module-constant	time.monotonic() + _DECODE_REDRIVE_WAIT_SECONDS
+mycelium_router/transports/iroh.py:1627:8:assignment:deadline	mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.delivery_timeout_seconds
+mycelium_router/transports/iroh.py:3606:8:assignment:deadline	mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.delivery_timeout_seconds
+mycelium_router/transports/iroh.py:3664:8:assignment:deadline	mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.delivery_timeout_seconds
+mycelium_router/transports/iroh.py:4906:8:assignment:shutdown_cleanup_deadline	mycelium_router/transports/iroh.py:93:0:assignment:_DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS	monotonic-offset-module-constant	time.monotonic() + _DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS
+mycelium_router/transports/iroh.py:4962:8:assignment:receipt_trace_deadline	mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.delivery_timeout_seconds
+mycelium_seed/http.py:773:12:assignment:deadline	mycelium_seed/http.py:69:0:assignment:_SERVER_CLOSE_SECONDS	monotonic-offset-module-constant	time.monotonic() + _SERVER_CLOSE_SECONDS
+scripts/a13_operator/round14_rpc.py:518:4:assignment:deadline	scripts/a13_operator/round14_rpc.py:106:0:assignment:_OWNER_CALL_BUDGET_S	monotonic-offset-module-constant	time.monotonic() + _OWNER_CALL_BUDGET_S
+scripts/qwen_phone_builder.py:397:8:assignment:deadline	scripts/qwen_phone_builder.py:356:8:assignment:self.timeout	monotonic-offset-constructor-field	time.monotonic() + self.timeout
+scripts/run_a10_physical_gate.py:714:6:assignment:deadline	scripts/run_a10_physical_gate.py:709:44:parameter:timeout	monotonic-offset-same-scope-parameter	time.monotonic() + timeout
+scripts/run_a5_benchmark_gate.py:319:8:assignment:deadline	scripts/run_a5_benchmark_gate.py:123:0:assignment:STREAM_TIMEOUT_SECONDS	monotonic-offset-module-constant	time.monotonic() + STREAM_TIMEOUT_SECONDS
+scripts/run_a5_benchmark_supervisor.py:295:8:assignment:deadline	scripts/run_a5_benchmark_supervisor.py:23:0:assignment:DETACH_REPARENT_TIMEOUT_SECONDS	monotonic-offset-module-constant	time.monotonic() + DETACH_REPARENT_TIMEOUT_SECONDS
+scripts/run_a5_benchmark_supervisor.py:517:12:assignment:termination_deadline[0]	scripts/run_a5_benchmark_supervisor.py:24:0:assignment:TERMINATION_GRACE_SECONDS	monotonic-offset-module-constant	time.monotonic() + TERMINATION_GRACE_SECONDS
+scripts/run_a5_benchmark_supervisor.py:561:24:assignment:termination_deadline[0]	scripts/run_a5_benchmark_supervisor.py:24:0:assignment:TERMINATION_GRACE_SECONDS	monotonic-offset-module-constant	time.monotonic() + TERMINATION_GRACE_SECONDS
+scripts/run_a5_benchmark_supervisor.py:695:12:assignment:termination_deadline[0]	scripts/run_a5_benchmark_supervisor.py:24:0:assignment:TERMINATION_GRACE_SECONDS	monotonic-offset-module-constant	time.monotonic() + TERMINATION_GRACE_SECONDS
+mycelium_a10_batch_policy_control.py:114:27:comparison:0	mycelium_a10_batch_policy_control.py:44:0:assignment:MAXIMUM_WINDOW_MS	comparison-reference-module-constant	0 <= window <= MAXIMUM_WINDOW_MS
+mycelium_a11_node_wiring.py:105:72:comparison:1	mycelium_a11_node_wiring.py:37:0:assignment:BASELINE_WINDOW	comparison-reference-module-constant	1 <= samples <= BASELINE_WINDOW
+mycelium_a13_linux/onboarding.py:194:15:comparison:1	mycelium_a13_linux/onboarding.py:65:0:assignment:_REQUEST_TTL_MAX	comparison-reference-module-constant	1 <= ttl_seconds <= _REQUEST_TTL_MAX
+mycelium_a13_macos/acquisition.py:587:19:comparison:0	mycelium_a13_macos/acquisition.py:80:0:assignment:_MAX_RANGE_BYTES	comparison-reference-module-constant	0 < length <= _MAX_RANGE_BYTES
+mycelium_a13_macos/adaptive_host.py:1160:38:comparison:0	mycelium_a13_macos/adaptive_host.py:1151:8:assignment:self._interval	comparison-reference-constructor-field	0 <= now - self._last < self._interval
+mycelium_a13_macos/authority.py:244:15:comparison:0	mycelium_a13_macos/authority.py:225:55:parameter:max_bytes	comparison-reference-same-scope-parameter	0 < metadata.st_size <= max_bytes
+mycelium_a13_macos/capability.py:243:51:comparison:1	mycelium_a13_macos/capability.py:96:0:assignment:REPORT_TTL_SECONDS	comparison-reference-module-constant	1 <= ttl_seconds <= REPORT_TTL_SECONDS
+mycelium_a13_macos/capability.py:279:19:comparison:0	mycelium_a13_macos/capability.py:96:0:assignment:REPORT_TTL_SECONDS	comparison-reference-module-constant	0 < report['expires_at'] - report['observed_at'] <= REPORT_TTL_SECONDS
+mycelium_a13_macos/control_session.py:140:23:comparison:2	mycelium_a13_macos/control_session.py:126:0:assignment:MAX_OWNER_COMMANDS	comparison-reference-module-constant	2 <= max_commands <= MAX_OWNER_COMMANDS
+mycelium_a13_macos/control_session.py:569:61:comparison:0	mycelium_a13_macos/control_session.py:124:0:assignment:MAX_SESSION_TIMEOUT_SECONDS	comparison-reference-module-constant	0 < timeout_seconds <= MAX_SESSION_TIMEOUT_SECONDS
+mycelium_a13_macos/layer_split.py:136:19:comparison:2	mycelium_a13_macos/layer_split.py:47:0:assignment:_MAX_HEADER_BYTES	comparison-reference-module-constant	2 <= length <= _MAX_HEADER_BYTES
+mycelium_a13_macos/managed_control.py:364:17:comparison:0	mycelium_a13_macos/managed_control.py:95:0:assignment:MAX_FRAME_BYTES	comparison-reference-module-constant	0 < len(raw) <= MAX_FRAME_BYTES
+mycelium_a13_macos/managed_control.py:625:17:comparison:0	mycelium_a13_macos/managed_control.py:95:0:assignment:MAX_FRAME_BYTES	comparison-reference-module-constant	0 < len(raw) <= MAX_FRAME_BYTES
+mycelium_a13_macos/managed_control.py:740:16:comparison:0.0	mycelium_a13_macos/managed_control.py:678:0:assignment:_LONG_POLL_MAX_HOLD_SECONDS	comparison-reference-module-constant	0.0 <= long_poll_hold <= _LONG_POLL_MAX_HOLD_SECONDS
+mycelium_a13_macos/managed_control.py:747:16:comparison:0.0	mycelium_a13_macos/managed_control.py:678:0:assignment:_LONG_POLL_MAX_HOLD_SECONDS	comparison-reference-module-constant	0.0 < long_poll_step <= _LONG_POLL_MAX_HOLD_SECONDS
+mycelium_a13_macos/managed_control.py:2570:21:comparison:0	mycelium_a13_macos/managed_control.py:95:0:assignment:MAX_FRAME_BYTES	comparison-reference-module-constant	0 < length <= MAX_FRAME_BYTES
+mycelium_a13_macos/managed_offers.py:78:53:comparison:0	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	comparison-reference-module-constant	0 < offer['archive_bytes'] <= MAX_ARCHIVE
+mycelium_a13_macos/pairing.py:175:15:comparison:1	mycelium_a13_macos/pairing.py:45:0:assignment:_REQUEST_TTL_MAX	comparison-reference-module-constant	1 <= ttl_seconds <= _REQUEST_TTL_MAX
+mycelium_a13_macos/peer_model_source.py:534:25:comparison:0	mycelium_a13_macos/peer_model_source.py:109:0:assignment:MAX_LAN_REQUEST_BYTES	comparison-reference-module-constant	0 < int(lengths[0]) <= MAX_LAN_REQUEST_BYTES
+mycelium_a13_macos/public_relay.py:306:23:comparison:0	mycelium_a13_macos/public_relay.py:286:0:assignment:MAX_RENEWAL_CAP_SECONDS	comparison-reference-module-constant	0 < max_renewed_seconds <= MAX_RENEWAL_CAP_SECONDS
+mycelium_a13_macos/serving.py:745:57:comparison:0	mycelium_a13_macos/serving.py:360:0:assignment:_MAX_JSON_BYTES	comparison-reference-module-constant	0 < metadata.st_size <= _MAX_JSON_BYTES
+mycelium_a13_macos/slice_acquisition.py:120:19:comparison:2	mycelium_a13_macos/slice_acquisition.py:67:0:assignment:_MAX_HEADER_BYTES	comparison-reference-module-constant	2 <= length <= _MAX_HEADER_BYTES
+mycelium_a13_macos/slice_acquisition.py:249:57:comparison:0	mycelium_a13_macos/slice_acquisition.py:63:0:assignment:MAX_SEGMENT_BYTES	comparison-reference-module-constant	0 < max_segment_bytes <= MAX_SEGMENT_BYTES
+mycelium_a13_macos/slice_acquisition.py:342:31:comparison:0	mycelium_a13_macos/slice_acquisition.py:63:0:assignment:MAX_SEGMENT_BYTES	comparison-reference-module-constant	0 < segment['length'] <= MAX_SEGMENT_BYTES
+mycelium_a13_macos/swarm_live.py:178:31:comparison:now - hit[0]	mycelium_a13_macos/swarm_live.py:18:0:assignment:CACHE_SECONDS	comparison-reference-module-constant	now - hit[0] < CACHE_SECONDS
+mycelium_a13_macos/workflow.py:112:15:comparison:0	mycelium_a13_macos/workflow.py:87:48:parameter:max_archive_bytes	comparison-reference-same-scope-parameter	0 < len(archive) <= max_archive_bytes
+mycelium_a13_windows/onboarding.py:222:15:comparison:1	mycelium_a13_windows/onboarding.py:93:0:assignment:_REQUEST_TTL_MAX	comparison-reference-module-constant	1 <= ttl_seconds <= _REQUEST_TTL_MAX
+mycelium_a7_node_wiring.py:170:64:comparison:1	mycelium_a7_node_wiring.py:64:0:assignment:MAX_CHECKPOINT_BYTES	comparison-reference-module-constant	1 <= standby['max_checkpoint_bytes'] <= MAX_CHECKPOINT_BYTES
+mycelium_a7_node_wiring.py:177:63:comparison:1	mycelium_a7_node_wiring.py:64:0:assignment:MAX_CHECKPOINT_BYTES	comparison-reference-module-constant	1 <= source['max_checkpoint_bytes'] <= MAX_CHECKPOINT_BYTES
+mycelium_a7_standby_qualification.py:290:37:comparison:1	mycelium_a7_standby_qualification.py:38:0:assignment:MAX_QUALIFICATION_TTL_MS	comparison-reference-module-constant	1 <= ttl_ms <= MAX_QUALIFICATION_TTL_MS
+mycelium_demo/public_origin_proxy.py:240:51:comparison:0	mycelium_demo/public_origin_proxy.py:66:0:assignment:_HELPER_ZIP_MAX_BYTES	comparison-reference-module-constant	0 < named.st_size <= _HELPER_ZIP_MAX_BYTES
+mycelium_gate_requirements/control.py:84:11:comparison:0	mycelium_gate_requirements/control.py:42:0:assignment:MAX_REQUEST_TTL_SECONDS	comparison-reference-module-constant	0 < ttl_seconds <= MAX_REQUEST_TTL_SECONDS
+mycelium_gate_requirements/control.py:180:20:comparison:0	mycelium_gate_requirements/control.py:42:0:assignment:MAX_REQUEST_TTL_SECONDS	comparison-reference-module-constant	0 < request['expires_at'] - request['issued_at'] <= MAX_REQUEST_TTL_SECONDS
+mycelium_live/activation.py:216:19:comparison:0	mycelium_live/activation.py:27:0:assignment:MAX_PLAN_BYTES	comparison-reference-module-constant	0 < metadata.st_size <= MAX_PLAN_BYTES
+mycelium_live/artifact_transport.py:425:23:comparison:1	mycelium_live/artifact_transport.py:41:0:assignment:_MAX_REQUEST_BYTES	comparison-reference-module-constant	1 <= length <= _MAX_REQUEST_BYTES
+mycelium_live/phone_stage_session.py:203:23:comparison:0	mycelium_live/phone_stage_session.py:28:0:assignment:_MAX_BYTES	comparison-reference-module-constant	0 < len(response_bytes) <= _MAX_BYTES
+mycelium_live/representation.py:102:15:comparison:0	mycelium_live/representation.py:20:0:assignment:_MAX_ASSIGNMENT_BYTES	comparison-reference-module-constant	0 < size <= _MAX_ASSIGNMENT_BYTES
+mycelium_live/router_port.py:274:42:comparison:0	mycelium_live/router_port.py:222:0:assignment:_MAX_RECOVERY_DEADLINE_MS	comparison-reference-module-constant	0 < value <= _MAX_RECOVERY_DEADLINE_MS
+mycelium_live/router_port.py:674:19:comparison:0	mycelium_live/router_port.py:440:0:assignment:A10_MAXIMUM_COLLECTION_WINDOW_MS	comparison-reference-module-constant	0 <= window_ms <= A10_MAXIMUM_COLLECTION_WINDOW_MS
+mycelium_live/router_port.py:2226:19:comparison:0	mycelium_live/router_port.py:226:0:assignment:_ROTATED_TERMINAL_RECORD_MAX_AGE_MS	comparison-reference-module-constant	0 <= now_ms - carried_ms <= _ROTATED_TERMINAL_RECORD_MAX_AGE_MS
+mycelium_mobile/android_onboarding.py:285:15:comparison:1	mycelium_mobile/android_onboarding.py:111:0:assignment:_REQUEST_TTL_MAX	comparison-reference-module-constant	1 <= ttl_seconds <= _REQUEST_TTL_MAX
+mycelium_mobile/android_sidecar.py:102:16:comparison:64	mycelium_mobile/android_sidecar.py:18:0:assignment:MAX_SIDECAR_BYTES	comparison-reference-module-constant	64 <= before.st_size <= MAX_SIDECAR_BYTES
+mycelium_mobile/android_sidecar.py:465:11:comparison:attempt + 1	mycelium_mobile/android_sidecar.py:422:25:parameter:poll_attempts	comparison-reference-same-scope-parameter	attempt + 1 < poll_attempts
+mycelium_mobile/pixel_stage.py:792:15:comparison:0	mycelium_mobile/pixel_stage.py:32:0:assignment:MAX_BODY_BYTES	comparison-reference-module-constant	0 <= length <= MAX_BODY_BYTES
+mycelium_mobile/termux_bridge.py:107:19:comparison:0	mycelium_mobile/termux_bridge.py:14:0:assignment:MAX_RESPONSE_BYTES	comparison-reference-module-constant	0 <= length <= MAX_RESPONSE_BYTES
+mycelium_mobile/termux_bridge_server.py:167:19:comparison:1	mycelium_mobile/termux_bridge_server.py:20:0:assignment:MAX_REQUEST_BYTES	comparison-reference-module-constant	1 <= length <= MAX_REQUEST_BYTES
+mycelium_node/process.py:3262:11:comparison:len(frame) + 1	mycelium_node/process.py:2001:8:assignment:self.max_frame_bytes	comparison-reference-constructor-field	len(frame) + 1 > self.max_frame_bytes
+mycelium_product_spine/region_declarations.py:70:53:comparison:0	mycelium_product_spine/region_declarations.py:47:0:assignment:MAX_BYTES	comparison-reference-module-constant	0 < info.st_size <= MAX_BYTES
+mycelium_product_spine/transport_history.py:74:41:comparison:1	mycelium_product_spine/transport_history.py:43:0:assignment:MAX_RETAINED	comparison-reference-module-constant	1 <= limit <= MAX_RETAINED
+mycelium_router/wire.py:386:13:comparison:2	mycelium_router/wire.py:89:0:assignment:A7_MAX_SIGNED_ACK_BYTES	comparison-reference-module-constant	2 <= len(message.signed_ack.encode('utf-8')) <= A7_MAX_SIGNED_ACK_BYTES
+mycelium_seed/route_assignment.py:375:26:comparison:0	mycelium_seed/route_assignment.py:55:0:assignment:MAX_ASSIGNMENT_TTL_SECONDS	comparison-reference-module-constant	0 < ttl <= MAX_ASSIGNMENT_TTL_SECONDS
+mycelium_seed/route_assignment.py:658:19:comparison:0	mycelium_seed/route_assignment.py:51:0:assignment:MAX_REQUEST_TTL_SECONDS	comparison-reference-module-constant	0 < expires_at - issued_at <= MAX_REQUEST_TTL_SECONDS
+physical_inference_node.py:2332:20:comparison:0	physical_inference_node.py:107:0:assignment:MAX_COMMAND_BYTES	comparison-reference-module-constant	0 < before.st_size <= MAX_COMMAND_BYTES
+physical_inference_node.py:2377:24:comparison:0	physical_inference_node.py:107:0:assignment:MAX_COMMAND_BYTES	comparison-reference-module-constant	0 < before.st_size <= MAX_COMMAND_BYTES
+physical_inference_qualification.py:737:19:comparison:0.0	physical_inference_qualification.py:80:0:assignment:_MAX_RUNNER_TIMEOUT_SECONDS	comparison-reference-module-constant	0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
+physical_inference_qualification.py:785:19:comparison:0.0	physical_inference_qualification.py:80:0:assignment:_MAX_RUNNER_TIMEOUT_SECONDS	comparison-reference-module-constant	0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
+physical_inference_qualification.py:1175:19:comparison:0	physical_inference_qualification.py:78:0:assignment:_MAX_TRANSFER_BYTES	comparison-reference-module-constant	0 <= record['size_bytes'] <= _MAX_TRANSFER_BYTES
+scripts/run_a5_benchmark_supervisor.py:52:55:comparison:0	scripts/run_a5_benchmark_supervisor.py:46:50:parameter:maximum_bytes	comparison-reference-same-scope-parameter	0 < before.st_size <= maximum_bytes
+mycelium_a13_macos/managed_control.py:1958:16:comparison:timeout	mycelium_a13_macos/managed_control.py:1933:25:parameter:timeout	zero-validation-same-scope-parameter	timeout > 0
+mycelium_a13_macos/peer.py:126:15:comparison:timeout	mycelium_a13_macos/peer.py:117:25:parameter:timeout	zero-validation-same-scope-parameter	timeout <= 0
+mycelium_a13_macos/token_receipt_mailbox.py:78:78:comparison:timeout	mycelium_a13_macos/token_receipt_mailbox.py:77:30:parameter:timeout	zero-validation-same-scope-parameter	timeout < 0
+mycelium_evidence.py:212:43:comparison:live_ttl_ms	mycelium_evidence.py:207:27:parameter:live_ttl_ms	zero-validation-same-scope-parameter	live_ttl_ms <= 0
+mycelium_gossip/service.py:188:30:comparison:suspicion_grace_seconds	mycelium_gossip/service.py:178:41:parameter:suspicion_grace_seconds	zero-validation-same-scope-parameter	suspicion_grace_seconds <= 0
+mycelium_gossip/service.py:190:11:comparison:worker_poll_seconds	mycelium_gossip/service.py:180:37:parameter:worker_poll_seconds	zero-validation-same-scope-parameter	worker_poll_seconds <= 0
+mycelium_gossip/service.py:190:39:comparison:repair_interval_seconds	mycelium_gossip/service.py:181:41:parameter:repair_interval_seconds	zero-validation-same-scope-parameter	repair_interval_seconds <= 0
+mycelium_gossip/service.py:190:71:comparison:shutdown_timeout_seconds	mycelium_gossip/service.py:182:42:parameter:shutdown_timeout_seconds	zero-validation-same-scope-parameter	shutdown_timeout_seconds <= 0
+mycelium_iroh_sidecar/client.py:169:11:comparison:timeout	mycelium_iroh_sidecar/client.py:165:25:parameter:timeout	zero-validation-same-scope-parameter	timeout <= 0
+mycelium_live/router_port.py:3347:15:comparison:timeout_seconds	mycelium_live/router_port.py:3343:48:parameter:timeout_seconds	zero-validation-same-scope-parameter	timeout_seconds <= 0
+mycelium_node/membership.py:153:15:comparison:message_ttl_seconds	mycelium_node/membership.py:137:37:parameter:message_ttl_seconds	zero-validation-same-scope-parameter	message_ttl_seconds <= 0
+mycelium_node/process.py:1997:15:comparison:max_frame_bytes	mycelium_node/process.py:1966:31:parameter:max_frame_bytes	zero-validation-same-scope-parameter	max_frame_bytes <= 0
+mycelium_request_gateway/client.py:160:81:comparison:timeout	mycelium_request_gateway/client.py:138:77:parameter:timeout	zero-validation-same-scope-parameter	timeout <= 0
+mycelium_router/transports/iroh.py:865:11:comparison:delivery_timeout_seconds	mycelium_router/transports/iroh.py:854:42:parameter:delivery_timeout_seconds	zero-validation-same-scope-parameter	delivery_timeout_seconds <= 0
+mycelium_router/transports/iroh.py:865:44:comparison:poll_interval_seconds	mycelium_router/transports/iroh.py:855:39:parameter:poll_interval_seconds	zero-validation-same-scope-parameter	poll_interval_seconds <= 0
+mycelium_seed/http.py:841:15:comparison:timeout	mycelium_seed/http.py:831:25:parameter:timeout	zero-validation-same-scope-parameter	timeout <= 0
+mycelium_live/router_port.py:1352:14:comparison:len(retained)	mycelium_live/router_port.py:78:0:assignment:_RETAINED_SOURCE_FAILURES_MAX	comparison-reference-module-constant	len(retained) > _RETAINED_SOURCE_FAILURES_MAX
+mycelium_live/router_port.py:1370:14:comparison:len(retained)	mycelium_live/router_port.py:78:0:assignment:_RETAINED_SOURCE_FAILURES_MAX	comparison-reference-module-constant	len(retained) > _RETAINED_SOURCE_FAILURES_MAX
+mycelium_live/router_port.py:1384:18:comparison:len(outcomes)	mycelium_live/router_port.py:78:0:assignment:_RETAINED_SOURCE_FAILURES_MAX	comparison-reference-module-constant	len(outcomes) > _RETAINED_SOURCE_FAILURES_MAX
+mycelium_live/router_port.py:1397:14:comparison:len(retained)	mycelium_live/router_port.py:78:0:assignment:_RETAINED_SOURCE_FAILURES_MAX	comparison-reference-module-constant	len(retained) > _RETAINED_SOURCE_FAILURES_MAX
+mycelium_demo/gateway_control_runtime.py:1370:12:keyword:max_buffered_events	mycelium_demo/gateway_control_runtime.py:1344:59:cli-default:--max-buffered-events	argparse-option	args.max_buffered_events
+mycelium_demo/public_origin_proxy.py:769:12:keyword:max_header_bytes	mycelium_demo/public_origin_proxy.py:808:56:cli-default:--max-header-bytes	argparse-option	args.max_header_bytes
+mycelium_demo/public_origin_proxy.py:770:12:keyword:max_body_bytes	mycelium_demo/public_origin_proxy.py:809:54:cli-default:--max-body-bytes	argparse-option	args.max_body_bytes
+mycelium_demo/public_origin_proxy.py:771:12:keyword:upstream_timeout_seconds	mycelium_demo/public_origin_proxy.py:810:66:cli-default:--upstream-timeout-seconds	argparse-option	args.upstream_timeout_seconds
+mycelium_node/__main__.py:630:12:keyword:heartbeat_interval_seconds	mycelium_node/__main__.py:482:60:cli-default:--heartbeat-interval	argparse-option	args.heartbeat_interval
+mycelium_node/__main__.py:1139:12:keyword:heartbeat_interval_seconds	mycelium_node/__main__.py:482:60:cli-default:--heartbeat-interval	argparse-option	args.heartbeat_interval
+mycelium_seed/__main__.py:394:16:keyword:window_seconds	mycelium_seed/__main__.py:125:62:cli-default:--pairing-window-seconds	argparse-option	args.pairing_window_seconds
+mycelium_seed/route_assignment.py:954:16:keyword:ttl_seconds	mycelium_seed/route_assignment.py:884:52:cli-default:--ttl-seconds	argparse-option	args.ttl_seconds
+mycelium_swarm_directory/watchdog.py:166:63:keyword:cooldown	mycelium_swarm_directory/watchdog.py:146:50:cli-default:--cooldown	argparse-option	args.cooldown
+physical_inference_node.py:6691:12:keyword:command_timeout	physical_inference_node.py:6667:57:cli-default:--command-timeout	argparse-option	args.command_timeout
+scripts/a10_batch_policy.py:134:8:keyword:timeout_s	scripts/a10_batch_policy.py:108:49:cli-default:--timeout	argparse-option	args.timeout
+scripts/a13_operator/round15_supervisor.py:188:40:keyword:timeout	scripts/a13_operator/round15_supervisor.py:113:55:cli-default:--chain-timeout	argparse-option	args.chain_timeout
+scripts/a13_operator/wp8_03_laptop_driver.py:176:59:keyword:timeout	scripts/a13_operator/wp8_03_laptop_driver.py:174:49:cli-default:--timeout	argparse-option	args.timeout
+scripts/a8_run_physical_gate.py:1295:20:assignment:case_inputs['poll_interval_seconds']	scripts/a8_run_physical_gate.py:957:8:cli-default:--poll-interval-seconds	argparse-option	args.poll_interval_seconds
+scripts/build_a7_operator_plan.py:175:6:dict-field:max_checkpoint_bytes	scripts/build_a7_operator_plan.py:227:54:cli-default:--max-checkpoint-bytes	argparse-option	args.max_checkpoint_bytes
+scripts/build_a7_operator_plan.py:176:6:dict-field:worker_timeout_s	scripts/build_a7_operator_plan.py:228:52:cli-default:--worker-timeout-s	argparse-option	args.worker_timeout_s
+scripts/build_a7_operator_plan.py:177:60:dict-field:reserved_kv_bytes	scripts/build_a7_operator_plan.py:229:51:cli-default:--reserved-kv-bytes	argparse-option	args.reserved_kv_bytes
+scripts/build_a7_operator_plan.py:177:105:dict-field:ttl_ms	scripts/build_a7_operator_plan.py:230:40:cli-default:--ttl-ms	argparse-option	args.ttl_ms
+scripts/mint_swarm_invites.py:37:12:keyword:ttl_seconds	scripts/mint_swarm_invites.py:28:51:cli-default:--ttl-seconds	argparse-option	args.ttl_seconds
+scripts/qualify_a5_replica_track.py:493:12:keyword:timeout_seconds	scripts/qualify_a5_replica_track.py:611:63:cli-default:--track-timeout-seconds	argparse-option	args.track_timeout_seconds
+scripts/qualify_a5_replica_track.py:504:12:keyword:timeout_seconds	scripts/qualify_a5_replica_track.py:611:63:cli-default:--track-timeout-seconds	argparse-option	args.track_timeout_seconds
+scripts/run_a10_concurrency_probe.py:312:8:keyword:timeout_seconds	scripts/run_a10_concurrency_probe.py:301:57:cli-default:--timeout-seconds	argparse-option	args.timeout_seconds
+scripts/run_a10_physical_gate.py:1870:48:keyword:timeout_s	scripts/run_a10_physical_gate.py:1807:51:cli-default:--timeout-s	argparse-option	arguments.timeout_s
+scripts/run_a12_mobile_physical_gate.py:670:9:keyword:heat_window_seconds	scripts/run_a12_mobile_physical_gate.py:641:58:cli-default:--heat-window-seconds	argparse-option	arguments.heat_window_seconds
+scripts/run_a12_mobile_physical_gate.py:671:9:keyword:thermal_probe_interval_seconds	scripts/run_a12_mobile_physical_gate.py:642:69:cli-default:--thermal-probe-interval-seconds	argparse-option	arguments.thermal_probe_interval_seconds
+scripts/run_a12_mobile_physical_gate.py:672:9:keyword:command_timeout_seconds	scripts/run_a12_mobile_physical_gate.py:640:62:cli-default:--command-timeout-seconds	argparse-option	arguments.command_timeout_seconds
+scripts/run_a12_mobile_physical_gate.py:673:9:keyword:timeout	scripts/run_a12_mobile_physical_gate.py:643:46:cli-default:--timeout	argparse-option	arguments.timeout
+scripts/run_a9_withdrawal_browser.py:410:33:keyword:timeout_s	scripts/run_a9_withdrawal_browser.py:383:51:cli-default:--timeout-s	argparse-option	args.timeout_s
+two_process_runtime_qualification.py:804:31:keyword:timeout_seconds	two_process_runtime_qualification.py:790:8:cli-default:--timeout-seconds	argparse-option	args.timeout_seconds
+two_process_runtime_qualification.py:808:31:keyword:timeout_seconds	two_process_runtime_qualification.py:790:8:cli-default:--timeout-seconds	argparse-option	args.timeout_seconds
+mycelium_node/__main__.py:632:12:keyword:reconnect_base_seconds	mycelium_node/__main__.py:484:64:cli-default:--reconnect-base-seconds	argparse-option	args.reconnect_base_seconds
+mycelium_node/__main__.py:1141:12:keyword:reconnect_base_seconds	mycelium_node/__main__.py:484:64:cli-default:--reconnect-base-seconds	argparse-option	args.reconnect_base_seconds
+mycelium_node/__main__.py:633:12:keyword:reconnect_max_seconds	mycelium_node/__main__.py:485:63:cli-default:--reconnect-max-seconds	argparse-option	args.reconnect_max_seconds
+mycelium_node/__main__.py:1142:12:keyword:reconnect_max_seconds	mycelium_node/__main__.py:485:63:cli-default:--reconnect-max-seconds	argparse-option	args.reconnect_max_seconds
+scripts/a13_operator/round15_supervisor.py:158:8:dict-field:max_seconds	scripts/a13_operator/round15_supervisor.py:111:51:cli-default:--max-seconds	argparse-option	args.max_seconds
+scripts/a8_run_physical_gate.py:1032:16:keyword:valid_for_seconds	scripts/a8_run_physical_gate.py:986:68:cli-default:--valid-for-seconds	argparse-option	args.valid_for_seconds
+scripts/capture_member_capacity_snapshot.py:289:8:keyword:resource_valid_for_ms	scripts/capture_member_capacity_snapshot.py:276:8:cli-default:--resource-valid-for-ms	argparse-option	args.resource_valid_for_ms
+mycelium_mobile/artifact_grant.py:211:31:parameter:maximum_chunk_bytes	mycelium_mobile/artifact_grant.py:42:0:assignment:MAX_CHUNK_BYTES	module-constant	MAX_CHUNK_BYTES
+mycelium_mobile/artifact_grant.py:236:8:dict-field:maximum_bytes_per_second	mycelium_mobile/artifact_grant.py:210:36:parameter:maximum_bytes_per_second	same-scope-parameter	maximum_bytes_per_second
+mycelium_node/process.py:2909:39:keyword:timeout	mycelium_node/process.py:2906:12:assignment:interval	same-scope-binding	interval
+mycelium_node/process.py:2915:16:positional-call:threading.Event().wait	mycelium_node/process.py:2906:12:assignment:interval	same-scope-binding	interval
+mycelium_platform_neutral/int8_stage_benchmark.py:230:8:dict-field:paired_windows	mycelium_platform_neutral/int8_stage_benchmark.py:204:26:parameter:paired_windows	same-scope-parameter	paired_windows
+mycelium_swarm_directory/ratelimit.py:12:8:assignment:self.window	mycelium_swarm_directory/ratelimit.py:10:51:parameter:window	same-scope-parameter	window
+mycelium_interactive/swarm.py:349:8:assignment:self._invite_ttl	mycelium_interactive/swarm.py:312:36:parameter:invite_ttl_seconds	validated-parameter-default	_positive_finite(invite_ttl_seconds, 'invite_ttl_invalid')
+mycelium_interactive/swarm.py:350:8:assignment:self._session_ttl	mycelium_interactive/swarm.py:313:37:parameter:session_ttl_seconds	validated-parameter-default	_positive_finite(session_ttl_seconds, 'session_ttl_invalid')
+mycelium_interactive/swarm.py:351:8:assignment:self._peer_idle_ttl	mycelium_interactive/swarm.py:314:39:parameter:peer_idle_ttl_seconds	validated-parameter-default	_positive_finite(peer_idle_ttl_seconds, 'peer_idle_ttl_invalid')
+mycelium_live/command_controller.py:303:8:assignment:self._maximum_requests	mycelium_live/command_controller.py:298:32:parameter:maximum_requests	validated-parameter-default	_integer(maximum_requests, 'maximum_requests', minimum=1)
+mycelium_live/command_controller.py:310:8:assignment:self._maximum_commands_per_request	mycelium_live/command_controller.py:299:44:parameter:maximum_commands_per_request	validated-parameter-default	_integer(maximum_commands_per_request, 'maximum_commands_per_request', minimum=1)
+mycelium_live/command_controller.py:317:8:assignment:self._cooperative_step_ms	mycelium_live/command_controller.py:300:35:parameter:cooperative_step_ms	validated-parameter-default	_integer(cooperative_step_ms, 'cooperative_step_ms', minimum=1)
+mycelium_live/command_controller.py:322:8:assignment:self._interruption_and_cleanup_ms	mycelium_live/command_controller.py:301:43:parameter:interruption_and_cleanup_ms	validated-parameter-default	_integer(interruption_and_cleanup_ms, 'interruption_and_cleanup_ms', minimum=1)
+mycelium_node/process.py:1912:4:assignment:timeout	mycelium_node/process.py:1896:37:parameter:command_timeout_seconds	validated-parameter-default	_positive_seconds(command_timeout_seconds, 'command_timeout_seconds')
+mycelium_node/process.py:1988:8:assignment:self.response_timeout_seconds	mycelium_node/process.py:1964:42:parameter:response_timeout_seconds	validated-parameter-default	_positive_seconds(response_timeout_seconds, 'response_timeout_seconds')
+mycelium_node/process.py:1991:8:assignment:self.shutdown_timeout_seconds	mycelium_node/process.py:1965:42:parameter:shutdown_timeout_seconds	validated-parameter-default	_positive_seconds(shutdown_timeout_seconds, 'shutdown_timeout_seconds')
+mycelium_seed/route_assignment.py:374:4:assignment:ttl	mycelium_seed/route_assignment.py:348:25:parameter:ttl_seconds	validated-parameter-default	_number(ttl_seconds)
+mycelium_a6_product_fault_seams.py:288:42:parameter:poll_seconds	mycelium_a6_product_fault_seams.py:208:8:assignment:self._poll	optional-parameter-default	None
+mycelium_deadlines.py:1195:47:parameter:total_budget_seconds	mycelium_deadlines.py:188:0:assignment:CANCEL_AND_CLEANUP_BUDGET_SECONDS	optional-parameter-default	None
+mycelium_deadlines.py:1196:51:parameter:fallback_reserve_seconds	mycelium_deadlines.py:193:0:assignment:CLEANUP_FALLBACK_RESERVE_SECONDS	optional-parameter-default	None
+mycelium_deadlines.py:1198:46:parameter:cooperative_step_ms	mycelium_deadlines.py:250:0:assignment:COMMAND_DEFAULT_COOPERATIVE_STEP_MS	optional-parameter-default	None
+mycelium_deadlines.py:1199:54:parameter:interruption_and_cleanup_ms	mycelium_deadlines.py:234:0:assignment:COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS	optional-parameter-default	None
+mycelium_deadlines.py:1200:56:parameter:qualification_max_age_seconds	mycelium_deadlines.py:313:0:assignment:QUALIFICATION_MAX_AGE_SECONDS	optional-parameter-default	None
+mycelium_deadlines.py:1201:59:parameter:requalification_interval_seconds	mycelium_deadlines.py:319:0:assignment:REQUALIFICATION_INTERVAL_SECONDS	optional-parameter-default	None
+mycelium_gossip/service.py:919:46:parameter:quarantine_seconds	mycelium_gossip/service.py:203:8:assignment:self._default_quarantine_seconds	optional-parameter-default	None
+mycelium_interactive/swarm.py:497:36:parameter:ttl_seconds	mycelium_interactive/swarm.py:349:8:assignment:self._invite_ttl	optional-parameter-default	None
+mycelium_internet/enrollment.py:599:40:parameter:backoff_seconds	mycelium_internet/enrollment.py:146:8:assignment:self._backoff_seconds	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:434:35:parameter:timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:531:35:parameter:timeout	mycelium_iroh_sidecar/client.py:29:0:assignment:PEER_CONNECT_DEADLINE_SECONDS	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:578:35:parameter:timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:911:43:parameter:timeout_seconds	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	optional-parameter-default	None
+mycelium_mobile/a12_activation.py:1722:29:parameter:maximum_age_ms	mycelium_mobile/a12_activation.py:1932:0:assignment:MAX_QUALIFYING_OBSERVATION_AGE_MS	optional-parameter-default	None
+mycelium_node/process.py:3224:40:parameter:timeout_seconds	mycelium_node/process.py:1988:8:assignment:self.response_timeout_seconds	optional-parameter-default	None
+mycelium_node/process.py:3340:55:parameter:timeout	mycelium_node/process.py:1988:8:assignment:self.response_timeout_seconds	optional-parameter-default	None
+mycelium_router/transports/iroh.py:1331:53:parameter:timeout	mycelium_router/transports/iroh.py:889:8:assignment:self.delivery_timeout_seconds	optional-parameter-default	None
+mycelium_deadlines.py:1221:8:assignment:reserve	mycelium_deadlines.py:1196:51:parameter:fallback_reserve_seconds	resolved-optional-value	CLEANUP_FALLBACK_RESERVE_SECONDS if fallback_reserve_seconds is None else _number(fallback_reserve_seconds, 'fallback_reserve_seconds')
+mycelium_gossip/service.py:922:8:assignment:duration	mycelium_gossip/service.py:919:46:parameter:quarantine_seconds	resolved-optional-value	self._default_quarantine_seconds if quarantine_seconds is None else quarantine_seconds
+mycelium_interactive/swarm.py:500:8:assignment:ttl	mycelium_interactive/swarm.py:497:36:parameter:ttl_seconds	resolved-optional-value	self._invite_ttl if ttl_seconds is None else _positive_finite(ttl_seconds, 'invite_ttl_invalid')
+mycelium_iroh_sidecar/client.py:466:8:assignment:selected_timeout	mycelium_iroh_sidecar/client.py:434:35:parameter:timeout	resolved-optional-value	self._timeout if timeout is None else timeout
+mycelium_iroh_sidecar/client.py:610:8:assignment:selected_timeout	mycelium_iroh_sidecar/client.py:578:35:parameter:timeout	resolved-optional-value	self._timeout if timeout is None else timeout
+mycelium_node/process.py:3238:8:assignment:timeout	mycelium_node/process.py:3224:40:parameter:timeout_seconds	resolved-optional-value	self.response_timeout_seconds if timeout_seconds is None else _positive_seconds(timeout_seconds, 'timeout_seconds')
+mycelium_node/process.py:3354:8:assignment:response_timeout	mycelium_node/process.py:3340:55:parameter:timeout	resolved-optional-value	self.response_timeout_seconds if timeout is None else float(timeout)
+mycelium_router/transports/iroh.py:1335:12:keyword:timeout	mycelium_router/transports/iroh.py:1331:53:parameter:timeout	resolved-optional-value	self.delivery_timeout_seconds if timeout is None else timeout
+mycelium_node/process.py:2699:16:assignment:deadline	mycelium_node/process.py:1991:8:assignment:self.shutdown_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.shutdown_timeout_seconds
+mycelium_node/process.py:2721:12:assignment:deadline	mycelium_node/process.py:1991:8:assignment:self.shutdown_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.shutdown_timeout_seconds
+mycelium_node/process.py:3318:12:assignment:deadline	mycelium_node/process.py:1991:8:assignment:self.shutdown_timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.shutdown_timeout_seconds
+mycelium_swarm_directory/ratelimit.py:24:25:comparison:now - bucket[0]	mycelium_swarm_directory/ratelimit.py:12:8:assignment:self.window	comparison-reference-constructor-field	now - bucket[0] >= self.window
+mycelium_swarm_directory/ratelimit.py:37:65:comparison:now - b[-1]	mycelium_swarm_directory/ratelimit.py:12:8:assignment:self.window	comparison-reference-constructor-field	now - b[-1] >= self.window
+mycelium_gateway/asgi.py:284:20:keyword:timeout	mycelium_gateway/asgi.py:115:8:assignment:self._poll_interval	upper-cap-reference	min(self._poll_interval, remaining)
+mycelium_live/local_preparer.py:1147:8:assignment:ttl_ms	mycelium_live/local_preparer.py:41:0:assignment:_STAGE_PACK_MIN_AUTHORITY_TTL_MS	lower-floor-reference	max(_STAGE_PACK_MIN_AUTHORITY_TTL_MS, estimated_ms + _STAGE_PACK_MIN_AUTHORITY_TTL_MS)
+mycelium_live/phone_stage_session.py:108:8:assignment:self._timeout	mycelium_live/phone_stage_session.py:29:0:assignment:_MAX_SECONDS	upper-cap-reference	min(timeout_seconds, _MAX_SECONDS)
+mycelium_live/route.py:3036:12:assignment:probe_deadline	mycelium_live/route.py:101:0:assignment:_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS	lower-floor-reference	max(_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS, float(getattr(self._sessions.get(node_id), 'idle_probe_floor_seconds', 0.0) or 0.0))
+mycelium_live/route.py:3619:16:assignment:attempt_deadline	mycelium_live/route.py:141:0:assignment:_CLEANUP_SNAPSHOT_SLICE_SECONDS	upper-cap-reference	min(deadline_monotonic_s, time.monotonic() + _CLEANUP_SNAPSHOT_SLICE_SECONDS)
+mycelium_live/route.py:3658:20:positional-call:time.sleep	mycelium_live/route.py:102:0:assignment:_CLEANUP_RECEIPT_POLL_SECONDS	upper-cap-reference	min(_CLEANUP_RECEIPT_POLL_SECONDS, max(0.0, deadline_monotonic_s - time.monotonic()))
+mycelium_live/route.py:3694:12:positional-call:time.sleep	mycelium_live/route.py:102:0:assignment:_CLEANUP_RECEIPT_POLL_SECONDS	upper-cap-reference	min(_CLEANUP_RECEIPT_POLL_SECONDS, remaining)
+mycelium_live/route.py:3935:12:assignment:attempt_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	upper-cap-reference	min(final_deadline_monotonic_s, time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS)
+mycelium_live/route.py:3991:24:keyword:retry_not_before_monotonic_s	mycelium_live/route.py:102:0:assignment:_CLEANUP_RECEIPT_POLL_SECONDS	upper-cap-reference	min(final_deadline_monotonic_s, time.monotonic() + _CLEANUP_RECEIPT_POLL_SECONDS)
+mycelium_live/router_port.py:337:16:positional-call:self._done.wait	mycelium_live/router_port.py:212:0:assignment:_RECOVERY_DEADLINE_POLL_SECONDS	upper-cap-reference	min(_RECOVERY_DEADLINE_POLL_SECONDS, remaining_ms / 1000.0)
+mycelium_node/process.py:1693:12:positional-call:time.sleep	mycelium_node/process.py:1656:22:parameter:interval	upper-cap-reference	min(interval, remaining)
+mycelium_router/transports/iroh.py:2200:8:assignment:timeout	mycelium_router/transports/iroh.py:131:0:assignment:_STALL_CANCEL_TIMEOUT_SECONDS	upper-cap-reference	min(_STALL_CANCEL_TIMEOUT_SECONDS, self._remaining(deadline))
+mycelium_router/transports/iroh.py:3017:24:keyword:timeout	mycelium_router/transports/iroh.py:81:0:assignment:_DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS	upper-cap-reference	min(_DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS, remaining)
+mycelium_router/transports/iroh.py:3690:16:positional-call:self._stop.wait	mycelium_router/transports/iroh.py:890:8:assignment:self.poll_interval_seconds	upper-cap-reference	min(self.poll_interval_seconds, remaining)
+physical_inference_node.py:3524:12:keyword:delivery_timeout_seconds	physical_inference_node.py:109:0:assignment:_MAX_IROH_DELIVERY_TIMEOUT_SECONDS	upper-cap-reference	min(self.command_timeout, _MAX_IROH_DELIVERY_TIMEOUT_SECONDS)
+physical_inference_node.py:5683:12:positional-call:time.sleep	physical_inference_node.py:115:0:assignment:_CANCEL_RECEIPT_POLL_SECONDS	upper-cap-reference	min(_CANCEL_RECEIPT_POLL_SECONDS, remaining)
+physical_inference_node.py:5795:12:positional-call:time.sleep	physical_inference_node.py:115:0:assignment:_CANCEL_RECEIPT_POLL_SECONDS	upper-cap-reference	min(_CANCEL_RECEIPT_POLL_SECONDS, remaining)
+mycelium_router/mlx_runtime.py:1018:9:parameter:kv_lease_renewal_seconds	mycelium_router/leases.py:35:0:assignment:DEFAULT_KV_LEASE_RENEWAL_SECONDS	imported-constant	DEFAULT_KV_LEASE_RENEWAL_SECONDS
+mycelium_router/numpy_runtime.py:224:9:parameter:kv_lease_renewal_seconds	mycelium_router/leases.py:35:0:assignment:DEFAULT_KV_LEASE_RENEWAL_SECONDS	imported-constant	DEFAULT_KV_LEASE_RENEWAL_SECONDS
+mycelium_seed/http.py:260:4:assignment:numbers['max_clock_skew_seconds']	mycelium_membership/contracts.py:31:0:assignment:MAX_CLOCK_SKEW_SECONDS	imported-constant	MAX_CLOCK_SKEW_SECONDS
+scripts/run_a5_benchmark_supervisor.py:273:35:positional-timeout:select.select.timeout	scripts/run_a5_benchmark_supervisor.py:22:0:assignment:DETACH_ACK_TIMEOUT_SECONDS	module-constant	DETACH_ACK_TIMEOUT_SECONDS
+mycelium_deadlines.py:1228:12:keyword:fallback_reserve_seconds	mycelium_deadlines.py:1221:8:assignment:reserve	same-scope-binding	reserve
+mycelium_live/route.py:3625:20:keyword:deadline_monotonic_s	mycelium_live/route.py:3619:16:assignment:attempt_deadline	same-scope-binding	attempt_deadline
+mycelium_live/route.py:3942:20:keyword:deadline_monotonic_s	mycelium_live/route.py:3935:12:assignment:attempt_deadline	same-scope-binding	attempt_deadline
+mycelium_mobile/artifact_grant.py:237:8:dict-field:maximum_chunk_bytes	mycelium_mobile/artifact_grant.py:211:31:parameter:maximum_chunk_bytes	same-scope-parameter	maximum_chunk_bytes
+mycelium_node/process.py:3267:12:keyword:timeout	mycelium_node/process.py:3238:8:assignment:timeout	same-scope-binding	timeout
+mycelium_node/process.py:3361:16:keyword:timeout	mycelium_node/process.py:3354:8:assignment:response_timeout	same-scope-binding	response_timeout
+mycelium_router/transports/iroh.py:2205:65:keyword:timeout	mycelium_router/transports/iroh.py:2200:8:assignment:timeout	same-scope-binding	timeout
+mycelium_router/transports/iroh.py:2207:60:keyword:timeout	mycelium_router/transports/iroh.py:2200:8:assignment:timeout	same-scope-binding	timeout
+mycelium_router/transports/iroh.py:2211:65:keyword:timeout	mycelium_router/transports/iroh.py:2200:8:assignment:timeout	same-scope-binding	timeout
+mycelium_router/transports/iroh.py:2222:42:keyword:timeout	mycelium_router/transports/iroh.py:2200:8:assignment:timeout	same-scope-binding	timeout
+mycelium_a13_macos/control_session.py:141:23:comparison-lower-reference:max_commands	mycelium_a13_macos/control_session.py:138:37:parameter:max_commands	same-scope-parameter	max_commands
+mycelium_a13_macos/worker.py:117:16:comparison-lower-reference:_CLEANUP_RESERVE_SECONDS	mycelium_a13_macos/worker.py:35:0:assignment:_CLEANUP_RESERVE_SECONDS	module-constant	_CLEANUP_RESERVE_SECONDS
+mycelium_request_gateway/service.py:336:19:comparison-lower-reference:max_concurrent_requests	mycelium_request_gateway/service.py:309:39:parameter:max_concurrent_requests	same-scope-parameter	max_concurrent_requests
+mycelium_router/relay.py:3473:6:assignment:retention	mycelium_router/contracts.py:157:3:assignment:idempotency_retention_seconds	reviewed-config-clamp	max(0.0, self.scheduler.config.idempotency_retention_seconds)
+mycelium_router/relay.py:3515:6:assignment:retention	mycelium_router/contracts.py:157:3:assignment:idempotency_retention_seconds	reviewed-config-clamp	max(0.0, self.scheduler.config.idempotency_retention_seconds)
+mycelium_router/relay.py:3558:6:assignment:retention	mycelium_router/contracts.py:157:3:assignment:idempotency_retention_seconds	reviewed-config-clamp	max(0.0, self.scheduler.config.idempotency_retention_seconds)
+mycelium_router/scheduler.py:283:6:assignment:retention	mycelium_router/contracts.py:157:3:assignment:idempotency_retention_seconds	reviewed-config-clamp	max(0.0, self.config.idempotency_retention_seconds)
+mycelium_router/relay.py:3565:12:comparison:now - created_at	mycelium_router/relay.py:3558:6:assignment:retention	reviewed-local-comparison	now - created_at > retention
+mycelium_router/scheduler.py:287:39:comparison:now - seen_at	mycelium_router/scheduler.py:283:6:assignment:retention	reviewed-local-comparison	now - seen_at > retention
+mycelium_live/route.py:5330:28:keyword:deadline_monotonic_s	mycelium_live/route.py:141:0:assignment:_CLEANUP_SNAPSHOT_SLICE_SECONDS	monotonic-offset-module-constant	time.monotonic() + _CLEANUP_SNAPSHOT_SLICE_SECONDS
+mycelium_a7_node_wiring.py:238:16:keyword:seconds	mycelium_router/terminal_kv_retention.py:36:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_SECONDS	terminal-composer-policy	TERMINAL_KV_RETENTION_SECONDS
+mycelium_router/numpy_runtime.py:766:34:keyword:seconds	mycelium_router/terminal_kv_retention.py:36:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_SECONDS	terminal-composer-policy	seconds
+mycelium_router/numpy_runtime.py:766:51:keyword:max_entries	mycelium_router/terminal_kv_retention.py:37:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_ENTRIES	terminal-composer-policy	max_entries
+mycelium_router/mlx_runtime.py:1563:34:keyword:seconds	mycelium_router/terminal_kv_retention.py:36:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_SECONDS	terminal-composer-policy	seconds
+mycelium_router/mlx_runtime.py:1563:51:keyword:max_entries	mycelium_router/terminal_kv_retention.py:37:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_ENTRIES	terminal-composer-policy	max_entries
+mycelium_router/terminal_kv_retention.py:65:6:assignment:self.seconds	mycelium_router/terminal_kv_retention.py:36:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_SECONDS	terminal-composer-policy	float(seconds)
+mycelium_router/terminal_kv_retention.py:66:6:assignment:self.max_entries	mycelium_router/terminal_kv_retention.py:37:0:assignment:DEFAULT_TERMINAL_KV_RETENTION_ENTRIES	terminal-composer-policy	max_entries
+mycelium_router/terminal_kv_retention.py:79:6:assignment:deadline	mycelium_router/terminal_kv_retention.py:65:6:assignment:self.seconds	terminal-retention-window	min(float(now) + self.seconds, kv_lease_deadline(state))
+mycelium_router/terminal_kv_retention.py:106:82:comparison:float(now)	mycelium_router/terminal_kv_retention.py:79:6:assignment:deadline	retained-kv-expiry	float(now) >= deadline
+mycelium_router/terminal_kv_retention.py:83:12:comparison:len(self._held)	mycelium_router/terminal_kv_retention.py:66:6:assignment:self.max_entries	terminal-capacity-enforcement	len(self._held) > self.max_entries
+mycelium_router/terminal_kv_retention.py:53:13:comparison:self.seconds	mycelium_router/terminal_kv_retention.py:65:6:assignment:self.seconds	terminal-positive-policy	self.seconds > 0
+mycelium_router/terminal_kv_retention.py:59:16:comparison:seconds	mycelium_router/terminal_kv_retention.py:65:6:assignment:self.seconds	terminal-positive-policy	seconds > 0
+scripts/run_a4_physical_idle_staleness_gate.py:360:16:comparison:stale_at_quarantine_ms	scripts/run_a4_physical_idle_staleness_gate.py:50:0:assignment:QUARANTINE_STALE_MS	comparison-reference-module-constant	stale_at_quarantine_ms >= QUARANTINE_STALE_MS
+mycelium_a13_macos/adaptive_host.py:118:39:comparison:0	mycelium_a13_macos/adaptive_host.py:88:0:assignment:_MAX_BYTES	comparison-reference-module-constant	0 <= reserve <= _MAX_BYTES
+mycelium_a13_macos/adaptive_host.py:212:68:comparison:0	mycelium_a13_macos/adaptive_host.py:88:0:assignment:_MAX_BYTES	comparison-reference-module-constant	0 <= available <= _MAX_BYTES
+mycelium_a13_macos/run_exchange.py:85:55:comparison:0	mycelium_a13_macos/run_exchange.py:60:0:assignment:MAX_CLOCK_RTT_SECONDS	comparison-reference-module-constant	0 <= rtt <= MAX_CLOCK_RTT_SECONDS
+mycelium_a6_direct_socket.py:121:15:comparison:0	mycelium_a6_direct_socket.py:27:0:assignment:_MAX_BODY	comparison-reference-module-constant	0 < size <= _MAX_BODY
+mycelium_router/adaptive_overlay.py:85:62:comparison:0	mycelium_router/adaptive_overlay.py:56:0:assignment:_MAX_BYTES	comparison-reference-module-constant	0 <= budget <= _MAX_BYTES
+mycelium_router/transports/iroh.py:2609:19:comparison:size	mycelium_router/transports/iroh.py:127:0:assignment:_RTT_SAMPLE_MAX_BYTES	comparison-reference-module-constant	size <= _RTT_SAMPLE_MAX_BYTES
+mycelium_a13_macos/control_origin.py:221:17:comparison:0	mycelium_a13_macos/managed_control.py:95:0:assignment:MAX_FRAME_BYTES	comparison-imported-constant	0 < length <= MAX_FRAME_BYTES
+mycelium_mobile/pixel_client.py:110:15:comparison:1	mycelium_mobile/pixel_stage.py:34:0:assignment:MAX_HIDDEN_SIZE	comparison-imported-constant	1 <= hidden_size <= MAX_HIDDEN_SIZE
+mycelium_mobile/pixel_client.py:174:19:comparison:0	mycelium_mobile/pixel_stage.py:32:0:assignment:MAX_BODY_BYTES	comparison-imported-constant	0 <= length <= MAX_BODY_BYTES
+mycelium_seed/__main__.py:156:11:comparison:1	mycelium_seed/pairing.py:43:0:assignment:MAX_WINDOW_SECONDS	comparison-imported-constant	1 <= args.pairing_window_seconds <= MAX_WINDOW_SECONDS
+physical_inference_node.py:317:8:comparison:1	mycelium_deadlines.py:234:0:assignment:COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS	comparison-imported-constant	1 <= budget_ms <= mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+physical_inference_node.py:5846:20:comparison:1	mycelium_deadlines.py:234:0:assignment:COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS	comparison-imported-constant	1 <= data['deadline_budget_ms'] <= mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+scripts/a10_batch_policy.py:119:42:comparison:0	mycelium_a10_batch_policy_control.py:44:0:assignment:MAXIMUM_WINDOW_MS	comparison-imported-constant	0 <= args.window_ms <= MAXIMUM_WINDOW_MS
+mycelium_a13_macos/managed_staging.py:99:8:assignment:self.max_archive_bytes	mycelium_a13_macos/managed_staging.py:94:15:comparison:max_archive_bytes	validated-required-ceiling	max_archive_bytes
+mycelium_a13_windows/managed_host/staging.py:186:8:assignment:self.max_archive_bytes	mycelium_a13_windows/managed_host/staging.py:172:15:comparison:max_archive_bytes	validated-required-ceiling	max_archive_bytes
+mycelium_a13_macos/managed_staging.py:218:48:comparison:0	mycelium_a13_macos/managed_staging.py:99:8:assignment:self.max_archive_bytes	comparison-reference-constructor-field	0 < len(archive) <= self.max_archive_bytes
+mycelium_a13_macos/managed_staging.py:249:48:comparison:0	mycelium_a13_macos/managed_staging.py:99:8:assignment:self.max_archive_bytes	comparison-reference-constructor-field	0 < len(archive) <= self.max_archive_bytes
+mycelium_a13_windows/managed_host/staging.py:374:49:comparison:0	mycelium_a13_windows/managed_host/staging.py:186:8:assignment:self.max_archive_bytes	comparison-reference-constructor-field	0 < len(archive) <= self.max_archive_bytes
+mycelium_a13_windows/managed_host/staging.py:424:19:comparison:0	mycelium_a13_windows/managed_host/staging.py:186:8:assignment:self.max_archive_bytes	comparison-reference-constructor-field	0 < len(archive) <= self.max_archive_bytes
+mycelium_a13_macos/peer_model_source.py:100:0:assignment:MAX_CHUNK_BYTES	mycelium_a13_macos/peer_model_source.py:99:0:assignment:LAN_CHUNK_BYTES	module-constant	LAN_CHUNK_BYTES
+mycelium_a13_macos/peer_model_source.py:195:31:parameter:max_chunk_bytes	mycelium_a13_macos/peer_model_source.py:100:0:assignment:MAX_CHUNK_BYTES	module-constant	MAX_CHUNK_BYTES
+mycelium_a13_macos/peer_model_source.py:207:8:assignment:self.max_chunk_bytes	mycelium_a13_macos/peer_model_source.py:195:31:parameter:max_chunk_bytes	same-scope-parameter	max_chunk_bytes
+mycelium_a13_macos/peer_model_source.py:200:52:comparison:0	mycelium_a13_macos/peer_model_source.py:100:0:assignment:MAX_CHUNK_BYTES	comparison-reference-module-constant	0 < max_chunk_bytes <= MAX_CHUNK_BYTES
+mycelium_a13_macos/peer_model_source.py:266:37:comparison:0	mycelium_a13_macos/peer_model_source.py:207:8:assignment:self.max_chunk_bytes	comparison-reference-constructor-field	0 < length <= self.max_chunk_bytes
+mycelium_platform_neutral/migration_executor.py:118:48:keyword:max_bytes	mycelium_platform_neutral/migration_executor.py:39:0:assignment:MAX_FILE	module-constant	MAX_FILE
+mycelium_router/transports/iroh.py:389:21:parameter:max_bytes	mycelium_router/transports/iroh.py:68:0:assignment:_TRACE_ENTRY_BYTES	module-constant	_TRACE_ENTRY_BYTES
+mycelium_router/transports/iroh.py:1014:12:keyword:maxlen	mycelium_router/transports/iroh.py:313:0:assignment:_FAILURE_REPORT_HISTORY	module-constant	_FAILURE_REPORT_HISTORY
+mycelium_router/transports/iroh.py:2303:32:keyword:maxlen	mycelium_router/transports/iroh.py:313:0:assignment:_FAILURE_REPORT_HISTORY	module-constant	_FAILURE_REPORT_HISTORY
+mycelium_router/transports/iroh.py:2057:36:keyword:maxlen	mycelium_router/transports/iroh.py:123:0:assignment:_LINK_SAMPLE_LIMIT	module-constant	_LINK_SAMPLE_LIMIT
+mycelium_router/transports/iroh.py:2412:25:keyword:maxlen	mycelium_router/transports/iroh.py:309:0:assignment:_PEER_FRAME_HISTORY	module-constant	_PEER_FRAME_HISTORY
+physical_inference_node.py:966:42:parameter:limit_bytes	physical_inference_node.py:883:0:assignment:_STDERR_RING_BYTES	module-constant	_STDERR_RING_BYTES
+physical_inference_node.py:1011:44:parameter:limit_bytes	physical_inference_node.py:883:0:assignment:_STDERR_RING_BYTES	module-constant	_STDERR_RING_BYTES
+scripts/a13_operator/single_mac_ui_rehearsal.py:101:8:dict-field:max_download_bytes	scripts/a13_operator/single_mac_ui_rehearsal.py:49:0:assignment:SNAPSHOT_BYTES	module-constant	SNAPSHOT_BYTES
+scripts/a13_operator/single_mac_ui_rehearsal.py:101:46:dict-field:storage_limit_bytes	scripts/a13_operator/single_mac_ui_rehearsal.py:50:0:assignment:STORAGE	module-constant	STORAGE
+mycelium_a13_macos/target_app.py:140:12:keyword:max_archive_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-constant	MAX_ARCHIVE
+mycelium_a13_macos/target_app.py:140:42:keyword:max_disk_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-constant	MAX_ARCHIVE
+mycelium_a13_macos/target_app.py:206:31:keyword:max_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-constant	MAX_ARCHIVE
+mycelium_a13_macos/target_app.py:209:42:keyword:max_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-constant	MAX_ARCHIVE
+mycelium_a13_macos/target_app.py:217:12:keyword:max_archive_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-constant	MAX_ARCHIVE
+mycelium_a13_macos/demo_target.py:324:44:comparison-lower-reference:_CLEANUP_RESERVE_SECONDS	mycelium_a13_macos/worker.py:35:0:assignment:_CLEANUP_RESERVE_SECONDS	imported-constant	_CLEANUP_RESERVE_SECONDS
+mycelium_a13_macos/standing_consent.py:248:44:comparison-lower-reference:_CLEANUP_RESERVE_SECONDS	mycelium_a13_macos/worker.py:35:0:assignment:_CLEANUP_RESERVE_SECONDS	imported-constant	_CLEANUP_RESERVE_SECONDS
+mycelium_a7_node_agent.py:264:15:keyword:ttl_ms	mycelium_a7_node_agent.py:117:3:assignment:ttl_ms	typed-config-field	coverage.ttl_ms
+mycelium_gossip/zenoh_transport.py:332:44:keyword:timeout	mycelium_gossip/zenoh_transport.py:64:4:assignment:query_timeout_seconds	typed-config-field	self.config.query_timeout_seconds
+mycelium_router/relay.py:2360:12:keyword:maximum_bytes	mycelium_router/contracts.py:166:3:assignment:maximum_runtime_batch_bytes	typed-config-field	self.scheduler.config.maximum_runtime_batch_bytes
+mycelium_router/relay.py:2479:9:keyword:window_seconds	mycelium_router/contracts.py:171:3:assignment:live_hop_collection_window_seconds	typed-config-field	self.batch_controller.config.live_hop_collection_window_seconds
+mycelium_a13_macos/session_factory.py:44:44:keyword:timeout_seconds	mycelium_a13_macos/control_session.py:124:0:assignment:MAX_SESSION_TIMEOUT_SECONDS	imported-upper-cap-reference	min(timeout_seconds, MAX_SESSION_TIMEOUT_SECONDS)
+mycelium_a13_macos/work_acceptance.py:29:26:keyword:max_bytes	mycelium_a13_macos/managed_offers.py:32:0:assignment:MAX_ARCHIVE	imported-upper-cap-reference	min(MAX_ARCHIVE, limits.max_disk_bytes)
+mycelium_a13_macos/worker.py:888:16:assignment:timeout	mycelium_a13_macos/worker.py:883:12:assignment:timeout	upper-cap-reference	min(timeout, remaining)
+mycelium_live/route.py:4135:16:dict-field:deadline_budget_ms	mycelium_deadlines.py:234:0:assignment:COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS	imported-upper-cap-reference	min(mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS, remaining_ms)
+mycelium_router/transports/iroh.py:1633:16:assignment:deadline	mycelium_router/transports/iroh.py:1627:8:assignment:deadline	upper-cap-reference	min(deadline, watched_deadline - self._stall_policy.ordering_margin_seconds)
+mycelium_router/transports/iroh.py:2960:12:assignment:acknowledgement_timeout	mycelium_router/transports/iroh.py:75:0:assignment:_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS	upper-cap-reference	min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, self.delivery_timeout_seconds)
+mycelium_seed/route_assignment.py:827:8:assignment:ttl_ms	mycelium_mobile/artifact_grant.py:37:0:assignment:DEFAULT_GRANT_TTL_MS	imported-upper-cap-reference	min(artifact_grant.DEFAULT_GRANT_TTL_MS, int(float(row['expires_at']) * 1000) - now_ms)
+physical_inference_node.py:5316:12:assignment:deadline	physical_inference_node.py:110:0:assignment:_MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS	monotonic-upper-cap-reference	time.monotonic() + min(self.command_timeout * 0.8, _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS)
+physical_inference_node.py:5388:12:assignment:deadline	physical_inference_node.py:110:0:assignment:_MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS	monotonic-upper-cap-reference	time.monotonic() + min(self.command_timeout * 0.8, _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS)
+physical_inference_node.py:5480:8:assignment:deadline	physical_inference_node.py:114:0:assignment:_MAX_LEGACY_TERMINAL_CLEANUP_SECONDS	monotonic-upper-cap-reference	time.monotonic() + min(_MAX_LEGACY_TERMINAL_CLEANUP_SECONDS, self.command_timeout * 0.8)
+mycelium_a13_macos/worker.py:894:20:keyword:timeout	mycelium_a13_macos/worker.py:888:16:assignment:timeout	same-scope-binding	timeout
+mycelium_router/transports/iroh.py:1721:20:keyword:deadline	mycelium_router/transports/iroh.py:1633:16:assignment:deadline	same-scope-binding	deadline
+mycelium_router/transports/iroh.py:1770:16:keyword:deadline	mycelium_router/transports/iroh.py:1633:16:assignment:deadline	same-scope-binding	deadline
+mycelium_router/transports/iroh.py:1806:48:keyword:deadline	mycelium_router/transports/iroh.py:1633:16:assignment:deadline	same-scope-binding	deadline
+mycelium_router/batching.py:113:9:assignment:deadline_guard	mycelium_router/contracts.py:175:3:assignment:batch_deadline_guard_seconds	reviewed-config-clamp	max(0.0, self.config.batch_deadline_guard_seconds)
+mycelium_iroh_sidecar/client.py:706:35:parameter:timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:712:8:assignment:maximum_wait	mycelium_iroh_sidecar/client.py:706:35:parameter:timeout	resolved-poll-default	self._timeout if single_poll or timeout is None else timeout
+mycelium_iroh_sidecar/client.py:715:8:assignment:deadline	mycelium_iroh_sidecar/client.py:712:8:assignment:maximum_wait	monotonic-offset-same-scope-binding	time.monotonic() + maximum_wait
+mycelium_iroh_sidecar/client.py:726:20:keyword:deadline	mycelium_iroh_sidecar/client.py:715:8:assignment:deadline	same-scope-binding	deadline
+mycelium_iroh_sidecar/client.py:753:35:parameter:timeout	mycelium_iroh_sidecar/client.py:173:8:assignment:self._timeout	optional-parameter-default	None
+mycelium_iroh_sidecar/client.py:761:8:assignment:maximum_wait	mycelium_iroh_sidecar/client.py:753:35:parameter:timeout	resolved-poll-default	self._timeout if single_poll or timeout is None else timeout
+mycelium_iroh_sidecar/client.py:764:8:assignment:deadline	mycelium_iroh_sidecar/client.py:761:8:assignment:maximum_wait	monotonic-offset-same-scope-binding	time.monotonic() + maximum_wait
+mycelium_iroh_sidecar/client.py:775:20:keyword:deadline	mycelium_iroh_sidecar/client.py:764:8:assignment:deadline	same-scope-binding	deadline
+mycelium_a13_macos/public_https.py:115:8:assignment:deadline	mycelium_a13_macos/public_https.py:47:0:assignment:_DNS_RETRY_CEILING_SECONDS	monotonic-upper-cap-reference	time.monotonic() + min(max(1.0, float(timeout) * _DNS_RETRY_FRACTION), _DNS_RETRY_CEILING_SECONDS)
+mycelium_seed/route_assignment.py:841:16:keyword:ttl_ms	mycelium_seed/route_assignment.py:827:8:assignment:ttl_ms	same-scope-binding	ttl_ms
+mycelium_host_platform/_win32.py:497:20:positional-call:time.sleep	mycelium_host_platform/_win32.py:40:57:tuple-element:REPLACE_BACKOFF_SECONDS[5]	schedule-maximum	REPLACE_BACKOFF_SECONDS[min(attempt, len(REPLACE_BACKOFF_SECONDS) - 1)]
+mycelium_swarm_directory/directory.py:303:15:comparison:now - value['received']	mycelium_swarm_directory/directory.py:47:4:assignment:offer_ttl	directory-offer-age	now - value['received'] > self.limits.offer_ttl
+mycelium_swarm_directory/directory.py:327:21:comparison:now - v['received']	mycelium_swarm_directory/directory.py:47:4:assignment:offer_ttl	directory-offer-age	now - v['received'] <= self.limits.offer_ttl
+mycelium_a13_linux/onboarding.py:214:8:dict-field:expires_at	mycelium_a13_linux/onboarding.py:182:23:parameter:ttl_seconds	reviewed-clock-offset	issued_at + ttl_seconds
+mycelium_a13_macos/capability.py:248:57:dict-field:expires_at	mycelium_a13_macos/capability.py:237:46:parameter:ttl_seconds	reviewed-clock-offset	float(now) + ttl_seconds
+mycelium_a13_macos/chat.py:270:12:assignment:deadline	mycelium_a13_macos/chat.py:51:0:assignment:REJOIN_WAIT_S	reviewed-clock-offset	self._clock() + REJOIN_WAIT_S
+mycelium_a13_macos/managed_control.py:1464:16:assignment:deadline	mycelium_a13_macos/managed_control.py:759:8:assignment:self.long_poll_hold	reviewed-clock-offset	now + self.long_poll_hold
+mycelium_a13_macos/managed_offers.py:117:45:dict-field:expires_at	mycelium_a13_macos/managed_offers.py:107:77:parameter:ttl_seconds	reviewed-clock-offset	now + ttl_seconds
+mycelium_a13_macos/pairing.py:195:8:dict-field:expires_at	mycelium_a13_macos/pairing.py:161:23:parameter:ttl_seconds	reviewed-clock-offset	issued_at + ttl_seconds
+mycelium_a13_macos/workflow.py:448:12:assignment:deadline	mycelium_a13_macos/workflow.py:38:0:assignment:_BOOT_ID_OBSERVATION_BUDGET_SECONDS	reviewed-clock-offset	_boot_id_observation_clock() + _BOOT_ID_OBSERVATION_BUDGET_SECONDS
+mycelium_a13_windows/onboarding.py:242:8:dict-field:expires_at	mycelium_a13_windows/onboarding.py:210:23:parameter:ttl_seconds	reviewed-clock-offset	issued_at + ttl_seconds
+mycelium_a6_case_observations.py:480:8:assignment:deadline	mycelium_a6_case_observations.py:456:8:assignment:self._settle_seconds	reviewed-clock-offset	self._clock() + self._settle_seconds
+mycelium_a6_case_observations.py:568:8:assignment:deadline	mycelium_a6_case_observations.py:456:8:assignment:self._settle_seconds	reviewed-clock-offset	self._clock() + self._settle_seconds
+mycelium_a7_entry_controller.py:292:6:assignment:deadline	mycelium_a7_entry_controller.py:151:6:assignment:self._ack_timeout	reviewed-clock-offset	started + self._ack_timeout
+mycelium_a7_successor_coordinator.py:202:9:dict-field:expires_at_unix_ms	mycelium_a7_successor_coordinator.py:145:6:assignment:self._ttl	reviewed-clock-offset	now + self._ttl
+mycelium_evidence.py:267:20:dict-field:valid_until_unix_ms	mycelium_evidence.py:216:8:assignment:self._live_ttl_ms	reviewed-clock-offset	now + self._live_ttl_ms
+mycelium_gateway/asgi.py:251:12:assignment:next_heartbeat	mycelium_gateway/asgi.py:114:8:assignment:self._heartbeat_interval	reviewed-clock-offset	loop.time() + self._heartbeat_interval
+mycelium_gateway/asgi.py:268:20:assignment:next_heartbeat	mycelium_gateway/asgi.py:114:8:assignment:self._heartbeat_interval	reviewed-clock-offset	loop.time() + self._heartbeat_interval
+mycelium_gateway/asgi.py:280:20:assignment:next_heartbeat	mycelium_gateway/asgi.py:114:8:assignment:self._heartbeat_interval	reviewed-clock-offset	loop.time() + self._heartbeat_interval
+mycelium_interactive/swarm.py:505:8:assignment:public_expires_at	mycelium_interactive/swarm.py:500:8:assignment:ttl	reviewed-clock-offset	self._wall_now() + ttl
+mycelium_interactive/swarm.py:527:12:assignment:deadline	mycelium_interactive/swarm.py:500:8:assignment:ttl	reviewed-clock-offset	now + ttl
+mycelium_interactive/swarm.py:550:12:assignment:public_expires_at	mycelium_interactive/swarm.py:350:8:assignment:self._session_ttl	reviewed-clock-offset	self._wall_now() + self._session_ttl
+mycelium_interactive/swarm.py:607:12:assignment:expires_at	mycelium_interactive/swarm.py:350:8:assignment:self._session_ttl	reviewed-clock-offset	now + self._session_ttl
+mycelium_live/phone_stage_session.py:129:32:keyword:deadline_monotonic_s	mycelium_live/phone_stage_session.py:108:8:assignment:self._timeout	reviewed-clock-offset	time.monotonic() + self._timeout
+mycelium_live/route.py:2834:20:keyword:deadline_monotonic_s	mycelium_live/route.py:108:0:assignment:_ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS	reviewed-clock-offset	observed_at_s + _ACTIVE_HEALTH_PROBE_DEADLINE_SECONDS
+mycelium_live/route.py:2935:12:assignment:interruption_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	reviewed-clock-offset	observed_at_s + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:3045:16:keyword:deadline_monotonic_s	mycelium_live/route.py:3036:12:assignment:probe_deadline	reviewed-clock-offset	time.monotonic() + probe_deadline
+mycelium_live/route.py:3831:8:assignment:final_deadline	mycelium_live/route.py:223:0:assignment:_CLEANUP_RECONCILIATION_HORIZON_SECONDS	reviewed-clock-offset	now + _CLEANUP_RECONCILIATION_HORIZON_SECONDS
+mycelium_live/route.py:4095:16:assignment:deadline_monotonic_s	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	reviewed-clock-offset	active['cancellation_started_at'] + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:5399:20:assignment:cleanup_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	reviewed-clock-offset	failure_observed_at + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_live/route.py:6408:12:assignment:interruption_deadline	mycelium_live/route.py:174:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	reviewed-clock-offset	observed_at_s + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_mobile/android_onboarding.py:306:8:dict-field:expires_at	mycelium_mobile/android_onboarding.py:273:23:parameter:ttl_seconds	reviewed-clock-offset	issued_at + ttl_seconds
+mycelium_mobile/artifact_grant.py:240:8:dict-field:expires_at_unix_ms	mycelium_mobile/artifact_grant.py:209:18:parameter:ttl_ms	reviewed-clock-offset	now_unix_ms + ttl_ms
+mycelium_mobile/artifact_grant.py:323:12:dict-field:expires_at_unix_ms	mycelium_mobile/artifact_grant.py:309:18:parameter:ttl_ms	reviewed-clock-offset	now_unix_ms + ttl_ms
+mycelium_node/membership.py:380:16:dict-field:expires_at	mycelium_node/membership.py:170:8:assignment:self._ttl	reviewed-clock-offset	now + self._ttl
+mycelium_node/membership.py:479:16:dict-field:expires_at	mycelium_node/membership.py:170:8:assignment:self._ttl	reviewed-clock-offset	now + self._ttl
+mycelium_node/process.py:2174:12:assignment:startup_deadline	mycelium_node/process.py:55:0:assignment:_LAUNCH_HANDSHAKE_SECONDS	reviewed-clock-offset	budget_started + _LAUNCH_HANDSHAKE_SECONDS
+mycelium_request_gateway/service.py:589:12:assignment:session.cancellation_deadline_at	mycelium_request_gateway/service.py:41:0:assignment:_MAX_CANCELLATION_AND_CLEANUP_SECONDS	reviewed-clock-offset	session.cancellation_started_at + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+mycelium_router/adaptive_overlay.py:138:11:dict-field:expires_at	mycelium_router/adaptive_overlay.py:47:0:assignment:MARKER_TTL_S	reviewed-clock-offset	float(wall_now) + MARKER_TTL_S
+mycelium_seed/coordinator.py:656:16:keyword:next_heartbeat_due_at	mycelium_seed/coordinator.py:255:8:assignment:self._keepalive_interval_seconds	reviewed-clock-offset	now + self._keepalive_interval_seconds
+mycelium_seed/coordinator.py:850:16:keyword:next_heartbeat_due_at	mycelium_seed/coordinator.py:255:8:assignment:self._keepalive_interval_seconds	reviewed-clock-offset	now + self._keepalive_interval_seconds
+mycelium_seed/route_assignment.py:757:8:assignment:statement_expires	mycelium_seed/route_assignment.py:53:0:assignment:DELIVERY_TTL_SECONDS	reviewed-clock-offset	now + DELIVERY_TTL_SECONDS
+scripts/capture_member_capacity_snapshot.py:192:8:dict-field:valid_until_unix_ms	scripts/capture_member_capacity_snapshot.py:151:62:parameter:valid_for_ms	reviewed-clock-offset	now + valid_for_ms
+scripts/run_a11_route_benchmark.py:404:8:assignment:deadline	scripts/run_a11_route_benchmark.py:379:97:parameter:timeout	reviewed-clock-offset	submitted + timeout
+scripts/run_a5_benchmark_gate.py:789:8:assignment:deadline	scripts/run_a5_benchmark_gate.py:751:40:parameter:duration_after_measure	reviewed-clock-offset	self._measured_start + duration_after_measure
+mycelium_interactive/swarm.py:530:16:keyword:expires_at	mycelium_interactive/swarm.py:527:12:assignment:deadline	same-scope-binding	deadline
+mycelium_interactive/swarm.py:536:16:keyword:expires_at	mycelium_interactive/swarm.py:505:8:assignment:public_expires_at	same-scope-binding	public_expires_at
+mycelium_interactive/swarm.py:613:16:keyword:expires_at	mycelium_interactive/swarm.py:607:12:assignment:expires_at	same-scope-binding	expires_at
+mycelium_interactive/swarm.py:620:16:keyword:expires_at	mycelium_interactive/swarm.py:550:12:assignment:public_expires_at	same-scope-binding	public_expires_at
+mycelium_live/route.py:2950:24:keyword:deadline_monotonic_s	mycelium_live/route.py:2935:12:assignment:interruption_deadline	same-scope-binding	interruption_deadline
+mycelium_live/route.py:3857:16:keyword:final_deadline_monotonic_s	mycelium_live/route.py:3831:8:assignment:final_deadline	same-scope-binding	final_deadline
+mycelium_live/route.py:6431:24:keyword:deadline_monotonic_s	mycelium_live/route.py:6408:12:assignment:interruption_deadline	same-scope-binding	interruption_deadline
+mycelium_router/a10_batch_admission.py:169:9:validated-field:self.maximum_members	mycelium_router/a10_batch_admission.py:172:9:keyword:maximum	reviewed-helper-field	self.maximum_members
+mycelium_router/a10_batch_admission.py:175:9:validated-field:self.maximum_batch_bytes	mycelium_router/a10_batch_admission.py:178:9:keyword:maximum	reviewed-helper-field	self.maximum_batch_bytes
+mycelium_router/a10_batch_admission.py:181:9:validated-field:self.maximum_queued_members	mycelium_router/a10_batch_admission.py:184:9:keyword:maximum	reviewed-helper-field	self.maximum_queued_members
+mycelium_router/a10_batch_admission.py:187:9:validated-field:self.maximum_queued_bytes	mycelium_router/a10_batch_admission.py:190:9:keyword:maximum	reviewed-helper-field	self.maximum_queued_bytes
+mycelium_router/a10_batch_admission.py:193:9:validated-field:self.maximum_active_batches	mycelium_router/a10_batch_admission.py:196:9:keyword:maximum	reviewed-helper-field	self.maximum_active_batches
+mycelium_router/a10_batch_admission.py:205:9:validated-field:self.maximum_consecutive_interactive_selections	mycelium_router/a10_batch_admission.py:208:9:keyword:maximum	reviewed-helper-field	self.maximum_consecutive_interactive_selections
+mycelium_router/a10_batch_admission.py:218:9:validated-field:self.maximum_member_event_bytes	mycelium_router/a10_batch_admission.py:221:9:keyword:maximum	reviewed-helper-field	self.maximum_member_event_bytes
+mycelium_router/a10_batch_admission.py:224:9:validated-field:self.gateway_buffer_bytes	mycelium_router/a10_batch_admission.py:227:9:keyword:maximum	reviewed-helper-field	self.gateway_buffer_bytes
+mycelium_router/a10_batch_admission.py:265:9:validated-field:self.encoded_bytes	mycelium_router/a10_batch_admission.py:268:9:keyword:maximum	reviewed-helper-field	self.encoded_bytes
+mycelium_router/a10_batch_admission.py:277:9:validated-field:self.committed_prefix	mycelium_router/a10_batch_admission.py:280:9:keyword:maximum	reviewed-helper-field	self.committed_prefix
+mycelium_router/a10_batch_admission.py:353:9:validated-field:self.proposed_member_count	mycelium_router/a10_batch_admission.py:356:9:keyword:maximum	reviewed-helper-field	self.proposed_member_count
+mycelium_router/a10_batch_admission.py:377:9:validated-field:self.committed_prefix	mycelium_router/a10_batch_admission.py:380:9:keyword:maximum	reviewed-helper-field	self.committed_prefix
+mycelium_router/a10_batch_admission.py:423:9:validated-field:self.forward_count	mycelium_router/a10_batch_admission.py:426:9:keyword:maximum	reviewed-helper-field	self.forward_count
+mycelium_router/a10_member_isolation.py:307:9:validated-field:self.first_position	mycelium_router/a10_member_isolation.py:310:9:keyword:maximum	reviewed-helper-field	self.first_position
+mycelium_router/a10_member_isolation.py:313:9:validated-field:self.real_length	mycelium_router/a10_member_isolation.py:316:9:keyword:maximum	reviewed-helper-field	self.real_length
+mycelium_router/a10_member_isolation.py:319:9:validated-field:self.padded_length	mycelium_router/a10_member_isolation.py:322:9:keyword:maximum	reviewed-helper-field	self.padded_length
+mycelium_router/a10_runtime_batch.py:236:9:validated-field:self.maximum_members	mycelium_router/a10_runtime_batch.py:239:9:keyword:maximum	reviewed-helper-field	self.maximum_members
+mycelium_router/a10_runtime_batch.py:242:9:validated-field:self.maximum_bytes	mycelium_router/a10_runtime_batch.py:245:9:keyword:maximum	reviewed-helper-field	self.maximum_bytes
+mycelium_router/a10_runtime_batch.py:297:9:validated-field:self.backend_invocations	mycelium_router/a10_runtime_batch.py:300:9:keyword:maximum	reviewed-helper-field	self.backend_invocations
+mycelium_router/a10_runtime_batch.py:305:9:validated-field:self.proposed_member_count	mycelium_router/a10_runtime_batch.py:308:9:keyword:maximum	reviewed-helper-field	self.proposed_member_count
+mycelium_router/a10_runtime_batch.py:431:9:validated-field:self.baseline_windows	mycelium_router/a10_runtime_batch.py:434:9:keyword:maximum	reviewed-helper-field	self.baseline_windows
+mycelium_router/a10_runtime_batch.py:437:9:validated-field:self.candidate_windows	mycelium_router/a10_runtime_batch.py:440:9:keyword:maximum	reviewed-helper-field	self.candidate_windows
+mycelium_router/a10_runtime_batch.py:445:9:validated-field:self.valid_pairs	mycelium_router/a10_runtime_batch.py:448:9:keyword:maximum	reviewed-helper-field	self.valid_pairs
+mycelium_router/a10_target_verification.py:105:9:validated-field:self.committed_prefix_position	mycelium_router/a10_target_verification.py:108:9:keyword:maximum	reviewed-helper-field	self.committed_prefix_position
+mycelium_router/a10_target_verification.py:112:9:validated-field:self.candidate_position_count	mycelium_router/a10_target_verification.py:115:9:keyword:maximum	reviewed-helper-field	self.candidate_position_count
+mycelium_router/a10_target_verification.py:118:9:validated-field:self.candidate_bytes	mycelium_router/a10_target_verification.py:121:9:keyword:maximum	reviewed-helper-field	self.candidate_bytes
+mycelium_router/a10_target_verification.py:130:9:validated-field:self.cancellation_generation	mycelium_router/a10_target_verification.py:133:9:keyword:maximum	reviewed-helper-field	self.cancellation_generation
+mycelium_router/a10_target_verification.py:159:9:validated-field:self.prefix_position	mycelium_router/a10_target_verification.py:162:9:keyword:maximum	reviewed-helper-field	self.prefix_position
+mycelium_router/a10_target_verification.py:165:9:validated-field:self.proposed_position_count	mycelium_router/a10_target_verification.py:168:9:keyword:maximum	reviewed-helper-field	self.proposed_position_count
+mycelium_router/a10_target_verification.py:183:9:validated-field:self.correction_count	mycelium_router/a10_target_verification.py:186:9:keyword:maximum	reviewed-helper-field	self.correction_count
+mycelium_router/a10_target_verification.py:229:9:validated-field:self.maximum_positions	mycelium_router/a10_target_verification.py:232:9:keyword:maximum	reviewed-helper-field	self.maximum_positions
+mycelium_router/a10_target_verification.py:235:9:validated-field:self.maximum_bytes	mycelium_router/a10_target_verification.py:238:9:keyword:maximum	reviewed-helper-field	self.maximum_bytes
+mycelium_router/a10_target_verification.py:272:9:validated-field:self.prefix_length_buckets	mycelium_router/a10_target_verification.py:275:9:keyword:maximum	reviewed-helper-field	self.prefix_length_buckets
+mycelium_router/a10_target_verification.py:278:9:validated-field:self.operations	mycelium_router/a10_target_verification.py:281:9:keyword:maximum	reviewed-helper-field	self.operations
+mycelium_router/a10_verifier_execution.py:61:9:validated-field:self.offset	mycelium_router/a10_verifier_execution.py:64:9:keyword:maximum	reviewed-helper-field	self.offset
+mycelium_router/a10_verifier_execution.py:81:9:validated-field:self.invocation_count	mycelium_router/a10_verifier_execution.py:84:9:keyword:maximum	reviewed-helper-field	self.invocation_count
+mycelium_router/a10_verifier_execution.py:87:9:validated-field:self.prefix_position	mycelium_router/a10_verifier_execution.py:90:9:keyword:maximum	reviewed-helper-field	self.prefix_position
+mycelium_router/a10_verifier_execution.py:121:9:validated-field:self.prefix_position	mycelium_router/a10_verifier_execution.py:124:9:keyword:maximum	reviewed-helper-field	self.prefix_position
+mycelium_router/a10_verifier_execution.py:128:9:validated-field:self.committed_position	mycelium_router/a10_verifier_execution.py:131:9:keyword:maximum	reviewed-helper-field	self.committed_position
+mycelium_router/a10_runtime_batch.py:314:9:keyword:maximum	mycelium_router/a10_runtime_batch.py:305:9:validated-field:self.proposed_member_count	reviewed-helper-field	self.proposed_member_count
+mycelium_router/a10_target_verification.py:174:9:keyword:maximum	mycelium_router/a10_target_verification.py:165:9:validated-field:self.proposed_position_count	reviewed-helper-field	self.proposed_position_count
+mycelium_router/a10_runtime_batch.py:311:9:validated-field:self.actual_member_count	mycelium_router/a10_runtime_batch.py:314:9:keyword:maximum	reviewed-helper-field	self.actual_member_count
+mycelium_router/a10_target_verification.py:171:9:validated-field:self.verified_count	mycelium_router/a10_target_verification.py:174:9:keyword:maximum	reviewed-helper-field	self.verified_count
+mycelium_router/a10_target_verification.py:180:9:keyword:maximum	mycelium_router/a10_target_verification.py:171:9:validated-field:self.verified_count	reviewed-helper-field	self.verified_count
+mycelium_router/a10_target_verification.py:177:9:validated-field:self.accepted_prefix_count	mycelium_router/a10_target_verification.py:180:9:keyword:maximum	reviewed-helper-field	self.accepted_prefix_count
+mycelium_router/a10_batch_admission.py:913:9:keyword:maximum_bytes	mycelium_router/a10_batch_admission.py:175:9:validated-field:self.maximum_batch_bytes	reviewed-helper-field	self._policy.maximum_batch_bytes
+mycelium_router/a10_batch_admission.py:1175:35:keyword:capacity_bytes	mycelium_router/a10_batch_admission.py:224:9:validated-field:self.gateway_buffer_bytes	reviewed-helper-field	self._policy.gateway_buffer_bytes
+mycelium_gossip/schema.py:452:4:assignment:ttl	mycelium_gossip/schema.py:453:7:comparison:ttl	gossip-successful-validation	_require_int(ttl_ms, 'ttl_ms', 1)
+mycelium_gossip/schema.py:481:8:keyword:ttl_ms	mycelium_gossip/schema.py:453:7:comparison:ttl	gossip-successful-validation	ttl_ms
+mycelium_gossip/schema.py:494:8:keyword:ttl_ms	mycelium_gossip/schema.py:453:7:comparison:ttl	gossip-successful-validation	ttl
+mycelium_gossip/schema.py:526:8:keyword:ttl_ms	mycelium_gossip/schema.py:453:7:comparison:ttl	gossip-successful-validation	value['ttl_ms']
+mycelium_gateway/event_adapter.py:246:8:assignment:self._max_event_bytes	mycelium_gateway/event_adapter.py:247:48:keyword:maximum	reviewed-helper-return	_positive_integer('max_event_bytes', max_event_bytes, maximum=2 * 1024 * 1024)
+mycelium_interactive/server.py:266:20:assignment:ttl	mycelium_interactive/server.py:266:101:keyword:maximum	reviewed-helper-return	_float_field(document, 'ttl_seconds', 'invite_ttl_invalid', default=300.0, maximum=300.0)
+mycelium_interactive/server.py:306:20:assignment:timeout	mycelium_interactive/server.py:306:110:keyword:maximum	reviewed-helper-return	_float_field(document, 'timeout_seconds', 'poll_timeout_invalid', default=15.0, maximum=25.0)
+mycelium_platform_neutral/acceleration_profile.py:201:12:keyword:packed_state_bounded_bytes	mycelium_platform_neutral/acceleration_profile.py:205:16:keyword:maximum	reviewed-helper-return	bounded_int(materialization['packed_state_bounded_bytes'], 'acceleration_packed_state_invalid', minimum=0, maximum=1 << 60)
+mycelium_platform_neutral/acceleration_profile.py:210:12:keyword:workspace_bounded_bytes	mycelium_platform_neutral/acceleration_profile.py:214:16:keyword:maximum	reviewed-helper-return	bounded_int(record['workspace_bounded_bytes'], 'acceleration_workspace_invalid', minimum=1, maximum=1 << 60)
+mycelium_platform_neutral/activation_transport.py:218:8:assignment:self._max_bytes	mycelium_platform_neutral/activation_transport.py:219:65:keyword:maximum	reviewed-helper-return	bounded_int(max_bytes, 'codec_frame_budget_invalid', minimum=64, maximum=1 << 40)
+mycelium_platform_neutral/peer_profile.py:172:12:keyword:max_frame_bytes	mycelium_platform_neutral/peer_profile.py:176:16:keyword:maximum	reviewed-helper-return	bounded_int(record['max_frame_bytes'], 'transport_frame_bound_invalid', minimum=1, maximum=1 << 30)
+mycelium_platform_neutral/peer_profile.py:244:12:keyword:max_concurrent_requests	mycelium_platform_neutral/peer_profile.py:248:16:keyword:maximum	reviewed-helper-return	bounded_int(record['max_concurrent_requests'], 'runtime_concurrency_bound_invalid', minimum=1, maximum=1 << 20)
+mycelium_platform_neutral/runtime_efficiency.py:201:8:assignment:paired_windows	mycelium_platform_neutral/runtime_efficiency.py:202:82:keyword:maximum	reviewed-helper-return	bounded_int(benchmark['paired_windows'], 'efficiency_windows_invalid', minimum=0, maximum=1 << 20)
+mycelium_platform_neutral/runtime_efficiency.py:331:12:keyword:warm_decode_windows	mycelium_platform_neutral/runtime_efficiency.py:335:16:keyword:maximum	reviewed-helper-return	bounded_int(materialization['warm_decode_windows'], 'efficiency_materialization_windows_invalid', minimum=0, maximum=1 << 20)
+mycelium_swarm_artifacts.py:1057:4:assignment:retries	mycelium_swarm_artifacts.py:1058:75:keyword:maximum	reviewed-helper-return	_integer(value.get('maximum_retries_per_chunk'), 'artifact_policy_invalid', maximum=64)
+mycelium_swarm_artifacts.py:1063:4:assignment:ttl	mycelium_swarm_artifacts.py:1067:8:keyword:maximum	reviewed-helper-return	_integer(value.get('partial_state_ttl_seconds'), 'artifact_policy_invalid', minimum=1, maximum=31536000)
+mycelium_interactive/server.py:270:24:keyword:ttl_seconds	mycelium_interactive/server.py:266:20:assignment:ttl	same-scope-binding	ttl
+mycelium_interactive/server.py:310:24:keyword:timeout_seconds	mycelium_interactive/server.py:306:20:assignment:timeout	same-scope-binding	timeout
+mycelium_platform_neutral/activation_transport.py:555:12:keyword:max_bytes	mycelium_platform_neutral/activation_transport.py:218:8:assignment:self._max_bytes	constructor-field	self._max_bytes
+mycelium_platform_neutral/runtime_efficiency.py:269:12:keyword:paired_windows	mycelium_platform_neutral/runtime_efficiency.py:201:8:assignment:paired_windows	same-scope-binding	paired_windows
+mycelium_platform_neutral/runtime_efficiency.py:306:12:keyword:paired_windows	mycelium_platform_neutral/runtime_efficiency.py:201:8:assignment:paired_windows	same-scope-binding	paired_windows
+mycelium_a13_macos/demo_chain.py:709:66:keyword:stall	mycelium_a13_macos/demo_chain.py:583:8:assignment:stall	same-scope-binding	stall
+physical_inference_node.py:372:13:comparison:window_ms	physical_inference_node.py:355:0:assignment:A10_MAXIMUM_COLLECTION_WINDOW_MS	comparison-reference-module-constant	window_ms <= A10_MAXIMUM_COLLECTION_WINDOW_MS
+physical_inference_node.py:373:24:validated-field:window_ms	physical_inference_node.py:355:0:assignment:A10_MAXIMUM_COLLECTION_WINDOW_MS	reviewed-helper-field	window_ms
+physical_inference_node.py:371:4:assignment:window_ms	physical_inference_node.py:373:24:validated-field:window_ms	reviewed-helper-field	int(match.group(1))
+mycelium_demo/gateway_control_runtime.py:228:8:assignment:self.token_delay_seconds	mycelium_demo/gateway_control_runtime.py:209:37:parameter:token_delay_seconds	parameter-float-normalization	float(token_delay_seconds)
+mycelium_a13_macos/worker.py:347:12:validated-field:bounded	mycelium_a13_macos/worker.py:343:4:assignment:capped	reviewed-helper-field	bounded
+mycelium_a13_macos/worker.py:344:4:assignment:bounded	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	min(budget, capped)
+mycelium_a13_macos/worker.py:345:11:comparison:0	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	0 < bounded <= capped
+mycelium_a13_macos/worker.py:953:8:assignment:(command_timeout, _)	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	_native_budgets(self.limits)
+mycelium_a13_macos/worker.py:1018:8:assignment:(_, response_timeout)	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	_native_budgets(self.limits)
+mycelium_a13_macos/worker.py:1029:16:keyword:timeout_seconds	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	response_timeout
+mycelium_a13_macos/worker.py:953:8:validated-field:command_timeout	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	command_timeout
+mycelium_a13_macos/worker.py:1018:11:validated-field:response_timeout	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	response_timeout
+mycelium_a13_macos/worker.py:968:12:cli-runtime-value:--command-timeout	mycelium_a13_macos/worker.py:347:12:validated-field:bounded	reviewed-helper-field	str(int(command_timeout))
+mycelium_interactive/swarm.py:327:50:validated-field:max_peers	mycelium_interactive/swarm.py:327:45:comparison:1	reviewed-helper-field	max_peers
+mycelium_interactive/swarm.py:333:19:comparison-lower-reference:max_peers	mycelium_interactive/swarm.py:327:50:validated-field:max_peers	reviewed-helper-field	max_peers
+mycelium_interactive/swarm.py:329:57:validated-field:max_pending_jobs	mycelium_interactive/swarm.py:329:52:comparison:1	reviewed-helper-field	max_pending_jobs
+mycelium_interactive/swarm.py:338:19:comparison-lower-reference:max_pending_jobs	mycelium_interactive/swarm.py:329:57:validated-field:max_pending_jobs	reviewed-helper-field	max_pending_jobs
+physical_inference_qualification.py:737:25:validated-field:timeout_seconds	physical_inference_qualification.py:737:19:comparison:0.0	reviewed-helper-field	float(timeout_seconds)
+physical_inference_qualification.py:749:16:keyword:timeout	physical_inference_qualification.py:737:25:validated-field:timeout_seconds	reviewed-helper-field	float(timeout_seconds)
+physical_inference_qualification.py:785:25:validated-field:timeout_seconds	physical_inference_qualification.py:785:19:comparison:0.0	reviewed-helper-field	float(timeout_seconds)
+physical_inference_qualification.py:795:8:assignment:self.timeout_seconds	physical_inference_qualification.py:785:25:validated-field:timeout_seconds	reviewed-helper-field	float(timeout_seconds)
+physical_inference_qualification.py:864:16:positional-timeout:select.select.timeout	physical_inference_qualification.py:785:25:validated-field:timeout_seconds	reviewed-helper-field	remaining
+physical_inference_qualification.py:853:8:assignment:deadline	physical_inference_qualification.py:795:8:assignment:self.timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.timeout_seconds
+mycelium_node/process.py:2923:8:assignment:term_deadline	mycelium_node/process.py:2925:35:ceiling-operand:term_deadline.maximum	reviewed-composed-ceiling	min(deadline, time.monotonic() + min(0.25, remaining / 2))
+mycelium_node/process.py:2963:12:assignment:graceful_deadline	mycelium_node/process.py:2963:65:ceiling-operand:graceful_deadline.maximum	reviewed-composed-ceiling	min(deadline, time.monotonic() + 0.05)
+mycelium_node/process.py:3323:16:assignment:stop_timeout	mycelium_node/process.py:3325:20:ceiling-operand:stop_timeout.maximum	reviewed-composed-ceiling	min(self.response_timeout_seconds, 0.5, max(0.0, deadline - time.monotonic()))
+mycelium_a13_macos/managed_runtime.py:463:20:assignment:self._outbound_retry_backoff	mycelium_a13_macos/managed_runtime.py:463:53:ceiling-operand:self._outbound_retry_backoff.maximum	reviewed-composed-ceiling	min(1.0, max(0.1, self._outbound_retry_backoff * 2))
+mycelium_a13_macos/owner_run.py:379:16:assignment:deadline	mycelium_a13_macos/owner_run.py:379:48:ceiling-operand:deadline.maximum	reviewed-composed-ceiling	self._clock() + (min(60.0, self.rollover_backoff_seconds * 2 ** (failures - 1)) if failures else 0.0)
+mycelium_node/process.py:3330:43:keyword:timeout	mycelium_node/process.py:3323:16:assignment:stop_timeout	same-scope-binding	stop_timeout
+mycelium_a13_macos/control_session.py:569:65:validated-field:timeout_seconds	mycelium_a13_macos/control_session.py:569:61:comparison:0	reviewed-helper-field	timeout_seconds
+mycelium_a13_macos/control_session.py:574:8:assignment:self.timeout_seconds	mycelium_a13_macos/control_session.py:569:65:validated-field:timeout_seconds	reviewed-helper-field	float(timeout_seconds)
+mycelium_a13_macos/control_session.py:364:12:keyword:timeout_seconds	mycelium_a13_macos/control_session.py:569:65:validated-field:timeout_seconds	reviewed-helper-field	timeout_seconds
+mycelium_a13_macos/control_session.py:596:12:keyword:deadline	mycelium_a13_macos/control_session.py:574:8:assignment:self.timeout_seconds	monotonic-offset-constructor-field	time.monotonic() + self.timeout_seconds
+physical_inference_qualification.py:1149:11:validated-field:_stage_timeout_seconds.return	physical_inference_qualification.py:95:0:assignment:_MAX_STAGE_TIMEOUT_SECONDS	reviewed-helper-field	min(_MAX_STAGE_TIMEOUT_SECONDS, max(_MIN_STAGE_TIMEOUT_SECONDS, estimated))
+physical_inference_qualification.py:2824:16:assignment:timeout	physical_inference_qualification.py:1149:11:validated-field:_stage_timeout_seconds.return	reviewed-helper-field	_stage_timeout_seconds(len(archive) + len(preposition_bytes) + preposition_artifact_bytes)
+physical_inference_qualification.py:2829:63:keyword:timeout_seconds	physical_inference_qualification.py:2824:16:assignment:timeout	same-scope-binding	timeout
+physical_inference_qualification.py:2832:53:keyword:timeout_seconds	physical_inference_qualification.py:2824:16:assignment:timeout	same-scope-binding	timeout
+mycelium_a10_batch_policy_control.py:114:32:validated-field:window	mycelium_a10_batch_policy_control.py:114:27:comparison:0	reviewed-helper-field	window
+mycelium_a10_batch_policy_control.py:120:55:dict-field:window_ms	mycelium_a10_batch_policy_control.py:114:32:validated-field:window	reviewed-helper-field	window
+mycelium_a13_macos/clock_offset.py:27:81:parameter:samples	mycelium_a13_macos/clock_offset.py:21:0:assignment:SAMPLES	module-constant	SAMPLES
+mycelium_a13_macos/clock_offset.py:31:8:assignment:self._samples	mycelium_a13_macos/clock_offset.py:27:81:parameter:samples	same-scope-parameter	samples
+mycelium_a13_macos/clock_offset.py:52:58:keyword:maxlen	mycelium_a13_macos/clock_offset.py:31:8:assignment:self._samples	constructor-field	self._samples
+mycelium_a13_macos/acquisition.py:507:44:comparison:0	mycelium_a13_macos/acquisition.py:85:0:assignment:_MAX_FILE_BYTES	comparison-reference-module-constant	0 < size <= _MAX_FILE_BYTES
+mycelium_a13_macos/acquisition.py:666:19:comparison:0	mycelium_a13_macos/acquisition.py:85:0:assignment:_MAX_FILE_BYTES	comparison-reference-module-constant	0 < size <= _MAX_FILE_BYTES
+mycelium_live/phone_stage_session.py:135:8:assignment:deadline	mycelium_live/phone_stage_session.py:108:8:assignment:self._timeout	upper-cap-reference	min(deadline_monotonic_s, time.monotonic() + self._timeout)
+mycelium_live/phone_stage_session.py:175:27:keyword:deadline	mycelium_live/phone_stage_session.py:135:8:assignment:deadline	same-scope-binding	deadline
+mycelium_live/supervisor.py:1320:28:keyword:timeout	mycelium_live/supervisor.py:1316:8:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_live/supervisor.py:1345:32:keyword:timeout	mycelium_live/supervisor.py:1342:12:assignment:reap_deadline	remaining-monotonic-local	max(0.0, reap_deadline - time.monotonic())
+mycelium_router/transports/iroh.py:2964:12:assignment:deadline	mycelium_router/transports/iroh.py:2960:12:assignment:acknowledgement_timeout	monotonic-offset-same-scope-binding	time.monotonic() + acknowledgement_timeout
+mycelium_router/a10_live_publication.py:292:41:comparison:len(intervals)	mycelium_router/a10_live_publication.py:44:0:assignment:MAXIMUM_INTERVALS	comparison-reference-module-constant	len(intervals) > MAXIMUM_INTERVALS
+mycelium_router/transports/iroh.py:1710:27:positional-call:threading.Timer	mycelium_router/transports/iroh.py:1627:8:assignment:deadline	remaining-monotonic-local	max(0.0, deadline - time.monotonic())
+mycelium_router/transports/iroh.py:2219:20:keyword:deadline	mycelium_router/transports/iroh.py:2200:8:assignment:timeout	upper-cap-reference	min(deadline, time.monotonic() + timeout)
+mycelium_a13_macos/managed_runtime.py:469:20:positional-call:self._stop.wait	mycelium_a13_macos/managed_runtime.py:463:20:assignment:self._outbound_retry_backoff	reviewed-retry-state	delay
+mycelium_a13_macos/managed_control.py:2231:20:positional-call:time.sleep	mycelium_a13_macos/managed_control.py:318:0:assignment:HTTP_RETRY_MAX_SECONDS	reviewed-retry-state	wait
+mycelium_a13_macos/managed_control.py:2236:24:positional-call:wake.wait	mycelium_a13_macos/managed_control.py:318:0:assignment:HTTP_RETRY_MAX_SECONDS	reviewed-retry-state	wait
+mycelium_a13_macos/managed_control.py:2208:12:assignment:deadline	mycelium_a13_macos/managed_control.py:2205:8:assignment:deadline	reviewed-retry-state	min(deadline, parent)
+mycelium_a13_macos/managed_control.py:2226:19:comparison:attempt + 1	mycelium_a13_macos/managed_control.py:315:0:assignment:HTTP_RETRY_ATTEMPTS	reviewed-retry-state	attempt + 1 == HTTP_RETRY_ATTEMPTS
+mycelium_a13_macos/demo_target.py:591:16:assignment:self._retry_delay	mycelium_a13_macos/demo_target.py:170:0:assignment:_RETRY_MAX_SECONDS	reviewed-retry-state	min(_RETRY_MAX_SECONDS, self._retry_delay * 2) if self._retry_delay else _RETRY_FIRST_SECONDS
+mycelium_a13_macos/demo_target.py:593:16:assignment:self._retry_at	mycelium_a13_macos/demo_target.py:591:16:assignment:self._retry_delay	reviewed-retry-state	now + self._retry_delay
+mycelium_iroh_sidecar/client.py:509:16:keyword:deadline	mycelium_iroh_sidecar/client.py:502:8:assignment:deadline	same-scope-binding	deadline
+mycelium_iroh_sidecar/client.py:651:16:keyword:deadline	mycelium_iroh_sidecar/client.py:644:8:assignment:deadline	same-scope-binding	deadline
+mycelium_iroh_sidecar/client.py:954:41:keyword:deadline	mycelium_iroh_sidecar/client.py:929:8:assignment:deadline	same-scope-binding	deadline
+mycelium_live/router_port.py:704:20:keyword:deadline_monotonic_s	mycelium_live/router_port.py:692:8:assignment:deadline	same-scope-binding	deadline
+mycelium_live/router_port.py:3381:24:keyword:timeout	mycelium_live/router_port.py:3350:8:assignment:shutdown_deadline	remaining-monotonic-local	max(0.0, shutdown_deadline - time.monotonic())
+mycelium_live/router_port.py:3386:28:keyword:timeout	mycelium_live/router_port.py:3350:8:assignment:shutdown_deadline	remaining-monotonic-local	max(0.0, shutdown_deadline - time.monotonic())
+mycelium_live/router_port.py:3394:24:keyword:timeout	mycelium_live/router_port.py:3350:8:assignment:shutdown_deadline	remaining-monotonic-local	max(0.0, shutdown_deadline - time.monotonic())
+mycelium_live/artifact_transport.py:563:16:dict-field:expires_at_unix_ms	mycelium_live/artifact_transport.py:547:8:assignment:expires	same-scope-binding	expires
+mycelium_live/member_transport.py:1050:20:dict-field:expires_at_unix_ms	mycelium_live/member_transport.py:1020:8:assignment:expires	same-scope-binding	expires
+mycelium_live/supervisor.py:539:12:dict-field:expires_at_unix_ms	mycelium_live/supervisor.py:530:12:assignment:expires_at	same-scope-binding	expires_at
+mycelium_seed/coordinator.py:1400:20:dict-field:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	renewed_until
+mycelium_seed/coordinator.py:1404:20:dict-field:lease_expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	renewed_until
+mycelium_seed/coordinator.py:1412:16:assignment:persisted_member['lease_expires_at']	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	renewed_until
+mycelium_seed/coordinator.py:1610:12:assignment:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	min(self._bounded_deadline(issued_at=now, ttl_seconds=self._message_ttl_seconds), member.lease_expires_at, *(peer.lease_expires_at for peer in peers))
+mycelium_seed/coordinator.py:1628:16:dict-field:expires_at	mycelium_seed/coordinator.py:1610:12:assignment:expires_at	same-scope-binding	expires_at
+mycelium_seed/coordinator.py:498:12:dict-field:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	self._bounded_deadline(issued_at=now, ttl_seconds=self._message_ttl_seconds)
+mycelium_seed/coordinator.py:639:12:assignment:lease_expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	self._bounded_deadline(issued_at=now, ttl_seconds=self._lease_seconds, reserve_headroom=True)
+mycelium_seed/coordinator.py:654:16:keyword:lease_expires_at	mycelium_seed/coordinator.py:639:12:assignment:lease_expires_at	same-scope-binding	lease_expires_at
+mycelium_seed/coordinator.py:673:16:dict-field:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	self._bounded_deadline(issued_at=now, ttl_seconds=self._message_ttl_seconds)
+mycelium_seed/coordinator.py:681:16:dict-field:lease_expires_at	mycelium_seed/coordinator.py:639:12:assignment:lease_expires_at	same-scope-binding	lease_expires_at
+mycelium_seed/coordinator.py:833:12:assignment:lease_expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	self._bounded_deadline(issued_at=now, ttl_seconds=self._lease_seconds, reserve_headroom=True)
+mycelium_seed/coordinator.py:848:16:keyword:lease_expires_at	mycelium_seed/coordinator.py:833:12:assignment:lease_expires_at	same-scope-binding	lease_expires_at
+mycelium_seed/coordinator.py:867:16:dict-field:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	self._bounded_deadline(issued_at=now, ttl_seconds=self._message_ttl_seconds)
+mycelium_seed/coordinator.py:876:16:dict-field:lease_expires_at	mycelium_seed/coordinator.py:833:12:assignment:lease_expires_at	same-scope-binding	lease_expires_at
+scripts/a13_operator/round14_rpc.py:210:4:assignment:deadline	scripts/a13_operator/round14_rpc.py:168:0:assignment:_READINESS_BUDGET_S	reviewed-clock-offset	started + _readiness_budget_s()
+scripts/a13_operator/round14_rpc.py:211:4:assignment:retry	scripts/a13_operator/round14_rpc.py:169:0:assignment:_READINESS_RETRY_S	resolved-optional-value	_readiness_retry_s()
+scripts/a13_operator/round14_rpc.py:212:4:assignment:grace	scripts/a13_operator/round14_rpc.py:115:0:assignment:_OWNER_STARTUP_GRACE_S	reviewed-clock-offset	time.monotonic() + (_OWNER_STARTUP_GRACE_S if not _OWNER_ANSWERED else 0.0)
+scripts/a13_operator/round14_rpc.py:246:8:positional-call:time.sleep	scripts/a13_operator/round14_rpc.py:211:4:assignment:retry	same-scope-binding	retry
+scripts/a13_operator/round14_rpc.py:361:29:assignment:deadline	scripts/a13_operator/round14_rpc.py:168:0:assignment:_READINESS_BUDGET_S	reviewed-clock-offset	started + _readiness_budget_s()
+scripts/a13_operator/round14_rpc.py:361:68:assignment:retry	scripts/a13_operator/round14_rpc.py:169:0:assignment:_READINESS_RETRY_S	resolved-optional-value	_readiness_retry_s()
+scripts/a13_operator/round14_rpc.py:377:8:positional-call:time.sleep	scripts/a13_operator/round14_rpc.py:361:68:assignment:retry	same-scope-binding	retry
+scripts/a13_operator/round14_rpc.py:482:29:assignment:deadline	scripts/a13_operator/round14_rpc.py:168:0:assignment:_READINESS_BUDGET_S	reviewed-clock-offset	started + _readiness_budget_s()
+scripts/a13_operator/round14_rpc.py:482:68:assignment:retry	scripts/a13_operator/round14_rpc.py:169:0:assignment:_READINESS_RETRY_S	resolved-optional-value	_readiness_retry_s()
+scripts/a13_operator/round14_rpc.py:498:8:positional-call:time.sleep	scripts/a13_operator/round14_rpc.py:482:68:assignment:retry	same-scope-binding	retry
+scripts/a13_operator/round14_rpc.py:519:4:assignment:grace	scripts/a13_operator/round14_rpc.py:115:0:assignment:_OWNER_STARTUP_GRACE_S	reviewed-clock-offset	time.monotonic() + (_OWNER_STARTUP_GRACE_S if not _OWNER_ANSWERED else 0.0)
+mycelium_demo/public_origin_proxy.py:711:16:positional-call:connection.settimeout	mycelium_demo/public_origin_proxy.py:708:12:assignment:deadline	remaining-monotonic-local	left
+mycelium_gateway/event_adapter.py:255:8:assignment:self._max_qualification_age_ms	mycelium_gateway/event_adapter.py:240:40:parameter:max_qualification_age_ms	validated-parameter-default	_positive_integer('max_qualification_age_ms', max_qualification_age_ms)
+mycelium_gateway/event_adapter.py:258:8:assignment:self._max_session_idle_ms	mycelium_gateway/event_adapter.py:241:35:parameter:max_session_idle_ms	validated-parameter-default	_positive_integer('max_session_idle_ms', max_session_idle_ms)
+mycelium_internet/enrollment.py:621:16:positional-call:time.sleep	mycelium_internet/enrollment.py:146:8:assignment:self._backoff_seconds	resolved-optional-value	delay
+mycelium_seed/pairing.py:126:8:assignment:self._window_seconds	mycelium_seed/pairing.py:43:0:assignment:MAX_WINDOW_SECONDS	reviewed-helper-return	_bounded_int(window_seconds, 'window_seconds', 1, MAX_WINDOW_SECONDS)
+mycelium_seed/pairing.py:173:8:assignment:self.expires_at	mycelium_seed/pairing.py:126:8:assignment:self._window_seconds	reviewed-clock-offset	int(self._clock()) + self._window_seconds
+mycelium_seed/route_assignment.py:771:12:assignment:statement_expires	mycelium_seed/route_assignment.py:757:8:assignment:statement_expires	reviewed-clock-offset	min(statement_expires, float(row['expires_at']))
+mycelium_seed/route_assignment.py:790:12:dict-field:expires_at	mycelium_seed/route_assignment.py:757:8:assignment:statement_expires	reviewed-clock-offset	statement_expires
+scripts/a13_operator/round14_bootstrap_compile.py:211:8:positional-call:time.sleep	scripts/a13_operator/round14_bootstrap_compile.py:163:0:assignment:REACHABILITY_GATE_INTERVAL_SECONDS	resolved-optional-value	delay
+scripts/a13_operator/wp8_05_measure_stream.py:108:38:keyword:timeout	scripts/a13_operator/wp8_05_measure_stream.py:62:52:parameter:timeout	resolved-optional-value	timeout
+scripts/a13_operator/wp8_05_measure_stream.py:95:34:keyword:timeout	scripts/a13_operator/wp8_05_measure_stream.py:62:52:parameter:timeout	resolved-optional-value	timeout
+scripts/a13_operator/wp8_05_soak.py:234:30:keyword:timeout	scripts/a13_operator/wp8_05_soak.py:216:40:parameter:timeout	resolved-optional-value	timeout
+scripts/run_a10_concurrency_probe.py:148:76:keyword:timeout_seconds	scripts/run_a10_concurrency_probe.py:135:29:parameter:timeout_seconds	resolved-optional-value	timeout_seconds
+mycelium_a13_macos/chain_compile.py:426:12:positional-call:thread.join	mycelium_deadlines.py:217:0:assignment:CLEANUP_RECEIPT_POLL_SECONDS	reviewed-composed-ceiling	max(0.0, min(CLEANUP_RECEIPT_POLL_SECONDS, deadline - clock()))
+mycelium_a13_macos/demo_chain.py:1220:8:assignment:grace	mycelium_a13_macos/demo_chain.py:267:24:dict-field:member_restart_grace	typed-config-field	self.budgets['member_restart_grace']
+mycelium_a13_macos/local_contributor.py:38:12:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	resolved-optional-value	self._timeout
+mycelium_a13_macos/local_contributor.py:62:61:keyword:timeout	mycelium_a13_macos/peer.py:135:8:assignment:self._timeout	resolved-optional-value	self._timeout
+mycelium_a13_macos/managed_control.py:2181:16:positional-call:sock.settimeout	mycelium_a13_macos/managed_control.py:1985:8:assignment:self.timeout	reviewed-helper-return	self._transport_timeout()
+mycelium_a13_macos/managed_control.py:2253:44:keyword:timeout	mycelium_a13_macos/managed_control.py:1985:8:assignment:self.timeout	reviewed-helper-return	self._transport_timeout()
+mycelium_a13_macos/public_relay.py:395:72:comparison:left	mycelium_a13_macos/public_relay.py:287:0:assignment:RENEWAL_MARGIN_SECONDS	reviewed-composed-ceiling	left <= min(RENEWAL_MARGIN_SECONDS, self._window / 3)
+mycelium_a13_macos/swarm_publish.py:442:22:positional-call:self._stop.wait	mycelium_a13_macos/swarm_publish.py:437:38:parameter:interval	resolved-optional-value	interval
+mycelium_a13_macos/token_policy.py:44:8:keyword:clock_uncertainty_ms	mycelium_a13_macos/managed_control.py:97:0:assignment:MAX_CLOCK_SKEW_SECONDS	resolved-optional-value	int(MAX_CLOCK_SKEW_SECONDS * 1000)
+physical_inference_node.py:967:8:assignment:self.limit_bytes	physical_inference_node.py:966:42:parameter:limit_bytes	resolved-optional-value	int(limit_bytes)
+physical_inference_node.py:2094:8:assignment:deadline	physical_inference_node.py:2079:4:assignment:socket_conflict_grace_seconds	reviewed-clock-offset	time.monotonic() + max(0.0, self.socket_conflict_grace_seconds)
+mycelium_interactive/swarm.py:702:12:assignment:deadline	mycelium_interactive/swarm.py:43:0:assignment:_MAX_LONG_POLL_SECONDS	reviewed-helper-return	now + timeout
+mycelium_interactive/swarm.py:757:41:keyword:timeout	mycelium_interactive/swarm.py:43:0:assignment:_MAX_LONG_POLL_SECONDS	reviewed-helper-return	remaining
+mycelium_a13_macos/adaptive_host.py:877:16:dict-field:expires_at	mycelium_a13_macos/adaptive_host.py:50:4:dict-field:stale_after_s	reviewed-clock-offset	issued + self._timings['stale_after_s']
+mycelium_a13_macos/adaptive_host.py:1045:8:assignment:interval	mycelium_a13_macos/adaptive_host.py:49:4:dict-field:sample_interval_s	resolved-optional-value	resolve_timings(policy)['sample_interval_s']
+mycelium_a6_product_fault_seams.py:289:8:assignment:deadline	mycelium_a6_product_fault_seams.py:207:8:assignment:self._wait_seconds	reviewed-clock-offset	self._clock() + (self._wait_seconds if seconds is None else seconds)
+mycelium_a6_recovery.py:1670:81:comparison:now - item	mycelium_a6_recovery.py:82:0:assignment:SUCCESSOR_BREAKER_WINDOW_SECONDS	reviewed-local-comparison	now - item <= SUCCESSOR_BREAKER_WINDOW_SECONDS * 1000
+mycelium_a7_physical_measurement.py:406:100:keyword:timeout	mycelium_a7_physical_measurement.py:348:8:assignment:self._timeout	constructor-field	self._timeout
+mycelium_internet/physical.py:2623:12:keyword:poll_interval_seconds	mycelium_internet/physical.py:2612:19:comparison:0.0	validated-required-ceiling	float(poll)
+mycelium_seed/coordinator.py:456:16:assignment:deadline	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	advanced
+mycelium_seed/coordinator.py:915:8:assignment:evidence_expired	mycelium_seed/coordinator.py:256:8:assignment:self._evidence_freshness_seconds	reviewed-local-comparison	age > self._evidence_freshness_seconds
+mycelium_seed/pairing.py:178:16:dict-field:expires_at	mycelium_seed/pairing.py:173:8:assignment:self.expires_at	reviewed-clock-offset	self.expires_at
+mycelium_seed/phone_preparation.py:184:12:assignment:expires	mycelium_seed/phone_preparation.py:176:8:assignment:expires	upper-cap-reference	min(expires, e.statement['expires_at'], auth['message']['expires_at'])
+mycelium_seed/phone_preparation.py:202:28:keyword:lease_expires_at	mycelium_seed/phone_preparation.py:176:8:assignment:expires	upper-cap-reference	min(m['lease_expires_at'], expires)
+mycelium_swarm_directory/watchdog.py:44:8:assignment:(self.opener, self.timeout)	mycelium_swarm_directory/watchdog.py:42:87:parameter:timeout	resolved-optional-value	(opener, timeout)
+mycelium_swarm_directory/watchdog.py:51:34:keyword:timeout	mycelium_swarm_directory/watchdog.py:42:87:parameter:timeout	constructor-field	self.timeout
+scripts/pilot_readiness_gate.py:285:12:keyword:timeout	scripts/pilot_readiness_gate.py:241:4:assignment:timeout	resolved-optional-value	self.timeout if timeout is None else timeout
+scripts/qualify_a5_replica_track.py:309:12:keyword:deadline_monotonic_s	mycelium_deadlines.py:188:0:assignment:CANCEL_AND_CLEANUP_BUDGET_SECONDS	reviewed-clock-offset	time.monotonic() + mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+mycelium_membership/contracts.py:873:4:assignment:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	_number(validated['expires_at'])
+mycelium_mobile/a12_activation.py:1254:8:keyword:validity_ms	mycelium_mobile/a12_activation.py:141:0:assignment:MAX_RUNG_VALIDITY_MS	reviewed-helper-return	validity
+mycelium_mobile/a12_activation.py:1346:8:keyword:validity_ms	mycelium_mobile/a12_activation.py:141:0:assignment:MAX_RUNG_VALIDITY_MS	reviewed-helper-return	_validity_ms(validity_ms)
+mycelium_mobile/a12_activation.py:1407:8:keyword:validity_ms	mycelium_mobile/a12_activation.py:141:0:assignment:MAX_RUNG_VALIDITY_MS	reviewed-helper-return	_validity_ms(validity_ms)
+mycelium_mobile/a12_activation.py:1493:8:keyword:validity_ms	mycelium_mobile/a12_activation.py:141:0:assignment:MAX_RUNG_VALIDITY_MS	reviewed-helper-return	_validity_ms(validity_ms)
+mycelium_mobile/a12_activation.py:1645:8:dict-field:expires_at_unix_ms	mycelium_mobile/a12_activation.py:141:0:assignment:MAX_RUNG_VALIDITY_MS	reviewed-clock-offset	now + _validity_ms(validity_ms)
+mycelium_mobile/termux_bridge_server.py:173:16:assignment:(argv, cwd, timeout, detach)	mycelium_mobile/termux_bridge_server.py:74:15:comparison:0.1	reviewed-helper-return	decode_run_request(value)
+mycelium_mobile/termux_bridge_server.py:201:20:keyword:timeout	mycelium_mobile/termux_bridge_server.py:74:15:comparison:0.1	reviewed-helper-return	timeout
+mycelium_seed/invite_batch.py:199:16:keyword:ttl_seconds	mycelium_seed/invite_batch.py:28:0:assignment:MAX_INVITE_TTL_SECONDS	validated-required-ceiling	ttl_seconds
+mycelium_seed/invite_batch.py:214:12:dict-field:expires_at	mycelium_seed/invite_batch.py:28:0:assignment:MAX_INVITE_TTL_SECONDS	reviewed-clock-offset	issued_at + ttl_seconds
+mycelium_seed/operator.py:468:12:dict-field:overlap_expires_at	mycelium_seed/operator.py:43:0:assignment:_MAX_ROTATION_OVERLAP_SECONDS	reviewed-clock-offset	instant + float(overlap_seconds)
+mycelium_seed/operator.py:497:12:dict-field:overlap_expires_at_unix_ms	mycelium_seed/operator.py:43:0:assignment:_MAX_ROTATION_OVERLAP_SECONDS	reviewed-clock-offset	int((instant + float(overlap_seconds)) * 1000)
+mycelium_a13_windows/onboarding.py:268:4:assignment:expires	mycelium_a13_windows/onboarding.py:93:0:assignment:_REQUEST_TTL_MAX	validated-required-ceiling	_finite(value.get('expires_at'))
+mycelium_internet/physical.py:2027:4:assignment:expires_at	mycelium_internet/physical.py:1746:0:assignment:_TRANSPORT_REPORT_MAX_AGE_MS	validated-required-ceiling	authority.get('expires_at_unix_ms')
+mycelium_membership/contracts.py:445:4:assignment:expires_at	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	validated-required-ceiling	_number(message['expires_at'])
+mycelium_membership/contracts.py:517:4:assignment:lease	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	validated-required-ceiling	_number(message['lease_expires_at'])
+mycelium_membership/contracts.py:549:4:assignment:lease	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	validated-required-ceiling	_number(message['lease_expires_at'])
+mycelium_membership/contracts.py:618:4:assignment:lease	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	validated-required-ceiling	_number(message['lease_expires_at'])
+mycelium_mobile/a12_activation.py:978:4:assignment:expires	mycelium_mobile/a12_activation.py:138:0:assignment:MAX_PROFILE_TTL_MS	validated-required-ceiling	_finite(record['expires_at_unix_ms'], code='member_profile_validity_invalid', minimum=0.0)
+mycelium_mobile/android_onboarding.py:336:4:assignment:expires	mycelium_mobile/android_onboarding.py:111:0:assignment:_REQUEST_TTL_MAX	validated-required-ceiling	_finite(value.get('expires_at'))
+mycelium_mobile/artifact_grant.py:280:4:assignment:expires	mycelium_mobile/artifact_grant.py:38:0:assignment:MAX_GRANT_TTL_MS	validated-required-ceiling	_int(g['expires_at_unix_ms'], code, minimum=1)
+mycelium_mobile/artifact_grant.py:350:4:assignment:expires	mycelium_mobile/artifact_grant.py:39:0:assignment:MAX_REQUEST_TTL_MS	validated-required-ceiling	_int(message['expires_at_unix_ms'], code, minimum=1)
+mycelium_a7_physical_measurement.py:305:8:assignment:deadline	mycelium_a7_physical_measurement.py:1021:66:keyword:timeout_s	reviewed-clock-offset	time.monotonic() + timeout_s
+mycelium_a7_physical_measurement.py:687:4:assignment:deadline	mycelium_a7_physical_measurement.py:978:45:keyword:timeout_s	reviewed-clock-offset	time.monotonic() + timeout_s
+mycelium_a7_physical_measurement.py:722:4:assignment:deadline	mycelium_a7_physical_measurement.py:1224:51:keyword:timeout_s	reviewed-clock-offset	time.monotonic() + timeout_s
+mycelium_internet/physical.py:1525:12:keyword:poll_interval_seconds	mycelium_internet/physical.py:2623:12:keyword:poll_interval_seconds	resolved-optional-value	poll_interval_seconds
+mycelium_platform_neutral/mac_mlx_int8.py:151:46:keyword:paired_windows	scripts/run_a9_gate.py:806:46:keyword:paired_windows	resolved-optional-value	paired_windows
+scripts/a10_batch_policy.py:136:8:keyword:window_ms	scripts/a10_batch_policy.py:119:42:comparison:0	validated-required-ceiling	args.window_ms
+scripts/a10_batch_policy.py:54:54:dict-field:timeout_s	scripts/a10_batch_policy.py:134:8:keyword:timeout_s	resolved-optional-value	timeout_s
+scripts/a10_batch_policy.py:56:8:assignment:document_out['window_ms']	scripts/a10_batch_policy.py:136:8:keyword:window_ms	resolved-optional-value	window_ms
+scripts/inventory_member_models.py:70:8:keyword:valid_until_unix_ms	scripts/inventory_member_models.py:51:11:comparison:1	reviewed-clock-offset	observed + args.ttl_seconds * 1000
+mycelium_a6_direct_socket.py:77:12:positional-call:sock.settimeout	mycelium_a6_direct_socket.py:71:8:assignment:deadline	remaining-monotonic-local	remaining
+mycelium_a6_http_fault_control.py:150:64:keyword:timeout	mycelium_a6_http_fault_control.py:144:12:assignment:deadline	remaining-monotonic-local	remaining
+mycelium_node/process.py:2647:19:comparison:len(line)	mycelium_node/process.py:2001:8:assignment:self.max_frame_bytes	comparison-reference-constructor-field	len(line) > self.max_frame_bytes + 1
+mycelium_node/process.py:2667:23:comparison:len(raw)	mycelium_node/process.py:2001:8:assignment:self.max_frame_bytes	comparison-reference-constructor-field	len(raw) > self.max_frame_bytes + 1
+mycelium_mobile/termux_bridge_server.py:69:4:assignment:timeout	mycelium_mobile/termux_bridge_server.py:74:15:comparison:0.1	validated-required-ceiling	value['timeout_seconds']
+mycelium_seed/coordinator.py:447:8:assignment:deadline	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	min(requested, ceiling)
+mycelium_seed/coordinator.py:449:12:assignment:deadline	mycelium_membership/contracts.py:30:0:assignment:MAX_MESSAGE_TTL_SECONDS	reviewed-helper-return	math.nextafter(ceiling, -math.inf)
+mycelium_seed/route_assignment.py:651:8:assignment:(issued_at, expires_at)	mycelium_seed/route_assignment.py:658:19:comparison:0	validated-required-ceiling	(_number(message['issued_at']), _number(message['expires_at']))
+mycelium_swarm_directory/docs.py:282:8:assignment:(issued, expires)	mycelium_swarm_directory/docs.py:42:0:assignment:MAX_GRANT_SECONDS	validated-required-ceiling	(_time(document['issued_at']), _time(document['expires_at']))
+scripts/qwen_phone_builder.py:120:8:assignment:(issued, expires)	scripts/qwen_phone_builder.py:125:63:comparison:0	validated-required-ceiling	(statement['issued_at'], statement['expires_at'])
+mycelium_speculative_decode_execution.py:1299:4:assignment:(admitted_ms, clamp_reason, _deadline_evidence)	mycelium_speculative_decode.py:76:0:assignment:DEADLINE_MAXIMUM_MS	reviewed-helper-return	_admit_deadline(document, deadline_ms)
+mycelium_speculative_decode_execution.py:1359:8:keyword:deadline_ms	mycelium_speculative_decode_execution.py:1299:4:assignment:(admitted_ms, clamp_reason, _deadline_evidence)	resolved-optional-value	admitted_ms
+mycelium_speculative_decode_execution.py:1449:8:keyword:deadline_at	mycelium_speculative_decode_execution.py:1299:4:assignment:(admitted_ms, clamp_reason, _deadline_evidence)	resolved-optional-value	admitted_ms
+mycelium_speculative_decode_execution.py:1462:8:dict-field:deadline_at	mycelium_speculative_decode_execution.py:1299:4:assignment:(admitted_ms, clamp_reason, _deadline_evidence)	resolved-optional-value	admitted_ms
+mycelium_speculative_decode_execution.py:2063:8:keyword:deadline_ms	mycelium_speculative_decode_execution.py:1299:4:assignment:(admitted_ms, clamp_reason, _deadline_evidence)	validated-required-ceiling	deadline_ms
+mycelium_speculative_decode_execution.py:2187:16:keyword:deadline_ms	mycelium_speculative_decode_execution.py:2063:8:keyword:deadline_ms	validated-required-ceiling	deadline_ms
+mycelium_speculative_decode_execution.py:2317:8:keyword:deadline_ms	mycelium_speculative_decode_execution.py:2063:8:keyword:deadline_ms	validated-required-ceiling	deadline_ms
+mycelium_speculative_decode_execution.py:2328:8:keyword:deadline_ms	mycelium_speculative_decode_execution.py:2063:8:keyword:deadline_ms	validated-required-ceiling	deadline_ms
+mycelium_speculative_decode_execution.py:2445:8:keyword:deadline_ms	mycelium_speculative_decode_execution.py:2063:8:keyword:deadline_ms	validated-required-ceiling	deadline_ms
+mycelium_product_spine/state.py:364:8:assignment:retained	mycelium_product_spine/app.py:111:62:keyword:maxlen	validated-required-ceiling	[validate_product_event(event) for event in events][-self._replay_limit:]
+mycelium_product_spine/state.py:376:12:assignment:retained	mycelium_product_spine/state.py:364:8:assignment:retained	resolved-optional-value	retained[1:]
+scripts/pilot_readiness_gate.py:1771:8:keyword:timeout	scripts/pilot_readiness_gate.py:1747:49:cli-default:--timeout	argparse-option	float(args.timeout)
+scripts/qualify_a5_replica_track.py:298:4:assignment:deadline	scripts/qualify_a5_replica_track.py:493:12:keyword:timeout_seconds	reviewed-clock-offset	time.monotonic() + timeout_seconds
+scripts/qualify_a5_replica_track.py:318:20:dict-field:timeout_seconds	scripts/qualify_a5_replica_track.py:493:12:keyword:timeout_seconds	resolved-optional-value	timeout_seconds
+scripts/run_a5_benchmark_supervisor.py:567:16:assignment:deadline	scripts/run_a5_benchmark_supervisor.py:561:24:assignment:termination_deadline[0]	resolved-optional-value	termination_deadline[0]
+scripts/a13_operator/ssh_window_evidence.py:457:67:keyword:timeout	scripts/a13_operator/ssh_window_evidence.py:580:55:parameter:timeout	resolved-optional-value	timeout
+mycelium_seed/coordinator.py:1248:12:assignment:member.next_heartbeat_due_at	mycelium_seed/coordinator.py:255:8:assignment:self._keepalive_interval_seconds	reviewed-clock-offset	committed_at + heartbeat_intervals * self._keepalive_interval_seconds
+mycelium_seed/coordinator.py:1419:16:assignment:next_heartbeat_due_at	mycelium_seed/coordinator.py:255:8:assignment:self._keepalive_interval_seconds	reviewed-clock-offset	now + heartbeat_intervals * self._keepalive_interval_seconds
+mycelium_seed/coordinator.py:1422:16:assignment:persisted_member['next_heartbeat_due_at']	mycelium_seed/coordinator.py:1419:16:assignment:next_heartbeat_due_at	resolved-optional-value	next_heartbeat_due_at
+scripts/run_a10_physical_gate.py:1668:6:assignment:self._timeout_s	scripts/run_a10_physical_gate.py:1870:48:keyword:timeout_s	resolved-optional-value	timeout_s
+scripts/run_a5_benchmark_gate.py:395:4:assignment:deadline	scripts/run_a5_benchmark_gate.py:889:8:keyword:timeout	reviewed-clock-offset	time.monotonic() + timeout
+scripts/run_a5_benchmark_gate.py:514:20:keyword:timeout	scripts/run_a5_benchmark_gate.py:800:12:keyword:deadline	reviewed-clock-offset	max(0.0, deadline - time.monotonic())
+scripts/run_a10_physical_gate.py:1674:58:dict-field:timeout_s	scripts/run_a10_physical_gate.py:1668:6:assignment:self._timeout_s	constructor-field	self._timeout_s
+mycelium_a7_physical_measurement.py:677:29:keyword:timeout	mycelium_a7_physical_measurement.py:588:4:assignment:terminal_timeout_s	resolved-optional-value	timeout_s
+scripts/manage_seed_membership.py:81:16:keyword:overlap_seconds	mycelium_seed/operator.py:43:0:assignment:_MAX_ROTATION_OVERLAP_SECONDS	validated-required-ceiling	args.overlap_seconds
+mycelium_seed/coordinator.py:1185:16:keyword:expires_at	mycelium_membership/contracts.py:445:4:assignment:expires_at	validated-required-ceiling	float(message['expires_at'])
+mycelium_seed/coordinator.py:1433:24:keyword:heartbeat_expires_at	mycelium_membership/contracts.py:445:4:assignment:expires_at	validated-required-ceiling	float(message['expires_at'])
+scripts/a13_operator/wp8_05_soak.py:196:66:keyword:timeout	scripts/a13_operator/wp8_05_soak.py:234:30:keyword:timeout	resolved-optional-value	timeout
+scripts/run_a10_concurrency_probe.py:113:45:keyword:timeout	scripts/run_a10_concurrency_probe.py:170:34:keyword:timeout_seconds	resolved-optional-value	timeout_seconds
+scripts/run_a10_concurrency_probe.py:85:45:keyword:timeout	scripts/run_a10_concurrency_probe.py:148:76:keyword:timeout_seconds	resolved-optional-value	timeout_seconds
+scripts/run_a4_physical_idle_staleness_gate.py:133:4:assignment:deadline	scripts/run_a4_physical_idle_staleness_gate.py:392:60:cli-default:--observation-window	reviewed-clock-offset	time.monotonic() + observation_window
+mycelium_qualification/safetensors_sharding.py:387:44:keyword:max_file_bytes	scripts/build_qwen_live_route.py:253:8:keyword:max_file_bytes	resolved-optional-value	max_file_bytes
+scripts/run_a9_withdrawal_browser.py:218:4:assignment:deadline	scripts/run_a9_withdrawal_browser.py:238:48:keyword:timeout_s	reviewed-clock-offset	clock() + timeout_s
+mycelium_a7_physical_measurement.py:637:8:positional-call:time.sleep	mycelium_a7_physical_measurement.py:590:4:assignment:poll_s	typed-config-field	settings.poll_s / 5
+mycelium_internet/bootstrap.py:229:8:assignment:self._max_attempts	mycelium_internet/bootstrap.py:329:16:keyword:max_attempts	resolved-optional-value	max_attempts
+mycelium_member_models.py:238:8:dict-field:valid_until_unix_ms	scripts/inventory_member_models.py:70:8:keyword:valid_until_unix_ms	resolved-optional-value	valid_until_unix_ms
+mycelium_a6_recovery.py:1674:12:assignment:self._breaker_open_until_unix_ms	mycelium_a6_recovery.py:81:0:assignment:SUCCESSOR_BREAKER_SECONDS	reviewed-clock-offset	max(self._breaker_open_until_unix_ms, now + SUCCESSOR_BREAKER_SECONDS * 1000)
+scripts/experimental_candidate_isolation.py:116:4:assignment:(issued, expires)	scripts/experimental_candidate_isolation.py:120:15:comparison:expires - issued	validated-required-ceiling	(binding.get('issued_at_unix_ms'), binding.get('expires_at_unix_ms'))
+scripts/run_a12_mobile_physical_gate.py:181:3:assignment:deadline	scripts/run_a12_mobile_physical_gate.py:279:9:keyword:timeout	reviewed-clock-offset	clock() + timeout
+mycelium_a6_product_fault_seams.py:561:24:keyword:timeout	mycelium_a6_product_fault_seams.py:783:23:positional-call:join	resolved-optional-value	seconds
+mycelium_a6_product_fault_seams.py:783:23:positional-call:join	mycelium_a6_product_fault_seams.py:207:8:assignment:self._wait_seconds	resolved-optional-value	target.wait_seconds
+scripts/qwen_phone_builder.py:378:42:positional-call:selector.select	scripts/qwen_phone_builder.py:397:8:assignment:deadline	reviewed-clock-offset	remaining
+mycelium_membership/contracts.py:660:4:assignment:expires_at	mycelium_membership/contracts.py:445:4:assignment:expires_at	validated-required-ceiling	_number(message['expires_at'])
+mycelium_membership/contracts.py:724:4:assignment:expires	mycelium_membership/contracts.py:445:4:assignment:expires_at	validated-required-ceiling	_number(message['expires_at'])
+scripts/bench_entry_token_path.py:95:63:keyword:hop_ms	scripts/bench_entry_token_path.py:81:48:cli-default:--hop-ms	argparse-option	args.hop_ms
+scripts/bench_entry_token_path.py:96:30:keyword:control_ms	scripts/bench_entry_token_path.py:82:52:cli-default:--control-ms	argparse-option	args.control_ms
+mycelium_a13_macos/pairing.py:666:23:comparison:_WINDOW_TTL_MIN	mycelium_a13_macos/pairing.py:453:0:assignment:_WINDOW_TTL_MAX	comparison-reference-module-constant	_WINDOW_TTL_MIN <= ttl_seconds <= _WINDOW_TTL_MAX
+mycelium_a13_macos/serving.py:77:12:comparison:SLICE_FETCH_MIN_SOURCE_BYTES	mycelium_a13_macos/serving.py:57:0:assignment:SLICE_FETCH_MAX_SOURCE_BYTES	comparison-reference-module-constant	SLICE_FETCH_MIN_SOURCE_BYTES < source_weight_bytes <= SLICE_FETCH_MAX_SOURCE_BYTES
+mycelium_live/command_controller.py:95:37:comparison:minimum	mycelium_live/command_controller.py:34:0:assignment:_MAX_MONOTONIC_MS	comparison-reference-module-constant	minimum <= value <= _MAX_MONOTONIC_MS
+mycelium_live/liveness.py:81:37:comparison:minimum	mycelium_live/liveness.py:27:0:assignment:_MAX_MONOTONIC_MS	comparison-reference-module-constant	minimum <= value <= _MAX_MONOTONIC_MS
+mycelium_seed/invite_batch.py:122:15:comparison:MIN_INVITE_TTL_SECONDS	mycelium_seed/invite_batch.py:28:0:assignment:MAX_INVITE_TTL_SECONDS	comparison-reference-module-constant	MIN_INVITE_TTL_SECONDS <= ttl_seconds <= MAX_INVITE_TTL_SECONDS
+scripts/build_qwen_live_route.py:1196:40:comparison:-_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS	scripts/build_qwen_live_route.py:137:0:assignment:_MANAGED_OBSERVATIONS_MAX_AGE_SECONDS	comparison-reference-module-constant	-_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS <= now - captured / 1000 <= _MANAGED_OBSERVATIONS_MAX_AGE_SECONDS
+scripts/build_qwen_live_route.py:1203:11:comparison:-_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS	scripts/build_qwen_live_route.py:137:0:assignment:_MANAGED_OBSERVATIONS_MAX_AGE_SECONDS	comparison-reference-module-constant	-_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS <= now - started <= _MANAGED_OBSERVATIONS_MAX_AGE_SECONDS
+scripts/a13_operator/packaged_app_daemon.py:30:15:keyword:timeout	scripts/a13_operator/packaged_app_daemon.py:5:152:cli-default:--max-seconds	argparse-option	a.max_seconds

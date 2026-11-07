@@ -1,0 +1,11 @@
+{
+  "boundary": "Primary Draft 2020-12 JSON Schema acceptance, not HTTP CSRF/session enforcement or endpoint availability. JSON Schema integer accepts integral JSON floats.",
+  "generator_sha256": "07dd39612047c783b3aecacf392747f38ad762011c0322f1d9e79f9bcfba05b1",
+  "jsonschema_version": "4.23.0",
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "source": {
+    "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
+    "sha256": "b779d6351213d3fca1ccf1b845e790dc4aedbe7535205e7130dae9b7d2f6d253"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "status": "partial replacement evidence only; no obligation retirement or full-product GREEN",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "groups": [
+    {
+      "tests": ["boundaries::c1_readiness_requires_native_ready_and_a_later_event_barrier", "boundaries::f16_all_quit_sources_share_one_cleanup_even_before_ready", "boundaries::f16_hung_cleanup_expires_without_permission_to_exit_or_retry", "boundaries::quit_exit_status_is_the_v014_launcher_status", "boundaries::a_close_step_that_raises_still_exits_3", "boundaries::every_production_shell_entry_uses_the_one_quit_allowance", "quit_exit_codes::*", "finder_launch::*", "failure_controls::f16_cleanup_errors_remain_terminal_and_observable", "native_smoke::c1_native_ready_real_webkit_fetch_then_exact_pid_appleevent_cleanup"],
+      "obligations": ["O:path:mycelium_a13_macos/__main__.py", "O:path:mycelium_a13_macos/native_quit.py", "O:path:mycelium_a13_macos/native/quit_bridge.m", "O:path:tests/a13_macos/test_native_quit.py", "O:path:tests/a13_macos/test_native_quit_dispatch.py"],
+      "incidents": ["C-1", "F16"],
+      "limits": "Native AppleEvent plus fake cleanup; quit_exit_codes (RU-032 60 s allowance, exit 0 or 3, menu and Command-Q through real AppKit) and finder_launch (LaunchServices launch and reopen) run on the DEVELOPMENT build only, never the packaged bundle. No real worker, relay, minimum OS, SIGTERM/logout or Finder proof. F3 persisted restart not covered."
+    },
+    {
+      "tests": ["boundaries::channel_*", "boundaries::native_missing_origin_requires_verified_document_not_a_browser_exception", "failure_controls::channel_content_method_size_and_duplicate_action_refusals", "assets::*", "security::*", "links::*", "services::*", "chat_channel::*", "development_probe::*", "native_links::tests::*", "shell::tests::both_pinned_documents_emit_the_enforced_csp_without_redirects"],
+      "obligations": ["O:path:tests/a13_macos/test_packaged_app_daemon_channel.py"],
+      "incidents": [],
+      "limits": "Exact Chat header routes preserve window/document/Origin/CSP checks. Probe import compiles against debug and fails E0432 against release. Real OS browser handler lookup is not launch proof. Full service/UI journeys remain open."
+    },
+    {
+      "tests": ["node_shutdown::*", "node_settlement::*", "native_smoke::custom_composition_probe_exercises_chat_stop_and_web_quit"],
+      "obligations": ["O:path:tests/a13_macos/test_packaged_app_daemon_channel.py", "O:path:tests/a13_macos/test_native_quit_dispatch.py"],
+      "incidents": ["F16"],
+      "limits": "Five tests compose actual SLICE-1 DesktopServices/NodeService with L11 adapters; signed-session success uses a controlled peer and inert residue callback, negatives refuse missing proof/failure. Native custom probe remains a 503 fixture. No actual worker/GPU/relay/reservation or native-GUI NodeService cleanup proof; no test retirement."
+    },
+    {
+      "tests": ["package::*", "boundaries::platform_preserves_oracle_exact_legacy_exception", "unsupported_os::*", "failure_controls::production_entry_*"],
+      "obligations": ["O:path:mycelium_a13_macos/package_manifest.py", "O:path:mycelium_a13_packaging/manifest.py", "O:path:mycelium_a13_packaging/build.py"],
+      "incidents": [],
+      "limits": "Synthetic bytes exercise identity/refusal/staging hooks, not native loading, a real installer, signatures, Metal, or install/upgrade/rollback. unsupported_os::* compares the refusal line, dialog script and exit code with 19 executed v0.1.4 launcher cases (FX-L11-unsupported-os); the packaged executable has not been launched on an unsupported Mac."
+    },
+    {
+      "tests": ["bundle::*", "bundle_gate::*", "bundle_smoke::built_bundle_launches_to_a_window_unfocused_and_exits_via_exact_pid_apple_event_quit"],
+      "obligations": ["O:path:mycelium_a13_packaging/build.py", "O:path:mycelium_a13_macos/package_manifest.py"],
+      "incidents": [],
+      "limits": "Local unsigned shell-only bundle: v0.1.4 name/identifier/icon/Info.plist keys, genuine native-input payload copied but not linked or loaded, no Python anywhere, brief unfocused launch-to-window with exact-PID AppleEvent quit. No Developer ID, notarization, Finder launch, real core, or GPU/minimum-OS proof (installer behaviour is the next group); native dylibs record minos 26.x above the claimed 15.6.1. No obligation retirement."
+    },
+    {
+      "tests": ["install::*", "install_cli::*", "launch_location::*", "rpath::*", "bundle::a_pinned_native_inputs_manifest_is_used_only_when_its_sha256_matches", "bundle::a_candidate_manifest_with_another_schema_is_not_guessed_at", "bundle_gate::built_executable_carries_exactly_the_relocatable_frameworks_rpath_and_every_rpath_dependency_resolves"],
+      "obligations": ["O:path:mycelium_a13_packaging/installer_core.py", "O:path:mycelium_a13_macos/installer.py", "O:path:mycelium_a13_macos/launch_location.py", "O:path:mycelium_a13_packaging/build.py"],
+      "incidents": [],
+      "limits": "Install, upgrade (including over a v0.1.x-shaped install and a real v0.1.2 release bundle), rollback, roll-forward, uninstall and byte-for-byte user-state preservation against scratch fake roots only; Python-compatible link-aware bundle digest; relocatable rpath proven with otool and dyld on tiny probes and checked on the built executable. The package document is unsigned (no Ed25519: L12/v0.3), Install Mycelium.command and Gatekeeper behaviour are not ported or tested, launch_location is not wired into the executable, no install into a real Applications folder, no Finder launch, no real core or GPU. No obligation retirement."
+    }
+  ]
+}

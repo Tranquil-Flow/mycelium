@@ -1,0 +1,76 @@
+   Compiling journey-tests v0.2.0-dev ($WORKTREE/test-support/journeys)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/journey_tests-e74811ecea86f99b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/journey_tests-ca4551537c0d52f2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/containment.rs (target/debug/deps/containment-f71ec04ae6371641)
+
+running 2 tests
+test audit_never_follows_links_and_rejects_model_payloads ... ok
+test sandbox_enforcement_has_real_positive_and_negative_controls ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/contracts.rs (target/debug/deps/contracts-39efb062fb85a96f)
+
+running 4 tests
+test loopback_only_never_resolve_hosts_or_accept_url_credentials ... ok
+test comparator_kills_changed_status_defaults_missing_and_extra_observations ... ok
+test wire_projection_is_scalar_allowlist_not_recursive_redaction ... ok
+test sse_order_multiline_comments_crlf_and_incomplete_terminal ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/golden.rs (target/debug/deps/golden-c300f177c3ef0ced)
+
+running 3 tests
+test cli_comparator_matches_real_fixture_without_starting_an_app ... ok
+test comparator_kills_every_captured_field_mutation_and_always_refuse ... ok
+test captured_corpus_is_complete_unique_and_every_tag_exists_in_l0 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/http_adapter.rs (target/debug/deps/http_adapter-a0dee373ed66a3e3)
+
+running 4 tests
+test actual_tcp_chunked_sse_preserves_terminal_order ... ok
+test session_cookie_is_consumed_and_origin_sent_without_redirect_following ... ok
+test truncated_and_ambiguous_responses_fail_not_success ... ok
+test one_total_deadline_rejects_stalled_response ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/process_safety.rs (target/debug/deps/process_safety-28de5bbd712e220f)
+
+running 3 tests
+test isolation_profile_never_grants_general_network_or_writes ... ok
+test target_identity_fails_closed_before_spawn ... ok
+test early_child_exit_fails_readiness_and_removes_its_scratch ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/quiescence.rs (target/debug/deps/quiescence-25d0fdc32d4cc717)
+
+running 1 test
+test recovered_closed_acquisition_is_inert_but_active_or_bytes_are_forbidden ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests journey_tests
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+real 1.81
+user 0.47
+sys 0.28

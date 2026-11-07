@@ -1,0 +1,22 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "source_directory": "mycelium_a13_macos/web",
+  "assets": {
+    "app.js": "8596c79e4279ba80c97f966dd65900fbab89f74aaf4c5a1b29fbf261f8d86a61",
+    "chat.css": "5dce5ce7198071e9186a65ecb02cf1277fa3c492a255af5c6bba91c0c8e7b7dd",
+    "chat.html": "68ae69a0e7225a301b1ee349fbd6ed4ecca8699e6f759c69b53770e7774b8463",
+    "chat.js": "7200b21c023a5e1800ca8d5d547f7ad3dc2cc0209cf3bee2081e293958bb4e91",
+    "index.html": "550bdcee38a8a491ad273f7ca03477aafc06ddebdc6fdbe88bb724cf33115fa8",
+    "run.js": "300684580a99adaa9254888015a83a17a3a77e07f9b56b7bb30f5593efa96f84",
+    "style.css": "ac6004edd1c4abf74bdc2f8ac1cf8adf0c0767242c1ddfc82d6759c0d63cba72",
+    "swarm.js": "1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe"
+  },
+  "icon": {
+    "source": "apps/node-app/src-tauri/icons/icon.png",
+    "sha256": "6413bfe9d546e5225fc9256a0ecec48df3a1272ea4bdc91c15b8e000222a95d3"
+  },
+  "app_icon": {
+    "source": "v0.1.4 Mycelium A13 Demo.app/Contents/Resources/icon-windowed.icns (APP-FILES.sha256 of the published zip; certified f4e366e9 package)",
+    "sha256": "b90a3b56e59169be0f86fe0410699f42ccaa16a0c85d980ef0eb6068032f0b36"
+  }
+}

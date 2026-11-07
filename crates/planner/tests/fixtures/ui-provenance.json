@@ -1,0 +1,14 @@
+{
+  "generator_sha256": "7cf328d4acd34a8034533b41a30faebcbe31fa8a6921d956dded9cc6e465d935",
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "oracle_source_files": {
+    "mycelium_a13_macos/layer_split.py": "e3dd6b7ee8827675ad7fae669d607ea3cb8bda6d2e2ff1d404c22218146e0f60",
+    "mycelium_a13_macos/model_resources.py": "471de9db12ef4b6f1c78db7579475a82f2c4a94a1924d8a77095bccaad494fb7"
+  },
+  "output_sha256": "9874ff4b465cd8c580d5ad8e9b2bb3ce9ec3ce994eccad749ce4f272213440b6",
+  "planning_fixture_sha256": "0718fb3f39474e8aa38019fe15f7596b6c4fbf621a5e349551be49bb1ec2e0dc",
+  "source_files": {
+    "ui-defaults-source.html": "550bdcee38a8a491ad273f7ca03477aafc06ddebdc6fdbe88bb724cf33115fa8",
+    "ui-defaults-source.js": "8596c79e4279ba80c97f966dd65900fbab89f74aaf4c5a1b29fbf261f8d86a61"
+  }
+}

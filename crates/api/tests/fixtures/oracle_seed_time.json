@@ -1,0 +1,189 @@
+{
+ "cases": [
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 1500.75, \"issued_at\": 1000.25, \"max_clock_skew_seconds\": 30.0, \"now\": 2000.5, \"seconds_after_expires\": 499.75, \"seconds_before_issued\": -1000.25}}",
+   "label": "after_expiry",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 1500.75,
+     "issued_at": 1000.25,
+     "max_clock_skew_seconds": 30.0,
+     "now": 2000.5,
+     "seconds_after_expires": 499.75,
+     "seconds_before_issued": -1000.25
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 1160.0, \"issued_at\": 1100.0, \"max_clock_skew_seconds\": 30.0, \"now\": 1000.0, \"seconds_after_expires\": -160.0, \"seconds_before_issued\": 100.0}}",
+   "label": "before_issued",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 1160.0,
+     "issued_at": 1100.0,
+     "max_clock_skew_seconds": 30.0,
+     "now": 1000.0,
+     "seconds_after_expires": -160.0,
+     "seconds_before_issued": 100.0
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 2.0, \"issued_at\": 1.0, \"max_clock_skew_seconds\": 30.0, \"now\": null}}",
+   "label": "now_nan",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 2.0,
+     "issued_at": 1.0,
+     "max_clock_skew_seconds": 30.0,
+     "now": null
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 20.0, \"issued_at\": null, \"max_clock_skew_seconds\": 30.0, \"now\": 10.0}}",
+   "label": "issued_text",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 20.0,
+     "issued_at": null,
+     "max_clock_skew_seconds": 30.0,
+     "now": 10.0
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 1500.0, \"issued_at\": 1000.0, \"max_clock_skew_seconds\": 30.0, \"now\": 2000.0, \"seconds_after_expires\": 500.0, \"seconds_before_issued\": -1000.0}}",
+   "label": "integers",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 1500.0,
+     "issued_at": 1000.0,
+     "max_clock_skew_seconds": 30.0,
+     "now": 2000.0,
+     "seconds_after_expires": 500.0,
+     "seconds_before_issued": -1000.0
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/pair/accept\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": null, \"issued_at\": 5.0, \"max_clock_skew_seconds\": 30.0, \"now\": 10.0}}",
+   "label": "expires_bool",
+   "path": "/api/pair/accept",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": null,
+     "issued_at": 5.0,
+     "max_clock_skew_seconds": 30.0,
+     "now": 10.0
+    }
+   }
+  },
+  {
+   "event_line": null,
+   "label": "no_window_unreachable",
+   "path": "/api/pair/accept",
+   "public_code": "peer_transport_unreachable",
+   "record": {
+    "error_code": "peer_transport_unreachable",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/pair/accept",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "peer_transport_unreachable"
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/api/join/poll\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 1500.75, \"issued_at\": 1000.25, \"max_clock_skew_seconds\": 30.0, \"now\": 2000.5, \"seconds_after_expires\": 499.75, \"seconds_before_issued\": -1000.25}}",
+   "label": "window_other_path",
+   "path": "/api/join/poll",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/api/join/poll",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 1500.75,
+     "issued_at": 1000.25,
+     "max_clock_skew_seconds": 30.0,
+     "now": 2000.5,
+     "seconds_after_expires": 499.75,
+     "seconds_before_issued": -1000.25
+    }
+   }
+  },
+  {
+   "event_line": "{\"error_code\": \"seed_http_seed_time_invalid\", \"event\": \"seed_time_refused\", \"max_clock_skew_seconds\": 30.0, \"path\": \"/invalid\", \"public_code\": \"seed_http_seed_time_invalid\", \"seed_window\": {\"expires_at\": 1500.75, \"issued_at\": 1000.25, \"max_clock_skew_seconds\": 30.0, \"now\": 2000.5, \"seconds_after_expires\": 499.75, \"seconds_before_issued\": -1000.25}}",
+   "label": "window_bad_path",
+   "path": "/api/bad path",
+   "public_code": "seed_http_seed_time_invalid",
+   "record": {
+    "error_code": "seed_http_seed_time_invalid",
+    "exception_module": "mycelium_a13_macos.peer",
+    "exception_type": "RemoteMacMemberError",
+    "path": "/invalid",
+    "protocol": "mycelium.a13.action_failure.v1",
+    "public_code": "seed_http_seed_time_invalid",
+    "seed_window": {
+     "expires_at": 1500.75,
+     "issued_at": 1000.25,
+     "max_clock_skew_seconds": 30.0,
+     "now": 2000.5,
+     "seconds_after_expires": 499.75,
+     "seconds_before_issued": -1000.25
+    }
+   }
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

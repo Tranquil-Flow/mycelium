@@ -1,0 +1,202 @@
+   Compiling node-service v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-slice/crates/node-service)
+    Finished `test` profile [unoptimized] target(s) in 3.91s
+     Running unittests src/lib.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/node_service-c3770f6420553b22)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/mycelium-node.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/mycelium_node-e87dad997669a7b5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/activation.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/activation-0161ec0dd789066e)
+
+running 2 tests
+test native_activation_uses_existing_myac_v1_not_a_new_float_protocol ... ok
+test malformed_activation_never_reaches_native ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/artifact_limits.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/artifact_limits-0f8f74299779e765)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authority_composition.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/authority_composition-e6ae7dfbf17f33f0)
+
+running 2 tests
+test join_requests_get_the_v014_coordinator_outcome ... ok
+test composed_and_committed_exemplars_get_the_oracle_outcome ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/cancel_ack.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/cancel_ack-b3c6638acd3acb34)
+
+running 1 test
+test cancellation_between_frame_delivery_and_flush_ack_preserves_sequence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/control_session.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/control_session-583673c3e4b88da0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/descriptor_confinement.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/descriptor_confinement-b4ff6656706b1e09)
+
+running 3 tests
+test spawned_worker_holds_no_parent_network_descriptor ... ok
+test control_a_plain_child_inherits_the_gap_descriptors ... ok
+test host_probe_child_holds_no_parent_network_descriptor ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+
+     Running tests/desktop_host.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/desktop_host-c39ef4927a0ad366)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/desktop_native.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/desktop_native-5e2c87185ce71819)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/enrollment.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/enrollment-636740181fcf95d3)
+
+running 4 tests
+test owner_verifies_join_signature_nonce_and_audience_before_acceptance ... ok
+test persistent_identity_is_v014_raw_key_and_never_rotates_on_reopen ... ok
+test local_consent_is_explicit_persisted_and_acceptance_is_request_bound ... ok
+test identity_refuses_symlinks_corruption_and_public_permissions ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+
+     Running tests/failed_run_restart.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/failed_run_restart-29cb0c176b135cca)
+
+running 5 tests
+test the_oracle_allows_the_next_start_after_any_failed_run ... ok
+test a_run_that_did_not_fail_without_cleanup_proof_stays_fenced ... ok
+test any_failed_run_stops_without_error_and_allows_the_next_start ... ok
+test a_signed_quorum_settles_a_dead_worker_run_as_failed_and_allows_the_next_start ... ok
+test the_failed_terminal_event_carries_the_workers_code ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/iroh_frames.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/iroh_frames-75f513a4a221e0ee)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/iroh_identity.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/iroh_identity-e72072cca199d99e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lifecycle.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/lifecycle-b95f914e888bd55c)
+
+running 2 tests
+test no_consent_or_bad_signature_creates_no_owner_state ... ok
+test signed_owner_admission_and_explicit_consent_reach_real_l6_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/liveness.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/liveness-0e240e08631257e0)
+
+running 5 tests
+test waker_registered_after_the_death_runs_at_once ... ok
+test a_worker_that_exits_by_itself_is_also_a_native_exit_like_v014 ... ok
+test killed_worker_is_noticed_within_one_registered_watch_period_and_wakes_waiters ... ok
+test the_supervisors_own_cancellation_is_never_reported_as_a_worker_death ... ok
+test watch_ends_at_the_job_deadline_so_the_wall_limit_owns_that_outcome ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+
+     Running tests/loopback.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/loopback-add0f07d999207ec)
+
+running 1 test
+test accepted_nonblocking_listener_is_explicitly_rearmed_for_blocking_io ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/member_clock.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/member_clock-a2b0db901a5ebb3f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/native.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/native-6f507ef5b3d5b3ff)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/no_loopback_control.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/no_loopback_control-7c1b9e6e1b846c41)
+
+running 5 tests
+test composed_slice_has_no_tcp_sockets_for_control ... ok
+test every_composed_spawn_goes_through_the_confining_module ... ok
+test loopback_module_no_longer_exports_a_control_framing ... ok
+test native_binds_the_signed_carrier_protocols_and_has_no_tcp_fallback ... ok
+test composed_slice_has_no_length_prefixed_json_rpc ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/phase.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/phase-9e9d5b1e094d2327)
+
+running 10 tests
+test an_empty_log_stalls_in_desktop_boot ... ok
+test mark_formats_the_documented_line ... ok
+test a_probe_failure_receipt_is_a_failure_too ... ok
+test each_missing_milestone_names_its_own_phase ... ok
+test markers_must_be_whole_lines_not_substrings ... ok
+test a_driver_failure_line_is_recorded_with_its_code_and_first_seen_time ... ok
+test the_stall_report_names_phase_awaited_marker_and_last_seen_time ... ok
+test webview_policy_and_window_occlusion_receipts_are_kept_with_first_seen_times ... ok
+test page_fetch_receipts_are_kept_in_order_with_first_seen_times ... ok
+test a_complete_run_has_no_stall_and_records_first_seen_times ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/planning.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/planning-d6bf22315650e700)
+
+running 1 test
+test l6_planner_adapter_reserves_real_l7_placement_and_refuses_reentry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/post_death_settle.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-slice-target/debug/deps/post_death_settle-ce1252b4a2f27ac4)
+
+running 8 tests
+test the_fixture_is_v014_executed_output ... ok
+test a_death_without_a_reap_proof_allows_the_next_start_but_does_not_verify_the_quit ... ok
+test the_ledger_proves_only_reaped_children_whose_pids_are_gone ... ok
+test a_proof_never_releases_a_run_that_did_not_fail ... ok
+test a_worker_death_never_closes_the_application_by_itself ... ok
+test a_death_with_a_local_reap_proof_fails_the_run_and_releases_the_generation ... ok
+test a_proven_death_verifies_the_shutdown_like_a_quit_that_exits_zero ... FAILED
+test a_tracked_worker_killed_from_outside_is_entered_as_reaped_and_proves ... ok
+
+failures:
+
+---- a_proven_death_verifies_the_shutdown_like_a_quit_that_exits_zero stdout ----
+
+thread 'a_proven_death_verifies_the_shutdown_like_a_quit_that_exits_zero' (21709921) panicked at crates/node-service/tests/post_death_settle.rs:153:5:
+assertion failed: service.poll_shutdown().expect("the reaped generation verifies")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_proven_death_verifies_the_shutdown_like_a_quit_that_exits_zero
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+error: test failed, to rerun pass `-p node-service --test post_death_settle`

@@ -1,0 +1,25 @@
+{
+  "assignment_id": "assignment-node-a",
+  "cache_entry_count": 3,
+  "objects": [
+    {
+      "object_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "relative_path": "model-stage-000.safetensors",
+      "size_bytes": 200,
+      "tensor_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "object_id": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "relative_path": "model-static.safetensors",
+      "size_bytes": 100,
+      "tensor_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  ],
+  "opened_object_ids": [
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  ],
+  "protocol": "mycelium.assignment_materialization.v1",
+  "route_ready": false,
+  "unassigned_object_count": 1
+}

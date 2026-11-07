@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "budgets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+trace-reads = []
+
+[lints]
+workspace = true

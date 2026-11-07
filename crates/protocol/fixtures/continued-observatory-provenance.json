@@ -1,0 +1,17 @@
+{
+  "boundary": "Pure exact semantic snapshot/event decoders including UTC dates, binding, scope/provenance and exact duplicate-claim conflict groups. No freshness-at-now qualification, publication, owner lease, persistence or SSE.",
+  "generator_sha256": "312a4ea07ae5888f0accaeda856506c5ba9eb918240236f09921f7bd277f553e",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_gateway/observatory.py",
+      "sha256": "442f11dbd8612afaf7b853a21bca5d5b09ce441440ad6f0ba9dd6666a649672e"
+    },
+    {
+      "path": "mycelium_gateway/semantic.py",
+      "sha256": "ca514d3781e58532b2b0f792cf927d6f91288d68dc3b88fe5a582c8819c31137"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

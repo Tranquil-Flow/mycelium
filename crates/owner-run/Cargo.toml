@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "owner-run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+budgets = { path = "../budgets" }
+planner = { path = "../planner" }
+serde_json = "=1.0.154"

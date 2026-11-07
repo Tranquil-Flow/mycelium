@@ -1,0 +1,5 @@
+case	clock	max_ttl_seconds	delta_seconds	delta_milliseconds
+zero-clock	0.0	300.0	60.0	60000
+ordinary-clock	1000.0	300.0	60.0	60000
+large-clock	1000000000000.0	300.0	60.0	60000
+private-override	1000.0	300.0	1e+100	uncapped-private-override

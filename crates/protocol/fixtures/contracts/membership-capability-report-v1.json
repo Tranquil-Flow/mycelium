@@ -1,0 +1,22 @@
+{
+  "architecture": "aarch64",
+  "available_storage_bytes": 64000000000,
+  "backends": [
+    "pixel-stdlib"
+  ],
+  "expires_at": 1300.0,
+  "generation": 1,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "memory_bytes": 8000000000,
+  "message_id": "capability_report-fixture",
+  "platform": "android",
+  "precisions": [
+    "float32"
+  ],
+  "protocol": "mycelium.membership.capability_report.v1",
+  "recipient_node_id": "seed-node",
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture"
+}

@@ -1,0 +1,22 @@
+{
+  "fixtures": {
+    "artifact-keys.json": "bd6052fbd9272f28276f17ef521e2f0b0496910137811925dbeb27fe39c4c217",
+    "assignments.json": "f58a8322ed877514aad66a3955e8218ea29be625a3b625b508560adf293a5c43",
+    "planning.json": "0718fb3f39474e8aa38019fe15f7596b6c4fbf621a5e349551be49bb1ec2e0dc"
+  },
+  "generator_sha256": "fd14f66355ccc2dc8dbbd06e1af61462515f32be23ee24adc8038afb902d0fb6",
+  "imported_sources": {
+    "layer_assignment.py": "f1a0325520387af6cb22b2ac0a23addd5a717fa9468c8bd6eb26591226590752",
+    "model_adapters.py": "6252e45a3fe6c6b41ecf04e12e5d2b68bd7705a4703e2ba3a4a1fd6e8185b61b",
+    "model_manifest.py": "8f04eb9a1b70b0bb3fdd48a3bbb3d4baa8fc16a2affb5f8c4e23a24d51ab927e",
+    "mycelium_a13_macos/__init__.py": "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707",
+    "mycelium_a13_macos/layer_split.py": "e3dd6b7ee8827675ad7fae669d607ea3cb8bda6d2e2ff1d404c22218146e0f60",
+    "mycelium_a13_macos/model_resources.py": "471de9db12ef4b6f1c78db7579475a82f2c4a94a1924d8a77095bccaad494fb7",
+    "mycelium_assignment_cache.py": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea",
+    "route_contract.py": "15ad39c20060da5b0d47daab050e595f56196cee08e1f2ff42191512c9bf9681",
+    "runtime_contracts.py": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8",
+  "source_archive_sha256": "ea99521b171349762d57ac4d62c7b155151f1964c4f30ad06cba79fe92dbe31f"
+}

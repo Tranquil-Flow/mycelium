@@ -1,0 +1,85 @@
+{
+  "id": "FX-L1b-r16-dynamic-domains",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "476153baa02bfef5aa5175b198686895922b64dd561089b244902e7cc138c2aa",
+  "scope": "Exact extracted oracle functions/expression; fake recorder/stat objects, no process or files launched; not physical timing evidence",
+  "cases": [
+    {
+      "kind": "positive-seconds",
+      "input": "1000000",
+      "result": 1000000.0
+    },
+    {
+      "kind": "positive-seconds",
+      "input": "1000000000",
+      "result": 1000000000.0
+    },
+    {
+      "kind": "positive-seconds",
+      "input": "0",
+      "refused": true
+    },
+    {
+      "kind": "positive-seconds",
+      "input": "-1",
+      "refused": true
+    },
+    {
+      "kind": "positive-seconds",
+      "input": "inf",
+      "refused": true
+    },
+    {
+      "kind": "send-before",
+      "input": 1,
+      "result": 1.0
+    },
+    {
+      "kind": "send-before",
+      "input": 1000000,
+      "result": 1000000.0
+    },
+    {
+      "kind": "send-before",
+      "input": 1000000000,
+      "result": 1000000000.0
+    },
+    {
+      "kind": "send-before",
+      "input": 0,
+      "refused": true
+    },
+    {
+      "kind": "send-before",
+      "input": -1,
+      "refused": true
+    },
+    {
+      "kind": "cache-formula",
+      "input": [],
+      "result": 1
+    },
+    {
+      "kind": "cache-formula",
+      "input": [
+        1
+      ],
+      "result": 2
+    },
+    {
+      "kind": "cache-formula",
+      "input": [
+        1000000000
+      ],
+      "result": 2000000000
+    },
+    {
+      "kind": "cache-formula",
+      "input": [
+        1000000000000,
+        2000000000000
+      ],
+      "result": 6000000000000
+    }
+  ]
+}

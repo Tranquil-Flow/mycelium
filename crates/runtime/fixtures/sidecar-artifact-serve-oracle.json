@@ -1,0 +1,146 @@
+{
+  "journal": [
+    {
+      "e": 600000,
+      "f": "93054c06393cc16d20092f792b56563d21cfd5ec6da4d6065b399e8187a3726b",
+      "g": "grant-1",
+      "n": 1000,
+      "x": 60000
+    },
+    {
+      "e": 600000,
+      "f": "e739458ed31f998b1fcb63acf532a75d7c35cd1e167a48cf7e1532f8f144229c",
+      "g": "grant-1",
+      "n": 1000,
+      "x": 60000
+    },
+    {
+      "e": 600000,
+      "f": "d80b1e01b197e430c8eb862618280683450de88fd92dea4b748210c9a32a2011",
+      "g": "grant-1",
+      "n": 1000,
+      "x": 60000
+    },
+    {
+      "e": 600000,
+      "f": "3009285506196ba78575ff69791614f361fa826bf7f3d1f16ad2364ed4f3136e",
+      "g": "grant-3",
+      "n": 100,
+      "x": 60000
+    },
+    {
+      "e": 600000,
+      "f": "85de749e629da9e76cef10f6c035e0e376ebee1cf92329318bce221a35f19031",
+      "g": "grant-3",
+      "n": 100,
+      "x": 60000
+    }
+  ],
+  "outcomes": [
+    {
+      "data": "sha256:4e4c294b331f7a2099a379bec34b9f9fc03dc46ab465d998f4d683da53487e6d",
+      "length": 1000,
+      "outcome": "ok",
+      "receipt": "valid",
+      "step": "granted_first"
+    },
+    {
+      "code": "artifact_chunk_request_replay",
+      "outcome": "refused",
+      "step": "replay_of_the_first"
+    },
+    {
+      "data": "sha256:6001f4fd9d6d0187a279decbb936b7e0ea8654ba3bb4624bdfc8b886bd0811d7",
+      "length": 1000,
+      "outcome": "ok",
+      "receipt": "valid",
+      "step": "granted_second"
+    },
+    {
+      "code": "artifact_grant_budget_exhausted",
+      "outcome": "refused",
+      "step": "budget_exceeded"
+    },
+    {
+      "data": "sha256:8cb2f4031b3da609b875b75db5d98ee5a2b1c689b927ec28f50c2a866ceb2107",
+      "length": 1000,
+      "outcome": "ok",
+      "receipt": "valid",
+      "step": "granted_third_fills_the_budget"
+    },
+    {
+      "code": "artifact_grant_budget_exhausted",
+      "outcome": "refused",
+      "step": "budget_exhausted_by_one_byte"
+    },
+    {
+      "data": "sha256:bce0aff19cf5aa6a7469a30d61d04e4376e4bbf6381052ee9e7f33925c954d52",
+      "length": 100,
+      "outcome": "ok",
+      "receipt": "valid",
+      "step": "other_grant_has_its_own_budget"
+    },
+    {
+      "code": "artifact_source_ledger_reset",
+      "outcome": "refused",
+      "step": "grant_began_before_genesis"
+    },
+    {
+      "code": "artifact_object_unavailable",
+      "outcome": "refused",
+      "step": "object_missing_on_disk"
+    },
+    {
+      "code": "artifact_object_unavailable",
+      "outcome": "refused",
+      "step": "object_content_tampered_on_disk"
+    },
+    {
+      "code": "artifact_chunk_range_invalid",
+      "outcome": "refused",
+      "step": "range_beyond_the_object"
+    },
+    {
+      "code": "artifact_recipient_transport_mismatch",
+      "outcome": "refused",
+      "step": "wrong_transport_peer"
+    },
+    {
+      "code": "artifact_chunk_request_invalid",
+      "outcome": "refused",
+      "step": "not_json"
+    },
+    {
+      "code": "artifact_chunk_request_signature_invalid",
+      "outcome": "refused",
+      "step": "tampered_request"
+    },
+    {
+      "code": "artifact_chunk_request_replay",
+      "outcome": "refused",
+      "step": "replay_after_restart"
+    },
+    {
+      "code": "artifact_grant_budget_exhausted",
+      "outcome": "refused",
+      "step": "budget_still_exhausted_after_restart"
+    },
+    {
+      "data": "sha256:dc51c9546d5998caf68ce165eccafcb7db043b226364a7b2c99c31f3ae658735",
+      "length": 100,
+      "outcome": "ok",
+      "receipt": "valid",
+      "step": "other_grant_continues_after_restart"
+    },
+    {
+      "code": "artifact_chunk_request_replay",
+      "outcome": "refused",
+      "step": "granted_after_restart_replay_of_the_other"
+    }
+  ],
+  "provenance": {
+    "binary_digest": "sha256:c2dcdb1820371cb6fc881b7a2342819e52cc0326c00578d40b5272aef5a63672",
+    "method": "EXECUTED: crates/runtime/tests/oracle_artifact_interop.rs ignored test with L9_WRITE_SERVE_FIXTURE; 18 signed chunk requests over the artifact ALPN, one restart",
+    "oracle": "mycelium-iroh-sidecar RELEASE profile (opt-level 0) of f4e366e98a1f705dfaf182897044500d290dbd7f, --local-only with the four --artifact-* flags"
+  }
+}

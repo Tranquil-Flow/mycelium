@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "name": "nonowner_before_existing_context",
+      "result": {
+        "class": "DemoError",
+        "error": "owner_action_required"
+      }
+    },
+    {
+      "name": "existing_context",
+      "result": {
+        "class": "DemoError",
+        "error": "bootstrap_context_already_exists"
+      }
+    },
+    {
+      "name": "missing_context",
+      "result": {
+        "class": "DemoError",
+        "error": "bootstrap_context_missing"
+      }
+    }
+  ],
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

@@ -1,0 +1,65 @@
+{
+  "id": "FX-L1b-r16-gap-operands",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "08e2c07f28e950e33360eb28488a14cd47f32713eba57226cb75688e1280b438",
+  "operands": [
+    [
+      "mycelium_m19_recovery.py:143:45:manual-bound:miss_count_trigger",
+      "count",
+      3
+    ],
+    [
+      "mycelium_m19_recovery.py:143:63:manual-bound:stale_age_trigger_ms",
+      "ms",
+      15000
+    ],
+    [
+      "mycelium_a7_fence_store.py:171:69:manual-bound:owner_file_max_bytes",
+      "bytes",
+      1048576
+    ],
+    [
+      "mycelium_m16_runtime.py:1230:40:manual-bound:maximum_reservations",
+      "count",
+      64
+    ],
+    [
+      "mycelium_router/a10_member_isolation.py:35:17:manual-bound:bound_ceiling",
+      "count",
+      1073741824
+    ],
+    [
+      "mycelium_router/token_receipt_delivery.py:69:52:manual-bound:delivery_wait_seconds",
+      "ms",
+      50
+    ]
+  ],
+  "constructor_cases": [
+    [
+      0,
+      "refused",
+      "m16_capacity_invalid"
+    ],
+    [
+      1,
+      "accepted",
+      1
+    ],
+    [
+      64,
+      "accepted",
+      64
+    ],
+    [
+      65,
+      "accepted",
+      65
+    ],
+    [
+      1000000000,
+      "accepted",
+      1000000000
+    ]
+  ],
+  "scope": "Exact pinned constant expressions and extracted real m16 constructor with inert graph; no physical reservation performed"
+}

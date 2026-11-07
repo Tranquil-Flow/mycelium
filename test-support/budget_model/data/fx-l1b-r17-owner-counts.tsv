@@ -1,0 +1,3 @@
+id	symbol	line	entries	scope
+ManagedOwnerSequenceReservationBlock	_SEQUENCE_BLOCK	38	64	reservation increment, not maximum sequence
+ManagedOwnerConfirmedLedgerTail	_COMMAND_LEDGER_TAIL	130	256	confirmed-retention target only; unresolved rows are never dropped

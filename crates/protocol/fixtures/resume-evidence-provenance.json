@@ -1,0 +1,120 @@
+{
+  "boundary": "External pinned read-only snapshot; no services, subprocesses, sockets or live state",
+  "generator_sha256": "22380431ca045202daa1fdfbf620d5eaf295c0d3f55cebfa9c8abd1d19606087",
+  "inputs": [
+    {
+      "path": "mycelium_a6_recovery.py",
+      "sha256": "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3"
+    },
+    {
+      "path": "mycelium_deadlines.py",
+      "sha256": "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0"
+    },
+    {
+      "path": "mycelium_internet/__init__.py",
+      "sha256": "9ae8ad751a77a49dea9ff9a795c502e359df685e113fd62279d395457e8bfccb"
+    },
+    {
+      "path": "mycelium_internet/contracts.py",
+      "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc"
+    },
+    {
+      "path": "mycelium_layer_planner/__init__.py",
+      "sha256": "950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf"
+    },
+    {
+      "path": "mycelium_layer_planner/allocation.py",
+      "sha256": "2c7e64ab6aea252075392a29e24a840d063a04a3b8081589514e50e5065dbf44"
+    },
+    {
+      "path": "mycelium_layer_planner/contracts.py",
+      "sha256": "038b579c1d7779598aca2303b6cecb3126926b897db0f051feac1d0aa1da3b90"
+    },
+    {
+      "path": "mycelium_layer_planner/cycle_search.py",
+      "sha256": "bea863d4e4928f3ec31251602bff808e3589271389948371f31587716136e675"
+    },
+    {
+      "path": "mycelium_layer_planner/flow.py",
+      "sha256": "38297c7229ee3053641c86e196aefb34277e973b086bd77c09b7c6f4d6892c10"
+    },
+    {
+      "path": "mycelium_layer_planner/network_cost.py",
+      "sha256": "2619c0506d51ee92d653c7eb945ffa8c3e5581f3c88832e2472766c56160ccae"
+    },
+    {
+      "path": "mycelium_layer_planner/phase_score.py",
+      "sha256": "b78053ce4bb224a47b0a4be8fca1d8bc135cf4d1092b0cc6211f6eacd3d01f57"
+    },
+    {
+      "path": "mycelium_layer_planner/physical_graph.py",
+      "sha256": "e299f4c9ea9f2581e63ca5fda74dc6579d80a2cf9d720a5d55266900f774a98d"
+    },
+    {
+      "path": "mycelium_layer_planner/planner.py",
+      "sha256": "2c3b152aef10ac9e865de9ad2c0250eb52c91018041b7aad92cce82e1f28d33c"
+    },
+    {
+      "path": "mycelium_layer_planner/primary_plan.py",
+      "sha256": "997b76db4254a338eb7a4a47fb64c213ae3686fec41da990ddef56a6f28ef938"
+    },
+    {
+      "path": "mycelium_layer_planner/recovery_intent.py",
+      "sha256": "3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9"
+    },
+    {
+      "path": "mycelium_layer_planner/replanning.py",
+      "sha256": "35fe72d9bd10597de7c2898c76a674a341492830f3ea598893dff9beee80ced7"
+    },
+    {
+      "path": "mycelium_layer_planner/replication.py",
+      "sha256": "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5"
+    },
+    {
+      "path": "mycelium_layer_planner/serialization.py",
+      "sha256": "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c"
+    },
+    {
+      "path": "mycelium_layer_planner/speculative.py",
+      "sha256": "2e47662403dc8d701cc83661b37951a04c64affab2fe773ac0cd35d0cbbf4d51"
+    },
+    {
+      "path": "mycelium_layer_planner/workload.py",
+      "sha256": "2c1d7080039ed06c856fdbfbbd6ea0d6d9d8cad9c3140cd47c36d6b383d8aa73"
+    },
+    {
+      "path": "mycelium_product_spine/__init__.py",
+      "sha256": "e04d895724d1f3ff9a3c3226f7346fe8314c02e81b2a4c47727523b8e4ee32fc"
+    },
+    {
+      "path": "mycelium_product_spine/app.py",
+      "sha256": "4c67013636546293e92ae13f677f1cbc8688512967ed786bf69ef62d6497f559"
+    },
+    {
+      "path": "mycelium_product_spine/coarse_region.py",
+      "sha256": "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2"
+    },
+    {
+      "path": "mycelium_product_spine/contracts.py",
+      "sha256": "9db268274b837bd898fce61a00cbd668c7119cba9c48ad28106559f5da1be27f"
+    },
+    {
+      "path": "mycelium_product_spine/projector.py",
+      "sha256": "f8dba1be39396b599700ea5fe8ad0a5110d384c83f12faa9ea702fab5bac64f1"
+    },
+    {
+      "path": "mycelium_product_spine/state.py",
+      "sha256": "d764926f81d246400b3e648011d61bd13fd80381cc09a50ce97bd011734c5add"
+    },
+    {
+      "path": "mycelium_product_spine/transport_history.py",
+      "sha256": "c3297c21ed62c7d76ede73cb314b49aa80b7a951dbba8ebd24cfed441b033183"
+    },
+    {
+      "path": "mycelium_topology_evidence.py",
+      "sha256": "d63e83f6b1404532b9d6b7be7ef0441f31018526eeed8a9797a2e40fff6387b0"
+    }
+  ],
+  "oracle_commit": "941765e882ed3eea9a5576cc53e525c4caa20300",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

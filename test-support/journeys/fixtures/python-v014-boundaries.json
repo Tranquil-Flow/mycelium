@@ -1,0 +1,386 @@
+{
+  "capture_kind": "real_packaged_process_loopback_http",
+  "executable_sha256": "bc06dc664353c5dd15b937afd8e5a5f464131c5248fd906a325a642c37e85467",
+  "observations": [
+    {
+      "fields": {
+        "/membership_state": "current",
+        "/route_ready": false
+      },
+      "id": "boundary_owner_created",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/create",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/peer_class": "mac_mlx_iroh",
+        "/protocol": "mycelium.pairing_request.v1"
+      },
+      "id": "boundary_member_request",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/join/request",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/member_count": 1,
+        "/authority/membership_state": "current",
+        "/resource_policy/storage_bytes": 4000000000
+      },
+      "id": "simultaneous_owner_status",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/join_flow/standing_consent": null,
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "simultaneous_unjoined_member_status",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "distinct_homes": true,
+        "distinct_listeners": true,
+        "distinct_pids": true,
+        "distinct_state_dirs": true,
+        "owner_standing_grant_exists": false
+      },
+      "id": "two_live_isolated_instances",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/fix/action": "start_relay",
+        "/state": "waiting_for_relay"
+      },
+      "id": "join_window_waits_for_public_relay",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/window/open",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/join_flow/pending_windows/0/state": "waiting_for_relay",
+        "/join_flow/pending_windows/0/ttl_seconds": 30
+      },
+      "id": "pending_window_status",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/state": "revoked"
+      },
+      "id": "pending_window_revoked",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/window/revoke",
+      "status": 200
+    },
+    {
+      "fields": {
+        "pending_windows": 0,
+        "redeemable_windows": 0
+      },
+      "id": "revoked_window_absent",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "relay_origin_invalid"
+      },
+      "id": "external_loopback_relay_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/public_relay.py",
+      "path": "/api/network/start",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/authority/member_count": 1,
+        "/network/state": "private",
+        "/serving/route_ready": false
+      },
+      "id": "relay_refusal_keeps_owner_private",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/public_relay.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/protocol": "mycelium.encrypted_invitation_handoff.v1"
+      },
+      "id": "manual_pairing_handoff_issued",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/approve",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/protocol": "mycelium.encrypted_invitation_handoff.v1"
+      },
+      "id": "manual_pairing_approval_idempotent",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/approve",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "pairing_approval_changed"
+      },
+      "id": "manual_pairing_quota_change_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/approve",
+      "status": 409
+    },
+    {
+      "fields": {
+        "/error": "pairing_handoff_request_mismatch"
+      },
+      "id": "handoff_request_binding_refused",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/pair/accept",
+      "status": 409
+    },
+    {
+      "fields": {
+        "/error": "peer_transport_unreachable"
+      },
+      "id": "manual_join_loopback_tls_untrusted",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/peer.py",
+      "path": "/api/pair/accept",
+      "status": 409
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/authority/pairing_state": "handoff_retained",
+        "/join_flow/standing_consent": null,
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "failed_manual_join_is_not_membership",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/peer.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/contribution_enabled": false,
+        "/authority/member_count": 1
+      },
+      "id": "failed_manual_join_did_not_enroll_member",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/app.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "consent_retry_changed"
+      },
+      "id": "saved2_after_failed_join_no_upgrade",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "/api/join/request",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/error": "standing_consent_missing"
+      },
+      "id": "unjoined_standing_withdraw_missing",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+      "path": "/api/consent/standing/withdraw",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/error": "join_window_missing"
+      },
+      "id": "unjoined_window_poll_missing",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/join/window/poll",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/state": "cancelled"
+      },
+      "id": "unjoined_window_cancel",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/pairing.py",
+      "path": "/api/join/window/cancel",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "not_found"
+      },
+      "id": "member_private_stats_not_exposed",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/swarm_stats.py",
+      "path": "/api/stats",
+      "status": 404
+    },
+    {
+      "fields": {
+        "/compilation": null,
+        "/route_ready": false,
+        "/serving": null
+      },
+      "id": "no_model_no_execution_proposal",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/chain_compile.py",
+      "path": "/api/serving/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/error": "target_role_required"
+      },
+      "id": "owner_cannot_leave_as_member",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/leave",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/error": "leave_confirmation_required"
+      },
+      "id": "leave_requires_confirmation",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/leave",
+      "status": 400
+    },
+    {
+      "fields": {
+        "/error": "leave_mode_invalid"
+      },
+      "id": "leave_rejects_unknown_mode",
+      "method": "POST",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/leave",
+      "status": 400
+    },
+    {
+      "fields": {
+        "all_steps_ok": true,
+        "fallback": null,
+        "handoff": "unavailable",
+        "joined_member": false,
+        "mode": "instant",
+        "state": "left"
+      },
+      "id": "unjoined_instant_leave_complete",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/demo_target/state": "not_joined",
+        "/join_flow/standing_consent": null,
+        "/leave/mode": "instant",
+        "/leave/state": "left",
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "unjoined_instant_leave_status",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/join_flow/standing_consent": null,
+        "/leave/mode": "instant",
+        "/leave/state": "left",
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "unjoined_leave_restart_preserved",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "all_steps_ok": true,
+        "fallback": null,
+        "handoff": "unavailable",
+        "joined_member": false,
+        "mode": "smooth",
+        "state": "left"
+      },
+      "id": "unjoined_smooth_leave_complete",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "public-observation-relation",
+      "status": 200
+    },
+    {
+      "fields": {
+        "/authority/membership_state": "absent",
+        "/demo_target/state": "not_joined",
+        "/join_flow/standing_consent": null,
+        "/leave/mode": "smooth",
+        "/leave/state": "left",
+        "/resource_policy/storage_bytes": 2000000000
+      },
+      "id": "unjoined_smooth_leave_status",
+      "method": "GET",
+      "obligation_id": "O:path:mycelium_a13_macos/member_leave.py",
+      "path": "/api/status",
+      "status": 200
+    },
+    {
+      "fields": {
+        "all_exit_zero": true,
+        "leftover_pids": 0,
+        "no_serving_or_download": true,
+        "scratch_removed": true
+      },
+      "id": "boundary_clean_teardown",
+      "method": "ASSERT",
+      "obligation_id": "O:path:mycelium_a13_macos/__main__.py",
+      "path": "public-observation-relation",
+      "status": 200
+    }
+  ],
+  "schema": "mycelium.journeys.golden.v1",
+  "source_sha": "ef9ae61de0222c78d83c8133f8f709619394bf51"
+}

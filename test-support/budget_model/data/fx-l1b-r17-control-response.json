@@ -1,0 +1,40 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "path": "mycelium_a13_macos/managed_control.py",
+  "file_sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+  "expression_line": 1006,
+  "expression_sha256": "aa6a996734a1e7361bdcdce0ad7de034963143cff28a28cc7423c0067bf58612",
+  "method_span_sha256": "8323347e1edd67ac67650df38f3df9f54b4b742fd0b55ce03ca5ccdbc4194f4f",
+  "probe_sha256": "7477b342b0455b251a34c2f6c34d7004b15b771541332845f954e9a9d761c6d2",
+  "scope": "Actual _response body, inert signing and fixed clocks only. Source initializer allowance, NOT a bound on arbitrary overriding fields or accepted external envelopes. No native/session/signing security calibration.",
+  "rows": [
+    [
+      "zero-clock",
+      "0.0",
+      "300.0",
+      "60.0",
+      "60000"
+    ],
+    [
+      "ordinary-clock",
+      "1000.0",
+      "300.0",
+      "60.0",
+      "60000"
+    ],
+    [
+      "large-clock",
+      "1000000000000.0",
+      "300.0",
+      "60.0",
+      "60000"
+    ],
+    [
+      "private-override",
+      "1000.0",
+      "300.0",
+      "1e+100",
+      "uncapped-private-override"
+    ]
+  ]
+}

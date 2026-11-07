@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Test profiles for the workspace (process fix P4). Run with `cargo nextest run --profile <name>`.
+#   quick   fast loop used by `cargo xtask quick`: fail-fast, short slow-timeout, no slow or two-host/device tests
+#   merge   whole workspace, no fail-fast, JUnit at target/nextest/merge/junit.xml
+#   nightly merge settings, no retries; ignored tests are added on the command line because nextest has no
+#           config key for them: `cargo nextest run --profile nightly --run-ignored all`
+# No test is deleted or loosened here: `quick` only selects. Everything it leaves out still runs in `merge`.
+
+[profile.default]
+fail-fast = true
+
+# hello-bootstrap: the six real-process tests of node-service::hello_bootstrap (the whole binary is those six)
+# start the real mycelium-hello-bootstrap helper and its ioreg identity probe. When workspace runs overlap,
+# running them side by side pushed helper startup past the WorkerStartup budget (six failures in one merge run,
+# green on rerun). One at a time they stay inside it; the budget itself is not touched.
+# The [test-groups] table is global. The override sits in profile.default, which quick, merge and nightly all
+# inherit (nextest checks the selected profile's overrides first, then its inheritance chain, then default),
+# so one entry covers all three. It sets only test-group: no timeout, retry or other grouping changes.
+[test-groups]
+hello-bootstrap = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary_id(=node-service::hello_bootstrap)'
+test-group = 'hello-bootstrap'
+
+# quick skips, and never runs, these (each is still run by merge and nightly):
+#  * every #[ignore]d test (nextest skips them unless --run-ignored is given). The real two-host and
+#    two-device suites are all #[ignore]d ("explicit isolated native qualification", "requires local assets").
+#  * any test named for two hosts, two Macs or real devices, should one ever be added without #[ignore].
+#  * the tests that took more than 5 s in the 2026-11-03 merge run (3116 tests, 107 over 5 s, on a loaded host).
+#    They are 5384 s of the 6068 s of summed test time; the other 3009 tests sum to 684 s.
+#    The list below is generated from target/nextest/merge/junit.xml (testcases with time > 5):
+#    after a merge run, re-list them (name = test, binary_id = classname) and update this block.
+# A test that still passes the filter but runs for 60 s (15 s period x 4) is killed and fails the run.
+[profile.quick]
+fail-fast = true
+slow-timeout = { period = "15s", terminate-after = 4 }
+default-filter = '''
+not (
+    test(/(^|_)(two_host|two_mac|two_device|real_device)(_|$)/)
+  | (binary_id(=api::headless_pair_e2e) &
+     (test(=a_joined_member_keeps_renewing_through_an_owner_restart_behind_the_edge)
+      | test(=a_joined_member_renews_its_own_lease_in_the_background)
+      | test(=a_member_that_has_left_stops_renewing_its_lease)
+      | test(=a_rust_member_joins_a_rust_owner_through_the_window_and_the_collapsed_seed)
+      | test(=an_owner_without_a_relay_restarts_with_its_swarm)
+      | test(=headless_observation::actual_headless_mounts_observation_and_refuses_missing_native_bootstrap)
+      | test(=stop_start_and_a_full_restart_equal_the_executed_oracle)
+      | test(=the_local_contributor_routes_equal_the_executed_oracle)
+      | test(=the_owner_renews_its_own_lease_in_the_background)
+     ))
+  | (binary_id(=protocol::gossip_contracts) &
+     (test(=gossip_bundle_refusals_carry_the_oracle_per_field_text)
+      | test(=gossip_bundle_rejects_forged_views_and_digests)
+      | test(=gossip_derivation_refusals_carry_the_oracle_evidence_text)
+      | test(=gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources)
+      | test(=signed_gossip_refusals_carry_the_oracle_text)
+      | test(=signed_gossip_verifies_independent_authority_time_and_complete_payload)
+     ))
+  | (binary_id(=budget-model::inventory_partition_b_families) & test(=b_families_require_the_exact_source_target_and_same_unit_provenance))
+  | (binary_id(=api::acquisition) & test(=the_acquisition_equals_the_executed_oracle_scenario_by_scenario))
+  | (binary_id(=planner::bound_replica) & test(=bound_replica_assignments_match_the_oracle_on_multi_node_bundles))
+  | (binary_id(=api::launcher_journey) &
+     (test(=headless_launcher_passes_the_unchanged_l3_baseline_journeys_against_the_python_golden)
+      | test(=headless_launcher_passes_the_unchanged_l3_boundaries_corpus_against_the_python_golden)
+     ))
+  | (binary_id(=budget-model::inventory_quantities) & test(=reviewed_quantities_reject_unrelated_same_unit_policy))
+  | (binary_id(=api::headless_private_json) &
+     (test(=a_document_between_64_kib_and_the_cap_is_accepted)
+      | test(=a_document_over_the_cap_is_refused_as_authority_state_invalid)
+     ))
+  | (binary_id(=api::seed_http) & test(=seed_http_client_equals_the_executed_oracle))
+  | (binary_id(=api::headless_signals) &
+     (test(=sigint_closes_the_launcher_as_v014)
+      | test(=sigterm_closes_the_launcher_as_v014)
+     ))
+  | (binary_id(=obligations::package_dispositions) & test(=original_637_gaps_are_exactly_dispositioned_and_each_is_required))
+  | (binary_id(=protocol::planner_snapshot_contracts) & test(=planner_snapshot_reconstructs_every_field_from_independent_gossip_evidence))
+  | (binary_id(=protocol::provenance) & test(=fixture_seal_and_coverage_crosswalk_are_complete))
+  | (binary_id(=sim::remaining_incidents) &
+     (test(=corrected_observations_match_independent_source_values)
+      | test(=historical_faults_have_distinct_semantics_and_reached_actions)
+      | test(=remaining_models_are_deterministic_and_minimizer_keeps_reachability)
+      | test(=section7_f2_authorized_progress_contract)
+     ))
+  | (binary_id(=budget-model::inventory_adjudication) & test(=real_tables_parse_and_every_verdict_row_validates))
+  | (binary_id(=budget-model::inventory_ratio) & test(=eleven_ratio_literals_are_registered_and_reviewed_exactly))
+  | (binary_id(=protocol::remaining_public_contracts) & test(=remaining_public_shapes_match_positive_bytes_and_all_negative_vectors))
+  | (binary_id(=protocol::planner_contracts) &
+     (test(=replan_simulation_oracle_corpus_positive_and_every_refusal_match)
+      | test(=tranche_oracle_corpus_positive_and_every_refusal_match)
+     ))
+  | (binary_id(=runtime::iroh_process) &
+     (test(=journal::real_journal_pending_failed_and_forged_receipts_are_not_promoted)
+      | test(=managed_raw_envelope_shares_strict_receipt_and_final_admission)
+      | test(=managed_signed_receipt_keeps_pending_failed_and_reconciliation_states)
+      | test(=managed_signed_receipt_rejects_foreign_identity_run_deployment_and_request)
+      | test(=managed_signed_receipt_timeout_and_peer_close_never_fabricate_stop)
+     ))
+  | (binary_id(=api::model_routes_e2e) &
+     (test(=a_model_download_reaches_prepared_through_the_running_process_and_a_bad_snapshot_is_refused)
+      | test(=model_download_and_cancel_on_the_rust_headless_equal_the_executed_oracle)
+     ))
+  | (binary_id(=api::peer_resume) & test(=start_resume_and_seed_refusals_equal_the_executed_oracle))
+  | (binary_id(=protocol::product_contracts) & test(=product_positive_bytes_and_negative_corpus))
+  | (binary_id(=protocol::observatory_contracts) & test(=observatory_positive_bytes_and_negative_corpus))
+  | (binary_id(=budget-model::inventory_round5_review) & test(=a_changed_value_unit_or_id_is_refused_for_every_reviewed_site))
+  | (binary_id(=budget-model::inventory_clamps) & test(=each_clamp_claim_binds_its_source_and_budget_provenance))
+  | (binary_id(=sim::remaining_persisted_corpus) & test(=seven_persisted_incidents_replay_exactly_and_corrected_controls_progress))
+  | (binary_id(=budget-model::inventory_forward_callers) & test(=relation_unit_value_budget_and_rule_mutations_are_refused))
+  | (binary_id(=runtime::sidecar_main_cli) &
+     (test(=the_binary_exits_and_logs_like_the_oracle_on_every_recorded_case)
+      | test(=the_binary_serves_the_relay_modes_as_the_executed_oracle)
+     ))
+  | (binary_id(=budget-model::inventory_source_unbounded) & test(=mutations_are_refused))
+  | (binary_id(=artifacts::cache_repair) &
+     (test(=damaged_entries_are_repaired_evicted_and_left_on_disk_exactly_as_v014_does)
+      | test(=test_temp::symlinked_tmpdir_runs_existing_tests_without_weakening_cache_admission)
+     ))
+  | (binary_id(=budget-model::inventory_zero_boundaries) & test(=every_zero_boundary_binds_exact_source_and_cannot_be_given_an_unrelated_zero_id))
+  | (binary_id(=planner::stage_sweep) & test(=oracle_stage_sweep_verdicts_are_reproduced))
+  | (binary_id(=planner::layer_planner) &
+     (test(=plan_snapshot_matches_the_oracle_for_scenarios_generated_fleets_and_mutations)
+      | test(=topology_replanning_matches_the_oracle_for_every_event_family)
+     ))
+  | (binary_id(=budget-model::inventory_cli_literals) & test(=value_unit_rule_id_and_table_mutations_are_refused))
+  | (binary_id(=sim::trace_migration) & test(=every_migrated_trace_preserves_both_complete_legacy_outcomes))
+  | (binary_id(=protocol::route_contracts) & test(=route_parser_and_unqualified_record_match_exact_oracle_outputs))
+  | (binary_id(=protocol::capacity_contracts) & test(=capacity_positive_bytes_rederived_claims_and_negative_corpus))
+  | (binary_id(=protocol::wire_contracts) & test(=all_router_messages_match_exact_frames_and_full_negative_corpus))
+  | (binary_id(=planner::chain_compile) &
+     (test(=capability_records_equal_the_oracle_for_every_case)
+      | test(=chain_outcomes_flip_exactly_where_the_oracle_flips)
+      | test(=compile_state_for_two_three_and_more_member_fleets_equals_the_oracle)
+     ))
+  | (binary_id(=node::pass_descriptors) &
+     (test(=an_empty_list_is_exactly_confine_descriptors)
+      | test(=exactly_the_listed_pipe_arrives_amid_concurrently_created_decoys)
+     ))
+  | (binary_id(=budget-model::inventory_argparse) & test(=caller_override_is_dynamic_and_unrelated_valid_budget_is_rejected))
+  | (binary_id(=api::qr) & test(=generated_corpus_is_byte_identical_across_modes_versions_and_masks))
+  | (binary_id(=journey-tests::twohost) &
+     (test(=engine_poll_records_a_read_timeout_as_latency_when_the_step_declares_it)
+      | test(=engine_poll_times_out_with_a_named_deadline)
+     ))
+  | (binary_id(=protocol::seed_members_contracts) & test(=member_paths_match_the_executed_coordinator))
+  | (binary_id(=budget-model::inventory_keyword_b_migration) &
+     (test(=canonical_union_keeps_original_27_and_b359_plus_exact_two_ratio_keys)
+      | test(=every_proposed_key_rejects_omission_and_identity_changes_and_remaining_25_are_not_allowed)
+     ))
+  | (binary_id(=protocol::managed_receipts) & test(=signed_managed_receipts_match_oracle_and_refuse_full_mutation_corpus))
+  | (binary_id(=protocol::assignment_contracts) & test(=assignment_report_and_audit_match_byte_exact_oracle))
+  | (binary_id(=protocol::promotion_contracts) & test(=promotion_reconstructs_exact_positive_bytes_and_rejects_forged_claims))
+  | (binary_id(=seed::oracle_server) &
+     (test(=member_flow_over_real_tls_equals_the_oracle)
+      | test(=revocation_and_restart_over_real_tls_equal_the_oracle)
+     ))
+  | (binary_id(=protocol::token_authority) & test(=token_grants_and_receipts_are_byte_exact_and_match_oracle_refusals))
+  | (binary_id(=planner::bound_compiler) & test(=bound_compiler_with_lineage_matches_the_oracle))
+  | (binary_id(=budget-model::inventory_clamp_bindings) & test(=clamp_reference_relationships_cannot_retarget_a_valid_policy))
+  | (binary_id(=budget-model::inventory_partition_b_quantities) & test(=b_protocol_compositions_and_configured_defaults_have_distinct_source_values))
+  | (binary_id(=budget-model::inventory_fallback_bindings) & test(=fallback_edges_do_not_authorize_other_valid_budgets))
+  | (binary_id(=protocol::route_assignment_contracts) & test(=route_assignment_answers_match_the_executed_service))
+  | (binary_id(=runtime) & test(=sidecar_session::tests::the_oracle_script_replays_byte_for_byte_through_the_port_dispatcher))
+  | (binary_id(=seed::oracle_operator) & test(=restore_seed_state_equals_the_oracle))
+  | (binary_id(=api::relay) & test(=quick_tunnel_provider_with_a_fake_cloudflared_equals_the_oracle))
+  | (binary_id(=budget-model::inventory_x_exclusion) & test(=producer_class_family_and_carrier_mutations_are_refused))
+  | (binary_id(=budget-model::inventory_keyword_b_mobile) & test(=mobile_sixty_five_operands_equal_independent_executed_fixture))
+  | (binary_id(=budget-model::inventory_keyword_b_recovery) & test(=recovery_seventy_operands_equal_independent_executed_fixture))
+  | (binary_id(=api::seed_join) & test(=seed_half_of_accept_handoff_equals_the_executed_oracle))
+  | (binary_id(=budget-model::inventory_keyword_b_predicates) & test(=predicates_fifty_seven_operands_equal_independent_executed_fixture))
+  | (binary_id(=budget-model::inventory_r36_stats_forwarded) & test(=separate_table_union_and_negative_controls))
+  | (binary_id(=api::acquisition_tls) & test(=a_model_snapshot_downloads_over_verified_tls_with_a_redirect_and_a_chunked_manifest))
+  | (binary_id(=budget-model::inventory_keyword_b_swarm) & test(=swarm_fifty_nine_operands_equal_independent_executed_fixture))
+  | (binary_id(=protocol::public_contracts) & test(=public_shapes_match_pinned_positive_bytes_and_negative_corpus))
+  | (binary_id(=model::greedy_driver) & test(=caps_and_prompt_shapes_are_refused_before_any_step))
+  | (binary_id(=sim::review_regressions) & test(=every_extended_trace_rejects_build_lock_version_and_budget_drift))
+  | (binary_id(=owner-run::oracle_slices) & test(=slices_matches_executed_oracle))
+  | (binary_id(=budget-model::inventory_keyword_b_validators) & test(=validators_fifty_operands_equal_independent_executed_fixture))
+  | (binary_id(=runtime::sidecar_relay_modes) & test(=an_unreachable_relay_waits_the_window_names_it_and_still_publishes_ready_as_the_oracle))
+  | (binary_id(=runtime::iroh_pool_process) & test(=a_dial_is_capped_by_the_connect_bound_not_the_stream_bound))
+  | (binary_id(=budget-model::inventory_report) & test(=report_on_current_data_has_counts_and_one_closure_line_without_failing))
+)
+'''
+
+[profile.merge]
+fail-fast = false
+
+[profile.merge.junit]
+path = "junit.xml"
+
+[profile.nightly]
+inherits = "merge"
+retries = 0
+
+[profile.nightly.junit]
+path = "junit.xml"

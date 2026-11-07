@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+budgets = { path = "../budgets" }
+protocol = { path = "../protocol" }
+planner = { path = "../planner" }
+owner-run = { path = "../owner-run" }
+runtime = { path = "../runtime", features = ["iroh-adapter"] }
+transport = { path = "../transport" }
+control-runtime = { path = "../control-runtime" }
+node = { path = "../node" }
+iroh = { version = "=1.0.2", default-features = false, features = ["tls-ring"] }
+tokio = { version = "=1.53.1", features = ["rt", "time", "io-util", "sync", "macros", "net", "signal", "rt-multi-thread"] }
+seed = { path = "../seed" }
+router = { path = "../router" }
+base64 = "=0.22.1"
+ed25519-dalek = "=2.2.0"
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+rustix = { version = "=1.1.4", features = ["process"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "=0.8.4"
+rustls-pki-types = "=1.15.1"
+sha1 = "=0.10.6"
+sha2 = "=0.10.9"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["raw_value", "arbitrary_precision"] }
+libc = "=0.2.190"
+
+[dev-dependencies]
+journey-tests = { path = "../../test-support/journeys" }
+
+[lints]
+workspace = true

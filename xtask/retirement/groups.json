@@ -1,0 +1,8 @@
+{
+  "schema": 2,
+  "rollback_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "rollback_note": "a retired group's test file is recovered from the read-only v0.1.4 oracle tree (~/Projects/mycelium-v014) at this commit",
+  "approvers": ["integrator-provisional", "owner"],
+  "default_approver": "integrator-provisional",
+  "approved": "2026-10-29"
+}

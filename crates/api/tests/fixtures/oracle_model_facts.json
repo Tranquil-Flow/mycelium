@@ -1,0 +1,71 @@
+{
+ "models": [
+  {
+   "architecture": "qwen2",
+   "choice": null,
+   "label": "Qwen2.5-7B",
+   "model_id": "Qwen/Qwen2.5-7B-Instruct",
+   "owner_storage": 23052975062,
+   "resolved_commit": "a09a35458c702b33eeacc393d103063234e8bc28"
+  },
+  {
+   "architecture": "qwen2",
+   "choice": "a9-route",
+   "label": "Qwen2.5-0.5B",
+   "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+   "owner_storage": 1099564539,
+   "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+  },
+  {
+   "architecture": "qwen3",
+   "choice": "qwen3-0.6b",
+   "label": "Qwen3-0.6B",
+   "model_id": "Qwen/Qwen3-0.6B",
+   "owner_storage": 1671130168,
+   "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+  },
+  {
+   "architecture": "qwen3",
+   "choice": "qwen3-8b",
+   "label": "Qwen3-8B",
+   "model_id": "Qwen/Qwen3-8B",
+   "owner_storage": 18037207393,
+   "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218"
+  },
+  {
+   "architecture": "qwen3",
+   "choice": "qwen3-14b",
+   "label": "Qwen3-14B",
+   "model_id": "Qwen/Qwen3-14B",
+   "owner_storage": 32507875154,
+   "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18"
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "stamps": [
+  {
+   "epoch": 0,
+   "stamp": "19700101T000000Z"
+  },
+  {
+   "epoch": 951782400,
+   "stamp": "20000229T000000Z"
+  },
+  {
+   "epoch": 1793231734,
+   "stamp": "20261028T235534Z"
+  },
+  {
+   "epoch": 1793231734.9,
+   "stamp": "20261028T235534Z"
+  },
+  {
+   "epoch": 4102444799,
+   "stamp": "20991231T235959Z"
+  },
+  {
+   "epoch": 1709164800,
+   "stamp": "20240229T000000Z"
+  }
+ ]
+}

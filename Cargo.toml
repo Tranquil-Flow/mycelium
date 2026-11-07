@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[workspace]
+resolver = "3"
+members = ["crates/*", "test-support/*", "xtask"]
+
+[workspace.package]
+version = "0.2.0-dev"
+edition = "2024"
+rust-version = "1.95"
+license = "AGPL-3.0-only"
+publish = false
+
+# Lint policy is owned by foundation lane L4 (V02-PLAN.md section 5); crates opt in with `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+let_underscore_must_use = "deny"
+let_underscore_future = "deny"
+
+# SE-L10-TLS-KEYGEN-SLOW (L5 round 13, measured in round13-keygen-profile.md): RSA-2048 key generation by `rsa` runs
+# on num-bigint-dig's modular arithmetic; at the dev/test profile's opt-level 0 two keys take 14-29 s of CPU (17-53 s
+# wall under load), at opt-level 3 for this one package 0.4-1.2 s. Only this package is optimised; no other crate, the
+# release profile and the sim/determinism code are untouched.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3

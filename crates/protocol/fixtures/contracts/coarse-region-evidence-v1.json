@@ -1,0 +1,15 @@
+{
+  "authority_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "digest": "sha256:077a98c3125d90e23f603c8b68bafaef3a14e1c631a6d5f3b2d6d61866744b8f",
+  "distance_class": null,
+  "expires_at_unix_ms": 0,
+  "issued_at_unix_ms": 0,
+  "model_version": null,
+  "protocol": "mycelium.coarse_region_evidence.v1",
+  "region": "unknown",
+  "source_kind": "owner_declared",
+  "subject_kind": "member",
+  "subject_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "uncertainty": "declared_unverified",
+  "vocabulary_version": "mycelium.coarse_region.v1"
+}

@@ -1,0 +1,1721 @@
+{
+ "grace": 0.05,
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "scenarios": [
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_sessions": 2
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3",
+    "r4"
+   ],
+   "label": "evict_terminal_oldest_first",
+   "modes": {},
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": true
+     }
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": true,
+      "r3": true
+     }
+    },
+    {
+     "ids_drawn": 3,
+     "op": "terminal",
+     "rid": "r3"
+    },
+    {
+     "ids_drawn": 4,
+     "op": "submit",
+     "result": "r4",
+     "token": null
+    },
+    {
+     "ids_drawn": 4,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": false,
+      "r3": true,
+      "r4": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_sessions": 1
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "terminal_with_active_subscription_pins",
+   "modes": {},
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "present",
+     "present": {
+      "r1": true
+     }
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1",
+    "r2"
+   ],
+   "config": {
+    "max_concurrent_requests": 2,
+    "max_pending_requests": 8,
+    "max_sessions": 2
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3",
+    "r4"
+   ],
+   "label": "never_subscribed_grace",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold",
+    "r3": "hold",
+    "r4": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "offset": 0.025,
+     "op": "set_time"
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "offset": 0.049999999999999996,
+     "op": "set_time"
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": true
+     }
+    },
+    {
+     "ids_drawn": 2,
+     "offset": 0.05,
+     "op": "set_time"
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": true,
+      "r3": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r2",
+    "r1"
+   ],
+   "config": {
+    "max_concurrent_requests": 2,
+    "max_pending_requests": 8,
+    "max_sessions": 2
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "abandoned_subscriber_no_grace",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold",
+    "r3": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": false,
+      "r3": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r2",
+    "r1"
+   ],
+   "config": {
+    "max_concurrent_requests": 2,
+    "max_pending_requests": 8,
+    "max_sessions": 2
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3",
+    "r4"
+   ],
+   "label": "active_subscription_pins_held",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold",
+    "r3": "hold",
+    "r4": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "offset": 0.05,
+     "op": "set_time"
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": false,
+      "r3": true
+     }
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 3,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r3": true
+     }
+    },
+    {
+     "ids_drawn": 3,
+     "offset": 0.15000000000000002,
+     "op": "set_time"
+    },
+    {
+     "ids_drawn": 4,
+     "op": "submit",
+     "result": "r4",
+     "token": null
+    },
+    {
+     "ids_drawn": 4,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r3": false
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "dup"
+   ],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_pending_requests": 2,
+    "max_sessions": 8
+   },
+   "ids": [
+    "dup",
+    "dup",
+    "bad id!",
+    "",
+    "ok-1",
+    "ok-2"
+   ],
+   "label": "duplicate_invalid_ids_and_slots",
+   "modes": {
+    "dup": "hold",
+    "ok-1": "hold",
+    "ok-2": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "dup",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "duplicate_request_id",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "invalid_request_id",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 3,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "invalid_request_id",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 4,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 5,
+     "op": "submit",
+     "result": "ok-1",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 5,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 5,
+     "op": "present",
+     "present": {
+      "dup": true,
+      "ok-1": true,
+      "ok-2": false
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_pending_requests": 1,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "slot_released_after_worker",
+   "modes": {
+    "r1": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "gateway_capacity_exhausted",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "release",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": true,
+      "r3": false
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1",
+    "r2"
+   ],
+   "config": {
+    "max_concurrent_requests": 3,
+    "max_pending_requests": 8,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "owner_tokens",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold"
+   },
+   "ops": [
+    {
+     "error": {
+      "code": "invalid_session_token",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 0,
+     "op": "submit",
+     "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "session_owner_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "session_owner_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "rid": "r1",
+     "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+     "error": {
+      "code": "session_owner_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "cancel",
+     "rid": "r1",
+     "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+     "error": {
+      "code": "session_owner_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "cancel",
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r1-owner",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r1-owner",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r2",
+     "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+     "error": {
+      "code": "stream_already_attached",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "key": "r2-second",
+     "last": null,
+     "op": "subscribe",
+     "rid": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2-any",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 2
+     },
+     "rid": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2-any",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "cancel",
+     "result": true,
+     "rid": "r1",
+     "token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "cancel",
+     "result": true,
+     "rid": "r2",
+     "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_concurrent_requests": 4,
+    "max_pending_requests": 64,
+    "max_sessions": 64
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3",
+    "r4",
+    "r5",
+    "r6",
+    "r7",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+    "r16",
+    "r17",
+    "r18",
+    "r19",
+    "r20",
+    "r21",
+    "r22",
+    "r23",
+    "r24",
+    "r25",
+    "r26",
+    "r27",
+    "r28",
+    "r29"
+   ],
+   "label": "qualification_per_submit",
+   "modes": {},
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "none",
+     "op": "source"
+    },
+    {
+     "error": {
+      "code": "route_dropped",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "not_ready",
+     "op": "source"
+    },
+    {
+     "error": {
+      "code": "qualification_unavailable",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "raise",
+     "op": "source"
+    },
+    {
+     "error": {
+      "code": "qualification_unavailable",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "ok",
+     "op": "source"
+    },
+    {
+     "field": "deployment_id",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "deployment_epoch",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "deployment_epoch_changed",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "topology_version",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "path_changed",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "path_manifest_digest",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "path_changed",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "qualification_id",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "stale_qualification",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "model_id",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "resolved_commit",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "manifest_digest",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "qualification_digest",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "field": "stage_load_proof_digests",
+     "ids_drawn": 1,
+     "op": "binding_field"
+    },
+    {
+     "error": {
+      "code": "qualification_mismatch",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1",
+    "r2"
+   ],
+   "config": {
+    "max_concurrent_requests": 3,
+    "max_pending_requests": 8,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "revalidation_of_admitted_requests",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold_after_tokens",
+    "r3": "fast"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "not_ready",
+     "op": "source"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "release",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "events": [
+      [
+       0,
+       "accepted",
+       null,
+       null,
+       null,
+       null
+      ],
+      [
+       1,
+       "failed",
+       null,
+       null,
+       "qualification_unavailable",
+       null
+      ]
+     ],
+     "ids_drawn": 1,
+     "key": "r1",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "ok",
+     "op": "source"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "mode": "none",
+     "op": "source"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "release",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r2",
+     "token": null
+    },
+    {
+     "events": [
+      [
+       0,
+       "accepted",
+       null,
+       null,
+       null,
+       null
+      ],
+      [
+       1,
+       "token",
+       0,
+       "a",
+       null,
+       null
+      ],
+      [
+       2,
+       "token",
+       1,
+       "b",
+       null,
+       null
+      ],
+      [
+       3,
+       "failed",
+       null,
+       null,
+       "route_dropped",
+       null
+      ]
+     ],
+     "ids_drawn": 2,
+     "key": "r2",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 2,
+     "mode": "not_ready",
+     "op": "source"
+    },
+    {
+     "error": {
+      "code": "qualification_unavailable",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "mode": "ok",
+     "op": "source"
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1"
+   ],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_pending_requests": 8,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1",
+    "r2"
+   ],
+   "label": "revalidation_at_worker_start",
+   "modes": {
+    "r1": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r2",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "mode": "none",
+     "op": "source"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "release",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "events": [
+      [
+       0,
+       "accepted",
+       null,
+       null,
+       null,
+       null
+      ],
+      [
+       1,
+       "failed",
+       null,
+       null,
+       "route_dropped",
+       null
+      ]
+     ],
+     "ids_drawn": 2,
+     "key": "r2",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "present",
+     "present": {
+      "r1": true,
+      "r2": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1"
+   ],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_pending_requests": 8,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1"
+   ],
+   "label": "revalidation_per_token",
+   "modes": {
+    "r1": "hold_then_tokens"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "mode": "none",
+     "op": "source"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "release",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "events": [
+      [
+       0,
+       "accepted",
+       null,
+       null,
+       null,
+       null
+      ],
+      [
+       1,
+       "failed",
+       null,
+       null,
+       "route_dropped",
+       null
+      ]
+     ],
+     "ids_drawn": 1,
+     "key": "r1",
+     "op": "drain"
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_sessions": 2
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "resume_and_eviction",
+   "modes": {},
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "events": [
+      [
+       0,
+       "accepted",
+       null,
+       null,
+       null,
+       null
+      ],
+      [
+       1,
+       "token",
+       0,
+       "a",
+       null,
+       null
+      ]
+     ],
+     "ids_drawn": 1,
+     "key": "r1",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1b",
+     "last": 1,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 2
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "events": [
+      [
+       2,
+       "token",
+       1,
+       "b",
+       null,
+       null
+      ],
+      [
+       3,
+       "completed",
+       null,
+       null,
+       null,
+       null
+      ]
+     ],
+     "ids_drawn": 1,
+     "key": "r1b",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1b",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1c",
+     "last": 1,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 3
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "events": [
+      [
+       2,
+       "token",
+       1,
+       "b",
+       null,
+       null
+      ],
+      [
+       3,
+       "completed",
+       null,
+       null,
+       null,
+       null
+      ]
+     ],
+     "ids_drawn": 1,
+     "key": "r1c",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1c",
+     "op": "close_subscription"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1d",
+     "last": 3,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 4
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "events": [],
+     "ids_drawn": 1,
+     "key": "r1d",
+     "op": "drain"
+    },
+    {
+     "ids_drawn": 1,
+     "key": "r1d",
+     "op": "close_subscription"
+    },
+    {
+     "error": {
+      "code": "invalid_last_event_id",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "key": "r1e",
+     "last": 4,
+     "op": "subscribe",
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "stale_publisher_generation",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 1,
+     "key": "r1f",
+     "last": [
+      5,
+      1
+     ],
+     "op": "subscribe",
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "error": {
+      "code": "unknown_request",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 3,
+     "key": "r1g",
+     "last": 3,
+     "op": "subscribe",
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": true,
+      "r3": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [],
+   "config": {
+    "max_concurrent_requests": 1,
+    "max_sessions": 1
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3",
+    "r4",
+    "r5",
+    "r6"
+   ],
+   "label": "submit_storm_max_one",
+   "modes": {},
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 1,
+     "op": "terminal",
+     "rid": "r1"
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "terminal",
+     "rid": "r2"
+    },
+    {
+     "ids_drawn": 3,
+     "op": "submit",
+     "result": "r3",
+     "token": null
+    },
+    {
+     "ids_drawn": 3,
+     "op": "terminal",
+     "rid": "r3"
+    },
+    {
+     "ids_drawn": 4,
+     "op": "submit",
+     "result": "r4",
+     "token": null
+    },
+    {
+     "ids_drawn": 4,
+     "op": "terminal",
+     "rid": "r4"
+    },
+    {
+     "ids_drawn": 5,
+     "op": "submit",
+     "result": "r5",
+     "token": null
+    },
+    {
+     "ids_drawn": 5,
+     "op": "terminal",
+     "rid": "r5"
+    },
+    {
+     "ids_drawn": 5,
+     "op": "present",
+     "present": {
+      "r1": false,
+      "r2": false,
+      "r3": false,
+      "r4": false,
+      "r5": true
+     }
+    }
+   ]
+  },
+  {
+   "cancelled_by_backend": [
+    "r1",
+    "r2"
+   ],
+   "config": {
+    "max_concurrent_requests": 2,
+    "max_pending_requests": 8,
+    "max_sessions": 8
+   },
+   "ids": [
+    "r1",
+    "r2",
+    "r3"
+   ],
+   "label": "close_cancels_and_refuses",
+   "modes": {
+    "r1": "hold",
+    "r2": "hold"
+   },
+   "ops": [
+    {
+     "ids_drawn": 1,
+     "op": "submit",
+     "result": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "submit",
+     "result": "r2",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "close"
+    },
+    {
+     "error": {
+      "code": "gateway_closed",
+      "type": "AdmissionError"
+     },
+     "ids_drawn": 2,
+     "op": "submit",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "key": "r1",
+     "last": null,
+     "op": "subscribe",
+     "result": {
+      "publisher_generation": 1
+     },
+     "rid": "r1",
+     "token": null
+    },
+    {
+     "ids_drawn": 2,
+     "op": "cancel",
+     "result": false,
+     "rid": "r1",
+     "token": null
+    }
+   ]
+  }
+ ],
+ "stall": 0.25
+}

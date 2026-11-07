@@ -1,0 +1,75 @@
+{
+  "eligibility_generation": "4ea7a37c1f91550d0ac0406ed80bf7e8a40782959ab77662c3d950be81571d1c",
+  "nodes": [
+    {
+      "boot_id": "boot-node-a-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "exclusion_reasons": [],
+      "fast_allocatable_bytes": 34359738368,
+      "in_flight": 0,
+      "incarnation": 1,
+      "memory_domains": [
+        {
+          "allocatable_after_reservations_bytes": 34359738368,
+          "committed_bytes": 8589934592,
+          "kind": "unified",
+          "memory_domain_id": "unified-0",
+          "reclaimable_bytes": 2147483648,
+          "reservation_generation": 1,
+          "total_bytes": 51539607552
+        }
+      ],
+      "node_id": "node-a",
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:0b9e0d738d714c183d79711100dd3e967a074e2d9f5d41ca131f320aa32997ff",
+        "sequence": 1
+      },
+      "total_allocatable_bytes": 34359738368
+    },
+    {
+      "boot_id": "boot-node-b-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "exclusion_reasons": [],
+      "fast_allocatable_bytes": 34359738368,
+      "in_flight": 0,
+      "incarnation": 1,
+      "memory_domains": [
+        {
+          "allocatable_after_reservations_bytes": 34359738368,
+          "committed_bytes": 8589934592,
+          "kind": "unified",
+          "memory_domain_id": "unified-0",
+          "reclaimable_bytes": 2147483648,
+          "reservation_generation": 1,
+          "total_bytes": 51539607552
+        }
+      ],
+      "node_id": "node-b",
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:88870e0038cb2a0ee394c315edd74be64042dfced3fab041ab8fca876b27d8f2",
+        "sequence": 1
+      },
+      "total_allocatable_bytes": 34359738368
+    }
+  ],
+  "protocol": "mycelium.gossip.allocator_view.v1",
+  "snapshot_generation": 10
+}

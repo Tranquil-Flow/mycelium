@@ -1,0 +1,63 @@
+key	category
+mycelium_a11_route_speculation.py:375:12:assignment:deadline	reviewed-nonscalar-slot
+mycelium_a6_case_observations.py:428:8:dict-field:source_absolute_deadline_unix_ms	reviewed-policy-readout
+mycelium_a6_case_observations.py:430:8:dict-field:successor_absolute_deadline_unix_ms	reviewed-policy-readout
+mycelium_a6_case_observations.py:486:16:assignment:last_retained	reviewed-nonscalar-slot
+mycelium_a6_case_observations.py:494:12:assignment:settled	reviewed-nonscalar-slot
+mycelium_a6_case_observations.py:539:12:assignment:settled	reviewed-nonscalar-slot
+mycelium_a6_case_observations.py:545:16:assignment:settled	reviewed-nonscalar-slot
+mycelium_iroh_sidecar/client.py:711:8:assignment:single_poll	reviewed-nonscalar-slot
+mycelium_iroh_sidecar/client.py:760:8:assignment:single_poll	reviewed-nonscalar-slot
+mycelium_live/artifact_provisioner.py:937:16:keyword:serving_reserve_satisfied	reviewed-nonscalar-slot
+mycelium_live/liveness.py:692:12:assignment:state.last_fresh_ms	reviewed-observation-slot
+mycelium_live/local_preparer.py:1142:8:assignment:estimated_ms	reviewed-policy-readout
+mycelium_live/local_preparer.py:1367:8:assignment:estimated_ms	reviewed-policy-readout
+mycelium_live/local_preparer.py:1377:12:keyword:estimated_work_ms	reviewed-policy-readout
+mycelium_live/member_artifact_provisioner.py:374:12:keyword:serving_reserve_satisfied	reviewed-nonscalar-slot
+mycelium_live/member_transport.py:1108:12:dict-field:serving_reserve_satisfied	reviewed-nonscalar-slot
+mycelium_live/model_capacity.py:199:69:slice:intervals	reviewed-structural-slot
+mycelium_live/route.py:2773:12:assignment:progress_ms	reviewed-observation-slot
+mycelium_live/router_port.py:1369:8:assignment:retained[request_id]	reviewed-nonscalar-slot
+mycelium_live/router_port.py:1396:8:assignment:retained[request_id]	reviewed-nonscalar-slot
+mycelium_live/router_port.py:1763:12:assignment:recovery_clock_ms	reviewed-nonscalar-slot
+mycelium_live/router_port.py:1817:12:assignment:deadline_guard	reviewed-nonscalar-slot
+mycelium_live/router_port.py:1818:16:keyword:deadline	reviewed-nonscalar-slot
+mycelium_live/router_port.py:1822:20:keyword:deadline	reviewed-nonscalar-slot
+mycelium_live/router_port.py:182:12:dict-field:absolute_deadline_ms	reviewed-policy-readout
+mycelium_live/router_port.py:2121:12:assignment:pending.recovery_deadline_phase	reviewed-nonscalar-slot
+mycelium_live/router_port.py:2159:12:assignment:pending.recovery_deadline_phase	reviewed-nonscalar-slot
+mycelium_live/router_port.py:2753:38:comparison:snapshots[0].cleanup_deadline_ms	reviewed-structural-slot
+mycelium_live/router_port.py:303:35:slice:_RECOVERY_DEADLINE_ENVIRONMENT	reviewed-structural-slot
+mycelium_live/router_port.py:323:8:assignment:self._deadline	reviewed-nonscalar-slot
+mycelium_live/router_port.py:3333:16:assignment:retained[identity.request_id]	reviewed-nonscalar-slot
+mycelium_live/router_port.py:530:8:assignment:self._recovery_clock_ms	reviewed-nonscalar-slot
+mycelium_live/router_port.py:721:20:dict-field:maximum_runtime_batch_size	reviewed-policy-readout
+mycelium_live/router_port.py:722:20:dict-field:collection_window_ms	reviewed-policy-readout
+mycelium_live/router_port.py:724:34:dict-field:window_ms	reviewed-policy-readout
+mycelium_live/supervisor.py:1057:8:assignment:settled	reviewed-nonscalar-slot
+mycelium_live/supervisor.py:1060:12:assignment:settled[request_id]	reviewed-nonscalar-slot
+mycelium_live/supervisor.py:736:16:assignment:self._qualification_clock_ms	reviewed-nonscalar-slot
+mycelium_live/supervisor.py:839:12:assignment:settled	reviewed-nonscalar-slot
+mycelium_router/a10_live_publication.py:291:3:assignment:intervals	reviewed-nonscalar-slot
+mycelium_router/a10_live_publication.py:417:6:keyword:commit_interval_ref	reviewed-structural-slot
+mycelium_router/a10_member_isolation.py:211:9:keyword:retained	reviewed-nonscalar-slot
+mycelium_router/a10_runtime_execution.py:121:3:assignment:interval	reviewed-nonscalar-slot
+mycelium_router/a10_runtime_execution.py:171:3:assignment:interval_reporter	reviewed-nonscalar-slot
+mycelium_router/batching.py:158:9:keyword:predicted_transfer_ms	reviewed-policy-readout
+mycelium_router/batching.py:217:9:assignment:transfer_ms	reviewed-policy-readout
+mycelium_router/batching.py:261:9:assignment:one_way_ms	reviewed-policy-readout
+mycelium_router/batching.py:266:9:assignment:one_way_ms	reviewed-policy-readout
+mycelium_router/mlx_runtime.py:1550:6:assignment:retention	reviewed-nonscalar-slot
+mycelium_router/mlx_runtime.py:3353:18:assignment:retained	reviewed-observation-slot
+mycelium_router/numpy_runtime.py:753:6:assignment:retention	reviewed-nonscalar-slot
+mycelium_router/router.py:33:9:keyword:lease_seconds	reviewed-nonscalar-slot
+mycelium_router/routing.py:134:6:assignment:self.lease_seconds	reviewed-nonscalar-slot
+mycelium_router/terminal_kv_retention.py:84:9:assignment:(evicted_path, (evicted, _deadline))	reviewed-nonscalar-slot
+mycelium_router/transports/iroh.py:1537:16:assignment:(reserved, cancellation_client)	reviewed-nonscalar-slot
+mycelium_router/transports/iroh.py:2696:12:assignment:(reserved, control)	reviewed-nonscalar-slot
+mycelium_router/transports/iroh.py:2769:12:assignment:(reserved, control)	reviewed-nonscalar-slot
+mycelium_router/transports/iroh.py:2839:12:assignment:(reserved, control)	reviewed-nonscalar-slot
+mycelium_router/transports/iroh.py:4918:20:assignment:(reserved, cancellation_client)	reviewed-nonscalar-slot
+mycelium_speculative_decode.py:1050:8:assignment:result['windows']	reviewed-nonscalar-slot
+mycelium_speculative_decode.py:1833:8:keyword:deadline_clamp_reason	reviewed-nonscalar-slot
+runtime_loader.py:903:8:assignment:ordered_intervals	reviewed-nonscalar-slot

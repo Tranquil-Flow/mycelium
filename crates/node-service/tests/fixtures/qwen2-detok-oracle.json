@@ -1,0 +1,197 @@
+{
+ "oracle": "mycelium-v014 f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "stop_token_ids": [
+  151643,
+  151645
+ ],
+ "token_bytes_hex": {
+  "87": "78",
+  "100": "a7",
+  "102": "a9",
+  "198": "0a",
+  "234": "8c",
+  "235": "8d",
+  "271": "0a0a",
+  "378": "e280",
+  "562": "6f6b",
+  "1056": "6c696e65",
+  "2997": "2066616d696c79",
+  "3958": "20c3a9",
+  "8960": "627265616b",
+  "11162": "20f09f",
+  "20772": "706c61696e",
+  "23455": "c39f65",
+  "35071": "6d6978",
+  "37523": "656d6f6a69",
+  "47120": "206173636969",
+  "61804": "20f09f91",
+  "94063": "204772c3bc",
+  "101059": "e697a5e69cac",
+  "102819": "e8aa9e",
+  "145233": "f09f91a9",
+  "145665": "f09f91a7",
+  "147919": "f09f8ca7",
+  "151644": "3c7c696d5f73746172747c3e"
+ },
+ "cases": [
+  {
+   "name": "日本語 🌧 Grüße",
+   "ids": [
+    101059,
+    102819,
+    11162,
+    234,
+    100,
+    94063,
+    23455
+   ],
+   "pieces": [
+    "日本",
+    "語",
+    " ",
+    "",
+    "🌧",
+    " Grü",
+    "ße",
+    ""
+   ],
+   "text": "日本語 🌧 Grüße"
+  },
+  {
+   "name": "plain ascii",
+   "ids": [
+    20772,
+    47120
+   ],
+   "pieces": [
+    "plain",
+    " ascii",
+    ""
+   ],
+   "text": "plain ascii"
+  },
+  {
+   "name": "emoji 👩‍👩‍👧 family",
+   "ids": [
+    37523,
+    61804,
+    102,
+    378,
+    235,
+    145233,
+    378,
+    235,
+    145665,
+    2997
+   ],
+   "pieces": [
+    "emoji",
+    " ",
+    "👩",
+    "",
+    "‍",
+    "👩",
+    "",
+    "‍",
+    "👧",
+    " family",
+    ""
+   ],
+   "text": "emoji 👩‍👩‍👧 family"
+  },
+  {
+   "name": "mix é🌧x",
+   "ids": [
+    35071,
+    3958,
+    147919,
+    87
+   ],
+   "pieces": [
+    "mix",
+    " é",
+    "🌧",
+    "x",
+    ""
+   ],
+   "text": "mix é🌧x"
+  },
+  {
+   "name": "line\nbreak\n\n",
+   "ids": [
+    1056,
+    198,
+    8960,
+    271
+   ],
+   "pieces": [
+    "line",
+    "\n",
+    "break",
+    "\n\n",
+    ""
+   ],
+   "text": "line\nbreak\n\n"
+  },
+  {
+   "name": "stop-151645-after-text",
+   "ids": [
+    562,
+    151645
+   ],
+   "pieces": [
+    "ok",
+    "",
+    ""
+   ],
+   "text": "ok"
+  },
+  {
+   "name": "endoftext-151643-after-text",
+   "ids": [
+    562,
+    151643
+   ],
+   "pieces": [
+    "ok",
+    "",
+    ""
+   ],
+   "text": "ok"
+  },
+  {
+   "name": "non-stop special literal",
+   "ids": [
+    562,
+    151644,
+    562
+   ],
+   "pieces": [
+    "ok",
+    "<|im_start|>",
+    "ok",
+    ""
+   ],
+   "text": "ok<|im_start|>ok"
+  },
+  {
+   "name": "stream ends inside a character",
+   "ids": [
+    11162,
+    234,
+    151645
+   ],
+   "pieces": [
+    " ",
+    "",
+    "",
+    "�"
+   ],
+   "text": " �"
+  }
+ ],
+ "id": "FX-L11-detok",
+ "source": "mycelium_live/codec.py:44-67,197-216 (IncrementalTokenDecoder, Qwen2PromptCodec._token_bytes_reader), EXECUTED",
+ "probe": "runs/v2/v02/L11-evidence/round10/oracle/detok_probe.py",
+ "probe_sha256": "c76d7ceed53707df73ec1ae4dbf863e19451a5150661716167f46ecce776fc08"
+}

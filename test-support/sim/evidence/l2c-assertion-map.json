@@ -1,0 +1,239 @@
+{
+  "base": "a984d632d4733fdaa95d21bfb0a5af98e18a2582",
+  "assertions": [
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:17",
+      "new": "test-support/sim/tests/persisted_corpus.rs:17",
+      "assertion": "assert_eq!(t.config.mode, Mode::Historical)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:18",
+      "new": "test-support/sim/tests/persisted_corpus.rs:18",
+      "assertion": "assert_eq!(t.commands.len(), 1)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:19",
+      "new": "test-support/sim/tests/persisted_corpus.rs:19",
+      "assertion": "assert_eq!(t.commands[0].command, Command::Begin)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:20",
+      "new": "test-support/sim/tests/persisted_corpus.rs:20",
+      "assertion": "assert!(\n            registry\n                .escapes\n                .iter()\n                .any(|e| e.id == format!(\"{:?}\", t.config.incident))\n        )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:28",
+      "new": "test-support/sim/tests/persisted_corpus.rs:28",
+      "assertion": "assert_eq!(o, t.expected_outcome)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:29",
+      "new": "test-support/sim/tests/persisted_corpus.rs:29",
+      "assertion": "assert_eq!(model::violations(&t.config, &o), t.expected_failure)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:31",
+      "new": "test-support/sim/tests/persisted_corpus.rs:31",
+      "assertion": "assert_eq!(t.replay().unwrap(), o)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:33",
+      "new": "test-support/sim/tests/persisted_corpus.rs:33",
+      "assertion": "assert!(model::violations(&green.config, &green.replay().unwrap()).is_empty())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/persisted_corpus.rs:42",
+      "new": "test-support/sim/tests/persisted_corpus.rs:42",
+      "assertion": "assert_eq!(\n            t.validate_profile(&changed).unwrap_err(),\n            \"profile_budget_mismatch\"\n        )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:21",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:21",
+      "assertion": "assert_eq!(t.config.mode, Mode::Historical)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:22",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:22",
+      "assertion": "assert_eq!(t.commands.len(), 1)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:23",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:23",
+      "assertion": "assert_eq!(t.commands[0].command, Command::Begin)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:24",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:24",
+      "assertion": "assert_eq!(t.profile_id, \"section7-policy-model-v1-NOT-MEASURED\")",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:28",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:28",
+      "assertion": "assert_eq!(outcome, t.expected_outcome)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:29",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:29",
+      "assertion": "assert_eq!(model::violations(&t.config, &outcome), t.expected_failure)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:32",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:32",
+      "assertion": "assert_eq!(\n            positive,\n            corrected.replay().unwrap(),\n            \"corrected event order drift\"\n        )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:37",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:37",
+      "assertion": "assert!(model::violations(&corrected.config, &positive).is_empty())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:38",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:38",
+      "assertion": "assert!(positive.successful_chats > 0)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:40",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:40",
+      "assertion": "assert!(positive.transitions.contains_key(*action))",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/remaining_persisted_corpus.rs:43",
+      "new": "test-support/sim/tests/remaining_persisted_corpus.rs:43",
+      "assertion": "assert_eq!(\n            t.validate_profile(&bundle).unwrap_err(),\n            \"model_profile_mismatch\"\n        )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:18",
+      "new": "test-support/sim/tests/review_regressions.rs:18",
+      "assertion": "assert_eq!(o.metrics.get(\"member_selected_bytes\"), Some(&1_735_338_491))",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:19",
+      "new": "test-support/sim/tests/review_regressions.rs:19",
+      "assertion": "assert_eq!(o.metrics.get(\"member_reserved_bytes\"), Some(&1_735_338_491))",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:20",
+      "new": "test-support/sim/tests/review_regressions.rs:20",
+      "assertion": "assert_eq!(o.metrics.get(\"member_staged_bytes\"), Some(&1_735_338_491))",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:21",
+      "new": "test-support/sim/tests/review_regressions.rs:21",
+      "assertion": "assert_eq!(o.metrics[\"staged_bytes\"], 1_997_798_421)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:22",
+      "new": "test-support/sim/tests/review_regressions.rs:22",
+      "assertion": "assert!(o.metrics[\"member_staged_bytes\"] <= o.metrics[\"member_storage_cap\"])",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:23",
+      "new": "test-support/sim/tests/review_regressions.rs:23",
+      "assertion": "assert!(o.metrics[\"staged_bytes\"] <= o.metrics[\"owner_storage_cap\"])",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:24",
+      "new": "test-support/sim/tests/review_regressions.rs:24",
+      "assertion": "assert_eq!(o.successful_chats, 1)",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:34",
+      "new": "test-support/sim/tests/review_regressions.rs:34",
+      "assertion": "assert_eq!((old.owner, old.member), (2_227_449_134, 1_505_687_777))",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:35",
+      "new": "test-support/sim/tests/review_regressions.rs:35",
+      "assertion": "assert_eq!(\n        select_route_shares(Mode::Corrected, saved, saved / 2).unwrap_err(),\n        \"member_storage_cap_below_share:RouteStorage\"\n    )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:39",
+      "new": "test-support/sim/tests/review_regressions.rs:39",
+      "assertion": "assert!(select_route_shares(Mode::Corrected, saved / 2, fresh).is_err())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:65",
+      "new": "test-support/sim/tests/review_regressions.rs:65",
+      "assertion": "assert!(!output.status.success())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:66",
+      "new": "test-support/sim/tests/review_regressions.rs:66",
+      "assertion": "assert!(\n        String::from_utf8_lossy(&output.stderr).contains(\"recorded_outcome_mismatch\"),\n        \"replay must reject golden drift before claiming incident RED: {}\",\n        String::from_utf8_lossy(&output.stderr)\n    )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:88",
+      "new": "test-support/sim/tests/review_regressions.rs:88",
+      "assertion": "assert!(changed.verify_recorded().is_err())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:106",
+      "new": "test-support/sim/tests/review_regressions.rs:106",
+      "assertion": "assert!(\n            t.require_identity(\"wrong-build\", &t.cargo_lock_sha256)\n                .is_err()\n        )",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:110",
+      "new": "test-support/sim/tests/review_regressions.rs:110",
+      "assertion": "assert!(t.require_identity(&t.build_id, &\"0\".repeat(64)).is_err())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/tests/review_regressions.rs:118",
+      "new": "test-support/sim/tests/review_regressions.rs:118",
+      "assertion": "assert!(changed.replay().is_err())",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    },
+    {
+      "source": "a984d632d4733fdaa95d21bfb0a5af98e18a2582:test-support/sim/src/main.rs:42",
+      "new": "test-support/sim/src/main.rs:56",
+      "assertion": "assert!(v.is_empty(), \"section-7 model invariant violation: {v:?}\")",
+      "disposition": "full assertion body retained; fixture references migrate v1\u2192v2; corrected CLI additionally checks full saved outcome"
+    }
+  ],
+  "count": 37,
+  "retired": [],
+  "new_probe_oracle_correction": {
+    "source": "L2C-evidence/adapters-green.log:29; tests/turmoil_comparison.rs:324 initial probe",
+    "old": "assert_eq!(error.raw_os_error(), Some(28), \"turmoil ENOSPC\")",
+    "new": [
+      "assert_eq!(error.raw_os_error(), None)",
+      "assert_eq!(error.kind(), std::io::ErrorKind::Other)",
+      "assert_eq!(error.to_string(), \"No space left on device\")"
+    ],
+    "reason": "Pinned upstream source maps capacity string with Error::other, not raw errno; correction preserves disk failure identity and all independent failure/recovery/content/cleanup assertions. Not a change to an inherited test."
+  }
+}

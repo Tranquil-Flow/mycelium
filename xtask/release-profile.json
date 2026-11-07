@@ -1,0 +1,580 @@
+{
+  "schema": 1,
+  "name": "v0.2.0-release-profile-draft-1",
+  "require_critical_lanes": [
+    "L12",
+    "L13"
+  ],
+  "mandatory_claims": [
+    "CL-L12-02",
+    "CL-L12-09",
+    "CL-L13-01",
+    "CL-L13-02",
+    "CL-L13-03",
+    "CL-L13-04",
+    "CL-L13-05",
+    "CL-L13-06",
+    "CL-L13-07",
+    "CL-L13-08",
+    "CL-L13-09",
+    "CL-L13-10",
+    "CL-L13-11",
+    "CL-L13-12"
+  ],
+  "cells": [
+    {
+      "id": "fmt",
+      "state": "preflight",
+      "claim": "CL-L13-03",
+      "bind": "source",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "cargo",
+          "fmt",
+          "--check"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "fmt",
+        "--",
+        "--check"
+      ]
+    },
+    {
+      "id": "clippy",
+      "state": "preflight",
+      "claim": "CL-L13-03",
+      "bind": "source",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "cargo",
+          "clippy",
+          "-D",
+          "warnings"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "clippy",
+        "-j",
+        "2",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ]
+    },
+    {
+      "id": "lint",
+      "state": "preflight",
+      "claim": "CL-L13-03",
+      "bind": "source",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "lint"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
+        "xtask",
+        "--",
+        "lint"
+      ]
+    },
+    {
+      "id": "preflight",
+      "state": "preflight",
+      "claim": "CL-L13-01",
+      "bind": "bytes",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "preflight"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
+        "xtask",
+        "--",
+        "preflight"
+      ]
+    },
+    {
+      "id": "bundle-admission",
+      "state": "package",
+      "claim": "CL-L13-01",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "bundle-admission"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "bundle-admission",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "relocation",
+      "state": "package",
+      "claim": "CL-L13-01",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "relocation"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "relocation",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "minimum-os",
+      "state": "package",
+      "claim": "CL-L12-09",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "minimum-os"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "minimum-os",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "workspace-tests",
+      "state": "cert",
+      "claim": "CL-L13-03",
+      "bind": "bytes",
+      "verify": {
+        "runs": "tests",
+        "argv_has": [
+          "cargo",
+          "test",
+          "--workspace"
+        ],
+        "min_passed": 1
+      },
+      "hint": [
+        "cargo",
+        "test",
+        "-j",
+        "2",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--no-fail-fast"
+      ]
+    },
+    {
+      "id": "doctests",
+      "state": "cert",
+      "claim": "CL-L13-03",
+      "bind": "bytes",
+      "verify": {
+        "runs": "tests",
+        "argv_has": [
+          "cargo",
+          "test",
+          "--doc"
+        ],
+        "min_passed": 1
+      },
+      "hint": [
+        "cargo",
+        "test",
+        "-j",
+        "2",
+        "--offline",
+        "--locked",
+        "--workspace",
+        "--doc"
+      ]
+    },
+    {
+      "id": "incident-matrix",
+      "state": "cert",
+      "claim": "CL-L13-04",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_matrix",
+        "name": "f-incidents"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_matrix",
+        "f-incidents",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "rehearsal-1",
+      "state": "cert",
+      "claim": "CL-L13-02",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "rehearsal",
+        "name": "rehearsal-1"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "rehearsal",
+        "rehearsal-1",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "rehearsal-2",
+      "state": "cert",
+      "claim": "CL-L13-02",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "rehearsal",
+        "name": "rehearsal-2"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "rehearsal",
+        "rehearsal-2",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "stranger-install",
+      "state": "device",
+      "claim": "CL-L13-05",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "stranger-install"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "stranger-install",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "join-chat",
+      "state": "device",
+      "claim": "CL-L13-06",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "join-10min-2gb-chat"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "join-10min-2gb-chat",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "stop-during-chat",
+      "state": "device",
+      "claim": "CL-L13-07",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "stop-during-chat"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "stop-during-chat",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "two-rollovers",
+      "state": "device",
+      "claim": "CL-L13-08",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "two-automatic-rollovers"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "two-automatic-rollovers",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "lifecycle-soak",
+      "state": "device",
+      "claim": "CL-L13-09",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "lifecycle-soak-20min"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "lifecycle-soak-20min",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "quit-teardown",
+      "state": "device",
+      "claim": "CL-L13-10",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "quit-teardown"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "quit-teardown",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "fresh-and-upgrade",
+      "state": "device",
+      "claim": "CL-L13-11",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "fresh-4gb-and-saved-2gb"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "fresh-4gb-and-saved-2gb",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "contract-inventory",
+      "state": "inventory",
+      "claim": "CL-L13-03",
+      "bind": "bytes",
+      "verify": {
+        "runs": "tests",
+        "argv_has": [
+          "cargo",
+          "test",
+          "-p",
+          "budget-model"
+        ],
+        "min_passed": 1,
+        "required_targets": [
+          "tests/python_inventory.rs"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "test",
+        "-j",
+        "2",
+        "--offline",
+        "--locked",
+        "-p",
+        "budget-model"
+      ]
+    },
+    {
+      "id": "r6-retirement",
+      "state": "inventory",
+      "claim": "CL-L12-02",
+      "bind": "bytes",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "retire",
+          "check"
+        ],
+        "argv_forbids": [
+          "--structure-only",
+          "--schema"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
+        "xtask",
+        "--",
+        "retire",
+        "check",
+        "--ledger",
+        "<registry>/evidence.jsonl"
+      ]
+    },
+    {
+      "id": "final-soak",
+      "state": "proof",
+      "claim": "CL-L13-12",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "final-soak-45min"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "final-soak-45min",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    }
+  ]
+}

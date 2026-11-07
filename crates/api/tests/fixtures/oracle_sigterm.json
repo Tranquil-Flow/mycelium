@@ -1,0 +1,55 @@
+{
+ "cases": [
+  {
+   "acquisition": null,
+   "exit_code": 0,
+   "files_after": [
+    "application.lock",
+    "authority",
+    "model-source-7ae557604adf"
+   ],
+   "files_before": [
+    "application.lock",
+    "authority",
+    "model-source-7ae557604adf",
+    "native-control.json",
+    "open-demo.html"
+   ],
+   "first_event": {
+    "distribution": "unsigned_development_demo",
+    "event": "launcher_started",
+    "serving_role": "not_yet_serving"
+   },
+   "label": "sigterm",
+   "seconds": 0.77,
+   "stderr": [],
+   "stdout_after": []
+  },
+  {
+   "acquisition": null,
+   "exit_code": 0,
+   "files_after": [
+    "application.lock",
+    "authority",
+    "model-source-7ae557604adf"
+   ],
+   "files_before": [
+    "application.lock",
+    "authority",
+    "model-source-7ae557604adf",
+    "native-control.json",
+    "open-demo.html"
+   ],
+   "first_event": {
+    "distribution": "unsigned_development_demo",
+    "event": "launcher_started",
+    "serving_role": "not_yet_serving"
+   },
+   "label": "sigint",
+   "seconds": 1.1,
+   "stderr": [],
+   "stdout_after": []
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

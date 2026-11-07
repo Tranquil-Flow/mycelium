@@ -1,0 +1,156 @@
+{
+  "after_unpin": {
+    "entry_count": 4,
+    "max_bytes": 10000,
+    "pinned_object_count": 2,
+    "protocol": "mycelium.assignment_artifact_cache.v1",
+    "used_bytes": 400
+  },
+  "materializations": [
+    {
+      "assignment_id": "assignment-a",
+      "expected": {
+        "assignment_id": "assignment-a",
+        "cache_entry_count": 4,
+        "objects": [
+          {
+            "object_id": "sha256:be72bf6ded3bc108a35c0852ad70afac1375533a8446f7e5b9accdbd931b2465",
+            "relative_path": "model-stage-000.safetensors",
+            "size_bytes": 100,
+            "tensor_digest": "sha256:80f93e8c7d0e1e083e6aab0b073011d858d092951eb4bb2d595cd43173e04704"
+          },
+          {
+            "object_id": "sha256:32c40f9e10006918f0b78953d9c7a89fc093e6c25d4b74885a6f6bc3d4a27913",
+            "relative_path": "model-static.safetensors",
+            "size_bytes": 100,
+            "tensor_digest": "sha256:e6df8456bd1560d9840a9b849e611c14e8f6a93a9ea413cc93e8f104d6f1b9d3"
+          }
+        ],
+        "opened_object_ids": [
+          "sha256:be72bf6ded3bc108a35c0852ad70afac1375533a8446f7e5b9accdbd931b2465",
+          "sha256:32c40f9e10006918f0b78953d9c7a89fc093e6c25d4b74885a6f6bc3d4a27913"
+        ],
+        "protocol": "mycelium.assignment_materialization.v1",
+        "route_ready": false,
+        "unassigned_object_count": 2
+      },
+      "required": {
+        "model-stage-000.safetensors": {
+          "format": "safetensors",
+          "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "quantization": "int8-weight-only",
+          "size_bytes": 100,
+          "tensor_digest": "sha256:80f93e8c7d0e1e083e6aab0b073011d858d092951eb4bb2d595cd43173e04704"
+        },
+        "model-static.safetensors": {
+          "format": "safetensors",
+          "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "quantization": "int8-weight-only",
+          "size_bytes": 100,
+          "tensor_digest": "sha256:e6df8456bd1560d9840a9b849e611c14e8f6a93a9ea413cc93e8f104d6f1b9d3"
+        }
+      }
+    },
+    {
+      "assignment_id": "assignment-b",
+      "expected": {
+        "assignment_id": "assignment-b",
+        "cache_entry_count": 4,
+        "objects": [
+          {
+            "object_id": "sha256:51edc3205fea270eaa7b969e0b6ffd098b55954d4de7580e9ec7382031e80430",
+            "relative_path": "model-stage-001.safetensors",
+            "size_bytes": 100,
+            "tensor_digest": "sha256:a602b7a20e4bfa29f01e08439a888cf02df13fcf45f8257ad5c392bcc5996f92"
+          },
+          {
+            "object_id": "sha256:32c40f9e10006918f0b78953d9c7a89fc093e6c25d4b74885a6f6bc3d4a27913",
+            "relative_path": "model-static.safetensors",
+            "size_bytes": 100,
+            "tensor_digest": "sha256:e6df8456bd1560d9840a9b849e611c14e8f6a93a9ea413cc93e8f104d6f1b9d3"
+          }
+        ],
+        "opened_object_ids": [
+          "sha256:51edc3205fea270eaa7b969e0b6ffd098b55954d4de7580e9ec7382031e80430",
+          "sha256:32c40f9e10006918f0b78953d9c7a89fc093e6c25d4b74885a6f6bc3d4a27913"
+        ],
+        "protocol": "mycelium.assignment_materialization.v1",
+        "route_ready": false,
+        "unassigned_object_count": 2
+      },
+      "required": {
+        "model-stage-001.safetensors": {
+          "format": "safetensors",
+          "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "quantization": "int8-weight-only",
+          "size_bytes": 100,
+          "tensor_digest": "sha256:a602b7a20e4bfa29f01e08439a888cf02df13fcf45f8257ad5c392bcc5996f92"
+        },
+        "model-static.safetensors": {
+          "format": "safetensors",
+          "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "quantization": "int8-weight-only",
+          "size_bytes": 100,
+          "tensor_digest": "sha256:e6df8456bd1560d9840a9b849e611c14e8f6a93a9ea413cc93e8f104d6f1b9d3"
+        }
+      }
+    }
+  ],
+  "objects": [
+    {
+      "key": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quantization": "int8-weight-only",
+        "size_bytes": 100,
+        "tensor_digest": "sha256:80f93e8c7d0e1e083e6aab0b073011d858d092951eb4bb2d595cd43173e04704"
+      },
+      "payload_hex": "01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101"
+    },
+    {
+      "key": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quantization": "int8-weight-only",
+        "size_bytes": 100,
+        "tensor_digest": "sha256:a602b7a20e4bfa29f01e08439a888cf02df13fcf45f8257ad5c392bcc5996f92"
+      },
+      "payload_hex": "02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202"
+    },
+    {
+      "key": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quantization": "int8-weight-only",
+        "size_bytes": 100,
+        "tensor_digest": "sha256:af463dc9670b6c91799ed7bd94e868ae7201a333aa7effe2958c02d401b2aa64"
+      },
+      "payload_hex": "03030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303"
+    },
+    {
+      "key": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quantization": "int8-weight-only",
+        "size_bytes": 100,
+        "tensor_digest": "sha256:e6df8456bd1560d9840a9b849e611c14e8f6a93a9ea413cc93e8f104d6f1b9d3"
+      },
+      "payload_hex": "04040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404040404"
+    }
+  ],
+  "status": {
+    "entry_count": 4,
+    "max_bytes": 10000,
+    "pinned_object_count": 3,
+    "protocol": "mycelium.assignment_artifact_cache.v1",
+    "used_bytes": 400
+  }
+}

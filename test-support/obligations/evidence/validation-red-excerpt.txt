@@ -1,0 +1,36 @@
+Command (before validator implementation):
+nice -n 19 cargo test --offline -j 1 -p obligations --test validation
+
+Terminal-output excerpt, transcribed from the actual RED run; not a rerun or historical-product claim:
+
+Finished `test` profile [unoptimized + debuginfo] target(s) in 22.51s
+running 16 tests
+positive_control ... ok
+accepts_reviewed_retirement_with_replacement ... ok
+
+All 14 rejection tests failed at tests/validation.rs:13:53 with:
+invalid inventory was accepted: ()
+
+Failing tests:
+rejects_dangling_module
+rejects_dangling_obligation
+rejects_duplicate_id
+rejects_duplicate_path_with_distinct_id
+rejects_empty_distinguishing_observation
+rejects_every_missing_escape
+rejects_missing_contract_crosswalk
+rejects_missing_f15b_without_confusing_f15
+rejects_missing_test_group_crosswalk
+rejects_retirement_without_reason
+rejects_retirement_without_replacement
+rejects_source_revision_mismatch
+rejects_unmapped_supplied_path
+rejects_unreviewed_retirement
+
+test result: FAILED. 2 passed; 14 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Tool exit_code: 101
+
+The pre-implementation validator returned Ok(()) for every parsed fixture.
+This was a behavioural RED, not an import/build/prerequisite failure. Final GREEN
+kept these assertions. This run preceded the parent's tightened no-cargo-while-busy
+rule; final verification used the mandatory host guard before every cargo command.

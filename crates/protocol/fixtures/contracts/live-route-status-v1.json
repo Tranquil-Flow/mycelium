@@ -1,0 +1,184 @@
+{
+  "concurrency_liveness_qualification": {
+    "cancellation_and_cleanup_bound_ms": 8000,
+    "cooperative_interruption_proven": false,
+    "deployment_id": "12345678-1234-5678-1234-567812345678",
+    "eligible": false,
+    "evidence_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "maximum_concurrent_requests": 4,
+    "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+    "publisher_generation_fencing_proven": false,
+    "qualification_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "request_scoped_cleanup_proven": false,
+    "scoped_liveness_proven": false,
+    "shared_process_termination_used": false
+  },
+  "counters": {
+    "applied_operation_count": 18,
+    "fatal": null,
+    "frames_received": 0,
+    "frames_sent": 0
+  },
+  "decode_mode": "stage_local_kv",
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "incidents": [],
+  "liveness": {
+    "deployment_fatal_reason": null,
+    "deployment_id": "12345678-1234-5678-1234-567812345678",
+    "generated_at_monotonic_ms": 1,
+    "incidents": [],
+    "protocol": "mycelium.traffic_liveness.v1",
+    "subjects": []
+  },
+  "model_id": "org/model",
+  "peers": [
+    {
+      "activation_output_bytes": 8192,
+      "active_kv_bytes": 0,
+      "active_kv_state_count": 0,
+      "applied_operation_count": 9,
+      "architecture": "qwen2",
+      "current_position": null,
+      "data_plane_health_observed": true,
+      "decode_input_token_count": 8,
+      "decode_mode": "stage_local_kv",
+      "decode_operation_count": 8,
+      "frames_received": 0,
+      "frames_sent": 0,
+      "interruptibility": {
+        "backend_candidate": true,
+        "cooperative_bound_candidate": true,
+        "decode_mode": "stage_local_kv",
+        "maximum_observed_work_unit_ms": 125.0,
+        "maximum_total_cleanup_ms": 4200,
+        "observed_work_unit_count": 24,
+        "physical_proof_required": true,
+        "runtime_backend": "numpy",
+        "work_unit": "transformer_layer"
+      },
+      "last_release_reason": "normal_completion",
+      "node_id": "node-a",
+      "peak_kv_bytes": 4096,
+      "placements": [
+        {
+          "component_roles": [
+            "input_embedding",
+            "decoder"
+          ],
+          "end_layer_exclusive": 2,
+          "node_id": "node-a",
+          "placement_id": "stage-000-primary",
+          "runtime_backend": "mlx",
+          "stage_id": "stage-000",
+          "start_layer": 0
+        }
+      ],
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
+      "release_counts": {
+        "normal_completion": 1
+      },
+      "release_state": "released",
+      "retained_result_count": 0,
+      "sidecar_process_alive": true,
+      "supported_decode_modes": [
+        "complete_context_replay",
+        "stage_local_kv"
+      ],
+      "transport_fatal": false,
+      "transport_fatal_code": null,
+      "transport_running": true
+    },
+    {
+      "activation_output_bytes": 8192,
+      "active_kv_bytes": 0,
+      "active_kv_state_count": 0,
+      "applied_operation_count": 9,
+      "architecture": "qwen2",
+      "current_position": null,
+      "data_plane_health_observed": true,
+      "decode_input_token_count": 8,
+      "decode_mode": "stage_local_kv",
+      "decode_operation_count": 8,
+      "frames_received": 0,
+      "frames_sent": 0,
+      "interruptibility": {
+        "backend_candidate": true,
+        "cooperative_bound_candidate": true,
+        "decode_mode": "stage_local_kv",
+        "maximum_observed_work_unit_ms": 125.0,
+        "maximum_total_cleanup_ms": 4200,
+        "observed_work_unit_count": 24,
+        "physical_proof_required": true,
+        "runtime_backend": "numpy",
+        "work_unit": "transformer_layer"
+      },
+      "last_release_reason": "normal_completion",
+      "node_id": "node-b",
+      "peak_kv_bytes": 4096,
+      "placements": [
+        {
+          "component_roles": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "end_layer_exclusive": 4,
+          "node_id": "node-b",
+          "placement_id": "stage-001-primary",
+          "runtime_backend": "mlx",
+          "stage_id": "stage-001",
+          "start_layer": 2
+        }
+      ],
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
+      "release_counts": {
+        "normal_completion": 1
+      },
+      "release_state": "released",
+      "retained_result_count": 0,
+      "sidecar_process_alive": true,
+      "supported_decode_modes": [
+        "complete_context_replay",
+        "stage_local_kv"
+      ],
+      "transport_fatal": false,
+      "transport_fatal_code": null,
+      "transport_running": true
+    }
+  ],
+  "protocol": "mycelium.live_route_status.v1",
+  "recent_inferences": [],
+  "route_alive": false,
+  "route_identity_digest": "sha256:53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5",
+  "simulated": false,
+  "stages": [
+    {
+      "component_roles": [
+        "input_embedding",
+        "decoder"
+      ],
+      "end_layer_exclusive": 2,
+      "node_id": "node-a",
+      "placement_id": "stage-000-primary",
+      "runtime_backend": "mlx",
+      "stage_id": "stage-000",
+      "start_layer": 0
+    },
+    {
+      "component_roles": [
+        "decoder",
+        "final_norm",
+        "lm_head"
+      ],
+      "end_layer_exclusive": 4,
+      "node_id": "node-b",
+      "placement_id": "stage-001-primary",
+      "runtime_backend": "mlx",
+      "stage_id": "stage-001",
+      "start_layer": 2
+    }
+  ],
+  "topology_version": 1
+}

@@ -1,0 +1,102 @@
+{
+ "cases": [
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-1",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "1",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-49151",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "49151",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-0",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "0",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-negative",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "-1",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-65536",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "65536",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-bool",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "True",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-float",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "49152.0",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_port_invalid",
+   "exc": "LocalTLSError",
+   "label": "port-str",
+   "message": "local_tls_port_invalid",
+   "ok": false,
+   "port_kind": "'49152'",
+   "seed_url_after": null
+  },
+  {
+   "code": "local_tls_bind_failed",
+   "exc": "LocalTLSError",
+   "label": "port-busy",
+   "message": "local_tls_bind_failed",
+   "ok": false,
+   "port_kind": "busy",
+   "seed_url_after": null
+  },
+  {
+   "base_url_is_origin_of_port": true,
+   "label": "port-free",
+   "ok": true,
+   "port_kind": "free",
+   "seed_url_bound_to": "base_url"
+  },
+  {
+   "base_url_is_origin_of_port": true,
+   "label": "port-free-public-origin",
+   "ok": true,
+   "port_kind": "free",
+   "seed_url_bound_to": "https://seed.example.test"
+  }
+ ],
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "probe_sha256": "5303fadbe9dffe6f881c2656832e1d3ab426f00274d54429304ef911074ba2b6",
+ "python": "3.14.8"
+}

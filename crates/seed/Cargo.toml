@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "seed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+budgets = { path = "../budgets" }
+protocol = { path = "../protocol" }
+rusqlite = { version = "=0.32.1", features = ["bundled", "backup"] }
+serde_json = { version = "=1.0.154", features = ["raw_value", "arbitrary_precision"] }
+thiserror = "=2.0.21"
+rustix = { version = "=1.1.4", features = ["fs", "process"] }
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "=1.15.1"
+# RU-027 lock revision (round 11): v0.1.4's seed TLS material is RSA-2048 + X.509 built with Python `cryptography`;
+# the audited Rust counterparts are `rsa` (key generation, certificate signing) and `x509-cert` (RustCrypto, builder).
+rsa = { version = "=0.9.10", default-features = false, features = ["std", "pem", "sha2"] }
+x509-cert = { version = "=0.2.5", default-features = false, features = ["std", "pem", "builder", "hazmat"] }
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+
+[dev-dependencies]
+sha1 = "=0.10.6"

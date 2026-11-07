@@ -1,0 +1,564 @@
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/api)
+    Finished `test` profile [unoptimized] target(s) in 14.95s
+     Running unittests src/lib.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/api-09ab1ec457d67ac4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/actions.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/actions-9b8c67e2469ab776)
+
+running 4 tests
+test typed_routes_refuse_unknown_and_invalid_shapes_before_effects ... ok
+test valid_actions_publish_before_success_and_publish_failure_is_not_success ... ok
+test network_window_is_integer_and_registry_bounded_with_external_shape ... ok
+test four_more_unchanged_l3_observations_over_real_rust_http ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/adaptive_policy.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/adaptive_policy-0fde3a9acc2f0388)
+
+running 5 tests
+test the_default_policy_is_the_oracles ... ok
+test adaptive_status_off_and_error_branches_equal_the_executed_oracle ... ok
+test the_first_consent_choice_writes_only_when_no_policy_exists ... ok
+test write_adaptive_policy_equals_the_executed_oracle ... ok
+test read_adaptive_policy_equals_the_executed_oracle ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/chat.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/chat-5cb5d3b29fb9363d)
+
+running 3 tests
+test relay_client_key_has_ipv6_prefix_and_no_local_header_trust ... ok
+test role_route_header_and_json_precedence ... ok
+test public_chat_crosses_real_desktop_http_without_session_or_origin ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/chat_order.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/chat_order-7ff80405cf45b3a6)
+
+running 2 tests
+test a_value_only_service_is_unchanged ... ok
+test chat_state_send_and_events_keep_the_services_key_order_like_the_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/consent_files.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/consent_files-cd1ce09ca1ccd9c0)
+
+running 7 tests
+test disclosure_text_and_digest_are_the_shipped_ones ... ok
+test consent_valid_matches_app_consent_valid ... ok
+test write_policy_is_python_json_dumps_sorted_with_private_mode ... ok
+test grant_time_must_be_finite ... ok
+test read_policy_matches_read_resource_policy_over_file_states ... ok
+test standing_consent_lifecycle_files_and_refusals_match_the_oracle ... ok
+test corrupt_standing_files_fail_every_operation_with_the_oracle_code ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/contracts-731eb2bfd22d88a2)
+
+running 3 tests
+test unchanged_assets_match_immutable_source_hashes ... ok
+test continuation_dispatch_review_has_no_pending_rows_or_false_closure_claims ... ok
+test route_inventory_is_unique_provenanced_and_never_claims_fake_acceptance ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/desktop.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/desktop-e51f052175e47a5b)
+
+running 7 tests
+test authentication_precedes_parse_and_actions ... ok
+test snapshot_schema_rejects_unexpected_or_missing_top_level_fields ... ok
+test launch_is_single_use_and_cookie_is_protected ... ok
+test native_reopen_requires_native_authority_not_a_browser_cookie ... ok
+test service_errors_remain_closed_and_headers_do_not_cache ... ok
+test host_path_duplicate_json_and_content_type_guards ... ok
+test publication_rejects_stale_completion_and_retains_failed_last_good ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/directory.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/directory-6360aaf21ae39d06)
+
+running 6 tests
+test get_head_and_method_refusal_preserve_contract ... ok
+test malformed_and_overlong_body_do_not_reach_signature_service ... ok
+test credential_header_and_path_refusals_precede_service ... ok
+test signed_routes_are_total_and_never_accept_unsigned_success ... ok
+test numeric_directory_refusals_do_not_turn_into_private_serde_map_errors ... ok
+test native_head_preserves_get_length_without_body_or_duplicate_headers ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/directory_context.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/directory_context-eff2d553c15d3c40)
+
+running 2 tests
+test qr_dispatch_and_trusted_proxy_identity_follow_directory_not_chat_policy ... ok
+test native_directory_refuses_credentials_before_waiting_for_posted_body ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/directory_http.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/directory_http-5f76b02de08e085e)
+
+running 1 test
+test svg_get_and_head_cross_real_http_with_security_headers_and_no_json_wrapping ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/event_validation.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/event_validation-a59199766a57683d)
+
+running 2 tests
+test host_cannot_bypass_exact_event_validation_or_disclose_private_fields ... ok
+test both_event_protocols_keep_their_exact_fields ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/failure_identity.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/failure_identity-e36886b879d3045b)
+
+running 1 test
+test every_failure_records_the_oracle_exception_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/handoff.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/handoff-e4bb5370a1478260)
+
+running 5 tests
+test peer_translate_matches_the_oracle ... ok
+test quota_and_invite_bundles_match_the_oracle ... ok
+test primitives_match_the_oracle_library ... ok
+test approve_and_decrypt_match_the_oracle_byte_for_byte ... ok
+test authority_approvals_store_is_idempotent_and_exact ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/headless_private_json.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/headless_private_json-3ac4961ba5ab95a6)
+
+running 2 tests
+test a_document_over_the_cap_is_refused_as_authority_state_invalid ... ok
+test a_document_between_64_kib_and_the_cap_is_accepted ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.48s
+
+     Running tests/headless_signals.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/headless_signals-320df55647c201ce)
+
+running 2 tests
+test sigint_closes_the_launcher_as_v014 ... ok
+test sigterm_closes_the_launcher_as_v014 ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.09s
+
+     Running tests/http_stream.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/http_stream-33803570ea6b6902)
+
+running 2 tests
+test resume_binding_rejects_first_wrong_request_and_replayed_cursor ... ok
+test source_cleanup_runs_on_bad_headers_head_and_preserves_both_failures ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/join_link.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/join_link-91896a8ecb3b842d)
+
+running 4 tests
+test relay_options_match_the_oracle_constructor ... ok
+test origin_validators_match_the_oracle ... ok
+test parse_join_text_matches_the_oracle_on_every_input ... ok
+test proxy_ports_match_the_oracle ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/json_ingress.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/json_ingress-5663e0353f486c0e)
+
+running 2 tests
+test private_number_keys_remain_objects_and_nested_duplicates_remain_errors ... ok
+test nested_numbers_preserve_scalar_types_under_workspace_feature_union ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/launcher_journey.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/launcher_journey-f60ea27a0b3d6706)
+
+running 2 tests
+test headless_launcher_passes_the_unchanged_l3_baseline_journeys_against_the_python_golden ... ok
+test headless_launcher_passes_the_unchanged_l3_boundaries_corpus_against_the_python_golden ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.12s
+
+     Running tests/leave.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/leave-f90bde43b2bf3567)
+
+running 2 tests
+test smooth_drain_stall_cap_and_handoff_equal_the_oracle ... ok
+test leave_actions_resume_and_state_files_equal_the_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/leave_background.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/leave_background-fcbf910200e82ad5)
+
+running 3 tests
+test a_second_request_while_the_drain_runs_only_reports_the_status ... ok
+test smooth_leave_answers_at_once_and_drains_on_a_member_leave_thread ... ok
+test no_work_in_flight_answers_with_the_begin_record_like_all_300_oracle_runs ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+     Running tests/live_seed.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/live_seed-ce683776528fcbac)
+
+running 1 test
+test the_rust_member_joins_a_live_python_seed_over_real_tls ... ignored, needs the live oracle seed of r11-probe-live-seed.py
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/loopback.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/loopback-2cd471943100488d)
+
+running 2 tests
+test unchanged_l3_golden_assertions_over_actual_rust_http ... ok
+test measured_compile_publish_close_stalls_do_not_block_status_under_load ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/native_session.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/native_session-fee0cc5779d460fc)
+
+running 5 tests
+test file_failures_never_return_success_and_failed_consumption_stays_one_use ... ok
+test launch_form_percent_decoding_matches_native_browser_form ... ok
+test launch_expiry_replacement_auth_precedence_and_closed_state_match_oracle ... ok
+test exact_session_expiry_is_not_sliding_and_native_reopen_requires_new_one_use_login ... ok
+test native_renewal_crosses_real_http_without_cookie_or_origin_authority ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/onboarding_golden.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/onboarding_golden-89d03a544b5dac70)
+
+running 1 test
+test unchanged_onboarding_default_observation_over_real_http ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/owner_creation.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/owner_creation-bc55edd2a143e11d)
+
+running 3 tests
+test adaptive_sharing_is_split_off_before_the_strict_checks_and_applied_after_success ... ok
+test withdraw_matches_the_oracle_route ... ok
+test create_prelude_matches_the_oracle_for_every_case ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/pairing.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/pairing-d6f06e9627f9dfc4)
+
+running 3 tests
+test real_signature_preview_and_tampering_obey_exact_public_contract ... ok
+test signed_preview_closed_shape_lifetime_and_refusal_precedence ... ok
+test two_unchanged_l3_pairing_observations_over_real_http ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/peer.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/peer-5d63796b1b3df8e4)
+
+running 2 tests
+test load_membership_state_returns_the_retained_credential_or_none ... ok
+test offline_accept_branches_equal_the_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/peer_renew.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/peer_renew-7880ea3e67e1fdae)
+
+running 1 test
+test renew_equals_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.02s
+
+     Running tests/peer_resume.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/peer_resume-863114c1fe086882)
+
+running 1 test
+test start_resume_and_seed_refusals_equal_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.54s
+
+     Running tests/persistent_backend.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/persistent_backend-b3cd79302af5b4ce)
+
+running 7 tests
+test other_actions_are_delegated_with_prepare_execute_publish ... ok
+test a_failed_write_is_the_library_code_and_never_publishes ... ok
+test fast_mode_refusals_keep_the_oracle_order_status_and_write_nothing ... ok
+test run_model_refusals_follow_choose_run_model_and_keep_the_saved_choice ... ok
+test fast_mode_persists_the_canonical_private_file_and_refreshes_the_process_default ... ok
+test run_model_choice_persists_and_returns_the_oracle_document ... ok
+test preference_observations_persist_over_real_rust_http ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/policy_encodings.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/policy_encodings-a07b1ecee98e12fd)
+
+running 1 test
+test every_encoding_and_malformed_file_matches_read_resource_policy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/preferences.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/preferences-66e6c431de747395)
+
+running 5 tests
+test choose_refusals_keep_the_oracle_precedence_and_status_classes ... ok
+test private_state_load_and_store_follow_authority_py ... ok
+test choose_writes_the_canonical_private_file_and_returns_the_saved_document ... ok
+test run_model_choice_persistence_matches_run_model_py ... ok
+test every_tampered_state_file_is_fast_mode_state_invalid ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/qr.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/qr-ed7838f12bb7bbcc)
+
+running 4 tests
+test full_svg_bytes_match ... ok
+test over_capacity_text_is_an_error_not_a_truncated_code ... ok
+test real_swarm_links_and_edge_strings_are_byte_identical ... ok
+test generated_corpus_is_byte_identical_across_modes_versions_and_masks ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.11s
+
+     Running tests/registry.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/registry-9196781886b891c8)
+
+running 12 tests
+test owner_token_is_digest_checked_and_unowned_sessions_accept_any_caller ... ok
+test cancel_is_one_shot_and_unknown_requests_are_refused ... ok
+test construction_ranges_and_submit_admission_order ... ok
+test generation_sync_failure_detaches_cancels_and_refuses ... ok
+test eviction_prefers_unattached_terminals_then_abandoned_and_protects_fresh_and_attached ... ok
+test terminal_eviction_rules_cancelled_needs_worker_done_and_attached_is_kept ... ok
+test rebinding_refuses_stale_generations_bad_cursors_and_reclaimed_history ... ok
+test trim_acknowledged_removes_only_the_acknowledged_prefix_down_to_the_target ... ok
+test session_may_start_at_the_signed_identity_generation_minus_one ... ok
+test vanished_consumer_drop_moves_only_the_replay_boundary_never_the_ack_watermark ... ok
+test rebinding_resumes_after_the_acknowledged_cursor_and_bumps_the_generation ... ok
+test terminal_trims_only_acknowledged_history_and_never_invents_capacity ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/registry_admission.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/registry_admission-ff11ab05b75b4aba)
+
+running 1 test
+test registry_and_host_rules_equal_the_executed_gateway ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/renew_session.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/renew_session-d8c6e420b9f7c2b4)
+
+running 1 test
+test heartbeat_and_lease_renewal_equal_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/requests.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/requests-dd4503ea9ae2efce)
+
+running 4 tests
+test failed_sse_write_does_not_ack_and_subscription_close_is_explicit ... ok
+test authorization_route_method_and_owner_precedence ... ok
+test malformed_cursor_or_owner_never_subscribes ... ok
+test actual_http_sse_flushes_before_terminal_ack_and_closes_subscription ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/routes.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/routes-2d736585e24b6594)
+
+running 2 tests
+test quit_is_closed_gated_shape_checked_and_answers_the_released_bytes ... ok
+test every_oracle_case_matches_status_files_log_and_bytes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/run_model_document.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/run_model_document-7654b82bf082e3a0)
+
+running 6 tests
+test memory_ceiling_and_options_match_the_oracle ... ok
+test ceilings_and_consent_documents_equal_model_resources_py ... ok
+test whole_model_member_limits_match_the_oracle ... ok
+test corrupt_state_surfaces_as_the_collapsed_builtin_failure ... ok
+test choose_matches_choose_run_model_for_every_oracle_trial ... ok
+test document_matches_run_model_py_over_state_environment_and_memory ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/run_model_errors.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/run_model_errors-73c31f8641cf2cee)
+
+running 3 tests
+test choice_errors_are_the_collapsed_wire_code ... ok
+test save_choice_errors_are_the_collapsed_wire_code ... ok
+test load_choice_errors_are_the_collapsed_wire_code ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/seed_http.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/seed_http-c845d6db5b41dcfa)
+
+running 1 test
+test seed_http_client_equals_the_executed_oracle has been running for over 60 seconds
+test seed_http_client_equals_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 117.74s
+
+     Running tests/seed_join.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/seed_join-830c197cd13390e9)
+
+running 1 test
+test seed_half_of_accept_handoff_equals_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.19s
+
+     Running tests/seed_time_refusal.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/seed_time_refusal-04c9e6cdb80d4104)
+
+running 1 test
+test a_seed_time_refusal_records_its_window_and_logs_the_event_like_the_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/signed_requests.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/signed_requests-450dc1388c49fc22)
+
+running 15 tests
+test admission_owner_and_cancel_refusals_match_source_codes ... ok
+test registry_wiring::the_immutable_grant_default_refuses_any_second_stream_and_cancels ... ok
+test registry_wiring::replay_history_is_bounded_by_the_registry_and_never_skips ... ok
+test registry_wiring::reconnect_rebinds_through_the_authenticated_handoff_and_replays_unacknowledged_events ... ok
+test qualification_mismatch_codes_preserve_oracle_precedence ... ok
+test subscription_ownership_and_resume_do_not_relabel_signed_generation ... ok
+test signed_receipts_reach_public_tokens_only_after_verification ... ok
+test registry_wiring::a_failed_handoff_detaches_and_cancels_the_request ... ok
+test cleanup_proved_completion_is_irreversible_and_ordered_after_tokens ... ok
+test failed_decode_cannot_become_completed_after_cleanup ... ok
+test real_http_signed_submission_sse_and_late_cancel ... ok
+test v1_has_no_lifecycle_and_cancel_wins_only_before_terminal_settlement ... ok
+test failed_terminal_uses_oracle_generic_code_not_backend_text ... ok
+test constructor_and_admission_reject_bad_owner_and_stale_authority ... ok
+test pre_first_stream_resume_matches_the_oracle_generation_table ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/sse.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/sse-ff378b8237a2df7c)
+
+running 5 tests
+test malformed_or_credential_bearing_event_is_refused_before_any_bytes ... ok
+test reordered_duplicate_or_other_request_events_are_not_published ... ok
+test write_failure_is_observable_and_fences_later_terminal ... ok
+test frames_preserve_identity_utf8_and_terminal_order ... ok
+test real_tcp_flush_delivers_first_frame_before_terminal_is_released ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/status_owner.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/status_owner-2d4c4d069b4cc107)
+
+running 4 tests
+test refresh_runs_collection_without_status_lock_and_preserves_source_and_fencing_errors ... ok
+test tickets_are_bound_to_owner_and_legacy_publish_cannot_bypass_owner ... ok
+test collection_revision_is_not_source_generation_and_stale_failure_cannot_erase_success ... ok
+test successor_fences_collectors_before_first_success_and_failure_orders_completions ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/status_responsiveness.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/status_responsiveness-ee3ecebfb8a8a7f4)
+
+running 1 test
+test status_completes_while_backend_and_publication_are_held ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/swarm_concurrency.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/swarm_concurrency-f2f84fef1483fa0b)
+
+running 5 tests
+test read_budget_race_admits_exactly_the_budget ... ok
+test identical_record_race_yields_the_oracle_tally ... ok
+test nonce_replay_race_accepts_exactly_one ... ok
+test rising_sequence_race_is_a_serial_execution ... ok
+test independent_writers_in_parallel_equal_the_serial_listing ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/swarm_directory.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/swarm_directory-d6a2f797df4ada2a)
+
+running 30 tests
+test ed25519_primitive_matches_rfc8032_test_vector_1_and_rejects_tamper ... ok
+test create_and_list_shows_every_swarm_with_public_fields ... ok
+test entry_origin_must_be_public_https_unless_loopback_enabled ... ok
+test entry_offer_then_owner_attaches_entry_and_expired_offers_hide ... ok
+test deep_documents_do_not_exhaust_the_stack_in_a_small_thread ... ok
+test known_answers_for_canonical_fingerprint_stored_text_and_response_text ... ok
+test heartbeat_with_skewed_clock_is_refused ... ok
+test malformed_json_consumes_the_ip_write_budget_before_parsing_like_the_source ... ok
+test detaching_the_entry_drops_its_heartbeat_but_an_owner_heartbeat_survives ... ok
+test grant_deposit_must_be_owner_signed_unexpired_and_bounded ... ok
+test delete_by_owner_retires_the_id_and_removes_requests_offers_and_grants ... ok
+test heartbeat_status_serving_warming_expiry_stale_and_stranger ... ok
+test access_request_owner_inbox_grant_and_deny ... ok
+test reads_are_rate_limited_per_ip ... ok
+test response_bodies_keep_source_key_order_and_post_records_keeps_client_record_order ... ok
+test query_replay_is_refused_and_expired_grants_disappear ... ok
+test only_the_owner_updates_and_seq_must_grow ... ok
+test store_failures_are_explicit_not_silent_success ... ok
+test listing_orders_by_status_then_lowercase_name_then_id ... ok
+test per_ip_and_per_key_write_rate_limits_with_one_minute_window ... ok
+test unknown_routes_and_methods ... ok
+test wire_refusals_match_python_json_rules ... ok
+test deep_nesting_has_the_oracle_outcome_at_every_depth ... ok
+test size_caps_owner_cap_and_directory_cap ... ok
+test owner_inbox_sorts_pending_first_then_newest_and_open_invite_modes_refuse_requests ... ok
+test unsigned_forged_and_tampered_records_are_refused_in_source_order ... ok
+test sqlite_store_is_durable_across_restart_mode_0600_and_oracle_text_compatible ... ok
+test spent_write_budget_does_not_stop_heartbeats_and_heartbeats_have_their_own_budget ... ok
+test junk_posts_do_not_starve_a_valid_heartbeat_and_only_signed_writes_spend_the_global_budget ... ok
+test signed_read_queries_have_their_own_budgets_and_stay_bounded ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/swarm_http.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/swarm_http-8ae3c1fa43c62869)
+
+running 8 tests
+test store_failure::transport_free_handle_surfaces_the_failure_instead_of_a_reply ... ok
+test csp_adds_loopback_connect_source_only_when_the_directory_allows_loopback_entries ... ok
+test transport_ordering_keeps_closed_public_errors ... ok
+test store_failure::storage_failure_does_not_affect_store_free_routes ... ok
+test store_failure::storage_failure_writes_no_bytes_on_every_store_touching_route ... ok
+test signed_record_over_real_tcp_loopback ... ok
+test config_is_exact_unlimited_and_in_source_key_order ... ok
+test signed_write_then_listing_link_and_head_over_the_boundary ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/v03_surrogates.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/v03_surrogates-37232d4907a65ca9)
+
+running 2 tests
+test http_bodies_refuse_what_the_oracle_accepts_and_echoes ... ok
+test stored_documents_replace_each_lone_surrogate_with_u_fffd ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/windows.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/windows-d3dcf364a5505e25)
+
+running 2 tests
+test pending_window_json_keeps_the_source_key_order ... ok
+test every_oracle_case_matches_status_pending_list_and_host_calls ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/wire.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/wire-47f4b9e8d9edcf85)
+
+running 4 tests
+test set_replaces_in_place_like_a_dict ... ok
+test insertion_order_is_kept_and_value_conversion_sorts ... ok
+test float_repr_matches_cpython_edges ... ok
+test every_oracle_case_is_byte_identical_in_both_text_modes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests/wire_routes.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l10-target/debug/deps/wire_routes-4ceac9c5fa0cd05a)
+
+running 8 tests
+test http::refusals_and_status_follow_the_same_encoding ... ok
+test pair_preview_projection_keeps_the_source_key_order ... ok
+test ordered_responses_keep_insertion_order_through_the_signed_wrapper ... ok
+test http::run_model_post_over_the_desktop_is_the_released_app_bytes ... ok
+test fast_mode_bodies_are_byte_identical ... ok
+test run_model_choose_bodies_are_byte_identical ... ok
+test standing_withdraw_bodies_are_byte_identical ... ok
+test run_model_documents_are_byte_identical_over_state_env_memory ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+   Doc-tests api
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

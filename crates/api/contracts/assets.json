@@ -1,0 +1,82 @@
+{
+  "assets": [
+    {
+      "source": "mycelium_a13_macos/web/index.html",
+      "path": "assets/desktop/index.html",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "550bdcee38a8a491ad273f7ca03477aafc06ddebdc6fdbe88bb724cf33115fa8",
+      "bytes": 23336
+    },
+    {
+      "source": "mycelium_a13_macos/web/app.js",
+      "path": "assets/desktop/app.js",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "8596c79e4279ba80c97f966dd65900fbab89f74aaf4c5a1b29fbf261f8d86a61",
+      "bytes": 52703
+    },
+    {
+      "source": "mycelium_a13_macos/web/style.css",
+      "path": "assets/desktop/style.css",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "ac6004edd1c4abf74bdc2f8ac1cf8adf0c0767242c1ddfc82d6759c0d63cba72",
+      "bytes": 4224
+    },
+    {
+      "source": "mycelium_a13_macos/web/run.js",
+      "path": "assets/desktop/run.js",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "300684580a99adaa9254888015a83a17a3a77e07f9b56b7bb30f5593efa96f84",
+      "bytes": 14628
+    },
+    {
+      "source": "mycelium_a13_macos/web/swarm.js",
+      "path": "assets/desktop/swarm.js",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe",
+      "bytes": 5796
+    },
+    {
+      "source": "mycelium_a13_macos/web/chat.html",
+      "path": "assets/desktop/chat.html",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "68ae69a0e7225a301b1ee349fbd6ed4ecca8699e6f759c69b53770e7774b8463",
+      "bytes": 1230
+    },
+    {
+      "source": "mycelium_a13_macos/web/chat.js",
+      "path": "assets/desktop/chat.js",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "7200b21c023a5e1800ca8d5d547f7ad3dc2cc0209cf3bee2081e293958bb4e91",
+      "bytes": 5070
+    },
+    {
+      "source": "mycelium_a13_macos/web/chat.css",
+      "path": "assets/desktop/chat.css",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "5dce5ce7198071e9186a65ecb02cf1277fa3c492a255af5c6bba91c0c8e7b7dd",
+      "bytes": 1330
+    },
+    {
+      "source": "mycelium_swarm_directory/web/index.html",
+      "path": "assets/directory/index.html",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "22b5ae169ae243f81d9fbbfec6ecb0a1a2574a6cc96f09489df4fc1fb43d9cb0",
+      "bytes": 4780
+    },
+    {
+      "source": "mycelium_swarm_directory/web/swarms.js",
+      "path": "assets/directory/swarms.js",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "f9292f1ddf9a6d340eaefca2ac17b365a0dbfa1d6d1906c47d26d9ae3e76f536",
+      "bytes": 34572
+    },
+    {
+      "source": "mycelium_swarm_directory/web/swarms.css",
+      "path": "assets/directory/swarms.css",
+      "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "sha256": "4685b1332e82741486100d9006c2c6ffa25fb263d81b69b9e2c326ebf5aa5094",
+      "bytes": 3938
+    }
+  ],
+  "claim": "Byte-identical existing web assets; no DOM/browser qualification implied."
+}

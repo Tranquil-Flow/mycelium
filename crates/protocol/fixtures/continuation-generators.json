@@ -1,0 +1,30 @@
+{
+  "oracle_commit": "941765e882ed3eea9a5576cc53e525c4caa20300",
+  "generators": [
+    {
+      "name": "cancel-vectors.py",
+      "sha256": "c26d6f85b8e29c565d52460e27837e362360fa9c5455e171a16041cbf4113048"
+    },
+    {
+      "name": "continuation.py",
+      "sha256": "b80c92d7af850d4f2f76bbae9ea939d25c212937a581f44d1ffafbf1ac0237cf"
+    },
+    {
+      "name": "managed-receipts.py",
+      "sha256": "0e49df62b7ed318e9fecb2153860f01e81f1b0af3c27e2c5884a6c5fd714fe64"
+    },
+    {
+      "name": "request-vectors.py",
+      "sha256": "95269dbc1408cee08e257474384c621541b8d56bf238e994cd196effc8d68dcb"
+    },
+    {
+      "name": "resume-evidence-vectors.py",
+      "sha256": "22380431ca045202daa1fdfbf620d5eaf295c0d3f55cebfa9c8abd1d19606087"
+    },
+    {
+      "name": "token-vectors.py",
+      "sha256": "af9ddb9dab9fcfc6b0cd902f5b93632040a3bfe015cff7256da9bc7d82c6ab00"
+    }
+  ],
+  "boundary": "External immutable oracle fixture generation only; generators are not present or invoked in product, tests, CI or release"
+}

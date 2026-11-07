@@ -1,0 +1,2315 @@
+{
+ "descriptors": [
+  {
+   "case": {
+    "dep": "dep-1",
+    "name": "whole_snapshot",
+    "run": "run-1",
+    "slice": null
+   },
+   "result": {
+    "ok": {
+     "protocol": "mycelium.managed_control.signed_envelope.v1",
+     "signature": {
+      "algorithm": "ed25519",
+      "signature": "WuMnkPLlJP82wHL+UeQwoJRklTJNWmyx5n2wCbY4Bw/lUVN5THbIvA86NeYN5sP+I66H4bnFzjWyX+LWrUMMCg==",
+      "signed_statement_digest": "sha256:3e508e4eec3c68959c566913e476c442a2a3d4ebc588ddbac4f13bcf3ab5e321",
+      "signer_endpoint_id": "endpoint-0707070707070707",
+      "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+     },
+     "statement": {
+      "deployment_id": "dep-1",
+      "expires_at": 1300.0,
+      "facts": {
+       "endpoint_id": "endpoint-0707070707070707",
+       "endpoint_secret_file": "/v02/fixed/root/local-contributor/identity/node.key",
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "membership_generation": 1,
+       "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+       "process_transport": "managed_https",
+       "python_executable": "/opt/homebrew/Cellar/python@3.14/3.14.8_2/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+       "route_ready": false,
+       "runtime_backend": "mlx",
+       "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+       "source_root": "/v02/fixed/source",
+       "ssh_identity_file": null,
+       "ssh_target": null,
+       "staging_root": "/v02/fixed/root/local-contributor/managed/run-1/mycelium-stage"
+      },
+      "issued_at": 1000.0,
+      "member_incarnation": "inc-abc123",
+      "membership_generation": 1,
+      "protocol": "mycelium.a13.installation_descriptor.v1",
+      "run_id": "run-1",
+      "swarm_id": "swarm-fixed",
+      "target_endpoint_id": "endpoint-0707070707070707",
+      "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+      "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+     },
+     "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+     }
+    }
+   }
+  },
+  {
+   "case": {
+    "dep": "dep-2",
+    "name": "slice_source",
+    "run": "run-2",
+    "slice": {
+     "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+     "source_root": "/v02/fixed/slice/run-2"
+    }
+   },
+   "result": {
+    "ok": {
+     "protocol": "mycelium.managed_control.signed_envelope.v1",
+     "signature": {
+      "algorithm": "ed25519",
+      "signature": "EyCp7GtAUXUzMU5wzsO+utbf2OtzAXTrTK55ZG0i+/V3SkhXMZEQEwUMreuIpU8rSZy39HExnl8StlwYP1fmDw==",
+      "signed_statement_digest": "sha256:ac1bda4ff2b7daed3a94ae44de215128e7bbebb191c20e154139ad9c5f4ccd8e",
+      "signer_endpoint_id": "endpoint-0707070707070707",
+      "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+     },
+     "statement": {
+      "deployment_id": "dep-2",
+      "expires_at": 1300.0,
+      "facts": {
+       "endpoint_id": "endpoint-0707070707070707",
+       "endpoint_secret_file": "/v02/fixed/root/local-contributor/identity/node.key",
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "membership_generation": 1,
+       "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+       "process_transport": "managed_https",
+       "python_executable": "/opt/homebrew/Cellar/python@3.14/3.14.8_2/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+       "route_ready": false,
+       "runtime_backend": "mlx",
+       "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+       "source_root": "/v02/fixed/slice/run-2",
+       "ssh_identity_file": null,
+       "ssh_target": null,
+       "staging_root": "/v02/fixed/root/local-contributor/managed/run-2/mycelium-stage"
+      },
+      "issued_at": 1000.0,
+      "member_incarnation": "inc-abc123",
+      "membership_generation": 1,
+      "protocol": "mycelium.a13.installation_descriptor.v1",
+      "run_id": "run-2",
+      "swarm_id": "swarm-fixed",
+      "target_endpoint_id": "endpoint-0707070707070707",
+      "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+      "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+     },
+     "verification_key": {
+      "algorithm": "ed25519",
+      "encoding": "base64",
+      "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+      "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+     }
+    }
+   }
+  },
+  {
+   "case": {
+    "dep": "dep-1",
+    "name": "segment_invalid",
+    "run": "../x",
+    "slice": null
+   },
+   "result": {
+    "error": {
+     "class": "ManagedControlError",
+     "text": "managed_control_identifier_invalid"
+    }
+   }
+  },
+  {
+   "case": {
+    "dep": "dep-1",
+    "name": "slice_source_relative",
+    "run": "run-1",
+    "slice": {
+     "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+     "source_root": "rel/path"
+    }
+   },
+   "result": {
+    "error": {
+     "class": "ValueError",
+     "text": "installation_slice_source_invalid"
+    }
+   }
+  },
+  {
+   "case": {
+    "dep": "dep-1",
+    "name": "slice_source_bad_digest",
+    "run": "run-1",
+    "slice": {
+     "manifest_digest": "md5:zz",
+     "source_root": "/v02/fixed/slice"
+    }
+   },
+   "result": {
+    "error": {
+     "class": "ValueError",
+     "text": "installation_slice_source_invalid"
+    }
+   }
+  },
+  {
+   "case": {
+    "ack": false,
+    "dep": "dep-1",
+    "name": "not_acknowledged",
+    "run": "run-1",
+    "slice": null
+   },
+   "result": {
+    "error": {
+     "class": "ValueError",
+     "text": "installation_disclosure_consent_required"
+    }
+   }
+  }
+ ],
+ "endpoint_id": "endpoint-0707070707070707",
+ "member": {
+  "endpoint_id": "endpoint-0707070707070707",
+  "generation": 1,
+  "incarnation": "inc-abc123",
+  "lease_expires_at": 4000000000.0,
+  "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+ },
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "/opt/homebrew/Cellar/python@3.14/3.14.8_2/Frameworks/Python.framework/Versions/3.14/bin/python3.14",
+ "scenarios": [
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1005.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1011.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1011.0
+    }
+   ],
+   "name": "idle_reports_once_per_interval",
+   "real_fs": false,
+   "spec": {
+    "name": "idle_reports_once_per_interval",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": null,
+       "issued_at": 1000.0,
+       "manifest_digest": null,
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "idle",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": null,
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1005.0
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1011.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "gRE+Cn20320Z3ZmkofWDLpjPyfg6yT/PFBYFZXqNhKXGjvEK6Q+wE6zg6qsu/RNCpoAxLTtnbju0eORqEB5GCw==",
+         "signed_statement_digest": "sha256:bc09618234e4c8ae68eb61c4d3c276afea1abc47b3405839b67ad41e33c651aa",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "gRE+Cn20320Z3ZmkofWDLpjPyfg6yT/PFBYFZXqNhKXGjvEK6Q+wE6zg6qsu/RNCpoAxLTtnbju0eORqEB5GCw==",
+         "signed_statement_digest": "sha256:bc09618234e4c8ae68eb61c4d3c276afea1abc47b3405839b67ad41e33c651aa",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1020.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1020.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "gRE+Cn20320Z3ZmkofWDLpjPyfg6yT/PFBYFZXqNhKXGjvEK6Q+wE6zg6qsu/RNCpoAxLTtnbju0eORqEB5GCw==",
+         "signed_statement_digest": "sha256:bc09618234e4c8ae68eb61c4d3c276afea1abc47b3405839b67ad41e33c651aa",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1100.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1100.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "bdlC9N2FNmN2IcezdMgDSwPINv9W8gTAOuGbpAJhKQVoGe1L2gsQwfjnoHWid8nYmSteptYzPS64wtXtrc5ZBQ==",
+         "signed_statement_digest": "sha256:46336d200185fa6a5ae6d61c8c39f247615f829f88135b031330cefa64e47d0e",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1451.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1151.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1151.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1151.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1152.0
+    }
+   ],
+   "name": "collect_makes_one_descriptor_then_waits",
+   "real_fs": false,
+   "spec": {
+    "name": "collect_makes_one_descriptor_then_waits",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1020.0
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1100.0
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1151.0
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1152.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "gRE+Cn20320Z3ZmkofWDLpjPyfg6yT/PFBYFZXqNhKXGjvEK6Q+wE6zg6qsu/RNCpoAxLTtnbju0eORqEB5GCw==",
+         "signed_statement_digest": "sha256:bc09618234e4c8ae68eb61c4d3c276afea1abc47b3405839b67ad41e33c651aa",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-2",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "CEwF0riAdHKIRkOQL9LArzpJjEhWIXDJ0rP96HxuNn+dJvqz08fT53j8ymNTjGorJmCTj0VwubSuR+fAISm3BA==",
+         "signed_statement_digest": "sha256:be2682fa2881f9c91ef468a9b810468be3b5a46488d5dc28909c2af25272df0a",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-2",
+         "expires_at": 1301.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-2/mycelium-stage"
+         },
+         "issued_at": 1001.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-2",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-2",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-2",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "observe",
+      "progress": null,
+      "run_id": "run-2",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1002.0
+    }
+   ],
+   "name": "a_new_run_gets_a_new_descriptor",
+   "real_fs": false,
+   "spec": {
+    "name": "a_new_run_gets_a_new_descriptor",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-2",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-2",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1002.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-2",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "observe",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-2",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": null,
+       "detail": "owner_run_not_active",
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "owner_run_not_active",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "A0gTYcr9I8EpBj3PcUTGjeoerJIoB52OpHC7JksHlDAQwwfQX0+LI+qCRHKR9b5WrMZR85Xgn5VK427Pdaj6BA==",
+         "signed_statement_digest": "sha256:58f9c9b391a75ef1c069c7572a4009e3e5cafa7c64d45c088eecd65e360c1b7d",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1301.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1001.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "consent_is_the_owner_run_being_active",
+   "real_fs": false,
+   "spec": {
+    "name": "consent_is_the_owner_run_being_active",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "active",
+      "value": false
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "active",
+      "value": true
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": null,
+       "detail": "resource_power_policy_violation",
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "resource_power_policy_violation",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "A0gTYcr9I8EpBj3PcUTGjeoerJIoB52OpHC7JksHlDAQwwfQX0+LI+qCRHKR9b5WrMZR85Xgn5VK427Pdaj6BA==",
+         "signed_statement_digest": "sha256:58f9c9b391a75ef1c069c7572a4009e3e5cafa7c64d45c088eecd65e360c1b7d",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1301.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1001.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "a_resource_refusal_is_reported_by_name",
+   "real_fs": false,
+   "spec": {
+    "name": "a_resource_refusal_is_reported_by_name",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "check",
+      "value": "resource_power_policy_violation"
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "check",
+      "value": null
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": null,
+       "detail": "demo_model_mismatch",
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "ffffffffffffffffffffffffffffffffffffffff"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "error"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "demo_model_mismatch",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1000.0
+    }
+   ],
+   "name": "the_announced_model_must_be_the_prepared_one",
+   "real_fs": false,
+   "spec": {
+    "name": "the_announced_model_must_be_the_prepared_one",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "ffffffffffffffffffffffffffffffffffffffff"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "000NyUAJUHZvhi15NIOvsAE38aXmIUeM3Oq4lSBIVgcWD0eceBuvgVzZZimFXJYkOyiBuKOgYmMOCoPaGQ12Bg==",
+         "signed_statement_digest": "sha256:762a5ac48ff9ad118aa50368ce3ebbd399e977d5e03e6d3e920d7fd50ae78e0e",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/slices/run-1",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": [
+      "run-1"
+     ],
+     "slice_mode_bits": {
+      "run-1": "0o700"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-2",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "7joQT8eB7jCwLVP2+NHtVFZvq5KzOQb5XxO5/pbzRqmDaaFj/oXBi2dkBo+PDqTCTLkXpSlVV07368+iPyMlBg==",
+         "signed_statement_digest": "sha256:cff3031184405313e32eb4294c25de942d6345ca43da5631faf1cf9abaccc799",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-2",
+         "expires_at": 1301.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/slices/run-2",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-2/mycelium-stage"
+         },
+         "issued_at": 1001.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-2",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-2",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": [
+      "run-2"
+     ],
+     "slice_mode_bits": {
+      "run-2": "0o700"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-2",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "slice_mode_describes_an_empty_per_run_slice_root",
+   "real_fs": true,
+   "spec": {
+    "name": "slice_mode_describes_an_empty_per_run_slice_root",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": true,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-2",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-2",
+       "slice_mode": true,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     }
+    ],
+    "pre_dirs": [
+     "model-source/slices/old-run"
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": null,
+       "detail": "native_sidecar_installation_invalid",
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "error"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "native_sidecar_installation_invalid",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "A0gTYcr9I8EpBj3PcUTGjeoerJIoB52OpHC7JksHlDAQwwfQX0+LI+qCRHKR9b5WrMZR85Xgn5VK427Pdaj6BA==",
+         "signed_statement_digest": "sha256:58f9c9b391a75ef1c069c7572a4009e3e5cafa7c64d45c088eecd65e360c1b7d",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1301.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1001.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "a_missing_sidecar_is_reported_by_name",
+   "real_fs": false,
+   "spec": {
+    "name": "a_missing_sidecar_is_reported_by_name",
+    "ops": [
+     {
+      "op": "sidecar",
+      "value": false
+     },
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "sidecar",
+      "value": true
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": {
+        "protocol": "mycelium.managed_control.signed_envelope.v1",
+        "signature": {
+         "algorithm": "ed25519",
+         "signature": "gRE+Cn20320Z3ZmkofWDLpjPyfg6yT/PFBYFZXqNhKXGjvEK6Q+wE6zg6qsu/RNCpoAxLTtnbju0eORqEB5GCw==",
+         "signed_statement_digest": "sha256:bc09618234e4c8ae68eb61c4d3c276afea1abc47b3405839b67ad41e33c651aa",
+         "signer_endpoint_id": "endpoint-0707070707070707",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        },
+        "statement": {
+         "deployment_id": "dep-1",
+         "expires_at": 1300.0,
+         "facts": {
+          "endpoint_id": "endpoint-0707070707070707",
+          "endpoint_secret_file": "<ROOT>/local-contributor/identity/node.key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a",
+          "process_transport": "managed_https",
+          "python_executable": "<PYTHON>",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/v02/fixed/native/mycelium-iroh-sidecar",
+          "source_root": "<ROOT>/model-source/snapshot",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "<ROOT>/local-contributor/managed/run-1/mycelium-stage"
+         },
+         "issued_at": 1000.0,
+         "member_incarnation": "inc-abc123",
+         "membership_generation": 1,
+         "protocol": "mycelium.a13.installation_descriptor.v1",
+         "run_id": "run-1",
+         "swarm_id": "swarm-fixed",
+         "target_endpoint_id": "endpoint-0707070707070707",
+         "target_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+         "target_node_id": "remote-mac-fe812c12f3ab4ce6ac5db69a"
+        },
+        "verification_key": {
+         "algorithm": "ed25519",
+         "encoding": "base64",
+         "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+         "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "reported"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "stopped"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "stopped",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "stopped"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1002.0
+    }
+   ],
+   "name": "stopped_after_a_run",
+   "real_fs": false,
+   "spec": {
+    "name": "stopped_after_a_run",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": null,
+       "issued_at": 1000.0,
+       "manifest_digest": null,
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "stopped",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": null,
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "time",
+      "t": 1002.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": null,
+       "issued_at": 1000.0,
+       "manifest_digest": null,
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "idle",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": null,
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "demo_announcement_unavailable",
+      "error_http": null,
+      "local": true,
+      "model_id": null,
+      "phase": null,
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "idle",
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "an_unreadable_announcement_is_reported_by_name",
+   "real_fs": false,
+   "spec": {
+    "name": "an_unreadable_announcement_is_reported_by_name",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "source_error",
+      "value": true
+     },
+     {
+      "op": "tick"
+     },
+     {
+      "op": "source_error",
+      "value": false
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": null,
+       "issued_at": 1000.0,
+       "manifest_digest": null,
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "idle",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": null,
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "time",
+      "t": 1001.0
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": null,
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": null,
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": null,
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": null,
+      "phase": null,
+      "progress": null,
+      "run_id": null,
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    }
+   ],
+   "name": "a_missing_announcement_is_idle",
+   "real_fs": false,
+   "spec": {
+    "name": "a_missing_announcement_is_idle",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": null
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-1",
+       "descriptor": null,
+       "detail": "membership_required",
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "run-1",
+       "state": "idle"
+      }
+     ],
+     "slice_dirs": null,
+     "slice_mode_bits": null,
+     "status": {
+      "detail": "membership_required",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "run-1",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    }
+   ],
+   "name": "no_local_contributor_means_membership_required",
+   "real_fs": false,
+   "spec": {
+    "member": false,
+    "name": "no_local_contributor_means_membership_required",
+    "ops": [
+     {
+      "op": "time",
+      "t": 1000.0
+     },
+     {
+      "op": "announce",
+      "value": {
+       "bootstrap_offer_id": null,
+       "deployment_id": "dep-1",
+       "issued_at": 1000.0,
+       "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+       "member_resources": null,
+       "model": {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+       },
+       "model_source": null,
+       "node_slice_plan": null,
+       "owner_incarnation": "owner-process-00000000000000000000000000000000",
+       "phase": "collect",
+       "protocol": "mycelium.a13_demo_run_announcement.v1",
+       "run_id": "run-1",
+       "slice_mode": false,
+       "work_limits": null
+      }
+     },
+     {
+      "op": "tick"
+     }
+    ]
+   }
+  }
+ ],
+ "secret_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+ "sidecar": "/v02/fixed/native/mycelium-iroh-sidecar",
+ "swarm_id": "swarm-fixed"
+}

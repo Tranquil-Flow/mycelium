@@ -1,0 +1,45 @@
+{
+  "boundary": "External immutable oracle capture only: control_plane_tranche validation (planner_assignment.validate_control_plane_tranche) and replan_simulator.simulate_bundle over systematic mutations of the two registered L5 fixtures. No model loaded; documents are sorted-key JSON.",
+  "counts": {
+    "simulation": 540,
+    "tranche": 4092
+  },
+  "generator_sha256": "149c865e066dcb70f22afb9116e2ffa894c1476b9bd003e072196ef1a02cf864",
+  "inputs": {
+    "control-plane-tranche-v1.json": "07030c947741389aebf560a2bd84ba75a43f2ec35ab1900bcc0f9ebd07f790e9",
+    "layer-replan-simulation-report-v1.json": "107c177a0c4e52d24d9ba656346897822db9ec18070be0d540a942e1f9910551",
+    "mycelium_gossip/evidence_bundle.py": "020624f985ed3e64ba53edfc068992d5694d19906bbbb4365d52ae85151b40da",
+    "mycelium_layer_planner/replan_simulator.py": "21546475e2ba4e66f6e1e1153fa39ec2dffcfad25a2bf2c12805503f69e92d97",
+    "planner_assignment.py": "8ed916013656c0f27e66017ad2d46dbc2980534928a6583494dfc0e386415c57",
+    "scenarios/product-v1-replanning.json": "447887a69c47272f972fc8b0d1426b5b61ce1d29906845ee08813fcaadbeeea7",
+    "scenarios/product-v1-replicated.json": "bcffce2553f385102a060c820854924875cf1562ea7255ff4cd979706937d461"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "outputs": {
+    "round5-control-plane-tranche-vectors.json": "7ad2e14a81362ac511820884a7d0f3ac28d48826c1afb21c9173849707831ae3",
+    "round5-layer-replan-simulation-vectors.json": "8a81539ba4e33d1b84983eedf962a0065b85db42809a16fb1c18ee91cb72804d"
+  },
+  "python": "3.14.8",
+  "simulation": {
+    "accepted": 246,
+    "classes": {
+      "FileNotFoundError": 1,
+      "JSONDecodeError": 1,
+      "KeyError": 8,
+      "TypeError": 196,
+      "ValueError": 88
+    },
+    "refused": 294
+  },
+  "simulation_oracle_timeouts_excluded": 0,
+  "tranche": {
+    "accepted": 740,
+    "classes": {
+      "AttributeError": 9,
+      "EvidenceBundleError": 780,
+      "TypeError": 2,
+      "ValueError": 2561
+    },
+    "refused": 3352
+  }
+}

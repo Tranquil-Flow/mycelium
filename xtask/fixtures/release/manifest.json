@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "candidate": {
+    "source_commit": "5ae5c0de5ae5c0de5ae5c0de5ae5c0de5ae5c0de",
+    "exe_sha256": "40ae8d1049fcf1df233b887226b3425e7d57041357935fa302c7be4d01a55329",
+    "bundle_sha256": "7d4adb51ed166628789d65c2dba9a46445c737263f0b5dd3d01fa6892a08edf9"
+  },
+  "frozen_at": 1793200000.0,
+  "exe_path": "candidate/bundle/Contents/MacOS/mycelium",
+  "bundle_dir": "candidate/bundle"
+}

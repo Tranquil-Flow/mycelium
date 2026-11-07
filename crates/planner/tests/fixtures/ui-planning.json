@@ -1,0 +1,2771 @@
+{
+  "cases": [
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2737614140,
+            "disk_need_bytes": 1368807070,
+            "end": 1,
+            "kv_bytes": 4194304,
+            "layers": 1,
+            "load_peak_bytes": 1380634398,
+            "max_disk_bytes": 1505687777,
+            "max_rss_bytes": 1587729558,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 151349135,
+            "stage_source_bytes": 302094080,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4049907516,
+            "disk_need_bytes": 2024953758,
+            "end": 24,
+            "kv_bytes": 96468992,
+            "layers": 23,
+            "load_peak_bytes": 2130368066,
+            "max_disk_bytes": 2227449134,
+            "max_rss_bytes": 2449923276,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 480078625,
+            "stage_source_bytes": 958240768,
+            "start": 1
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:6f8d0f9af33ddffefea9c406acd6db622296c80c89c6d16574af3409055ab0e3",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1262550624,
+              "end": 1,
+              "node_id": "member-0",
+              "stage_bytes": 302094080,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1672642304,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 958240768,
+              "start": 1
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3393759036,
+            "disk_need_bytes": 1696879518,
+            "end": 12,
+            "kv_bytes": 50331648,
+            "layers": 12,
+            "load_peak_bytes": 1755500334,
+            "max_disk_bytes": 1866567470,
+            "max_rss_bytes": 2018825385,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 315713431,
+            "stage_source_bytes": 630166528,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3393762620,
+            "disk_need_bytes": 1696881310,
+            "end": 24,
+            "kv_bytes": 50331648,
+            "layers": 12,
+            "load_peak_bytes": 1755502130,
+            "max_disk_bytes": 1866569441,
+            "max_rss_bytes": 2018827450,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 315714329,
+            "stage_source_bytes": 630168320,
+            "start": 12
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:044d8fdd9b7e417003086f78de1ba245624235e0230db8ee0507a8a8030e4130",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1467595904,
+              "end": 12,
+              "node_id": "member-0",
+              "stage_bytes": 630166528,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1467597024,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 630168320,
+              "start": 12
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2737614140,
+            "disk_need_bytes": 1368807070,
+            "end": 1,
+            "kv_bytes": 4194304,
+            "layers": 1,
+            "load_peak_bytes": 1380634398,
+            "max_disk_bytes": 1505687777,
+            "max_rss_bytes": 1587729558,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 151349135,
+            "stage_source_bytes": 302094080,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2491323196,
+            "disk_need_bytes": 1245661598,
+            "end": 7,
+            "kv_bytes": 25165824,
+            "layers": 6,
+            "load_peak_bytes": 1278214154,
+            "max_disk_bytes": 1370227758,
+            "max_rss_bytes": 1469946278,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-1",
+            "resident_bytes": 89653253,
+            "stage_source_bytes": 178948608,
+            "start": 1
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3692010300,
+            "disk_need_bytes": 1846005150,
+            "end": 24,
+            "kv_bytes": 71303168,
+            "layers": 17,
+            "load_peak_bytes": 1925895738,
+            "max_disk_bytes": 2030605665,
+            "max_rss_bytes": 2214780099,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 390425373,
+            "stage_source_bytes": 779292160,
+            "start": 7
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:f3ddf636a40ed1506ea242e39d0b4079613c845da8c257f43f5f2f052bb66f88",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1262550624,
+              "end": 1,
+              "node_id": "member-0",
+              "stage_bytes": 302094080,
+              "start": 0
+            },
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1185584704,
+              "end": 7,
+              "node_id": "member-1",
+              "stage_bytes": 178948608,
+              "start": 1
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1560799424,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 779292160,
+              "start": 7
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2976212284,
+            "disk_need_bytes": 1488106142,
+            "end": 5,
+            "kv_bytes": 20971520,
+            "layers": 5,
+            "load_peak_bytes": 1516949284,
+            "max_disk_bytes": 1636916757,
+            "max_rss_bytes": 1744491677,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 211117970,
+            "stage_source_bytes": 421393152,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2968519484,
+            "disk_need_bytes": 1484259742,
+            "end": 19,
+            "kv_bytes": 58720256,
+            "layers": 14,
+            "load_peak_bytes": 1550843926,
+            "max_disk_bytes": 1632685717,
+            "max_rss_bytes": 1783470515,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-1",
+            "resident_bytes": 209190923,
+            "stage_source_bytes": 417546752,
+            "start": 5
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2976215868,
+            "disk_need_bytes": 1488107934,
+            "end": 24,
+            "kv_bytes": 20971520,
+            "layers": 5,
+            "load_peak_bytes": 1516951078,
+            "max_disk_bytes": 1636918728,
+            "max_rss_bytes": 1744493740,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 211118867,
+            "stage_source_bytes": 421394944,
+            "start": 19
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:0c00c8fd37ab7aee747c4a193fdff474737dbd07e17267bd1e681463327d0736",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1337112544,
+              "end": 5,
+              "node_id": "member-0",
+              "stage_bytes": 421393152,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1334708544,
+              "end": 19,
+              "node_id": "member-1",
+              "stage_bytes": 417546752,
+              "start": 5
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1337113664,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 421394944,
+              "start": 19
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3155160892,
+            "disk_need_bytes": 1577580446,
+            "end": 8,
+            "kv_bytes": 33554432,
+            "layers": 8,
+            "load_peak_bytes": 1619185448,
+            "max_disk_bytes": 1735338491,
+            "max_rss_bytes": 1862063266,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 255944596,
+            "stage_source_bytes": 510867456,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3632360764,
+            "disk_need_bytes": 1816180382,
+            "end": 24,
+            "kv_bytes": 67108864,
+            "layers": 16,
+            "load_peak_bytes": 1891817016,
+            "max_disk_bytes": 1997798421,
+            "max_rss_bytes": 2175589569,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 375483164,
+            "stage_source_bytes": 749467392,
+            "start": 8
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:d9110e1c1a3e57c1a8d3801a846646976eaae373dd1ae0a60e4e3c5bf91ccfb7",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1393033984,
+              "end": 8,
+              "node_id": "member-0",
+              "stage_bytes": 510867456,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1542158944,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 749467392,
+              "start": 8
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3393759036,
+            "disk_need_bytes": 1696879518,
+            "end": 12,
+            "kv_bytes": 50331648,
+            "layers": 12,
+            "load_peak_bytes": 1755500334,
+            "max_disk_bytes": 1866567470,
+            "max_rss_bytes": 2018825385,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 315713431,
+            "stage_source_bytes": 630166528,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3393762620,
+            "disk_need_bytes": 1696881310,
+            "end": 24,
+            "kv_bytes": 50331648,
+            "layers": 12,
+            "load_peak_bytes": 1755502130,
+            "max_disk_bytes": 1866569441,
+            "max_rss_bytes": 2018827450,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 315714329,
+            "stage_source_bytes": 630168320,
+            "start": 12
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:044d8fdd9b7e417003086f78de1ba245624235e0230db8ee0507a8a8030e4130",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1467595904,
+              "end": 12,
+              "node_id": "member-0",
+              "stage_bytes": 630166528,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1467597024,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 630168320,
+              "start": 12
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2737614140,
+            "disk_need_bytes": 1368807070,
+            "end": 1,
+            "kv_bytes": 4194304,
+            "layers": 1,
+            "load_peak_bytes": 1380634398,
+            "max_disk_bytes": 1505687777,
+            "max_rss_bytes": 1587729558,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 151349135,
+            "stage_source_bytes": 302094080,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2550972732,
+            "disk_need_bytes": 1275486366,
+            "end": 8,
+            "kv_bytes": 29360128,
+            "layers": 7,
+            "load_peak_bytes": 1312292876,
+            "max_disk_bytes": 1403035003,
+            "max_rss_bytes": 1509136808,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-1",
+            "resident_bytes": 104595462,
+            "stage_source_bytes": 208773376,
+            "start": 1
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3632360764,
+            "disk_need_bytes": 1816180382,
+            "end": 24,
+            "kv_bytes": 67108864,
+            "layers": 16,
+            "load_peak_bytes": 1891817016,
+            "max_disk_bytes": 1997798421,
+            "max_rss_bytes": 2175589569,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 375483164,
+            "stage_source_bytes": 749467392,
+            "start": 8
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:7a21ef109e49b94762bb7664eb0025e22430cfde8c8e71fa36cfb9b74ac7b718",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1262550624,
+              "end": 1,
+              "node_id": "member-0",
+              "stage_bytes": 302094080,
+              "start": 0
+            },
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1204225184,
+              "end": 8,
+              "node_id": "member-1",
+              "stage_bytes": 208773376,
+              "start": 1
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1542158944,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 749467392,
+              "start": 8
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2976212284,
+            "disk_need_bytes": 1488106142,
+            "end": 5,
+            "kv_bytes": 20971520,
+            "layers": 5,
+            "load_peak_bytes": 1516949284,
+            "max_disk_bytes": 1636916757,
+            "max_rss_bytes": 1744491677,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 211117970,
+            "stage_source_bytes": 421393152,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2968519484,
+            "disk_need_bytes": 1484259742,
+            "end": 19,
+            "kv_bytes": 58720256,
+            "layers": 14,
+            "load_peak_bytes": 1550843926,
+            "max_disk_bytes": 1632685717,
+            "max_rss_bytes": 1783470515,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-1",
+            "resident_bytes": 209190923,
+            "stage_source_bytes": 417546752,
+            "start": 5
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 2976215868,
+            "disk_need_bytes": 1488107934,
+            "end": 24,
+            "kv_bytes": 20971520,
+            "layers": 5,
+            "load_peak_bytes": 1516951078,
+            "max_disk_bytes": 1636918728,
+            "max_rss_bytes": 1744493740,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 211118867,
+            "stage_source_bytes": 421394944,
+            "start": 19
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen2",
+          "num_layers": 24,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:cc4e25aad58ae15885d5a4cfae4673a4ff2977ed34d747ec2293e7fba81f1d6b",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:0c00c8fd37ab7aee747c4a193fdff474737dbd07e17267bd1e681463327d0736",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1337112544,
+              "end": 5,
+              "node_id": "member-0",
+              "stage_bytes": 421393152,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1334708544,
+              "end": 19,
+              "node_id": "member-1",
+              "stage_bytes": 417546752,
+              "start": 5
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1337113664,
+              "end": 24,
+              "node_id": "owner",
+              "stage_bytes": 421394944,
+              "start": 19
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4046661174,
+            "disk_need_bytes": 2023330587,
+            "end": 4,
+            "kv_bytes": 134217728,
+            "layers": 4,
+            "load_peak_bytes": 1645846058,
+            "max_disk_bytes": 2225663646,
+            "max_rss_bytes": 1892722967,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 218943253,
+            "stage_source_bytes": 437012480,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 5927470646,
+            "disk_need_bytes": 2963735323,
+            "end": 28,
+            "kv_bytes": 805306368,
+            "layers": 24,
+            "load_peak_bytes": 3259220244,
+            "max_disk_bytes": 3260108856,
+            "max_rss_bytes": 3748103281,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 690086026,
+            "stage_source_bytes": 1377417216,
+            "start": 4
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen3",
+          "num_layers": 28,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:80833beb2ffcccb40d1adbd92763155a62ad45fafc6302328571de65b2af3f28",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:ea8453d722ed099efd744696d0ad8ddd9b2e968ac20a8f99c9a87459cd2bc12f",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1346874624,
+              "end": 4,
+              "node_id": "member-0",
+              "stage_bytes": 437012480,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1934627584,
+              "end": 28,
+              "node_id": "owner",
+              "stage_bytes": 1377417216,
+              "start": 4
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4990517814,
+            "disk_need_bytes": 2495258907,
+            "end": 19,
+            "kv_bytes": 637534208,
+            "layers": 19,
+            "load_peak_bytes": 2622034714,
+            "max_disk_bytes": 2744784798,
+            "max_rss_bytes": 3015339922,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 455379341,
+            "stage_source_bytes": 908940800,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4983614006,
+            "disk_need_bytes": 2491807003,
+            "end": 28,
+            "kv_bytes": 301989888,
+            "layers": 9,
+            "load_peak_bytes": 2283031586,
+            "max_disk_bytes": 2740987704,
+            "max_rss_bytes": 2625486324,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 453649937,
+            "stage_source_bytes": 905488896,
+            "start": 19
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen3",
+          "num_layers": 28,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:80833beb2ffcccb40d1adbd92763155a62ad45fafc6302328571de65b2af3f28",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:6b46a20471329ee1ac27520a6f182c2fe3747c2a852ebf0e4ae0401233bae29d",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1641829824,
+              "end": 19,
+              "node_id": "member-0",
+              "stage_bytes": 908940800,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1639672384,
+              "end": 28,
+              "node_id": "owner",
+              "stage_bytes": 905488896,
+              "start": 19
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3857889846,
+            "disk_need_bytes": 1928944923,
+            "end": 1,
+            "kv_bytes": 33554432,
+            "layers": 1,
+            "load_peak_bytes": 1450608326,
+            "max_disk_bytes": 2121839416,
+            "max_rss_bytes": 1668199575,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-0",
+            "resident_bytes": 171656035,
+            "stage_source_bytes": 342626816,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 3864797750,
+            "disk_need_bytes": 1932398875,
+            "end": 12,
+            "kv_bytes": 369098752,
+            "layers": 11,
+            "load_peak_bytes": 1789613506,
+            "max_disk_bytes": 2125638763,
+            "max_rss_bytes": 2058055532,
+            "memory_bytes": 17179869184,
+            "memory_ceiling_bytes": 12884901888,
+            "node_id": "member-1",
+            "resident_bytes": 173386465,
+            "stage_source_bytes": 346080768,
+            "start": 1
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 5424080438,
+            "disk_need_bytes": 2712040219,
+            "end": 28,
+            "kv_bytes": 536870912,
+            "layers": 16,
+            "load_peak_bytes": 2738586294,
+            "max_disk_bytes": 2983244241,
+            "max_rss_bytes": 3149374239,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 563986779,
+            "stage_source_bytes": 1125722112,
+            "start": 12
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 17179869184,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen3",
+          "num_layers": 28,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:80833beb2ffcccb40d1adbd92763155a62ad45fafc6302328571de65b2af3f28",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:29058ae26d50ac6a323f9ec22de8721569ea0e98c76c4f23fa77f5910b2c4f1b",
+          "stages": [
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1287883584,
+              "end": 1,
+              "node_id": "member-0",
+              "stage_bytes": 342626816,
+              "start": 0
+            },
+            {
+              "budget_bytes": 8589934592,
+              "cost_bytes": 1290042304,
+              "end": 12,
+              "node_id": "member-1",
+              "stage_bytes": 346080768,
+              "start": 1
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1777318144,
+              "end": 28,
+              "node_id": "owner",
+              "stage_bytes": 1125722112,
+              "start": 12
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "expected": {
+        "members": [
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4361280054,
+            "disk_need_bytes": 2180640027,
+            "end": 9,
+            "kv_bytes": 301989888,
+            "layers": 9,
+            "load_peak_bytes": 1971242276,
+            "max_disk_bytes": 2398704030,
+            "max_rss_bytes": 2266928618,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-0",
+            "resident_bytes": 297755282,
+            "stage_source_bytes": 594321920,
+            "start": 0
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4305264182,
+            "disk_need_bytes": 2152632091,
+            "end": 27,
+            "kv_bytes": 603979776,
+            "layers": 18,
+            "load_peak_bytes": 2245168212,
+            "max_disk_bytes": 2367895301,
+            "max_rss_bytes": 2581943444,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "member-1",
+            "resident_bytes": 283723306,
+            "stage_source_bytes": 566313984,
+            "start": 9
+          },
+          {
+            "basis": "modelled",
+            "disk_footprint_bytes": 4480223798,
+            "disk_need_bytes": 2240111899,
+            "end": 28,
+            "kv_bytes": 33554432,
+            "layers": 1,
+            "load_peak_bytes": 1762397636,
+            "max_disk_bytes": 2464123089,
+            "max_rss_bytes": 2026757282,
+            "memory_bytes": 51539607552,
+            "memory_ceiling_bytes": 38654705664,
+            "node_id": "owner",
+            "resident_bytes": 327550690,
+            "stage_source_bytes": 653793792,
+            "start": 27
+          }
+        ],
+        "split": {
+          "members": [
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-0"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "member-1"
+            },
+            {
+              "memory_bytes": 51539607552,
+              "node_id": "owner"
+            }
+          ],
+          "model_type": "qwen3",
+          "num_layers": 28,
+          "policy": {
+            "memory_fraction_denominator": 2,
+            "memory_fraction_numerator": 1,
+            "resident_factor_denominator": 8,
+            "resident_factor_numerator": 5,
+            "runtime_overhead_bytes": 1073741824,
+            "speed_clamp_high": 2,
+            "speed_clamp_low_denominator": 2,
+            "speed_clamp_low_numerator": 1
+          },
+          "profile_digest": "sha256:80833beb2ffcccb40d1adbd92763155a62ad45fafc6302328571de65b2af3f28",
+          "protocol": "mycelium.a13_layer_split.v1",
+          "split_digest": "sha256:b3115f25d6c0f108774a9136fb4c94ea7653a97cc256cb855ac55020b1d4f89e",
+          "stages": [
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1445193024,
+              "end": 9,
+              "node_id": "member-0",
+              "stage_bytes": 594321920,
+              "start": 0
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1427688064,
+              "end": 27,
+              "node_id": "member-1",
+              "stage_bytes": 566313984,
+              "start": 9
+            },
+            {
+              "budget_bytes": 25769803776,
+              "cost_bytes": 1482362944,
+              "end": 28,
+              "node_id": "owner",
+              "stage_bytes": 653793792,
+              "start": 27
+            }
+          ],
+          "weighting": "memory"
+        }
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-0.6B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-8B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 4000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": false,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 16,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 12884901888,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 17179869184,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        12884901888,
+        10737418240,
+        8589934592
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    },
+    {
+      "device_ram_gib": 48,
+      "error": {
+        "code": "member_storage_cap_below_share",
+        "node_id": "member-0"
+      },
+      "members": [
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-0"
+        },
+        {
+          "caps": {
+            "max_memory_bytes": 38654705664,
+            "max_wall_seconds": 1800,
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "member-1"
+        },
+        {
+          "caps": {
+            "storage_bytes": 2000000000
+          },
+          "memory_bytes": 51539607552,
+          "node_id": "owner"
+        }
+      ],
+      "memory_options": [
+        38654705664,
+        32212254720,
+        25769803776
+      ],
+      "model_id": "Qwen/Qwen3-14B",
+      "owner_node_id": "owner",
+      "quantization": "int8-weight-only",
+      "saved_policy": true,
+      "slice_mode": false,
+      "ui_defaults": true
+    }
+  ],
+  "claim": "parsed pinned HTML and applied inspected setOptions selection rule to actual oracle memory options; browser not executed",
+  "html_defaults": {
+    "network": "unmetered_only",
+    "pair-network": 2000000000,
+    "pair-storage": 2000000000,
+    "pair-ttl": 120,
+    "power": "ac_only",
+    "standing-memory": 4294967296,
+    "standing-wall": 1800,
+    "storage": 4000000000,
+    "swarm-mode": "request",
+    "window-ttl": 600
+  }
+}

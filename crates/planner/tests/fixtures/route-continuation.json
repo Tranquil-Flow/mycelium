@@ -1,0 +1,2999 @@
+{
+  "activation": [
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "enabled": true,
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": null,
+      "owner": "string"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": true,
+      "operator": "on",
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_unprovisioned",
+      "operator": "on",
+      "owner": "string"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "enabled": false,
+      "operator": "off",
+      "owner": "string"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "invalid",
+      "owner": "string"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "",
+      "owner": "string"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": null,
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": "on",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": "off",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": "invalid",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": "",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "absent"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "missing"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "true"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "false"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "one"
+    },
+    {
+      "app_default": "OFF",
+      "error": "token_path_activation_invalid",
+      "operator": "ON",
+      "owner": "string"
+    }
+  ],
+  "claim": "Pure normal/fast owner-admission and graph metadata; synthetic load proofs, no native route execution",
+  "graphs": [
+    {
+      "base": 0,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:3aba8cdbcacaa349e0c373b2d5fe76a637cd8a78849cc115e593e1e7ca078096",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "stage_signature": "sha256:e28a1e5905c7f833165ca36fd24d70a552926e73eb096c66721c76da01cf19f4"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:c5fe6346dcc96f3e00ada6a81e14bd697e011137ec5b70e9437f9508268ea603",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "stage_signature": "sha256:b68facc5eed9856eb74bb9a56d8a616edf67e263558c1bb1c161965fcd14e23b"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 1,
+      "mode": "off",
+      "proofs": [
+        {
+          "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "lm_head.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 0,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:1183f99b1b3d2654a9db70fe5faaa29d7ca41a7b887baf3595c7958e49238335",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "stage_signature": "sha256:e28a1e5905c7f833165ca36fd24d70a552926e73eb096c66721c76da01cf19f4"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:be72298a87028155ae40a98d685cb1b9ef1da7d4f1b56b67711dfbabd7e37965",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "stage_signature": "sha256:b68facc5eed9856eb74bb9a56d8a616edf67e263558c1bb1c161965fcd14e23b"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 2,
+      "mode": "off",
+      "proofs": [
+        {
+          "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "lm_head.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 0,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:3aba8cdbcacaa349e0c373b2d5fe76a637cd8a78849cc115e593e1e7ca078096",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "stage_signature": "sha256:e28a1e5905c7f833165ca36fd24d70a552926e73eb096c66721c76da01cf19f4"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:c5fe6346dcc96f3e00ada6a81e14bd697e011137ec5b70e9437f9508268ea603",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "stage_signature": "sha256:b68facc5eed9856eb74bb9a56d8a616edf67e263558c1bb1c161965fcd14e23b"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 1,
+      "mode": "on",
+      "proofs": [
+        {
+          "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "lm_head.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 0,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:1183f99b1b3d2654a9db70fe5faaa29d7ca41a7b887baf3595c7958e49238335",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/ceaa8276-5d5a-5c32-87d2-51520df704fb",
+                "stage_signature": "sha256:e28a1e5905c7f833165ca36fd24d70a552926e73eb096c66721c76da01cf19f4"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:be72298a87028155ae40a98d685cb1b9ef1da7d4f1b56b67711dfbabd7e37965",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+                "stage_signature": "sha256:b68facc5eed9856eb74bb9a56d8a616edf67e263558c1bb1c161965fcd14e23b"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 2,
+      "mode": "on",
+      "proofs": [
+        {
+          "assignment_id": "ceaa8276-5d5a-5c32-87d2-51520df704fb",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "8aa9abba-1ac0-5597-9d40-ec131ed9c893",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "lm_head.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:0791220d0f9387cc6a28534cf8b7b8898d65f0316f9b86ecb4ccc4813ec42e5e",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": false,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 1,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:6230977ca84765bc4cac8f9777bf082173a07ef42d25af84ec4e622003ef3661",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "stage_signature": "sha256:fbd87d73b11b0e273007b170fe9bf4cd77dc0df57de441bb9fdbf1b6a9208499"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:02cb3910d4bffbeb1ab2a10cffba4d8c2a5fb10ad0d9f776247a003716e05b51",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "stage_signature": "sha256:96715b3636fefa4c0ae7cfca1947858de9c53607439ad3eaca97372b39932576"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 1,
+      "mode": "off",
+      "proofs": [
+        {
+          "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {
+            "lm_head": "input_embedding"
+          },
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 1,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:fa1edae017ee6b0ef7436a9170c90f621ae911f7ee9493db90f819ab9f60cb2b",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "stage_signature": "sha256:fbd87d73b11b0e273007b170fe9bf4cd77dc0df57de441bb9fdbf1b6a9208499"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:b115d1454633f44ad7b426016f156925cd3bea15eadb4cdd3932ba5c23ee692c",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "stage_signature": "sha256:96715b3636fefa4c0ae7cfca1947858de9c53607439ad3eaca97372b39932576"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 2,
+      "mode": "off",
+      "proofs": [
+        {
+          "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {
+            "lm_head": "input_embedding"
+          },
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 1,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:6230977ca84765bc4cac8f9777bf082173a07ef42d25af84ec4e622003ef3661",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "stage_signature": "sha256:fbd87d73b11b0e273007b170fe9bf4cd77dc0df57de441bb9fdbf1b6a9208499"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:02cb3910d4bffbeb1ab2a10cffba4d8c2a5fb10ad0d9f776247a003716e05b51",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "stage_signature": "sha256:96715b3636fefa4c0ae7cfca1947858de9c53607439ad3eaca97372b39932576"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 1,
+      "mode": "on",
+      "proofs": [
+        {
+          "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 1,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {
+            "lm_head": "input_embedding"
+          },
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    },
+    {
+      "base": 1,
+      "expected": {
+        "activation_bytes": 4,
+        "deployment_epoch": 7,
+        "deployment_id": "12345678-1234-5678-9234-567812345678",
+        "edges": [
+          {
+            "edge_id": "forward:placement-000->placement-001",
+            "from_placement_id": "placement-000",
+            "link_id": "iroh:a->b",
+            "to_placement_id": "placement-001"
+          }
+        ],
+        "entry_stage_id": "stage-000",
+        "final_stage_id": "stage-001",
+        "hidden_size": 4,
+        "loopback_edges": [
+          {
+            "edge_id": "loopback:placement-001->placement-000",
+            "from_placement_id": "placement-001",
+            "link_id": "iroh:b->a",
+            "to_placement_id": "placement-000"
+          }
+        ],
+        "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+        "model_id": "fixture/qwen2",
+        "protocol": "mycelium.execution_graph.v1",
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stages": [
+          {
+            "component_roles": [
+              "input_embedding",
+              "decoder"
+            ],
+            "placements": [
+              {
+                "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:fa1edae017ee6b0ef7436a9170c90f621ae911f7ee9493db90f819ab9f60cb2b",
+                "node_id": "a",
+                "placement_id": "placement-000",
+                "replica_group_id": "stage-000-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://a/a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+                "stage_signature": "sha256:fbd87d73b11b0e273007b170fe9bf4cd77dc0df57de441bb9fdbf1b6a9208499"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 1,
+              "layer_count": 1,
+              "start_layer": 0
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-000"
+          },
+          {
+            "component_roles": [
+              "decoder",
+              "final_norm",
+              "lm_head"
+            ],
+            "placements": [
+              {
+                "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "lifecycle_state": "ACTIVE",
+                "load_proof_digest": "sha256:b115d1454633f44ad7b426016f156925cd3bea15eadb4cdd3932ba5c23ee692c",
+                "node_id": "b",
+                "placement_id": "placement-001",
+                "replica_group_id": "stage-001-replicas",
+                "runtime_backend": "mlx",
+                "runtime_endpoint": "iroh://b/57c711f8-13fc-5851-8907-2d15c23f9d31",
+                "stage_signature": "sha256:96715b3636fefa4c0ae7cfca1947858de9c53607439ad3eaca97372b39932576"
+              }
+            ],
+            "range": {
+              "end_layer_exclusive": 3,
+              "layer_count": 2,
+              "start_layer": 1
+            },
+            "stage_cost": {
+              "decode_work_units_per_token": 1.0,
+              "kv_bytes_per_context_token": 32,
+              "prefill_work_units_per_prompt_token": 1.0
+            },
+            "stage_id": "stage-001"
+          }
+        ],
+        "token_envelope_bytes": 9,
+        "topology_version": 1
+      },
+      "load_generation": 2,
+      "mode": "on",
+      "proofs": [
+        {
+          "assignment_id": "a4c15d9a-024c-5ef2-b7ef-7dad2c30babe",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "input_embedding",
+            "decoder"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+            "start_layer": 0
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.0.self_attn.q_proj.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "a",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {},
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        },
+        {
+          "assignment_id": "57c711f8-13fc-5851-8907-2d15c23f9d31",
+          "claim_boundary": "synthetic metadata oracle only; no model loaded",
+          "deployment_epoch": 7,
+          "deployment_id": "12345678-1234-5678-9234-567812345678",
+          "load_generation": 2,
+          "loaded_components": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "loaded_range": {
+            "end_layer_exclusive": 3,
+            "layer_count": 2,
+            "start_layer": 1
+          },
+          "loaded_tensor_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "loaded_tensor_keys": [
+            "model.embed_tokens.weight",
+            "model.layers.1.self_attn.q_proj.weight",
+            "model.layers.2.self_attn.q_proj.weight",
+            "model.norm.weight"
+          ],
+          "manifest_digest": "sha256:349f32ad4fd1d10147011e41a398d4f69808baed35cd6fea4d944814112349b7",
+          "model_id": "fixture/qwen2",
+          "node_id": "b",
+          "probe_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "probe_shape": [
+            1,
+            3,
+            4
+          ],
+          "protocol": "mycelium.layer_load_proof.v1",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "resolved_component_aliases": {
+            "lm_head": "input_embedding"
+          },
+          "route_ready": false,
+          "runtime": {
+            "architecture": "qwen2",
+            "backend": "mlx",
+            "dtype": "float32",
+            "model_config": {
+              "activation_function": "silu",
+              "head_dim": 4,
+              "n_embd": 4,
+              "n_head": 1,
+              "n_inner": 8,
+              "n_kv_head": 1,
+              "n_layer": 3,
+              "n_positions": 16,
+              "rms_norm_epsilon": 1e-06,
+              "rope_theta": 10000.0,
+              "tie_word_embeddings": true,
+              "vocab_size": 8
+            },
+            "quantization": "int8-weight-only"
+          }
+        }
+      ]
+    }
+  ]
+}

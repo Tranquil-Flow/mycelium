@@ -1,0 +1,78 @@
+[
+  {
+    "card": {
+      "protocol": "mycelium.managed_control.signed_envelope.v1",
+      "signature": {
+        "algorithm": "ed25519",
+        "signature": "ulR3u8RY165KbS5ms+V3AXjm2V2dVqOGXz60opluroSKbDvToMqTFMDR+c10Mc85LM1Cibbm2YFXnMUMGKGdAQ==",
+        "signed_statement_digest": "sha256:2a56ec1254020a3d6c02c084ff551afee6669bd58ca5796c7d1f97674a76b0c0",
+        "signer_endpoint_id": "endpoint-probe",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      },
+      "statement": {
+        "deployment_id": "dep-1",
+        "expires_at": 1300,
+        "facts": {
+          "endpoint_id": "endpoint-probe",
+          "endpoint_secret_file": "/scratch/key",
+          "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "membership_generation": 1,
+          "node_id": "member-probe",
+          "process_transport": "managed_https",
+          "python_executable": "/scratch/host",
+          "route_ready": false,
+          "runtime_backend": "mlx",
+          "sidecar_binary": "/scratch/sidecar",
+          "source_root": "/scratch/source",
+          "ssh_identity_file": null,
+          "ssh_target": null,
+          "staging_root": "/scratch/stage"
+        },
+        "issued_at": 1000,
+        "member_incarnation": "inc-probe",
+        "membership_generation": 1,
+        "protocol": "mycelium.a13.installation_descriptor.v1",
+        "run_id": "run-1",
+        "swarm_id": "swarm-1",
+        "target_endpoint_id": "endpoint-probe",
+        "target_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb",
+        "target_node_id": "member-probe"
+      },
+      "verification_key": {
+        "algorithm": "ed25519",
+        "encoding": "base64",
+        "verification_key": "Wv/GZ+MUUQ301odrkEJcKp23iX+0kwP9np6L88Idku9=",
+        "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+      }
+    },
+    "expected": {
+      "ok": {
+        "activation_endpoint_id": "5affc667e314510df4d6876b90425c2a9db7897fb49303fd9e9e8bf3c21d92ef",
+        "endpoint_id": "endpoint-probe",
+        "endpoint_secret_file": "/scratch/key",
+        "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "membership_generation": 1,
+        "node_id": "member-probe",
+        "process_transport": "managed_https",
+        "python_executable": "/scratch/host",
+        "route_ready": false,
+        "runtime_backend": "mlx",
+        "sidecar_binary": "/scratch/sidecar",
+        "source_root": "/scratch/source",
+        "ssh_identity_file": null,
+        "ssh_target": null,
+        "staging_root": "/scratch/stage"
+      }
+    },
+    "member": {
+      "endpoint_id": "endpoint-probe",
+      "generation": 1,
+      "incarnation": "inc-probe",
+      "lease_expires_at": 2000,
+      "node_id": "member-probe",
+      "verification_key_digest": "sha256:be4825bf478e1a236523e26bdc65e360f00483a093b7cd22d5e25269c9d721cb"
+    },
+    "name": "python-accepted-nonzero-base64-pad-bits",
+    "now": 1000
+  }
+]

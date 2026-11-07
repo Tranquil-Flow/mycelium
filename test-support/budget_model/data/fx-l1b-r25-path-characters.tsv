@@ -1,0 +1,7 @@
+key	input_characters	input_utf8_bytes	outcome	output_characters	output_utf8_bytes	error
+source_path	4095	8189	accepted	4095	8189	-
+source_path	4096	8191	accepted	4096	8191	-
+source_path	4097	8193	refused	-	-	offer_preposition_invalid
+destination_path	4095	8190	accepted	4095	8190	-
+destination_path	4096	8192	accepted	4096	8192	-
+destination_path	4097	8194	refused	-	-	offer_preposition_invalid

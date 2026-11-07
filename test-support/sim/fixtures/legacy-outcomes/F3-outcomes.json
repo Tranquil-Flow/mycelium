@@ -1,0 +1,90 @@
+{
+  "corrected": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:initial_report",
+      "0:chat_success",
+      "15000:owner_restart",
+      "15000:announcement",
+      "15000:capability_report_delivered",
+      "15000:stale_generation",
+      "15500:recovery_attempt",
+      "15500:chat_success"
+    ],
+    "metrics": {
+      "member_identity_preserved": 1,
+      "member_reconsents": 0,
+      "member_restarts": 0,
+      "owner_restarts": 1,
+      "recovered_requests": 1,
+      "reports_delivered": 2,
+      "stale_generation_refusals": 2
+    },
+    "rollovers": 0,
+    "served": 2,
+    "starts": 1,
+    "successful_chats": 2,
+    "swallowed_errors": 0,
+    "transitions": {
+      "announcement": 1,
+      "capability_report_delivered": 1,
+      "chat_success": 2,
+      "initial_report": 1,
+      "owner_restart": 1,
+      "recovery_attempt": 1,
+      "stale_generation": 1,
+      "start_attempt": 1
+    },
+    "workers": []
+  },
+  "historical": {
+    "cleanup_proofs": 0,
+    "deadlines": [],
+    "diagnostics": [],
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "interrupted_chats": 0,
+    "log": [
+      "0:start_attempt",
+      "0:initial_report",
+      "0:chat_success",
+      "15000:owner_restart",
+      "15000:announcement",
+      "15000:report_suppressed",
+      "15000:stale_generation",
+      "15500:recovery_attempt"
+    ],
+    "metrics": {
+      "member_identity_preserved": 1,
+      "member_reconsents": 0,
+      "member_restarts": 0,
+      "owner_restarts": 1,
+      "recovery_without_report": 1,
+      "reports_delivered": 1,
+      "stale_generation_refusals": 2
+    },
+    "rollovers": 0,
+    "served": 1,
+    "starts": 1,
+    "successful_chats": 1,
+    "swallowed_errors": 0,
+    "transitions": {
+      "announcement": 1,
+      "chat_success": 1,
+      "initial_report": 1,
+      "owner_restart": 1,
+      "recovery_attempt": 1,
+      "report_suppressed": 1,
+      "stale_generation": 1,
+      "start_attempt": 1
+    },
+    "workers": []
+  },
+  "source_commit": "a984d632d4733fdaa95d21bfb0a5af98e18a2582"
+}

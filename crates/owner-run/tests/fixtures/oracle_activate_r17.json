@@ -1,0 +1,1200 @@
+{
+  "cases": {
+    "code-empty": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "text_fallback",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "code": "",
+          "kind": "failed",
+          "text": "text_fallback"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "code-precedence": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_denied",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "code": "activation_denied",
+          "kind": "failed",
+          "text": "other_closed"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "code-private": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "code": "private path",
+          "kind": "failed",
+          "text": "valid_closed"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-absent": {
+      "calls": [],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-false": {
+      "calls": [
+        [
+          "activate",
+          false
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": false,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": false,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-float": {
+      "calls": [
+        [
+          "activate",
+          1.5
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": 1.5,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": 1.5,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-list": {
+      "calls": [
+        [
+          "activate",
+          [
+            1,
+            null
+          ]
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": [
+            1,
+            null
+          ],
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": [
+          1,
+          null
+        ],
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-null": {
+      "calls": [
+        [
+          "activate",
+          null
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": null,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": null,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-object": {
+      "calls": [
+        [
+          "activate",
+          {
+            "x": 1
+          }
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "x": 1
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "x": 1
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-string": {
+      "calls": [
+        [
+          "activate",
+          "proposal"
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": "proposal",
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": "proposal",
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-true": {
+      "calls": [
+        [
+          "activate",
+          true
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": true,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": true,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "proposal-zero": {
+      "calls": [
+        [
+          "activate",
+          0
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": 0,
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": 0,
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "refused-advice-redacted": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_refused",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "code": "activation_refused",
+          "kind": "refused"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "return-ignored-failed-doc": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "return": {
+          "state": "failed"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "return-ignored-false": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "return": false,
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "return-ignored-null": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "return": null,
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "return-ignored-opaque": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "kind": "ok"
+      },
+      "progress": [
+        "qualifying the route (startup challenge)"
+      ],
+      "result": {},
+      "spec": {
+        "return": [
+          "ignored"
+        ],
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "text-closed": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_denied",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "kind": "failed",
+          "text": "activation_denied"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "text-empty": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "kind": "failed",
+          "text": ""
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "text-newline": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "kind": "failed",
+          "text": "activation_denied\n"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "text-private": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "kind": "failed",
+          "text": "private path /secret/value"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    },
+    "text-uppercase": {
+      "calls": [
+        [
+          "activate",
+          {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          }
+        ]
+      ],
+      "outcome": {
+        "code": "activation_failed",
+        "fix": null,
+        "kind": "refused",
+        "message": null
+      },
+      "progress": [],
+      "result": {},
+      "spec": {
+        "error": {
+          "kind": "failed",
+          "text": "Activation_denied"
+        },
+        "state": {
+          "execution_clock_started_at": 3.0,
+          "proposal": {
+            "max_wall_seconds": 600,
+            "opaque": [
+              "private-plan",
+              null,
+              false
+            ]
+          },
+          "registry_origin": "http://scripted.invalid"
+        }
+      },
+      "state": {
+        "execution_clock_started_at": 3.0,
+        "proposal": {
+          "max_wall_seconds": 600,
+          "opaque": [
+            "private-plan",
+            null,
+            false
+          ]
+        },
+        "registry_origin": "http://scripted.invalid"
+      }
+    }
+  },
+  "chain_ops_witnesses": {
+    "accepted": {
+      "calls": [
+        "workflow.status",
+        "gate.set"
+      ],
+      "outcome": {
+        "kind": "ok",
+        "value": {
+          "route_ready": false,
+          "state": "activation_requested"
+        }
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "changed-proposal": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_proposal_changed"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 2
+        },
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "compiled-absent": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_proposal_changed"
+      },
+      "spec": {
+        "compiled": null,
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "consent-before-proposal": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_consent_required"
+      },
+      "spec": {
+        "compiled": null,
+        "proposal": {
+          "opaque": 1
+        },
+        "role": "member",
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "gate-absent": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "managed_workflow_not_awaiting_activation"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "no_gate": true,
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "malformed-status": {
+      "calls": [
+        "workflow.status"
+      ],
+      "outcome": {
+        "class": "TypeError",
+        "kind": "exception",
+        "text": "'bool' object is not subscriptable"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": false
+      }
+    },
+    "missing-state": {
+      "calls": [
+        "workflow.status"
+      ],
+      "outcome": {
+        "class": "KeyError",
+        "kind": "exception",
+        "text": "'state'"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {}
+      }
+    },
+    "not-running": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_consent_required"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "running": false,
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "proposal-before-workflow": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_proposal_changed"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "no_workflow": true,
+        "proposal": false,
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "workflow-absent": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "managed_workflow_not_awaiting_activation"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "no_workflow": true,
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "wrong-role": {
+      "calls": [],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "model_execution_consent_required"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "role": "member",
+        "workflow": {
+          "state": "awaiting_activation"
+        }
+      }
+    },
+    "wrong-state": {
+      "calls": [
+        "workflow.status"
+      ],
+      "outcome": {
+        "class": "ValueError",
+        "kind": "exception",
+        "text": "managed_workflow_not_awaiting_activation"
+      },
+      "spec": {
+        "compiled": {
+          "execution_proposal": {
+            "opaque": 1
+          }
+        },
+        "proposal": {
+          "opaque": 1
+        },
+        "workflow": {
+          "state": "api_running"
+        }
+      }
+    }
+  },
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "scope": "activation step with scripted IO; ChainOps scheduling gate witness is not native startup",
+  "source_sha256": {
+    "mycelium_a13_macos/chain_compile.py": "57e4cd862a200d9a437a1840eb4c62b6e49d9f4429028f619b75852eb0645d7e",
+    "mycelium_a13_macos/demo_chain.py": "604a2cf25b35ce7d4be8b5f9cb1f69eb8933a2f5453e8f8f5ca05904fecb4b0c",
+    "mycelium_a13_macos/owner_run.py": "4b85f9fdb307879007b4deb19c78e142e7d6c19c10e4d3210fc9a93b057fe5fd"
+  }
+}

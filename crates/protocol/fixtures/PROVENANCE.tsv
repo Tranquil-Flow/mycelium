@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Fixture provenance (CL-L4-09, RU-003). The probe path is the one recorded in the fixture's embedded provenance;
+# the oracle row was produced by executing the v0.1.4 oracle at f4e366e98a1f705dfaf182897044500d290dbd7f (CPython 3.14.2).
+path	fixture_id	kind	probe	probe_sha256	oracle_sha	case_count	fixture_sha256
+tests/fixtures/canonical-float-ties.json	FX-L5-canonical-float-ties	oracle	$MYCELIUM_PROGRAM_ROOT/status/moonweaver/workers/protocol-canonical-float-tie-parity/evidence/canonical_float_ties_probe.py	545452aa3c553f450fe66787615e6643811057151b97b82a2d3151a3a29e4ca8	f4e366e98a1f705dfaf182897044500d290dbd7f	10617	7f638d831c209189f8845362811e2222ac15d95d67a87ebe2e06e580ffd41527

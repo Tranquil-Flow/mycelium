@@ -1,0 +1,2215 @@
+{
+  "admission_counters_json": "{\"protocol\":\"mycelium.iroh_sidecar.inbound_admission.v1\",\"inbound_identity_rejections\":5,\"inbound_frames_admitted\":7,\"candidate_identity_rejections\":2,\"measured_at_unix_ms\":1700000000999}",
+  "alpn": "mycelium.iroh.sidecar.v1",
+  "alpn_negotiation": {
+    "note": "bind_endpoint registers IROH_ALPN, plus ARTIFACT_CHUNK_ALPN only when an artifact source is configured; NODE_CONTROL_ALPN is never registered",
+    "registered_alpns_router_only": [
+      "mycelium.iroh.sidecar.v1"
+    ],
+    "rows": [
+      {
+        "alpn": "router",
+        "dial": "connected",
+        "serves_artifacts": false,
+        "target": "router_only"
+      },
+      {
+        "alpn": "node_control",
+        "dial": "dial_error:aborted by peer: the cryptographic handshake failed: error 1",
+        "serves_artifacts": false,
+        "target": "router_only"
+      },
+      {
+        "alpn": "artifact_chunk",
+        "dial": "dial_error:aborted by peer: the cryptographic handshake failed: error 1",
+        "serves_artifacts": false,
+        "target": "router_only"
+      },
+      {
+        "alpn": "unknown",
+        "dial": "dial_error:aborted by peer: the cryptographic handshake failed: error 1",
+        "serves_artifacts": false,
+        "target": "router_only"
+      },
+      {
+        "server_saw": [
+          "accepted:mycelium.iroh.sidecar.v1",
+          "handshake_failed",
+          "handshake_failed",
+          "handshake_failed"
+        ],
+        "target": "router_only"
+      },
+      {
+        "alpn": "router",
+        "dial": "connected",
+        "serves_artifacts": true,
+        "target": "router_and_artifact"
+      },
+      {
+        "alpn": "node_control",
+        "dial": "dial_error:aborted by peer: the cryptographic handshake failed: error 1",
+        "serves_artifacts": true,
+        "target": "router_and_artifact"
+      },
+      {
+        "alpn": "artifact_chunk",
+        "dial": "connected",
+        "serves_artifacts": true,
+        "target": "router_and_artifact"
+      },
+      {
+        "alpn": "unknown",
+        "dial": "dial_error:aborted by peer: the cryptographic handshake failed: error 1",
+        "serves_artifacts": true,
+        "target": "router_and_artifact"
+      },
+      {
+        "server_saw": [
+          "accepted:mycelium.iroh.sidecar.v1",
+          "handshake_failed",
+          "accepted:mycelium.artifact_chunk.v1",
+          "handshake_failed"
+        ],
+        "target": "router_and_artifact"
+      }
+    ]
+  },
+  "bind_secure_uds": [
+    {
+      "name": "fresh_nested_parent",
+      "parent_mode": 448,
+      "result": "ok",
+      "socket_mode": 384
+    },
+    {
+      "name": "loose_parent_is_tightened",
+      "parent_mode": 448,
+      "result": "ok",
+      "socket_mode": 384
+    },
+    {
+      "file_survives": true,
+      "name": "regular_file_at_path",
+      "parent_mode": 448,
+      "result": "socket_security_error"
+    },
+    {
+      "name": "stale_socket_replaced",
+      "result": "ok",
+      "socket_mode": 384
+    },
+    {
+      "name": "symlink_at_path",
+      "result": "socket_security_error",
+      "target_untouched": 384
+    },
+    {
+      "name": "parent_is_symlink",
+      "real_parent_mode": 493,
+      "result": "socket_security_error"
+    },
+    {
+      "name": "parent_is_file",
+      "result": "filesystem_error"
+    },
+    {
+      "name": "path_over_sun_path",
+      "result": "socket_bind_error"
+    },
+    {
+      "name": "cleanup_removes_socket_only",
+      "plain_file_kept": true,
+      "socket_exists_after_listener_drop": true,
+      "socket_removed_by_cleanup": true
+    }
+  ],
+  "bootstrap_fd": [
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_exactly_32",
+      "result": "ok:0505050505050505050505050505050505050505050505050505050505050505"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_empty",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_one",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_31",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_33",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_64",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "pipe_32_plus_newline",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "descriptor_closed_after": true,
+      "name": "regular_file",
+      "result": "bootstrap_not_pipe"
+    },
+    {
+      "name": "negative_fd",
+      "result": "invalid_bootstrap_fd"
+    }
+  ],
+  "bootstrap_stdin_parse": [
+    {
+      "len": 32,
+      "name": "exactly_32",
+      "result": "ok:0505050505050505050505050505050505050505050505050505050505050505"
+    },
+    {
+      "len": 0,
+      "name": "empty",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "len": 1,
+      "name": "one",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "len": 31,
+      "name": "31",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "len": 33,
+      "name": "33",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "len": 64,
+      "name": "64",
+      "result": "invalid_bootstrap_length"
+    },
+    {
+      "len": 33,
+      "name": "32_plus_newline",
+      "result": "invalid_bootstrap_length"
+    }
+  ],
+  "constants": {
+    "control_call_concurrency": 4,
+    "control_call_max_bytes": 4194304,
+    "control_call_timeout_ceiling_ms": 60000,
+    "local_handshake_timeout_ms": 2000,
+    "local_max_payload_bytes": 16777264,
+    "local_max_record_bytes": 16777326,
+    "max_hello_bytes": 4096,
+    "max_local_sessions": 16,
+    "receive_poll_wait_ms": 250,
+    "stream_io_timeout_ms": 60000
+  },
+  "control_call_results": {
+    "all_00_is_valid_point": true,
+    "all_ff_is_valid_point": true,
+    "fixture_ceiling_ok": {
+      "input_hex": "1111111111111111111111111111111111111111111111111111111111111111000000000000ea6078",
+      "verdict": {
+        "ok": {
+          "command_hex": "78",
+          "command_len": 1,
+          "destination_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+          "millis": 60000
+        }
+      }
+    },
+    "fixture_destination_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "fixture_destination_is_valid_point": true,
+    "fixture_empty_command": {
+      "input_hex": "111111111111111111111111111111111111111111111111111111111111111100000000000003e8",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "fixture_ok": {
+      "input_hex": "111111111111111111111111111111111111111111111111111111111111111100000000000005dc7b2261223a317d",
+      "verdict": {
+        "ok": {
+          "command_hex": "7b2261223a317d",
+          "command_len": 7,
+          "destination_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+          "millis": 1500
+        }
+      }
+    },
+    "fixture_timeout_exceeded": {
+      "input_hex": "1111111111111111111111111111111111111111111111111111111111111111000000000000ea6178",
+      "verdict": {
+        "err": "control_timeout_exceeded"
+      }
+    },
+    "fixture_too_short": {
+      "input_hex": "111111111111111111111111111111111111111111111111111111111111111100000000000000",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "fixture_zero_timeout": {
+      "input_hex": "1111111111111111111111111111111111111111111111111111111111111111000000000000000078",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "huge_millis": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ceffffffffffffffff78",
+      "verdict": {
+        "err": "control_timeout_exceeded"
+      }
+    },
+    "invalid_point_control_call": {
+      "input_hex": "000300000000000000000000000000000000000000000000000000000000000000000000000003e878",
+      "verdict": {
+        "err": "invalid_control_destination"
+      }
+    },
+    "invalid_point_example_hex": "0003000000000000000000000000000000000000000000000000000000000000",
+    "over_ceiling_and_empty": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000ea61",
+      "verdict": {
+        "err": "control_timeout_exceeded"
+      }
+    },
+    "short_by_one": {
+      "input_hex": "000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "valid_ceiling": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000ea6078",
+      "verdict": {
+        "ok": {
+          "command_hex": "78",
+          "command_len": 1,
+          "destination_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce",
+          "millis": 60000
+        }
+      }
+    },
+    "valid_destination_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce",
+    "valid_empty_command": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce00000000000003e8",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "valid_max_command": {
+      "command_len": 4194304
+    },
+    "valid_ok": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce00000000000005dc7b2261223a317d",
+      "verdict": {
+        "ok": {
+          "command_hex": "7b2261223a317d",
+          "command_len": 7,
+          "destination_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce",
+          "millis": 1500
+        }
+      }
+    },
+    "valid_over_ceiling": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000ea6178",
+      "verdict": {
+        "err": "control_timeout_exceeded"
+      }
+    },
+    "valid_over_max_command": {
+      "input_len": 4194345,
+      "input_pattern": "destination(32) + millis(8 BE) + 0x07 repeated",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    },
+    "valid_zero_timeout": {
+      "input_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000000078",
+      "verdict": {
+        "err": "invalid_control_call"
+      }
+    }
+  },
+  "endpoint_id": "677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4",
+  "endpoint_id_hex": "677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4",
+  "endpoint_secret_file": [
+    {
+      "name": "good",
+      "result": "ok:0707070707070707070707070707070707070707070707070707070707070707"
+    },
+    {
+      "name": "mode_0644",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "mode_0660",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "mode_0700",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "short_31",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "long_33",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "symlink_to_good",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "directory",
+      "result": "endpoint_secret_security_error"
+    },
+    {
+      "name": "missing",
+      "result": "endpoint_secret_security_error"
+    }
+  ],
+  "envelope_json": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observations.v1\",\"observations\":[{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12\",\"connection_generation\":9,\"path_class\":\"relay\",\"relay_identity\":\"https://relay.example/\",\"relay_region\":null,\"cold_rtt_ms\":40.0,\"warm_rtt_ms\":40.0,\"observed_goodput_bps\":2000.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":1,\"connections_opened\":1,\"frames_sent\":1,\"reconnect_count\":0,\"selected_path_changes\":1,\"measured_at_unix_ms\":5},{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"connection_generation\":3,\"path_class\":\"direct\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":1.5,\"warm_rtt_ms\":2.5,\"observed_goodput_bps\":16384.0,\"jitter_ms\":0.7071067811865476,\"loss_ratio\":0.25,\"sample_count\":4,\"connections_opened\":2,\"frames_sent\":3,\"reconnect_count\":1,\"selected_path_changes\":1,\"measured_at_unix_ms\":1700000000123},{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d\",\"connection_generation\":1,\"path_class\":\"unknown\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":0.0,\"warm_rtt_ms\":0.0,\"observed_goodput_bps\":0.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":0,\"connections_opened\":0,\"frames_sent\":0,\"reconnect_count\":0,\"selected_path_changes\":0,\"measured_at_unix_ms\":0}]}",
+  "error_payloads": {
+    "cancelled": "{\"code\":\"cancelled\"}",
+    "carrier_unavailable": "{\"code\":\"carrier_unavailable\"}",
+    "control_timeout_exceeded": "{\"code\":\"control_timeout_exceeded\"}",
+    "empty": "{\"code\":\"empty\"}",
+    "invalid_candidate_endpoint": "{\"code\":\"invalid_candidate_endpoint\"}",
+    "invalid_control_call": "{\"code\":\"invalid_control_call\"}",
+    "invalid_control_destination": "{\"code\":\"invalid_control_destination\"}",
+    "invalid_frame": "{\"code\":\"invalid_frame\"}",
+    "invalid_generation": "{\"code\":\"invalid_generation\"}",
+    "invalid_kind": "{\"code\":\"invalid_kind\"}",
+    "invalid_peer": "{\"code\":\"invalid_peer\"}",
+    "peer_rotated": "{\"code\":\"peer_rotated\"}",
+    "queue_full": "{\"code\":\"queue_full\"}",
+    "replay_collision": "{\"code\":\"replay_collision\"}",
+    "unknown_delivery": "{\"code\":\"unknown_delivery\"}",
+    "unknown_message": "{\"code\":\"unknown_message\"}",
+    "unknown_peer": "{\"code\":\"unknown_peer\"}"
+  },
+  "handshake": {
+    "client_hello_json": "{\"protocol\":\"mycelium.iroh_sidecar.local.v1\",\"client_nonce\":\"0202020202020202020202020202020202020202020202020202020202020202\",\"client_proof\":\"193b4cc3239220477b0ea5a1038e59b71eed249c15ebc0c1b5c829a42dd9cd77\"}",
+    "client_nonce_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "client_proof_hex": "193b4cc3239220477b0ea5a1038e59b71eed249c15ebc0c1b5c829a42dd9cd77",
+    "client_to_sidecar_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+    "client_verify": {
+      "alias_fields": "ok:0202020202020202020202020202020202020202020202020202020202020202",
+      "good": "ok:0202020202020202020202020202020202020202020202020202020202020202",
+      "not_json": "parse_error",
+      "secret_31_bytes": "invalid_secret_length",
+      "short_nonce": "invalid_hex",
+      "unknown_field": "parse_error",
+      "uppercase_nonce": "ok:0202020202020202020202020202020202020202020202020202020202020202",
+      "wrong_protocol": "unknown_protocol",
+      "wrong_secret": "invalid_proof"
+    },
+    "derive_session_keys_31_byte_secret": "invalid_secret_length",
+    "endpoint_id": "public",
+    "secret_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "server_hello_json": "{\"protocol\":\"mycelium.iroh_sidecar.local.v1\",\"server_nonce\":\"0303030303030303030303030303030303030303030303030303030303030303\",\"endpoint_id\":\"public\",\"server_proof\":\"1e6bf7969f2112134513cead82caf4e4c7842f8d6bbc0d7fd5e7959ca03703e0\"}",
+    "server_nonce_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "server_proof_hex": "1e6bf7969f2112134513cead82caf4e4c7842f8d6bbc0d7fd5e7959ca03703e0",
+    "server_verify": {
+      "alias_fields": "ok",
+      "good": "ok",
+      "swapped_endpoint": "invalid_proof",
+      "wrong_client_nonce": "invalid_proof"
+    },
+    "sidecar_to_client_hex": "735b9c13d461ab51fa4fe0aa0e44f556134d853b724d831f911d696ae2437ff6"
+  },
+  "hmac": [
+    {
+      "data_hex": "4869205468657265",
+      "key_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+      "mac_hex": "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+    },
+    {
+      "data_hex": "7768617420646f2079612077616e7420666f72206e6f7468696e673f",
+      "key_hex": "4a656665",
+      "mac_hex": "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    },
+    {
+      "data_hex": "54657374205573696e67204c6172676572205468616e20426c6f636b2d53697a65204b6579202d2048617368204b6579204669727374",
+      "key_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mac_hex": "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+    }
+  ],
+  "loopback_authorize": [
+    {
+      "name": "owner_matches",
+      "result": "ok"
+    },
+    {
+      "name": "naming_the_sidecar_pid",
+      "result": "loopback_owner_foreign"
+    },
+    {
+      "name": "foreign_owner",
+      "result": "loopback_owner_foreign"
+    },
+    {
+      "name": "mirror_row_only",
+      "result": "loopback_owner_unknown"
+    },
+    {
+      "name": "other_client_port",
+      "result": "loopback_owner_unknown"
+    },
+    {
+      "name": "two_owners",
+      "result": "loopback_owner_ambiguous"
+    },
+    {
+      "name": "duplicate_same_owner",
+      "result": "ok"
+    },
+    {
+      "name": "lookup_failed",
+      "result": "loopback_owner_lookup_failed"
+    },
+    {
+      "name": "pid_zero",
+      "result": "loopback_policy_invalid"
+    },
+    {
+      "name": "client_not_loopback",
+      "result": "loopback_peer_not_loopback"
+    },
+    {
+      "name": "server_not_localhost",
+      "result": "loopback_peer_not_loopback"
+    },
+    {
+      "name": "client_127_0_0_2",
+      "result": "ok"
+    },
+    {
+      "name": "ipv6_client",
+      "result": "loopback_peer_not_loopback"
+    }
+  ],
+  "loopback_listener": {
+    "ip": "127.0.0.1",
+    "port_nonzero": true
+  },
+  "netstat_rows": {
+    "rows": [
+      {
+        "local": "127.0.0.1:52000",
+        "pid": 4242,
+        "remote": "127.0.0.1:60000"
+      },
+      {
+        "local": "127.0.0.1:60000",
+        "pid": 7,
+        "remote": "127.0.0.1:52000"
+      }
+    ],
+    "text": "Active Internet connections (including servers)\nProto Recv-Q Send-Q  Local Address          Foreign Address        (state)          rxbytes      txbytes  rhiwat  shiwat          process:pid    state  options           gencnt    flags   flags1 usecnt rtncnt fltrs\ntcp4       0      0  127.0.0.1.52000        127.0.0.1.60000        ESTABLISHED         1252            0  407744  146988       python3.11:4242   00102 00000004 000000000654b0c7 00000080 01000800      2      0 000000\ntcp4       0      0  127.0.0.1.60000        127.0.0.1.52000        ESTABLISHED            0          600  408300  146988  mycelium-iroh:7   00102 00000108 000000000654b0c6 00000081 04000900      2      0 000000\ntcp6       0      0  ::1.52000              ::1.60000              ESTABLISHED            0          600  408300  146988           other:9   00102 00000108 000000000654b0c6 00000081 04000900      2      0 000000\ntcp4       0      0  127.0.0.1.52001        127.0.0.1.60000        ESTABLISHED            0          600  408300  146988       Some App:11   00102 00000108 000000000654b0c6 00000081 04000900      2      0 000000\n"
+  },
+  "observations": [
+    {
+      "document_json": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"connection_generation\":3,\"path_class\":\"direct\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":1.5,\"warm_rtt_ms\":2.5,\"observed_goodput_bps\":16384.0,\"jitter_ms\":0.7071067811865476,\"loss_ratio\":0.25,\"sample_count\":4,\"connections_opened\":2,\"frames_sent\":3,\"reconnect_count\":1,\"selected_path_changes\":1,\"measured_at_unix_ms\":1700000000123}",
+      "document_json_without_state": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"connection_generation\":3,\"path_class\":\"unknown\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":0.0,\"warm_rtt_ms\":0.0,\"observed_goodput_bps\":0.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":0,\"connections_opened\":0,\"frames_sent\":0,\"reconnect_count\":0,\"selected_path_changes\":0,\"measured_at_unix_ms\":0}",
+      "generation": 3,
+      "name": "direct_after_reconnect",
+      "remote_endpoint_id": "677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4",
+      "state": {
+        "acked_bytes": 4096,
+        "acked_ms": 250.0,
+        "at": 1700000000123,
+        "attempts": 4,
+        "changes": 1,
+        "cold": 1.5,
+        "failures": 1,
+        "frames": 3,
+        "opened": 2,
+        "path": "direct",
+        "reconnects": 1,
+        "relay": null,
+        "rtt": [
+          1.5,
+          2.5,
+          3.5,
+          2.5
+        ]
+      }
+    },
+    {
+      "document_json": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d\",\"connection_generation\":1,\"path_class\":\"unknown\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":0.0,\"warm_rtt_ms\":0.0,\"observed_goodput_bps\":0.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":0,\"connections_opened\":0,\"frames_sent\":0,\"reconnect_count\":0,\"selected_path_changes\":0,\"measured_at_unix_ms\":0}",
+      "document_json_without_state": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d\",\"connection_generation\":1,\"path_class\":\"unknown\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":0.0,\"warm_rtt_ms\":0.0,\"observed_goodput_bps\":0.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":0,\"connections_opened\":0,\"frames_sent\":0,\"reconnect_count\":0,\"selected_path_changes\":0,\"measured_at_unix_ms\":0}",
+      "generation": 1,
+      "name": "never_used_peer",
+      "remote_endpoint_id": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+      "state": {
+        "acked_bytes": 0,
+        "acked_ms": 0.0,
+        "at": 0,
+        "attempts": 0,
+        "changes": 0,
+        "cold": null,
+        "failures": 0,
+        "frames": 0,
+        "opened": 0,
+        "path": "",
+        "reconnects": 0,
+        "relay": null,
+        "rtt": []
+      }
+    },
+    {
+      "document_json": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12\",\"connection_generation\":9,\"path_class\":\"relay\",\"relay_identity\":\"https://relay.example/\",\"relay_region\":null,\"cold_rtt_ms\":40.0,\"warm_rtt_ms\":40.0,\"observed_goodput_bps\":2000.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":1,\"connections_opened\":1,\"frames_sent\":1,\"reconnect_count\":0,\"selected_path_changes\":1,\"measured_at_unix_ms\":5}",
+      "document_json_without_state": "{\"protocol\":\"mycelium.iroh_sidecar.transport_observation.v1\",\"remote_endpoint_id\":\"2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12\",\"connection_generation\":9,\"path_class\":\"unknown\",\"relay_identity\":null,\"relay_region\":null,\"cold_rtt_ms\":0.0,\"warm_rtt_ms\":0.0,\"observed_goodput_bps\":0.0,\"jitter_ms\":0.0,\"loss_ratio\":0.0,\"sample_count\":0,\"connections_opened\":0,\"frames_sent\":0,\"reconnect_count\":0,\"selected_path_changes\":0,\"measured_at_unix_ms\":0}",
+      "generation": 9,
+      "name": "relay_path",
+      "remote_endpoint_id": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "state": {
+        "acked_bytes": 10,
+        "acked_ms": 5.0,
+        "at": 5,
+        "attempts": 1,
+        "changes": 1,
+        "cold": 40.0,
+        "failures": 0,
+        "frames": 1,
+        "opened": 1,
+        "path": "relay",
+        "reconnects": 0,
+        "relay": "https://relay.example/",
+        "rtt": [
+          40.0
+        ]
+      }
+    }
+  ],
+  "owner_pid_table": {
+    "empty_zero_rows": {
+      "rows": []
+    },
+    "lying_count": {
+      "err": "invalid_data"
+    },
+    "no_bytes": {
+      "err": "invalid_data"
+    },
+    "too_short": {
+      "err": "invalid_data"
+    },
+    "truncated": {
+      "err": "invalid_data"
+    },
+    "valid": {
+      "rows": [
+        {
+          "local": "127.0.0.1:52000",
+          "pid": 4242,
+          "remote": "127.0.0.1:60000"
+        },
+        {
+          "local": "127.0.0.1:60000",
+          "pid": 7,
+          "remote": "127.0.0.1:52000"
+        }
+      ]
+    },
+    "valid_hex": "02000000050000007f000001cb2000007f000001ea60000092100000050000007f000001ea6000007f000001cb20000007000000"
+  },
+  "path_change_rule": [
+    {
+      "delta": 0,
+      "new": "unknown",
+      "prior": ""
+    },
+    {
+      "delta": 1,
+      "new": "direct",
+      "prior": ""
+    },
+    {
+      "delta": 0,
+      "new": "direct",
+      "prior": "direct"
+    },
+    {
+      "delta": 1,
+      "new": "relay",
+      "prior": "direct"
+    },
+    {
+      "delta": 1,
+      "new": "unknown",
+      "prior": "relay"
+    },
+    {
+      "delta": 1,
+      "new": "direct",
+      "prior": "unknown"
+    }
+  ],
+  "provenance": {
+    "inputs": "inputs (keys, nonces, payloads, observation states) are the same as the independent Python generator's; outputs are the oracle's",
+    "method": "values below were produced by executing the oracle crate's own Rust (encode_record, ClientHello/ServerHello, derive_session_keys, parse_control_call, transport_observation_document, RuntimeState::transport_observation_documents, handle_local_session, process_local_record, control_call, posix_ready_record, bind_secure_uds, read_bootstrap_secret, read_endpoint_secret, authorize_loopback_client, ...) via a scratch harness module compiled into the copy",
+    "oracle": "mycelium v0.1.4 f4e366e98a1f705dfaf182897044500d290dbd7f (read only; built from a scratch copy)"
+  },
+  "readiness_gate": [
+    {
+      "addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]}",
+      "event": "address_ready",
+      "name": "local_only_with_ip",
+      "readiness": "LocalOnly",
+      "reason": null
+    },
+    {
+      "event": "ready_address_incomplete",
+      "name": "local_only_no_addresses",
+      "readiness": "WindowExpired",
+      "reason": "relay_address_not_advertised"
+    },
+    {
+      "event": "address_ready",
+      "name": "relay_required_relay_present",
+      "readiness": "Online",
+      "reason": null
+    },
+    {
+      "event": "ready_address_incomplete",
+      "name": "relay_required_only_ip",
+      "readiness": "WindowExpired",
+      "reason": "relay_address_not_advertised"
+    },
+    {
+      "addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]}",
+      "event": "address_ready",
+      "name": "relay_appears_inside_window",
+      "readiness": "Online"
+    },
+    {
+      "name": "sender_dropped_before_relay",
+      "readiness": "Online"
+    }
+  ],
+  "ready_address_constants": {
+    "incomplete_reason": "relay_address_not_advertised",
+    "window_ms": 3000
+  },
+  "ready_records": [
+    {
+      "address_changed": "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[]}}",
+      "endpoint_addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[]}",
+      "loopback_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[]},\"alpn\":\"mycelium.iroh.sidecar.v1\",\"local_port\":61234}",
+      "name": "id_only",
+      "posix_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[]},\"alpn\":\"mycelium.iroh.sidecar.v1\"}"
+    },
+    {
+      "address_changed": "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]}}",
+      "endpoint_addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]}",
+      "loopback_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\",\"local_port\":61234}",
+      "name": "one_ip",
+      "posix_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\"}"
+    },
+    {
+      "address_changed": "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]}}",
+      "endpoint_addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]}",
+      "loopback_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\",\"local_port\":61234}",
+      "name": "ip_and_relay",
+      "posix_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\"}"
+    },
+    {
+      "address_changed": "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"[::1]:7\"}]}}",
+      "endpoint_addr_json": "{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"[::1]:7\"}]}",
+      "loopback_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"[::1]:7\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\",\"local_port\":61234}",
+      "name": "ipv6",
+      "posix_ready": "{\"event\":\"ready\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"[::1]:7\"}]},\"alpn\":\"mycelium.iroh.sidecar.v1\"}"
+    }
+  ],
+  "record_negative": {
+    "bad_tag_hex": "01070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27ca",
+    "bad_version_hex": "02070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27cb",
+    "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+    "trailing_byte_hex": "01070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27cb00",
+    "unknown_kind_hex": "01140000000000000000000102030405060708090a0b0c0d0e0f000000002ea110d2a76c7a10af206a1543d69d317a455ca179bb722285899b25b77988e5"
+  },
+  "record_negative_results": [
+    {
+      "input_hex": "01070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27cb00",
+      "name": "trailing_byte_hex",
+      "next_expected": 0,
+      "outcome": "record_length_mismatch"
+    },
+    {
+      "input_hex": "01070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27ca",
+      "name": "bad_tag_hex",
+      "next_expected": 0,
+      "outcome": "invalid_proof"
+    },
+    {
+      "input_hex": "02070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27cb",
+      "name": "bad_version_hex",
+      "next_expected": 0,
+      "outcome": "unknown_record_version"
+    },
+    {
+      "input_hex": "01140000000000000000000102030405060708090a0b0c0d0e0f000000002ea110d2a76c7a10af206a1543d69d317a455ca179bb722285899b25b77988e5",
+      "name": "unknown_kind_hex",
+      "next_expected": 1,
+      "outcome": "unknown_record_kind"
+    },
+    {
+      "input_hex": "01140000000000000000000102030405060708090a0b0c0d0e0f000000002ea110d2a76c7a10af206a1543d69d317a455ca179bb722285899b25b77988e5",
+      "name": "unknown_kind_hex",
+      "next_expected": 1,
+      "outcome": "invalid_sequence"
+    },
+    {
+      "input_hex": "00000000000000000000",
+      "name": "too_short",
+      "next_expected": 0,
+      "outcome": "record_too_short"
+    },
+    {
+      "input_hex": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "name": "wrong_key_length",
+      "next_expected": 0,
+      "outcome": "invalid_key_length"
+    },
+    {
+      "input_hex": "010700000000000000000101010101010101010101010101010100000000905357034dca8f62c6734617fe514aee51263be06379377f5e03a9ea7ab98e4c",
+      "name": "ping_first",
+      "next_expected": 1,
+      "outcome": "ok:7"
+    },
+    {
+      "input_hex": "010700000000000000000101010101010101010101010101010100000000905357034dca8f62c6734617fe514aee51263be06379377f5e03a9ea7ab98e4c",
+      "name": "ping_replayed",
+      "next_expected": 1,
+      "outcome": "invalid_sequence"
+    },
+    {
+      "input_hex": "0107000000000000000501010101010101010101010101010101000000008076a892d874d759001e6345a6894bd8fa4d71239298d95fbdea72fadf51a35e",
+      "name": "sequence_gap",
+      "next_expected": 0,
+      "outcome": "invalid_sequence"
+    },
+    {
+      "name": "encode_payload_over_cap",
+      "outcome": "payload_too_large"
+    },
+    {
+      "name": "encode_payload_at_cap",
+      "outcome": "ok"
+    },
+    {
+      "name": "encode_key_16",
+      "outcome": "invalid_key_length"
+    }
+  ],
+  "records": [
+    {
+      "encoded_hex": "01010000000000000000000102030405060708090a0b0c0d0e0f0000000b6672616d652d627974657348291945d432a4bec829dd108fd8b730729425d72fc429e304c3a2f748c48766",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 1,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "6672616d652d6279746573",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01010000000000000007000102030405060708090a0b0c0d0e0f0000000b6672616d652d6279746573e5377cf8534a54d3724096d82d86609b81fe485e7859186a873b3533de83fb1b",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 1,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "6672616d652d6279746573",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01020000000000000000000102030405060708090a0b0c0d0e0f00000000fa366628e3231c4837c2b5eb97b5fd812474d60c4740bb1de4e1c34dda8ba08e",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 2,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01020000000000000007000102030405060708090a0b0c0d0e0f000000009cdd3ee53abe1c4c1a39530ffb1293536fa3b3bfad64ce81f425ce5dec24931c",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 2,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01030000000000000000000102030405060708090a0b0c0d0e0f0000000d00000000000000036672616d65b4eb1d4c09b5dd626c69ae91f79e5eaa4c0ba0236fd672f044c6c2592f48f754",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 3,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "00000000000000036672616d65",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01030000000000000007000102030405060708090a0b0c0d0e0f0000000d00000000000000036672616d651d07202f34196f0cd074f4bd0fbf569919b325cdf32d238e9823f4f6ad4e6ec8",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 3,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "00000000000000036672616d65",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01040000000000000000000102030405060708090a0b0c0d0e0f00000000268291922cb686fef5ae6aab9cd6ab15a142e880a57f66b5ce09940c8c863ab4",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 4,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01040000000000000007000102030405060708090a0b0c0d0e0f00000000e70049e83f6528aadcbdc5787dd2b830524794caa82ec968104b9cf076aaa2f2",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 4,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01050000000000000000000102030405060708090a0b0c0d0e0f0000000078480e0357e0c16c3bfa792b3443883e62101d5237c2c26fb5a6d4aec6f9e018",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 5,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01050000000000000007000102030405060708090a0b0c0d0e0f000000000b5716b8091c0227ebb405e1adb0b3cb9f12488e7896ff3664d5989a1a022f53",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 5,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01060000000000000000000102030405060708090a0b0c0d0e0f000000137b22656e64706f696e745f6964223a2278227d92a40c52630462f360d2b43a98c97cc843c4c1fa2b011c402d9f2b15017dff72",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 6,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b22656e64706f696e745f6964223a2278227d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01060000000000000007000102030405060708090a0b0c0d0e0f000000137b22656e64706f696e745f6964223a2278227ddc967db2947cf75586542e6605df1a07df0d65a475832653459658bcdda16b8a",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 6,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b22656e64706f696e745f6964223a2278227d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01070000000000000000000102030405060708090a0b0c0d0e0f00000000e7d4332b35d2cd0e809f110708270dc1878a44fc09d14aa8d156fef37baa27cb",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 7,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01070000000000000007000102030405060708090a0b0c0d0e0f00000000fb62e2373e13f1d042cbd846e77e8e301b678f53d530c782ef7df42a940a718d",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 7,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01080000000000000000000102030405060708090a0b0c0d0e0f000000107b22636f6465223a22656d707479227db2f4c1a2f53b10cc3ecc4935f7acda53be62712ef4f489445468e5a302e60623",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 8,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b22636f6465223a22656d707479227d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01080000000000000007000102030405060708090a0b0c0d0e0f000000107b22636f6465223a22656d707479227d8e2defa96aaab63ee39260d7cedd93cafebf395d517311a9e9e10992254452e3",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 8,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b22636f6465223a22656d707479227d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01090000000000000000000102030405060708090a0b0c0d0e0f00000015000000000000000200000000000000036672616d652469b46d266bd4736ba2ffc59688c9e785d720442e95d67a5ab0765ec4db1041",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 9,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "000000000000000200000000000000036672616d65",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01090000000000000007000102030405060708090a0b0c0d0e0f00000015000000000000000200000000000000036672616d65674b6f13cc48e90fca2d9081a779a96f15225f580a349bbece7e971f5f40674b",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 9,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "000000000000000200000000000000036672616d65",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010a0000000000000000000102030405060708090a0b0c0d0e0f0000000c7b227065657273223a5b5d7ddea8850a3d61d6e4e9da06319048d2a3b1b4f4c5d3fd4a9da2a57f106d0a0505",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 10,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b227065657273223a5b5d7d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010a0000000000000007000102030405060708090a0b0c0d0e0f0000000c7b227065657273223a5b5d7da3d91a29630614ed8865cd934f949d64a9ad5d3d6e2fe995845467667b08f601",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 10,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b227065657273223a5b5d7d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010b0000000000000000000102030405060708090a0b0c0d0e0f00000035abababababababababababababababababababababababababababababababab000000000000000200000000000000036672616d65f2abb304c560bc746a8ad66e4c37c6778b5d1caf4708ed98f0f4f2d457606dd2",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 11,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "abababababababababababababababababababababababababababababababab000000000000000200000000000000036672616d65",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010b0000000000000007000102030405060708090a0b0c0d0e0f00000035abababababababababababababababababababababababababababababababab000000000000000200000000000000036672616d65b73e75866f32b17b04426408a24760ebb631e4fec1865c9d7d816462d1e75b7f",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 11,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "abababababababababababababababababababababababababababababababab000000000000000200000000000000036672616d65",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010c0000000000000000000102030405060708090a0b0c0d0e0f00000000c0ac2ff267621097fe0aab93a5161ce67baca6ea20561a260abbdbd114896fe9",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 12,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010c0000000000000007000102030405060708090a0b0c0d0e0f000000005cb97d56260d29bbba6fd0542106b6aa342df5a80e47a4b14f02372b15b4154e",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 12,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010d0000000000000000000102030405060708090a0b0c0d0e0f0000002dcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00000000000000046672616d652df6421c2bd4ba24df38af0b103ed1a47a227670a916654b7ce35864f3f8d153",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 13,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00000000000000046672616d65",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010d0000000000000007000102030405060708090a0b0c0d0e0f0000002dcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00000000000000046672616d6594843d7e0057cb74460e6045074599f34db1bd825f37aedeb15a41bfad9a47c4",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 13,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd00000000000000046672616d65",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010e0000000000000000000102030405060708090a0b0c0d0e0f00000000d812b3cf2dd77f3e1fee40648066f63fcd8edcd1e33b89d274338f70b1aa1370",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 14,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010e0000000000000007000102030405060708090a0b0c0d0e0f000000008737909b5a667cb854f189ba982b387fae244f2f4d3a4e3c59c84968fecd7b99",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 14,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "010f0000000000000000000102030405060708090a0b0c0d0e0f000000137b226f62736572766174696f6e73223a5b5d7da31eebd142b5061c510e485a923206b2e1e492550a701d9226054c8a08f9e77f",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 15,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b226f62736572766174696f6e73223a5b5d7d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "010f0000000000000007000102030405060708090a0b0c0d0e0f000000137b226f62736572766174696f6e73223a5b5d7d35fb9c18cc0a615c31541153b75963059ad4ab931f9c599b5778a494a90acb05",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 15,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b226f62736572766174696f6e73223a5b5d7d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01100000000000000000000102030405060708090a0b0c0d0e0f0000001d7b2263616e6469646174655f656e64706f696e745f6964223a2278227d40c433fe52b3709626ff4c6f6d36937b9fa2163ae0eab63f75dbc1a5b546d4c7",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 16,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b2263616e6469646174655f656e64706f696e745f6964223a2278227d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01100000000000000007000102030405060708090a0b0c0d0e0f0000001d7b2263616e6469646174655f656e64706f696e745f6964223a2278227dc6307495a680c03359ffe6c4d9ba9d40de8754127e1ff663b6ee5f095a4fc884",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 16,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b2263616e6469646174655f656e64706f696e745f6964223a2278227d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01110000000000000000000102030405060708090a0b0c0d0e0f000000027b7dac6039bcf9b454887a2727d6e3afadac6662b4d647fc6f0436415b5890c76656",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 17,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b7d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01110000000000000007000102030405060708090a0b0c0d0e0f000000027b7d0ed7d52df0ee5a4f087ea3ecc3f49502170d22de86402cb3bc570c815208e536",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 17,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b7d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01120000000000000000000102030405060708090a0b0c0d0e0f00000031efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef00000000000005dc7b22636d64223a317d36bc2919eec698fa4c4d5ccc223f083791a6e13829d8292c0087bcba53a6d22c",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 18,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef00000000000005dc7b22636d64223a317d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01120000000000000007000102030405060708090a0b0c0d0e0f00000031efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef00000000000005dc7b22636d64223a317d7b968a4e139f60dc0b78d3739ab6353d180a4cc3a2a4d5b6dd6a9590205598a4",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 18,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef00000000000005dc7b22636d64223a317d",
+      "sequence": 7
+    },
+    {
+      "encoded_hex": "01130000000000000000000102030405060708090a0b0c0d0e0f0000000b7b226f6b223a747275657d6c5d20851d5074117806d5fc9f1d5e75d03b59797add8f1875c89e0fa569c07c",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 19,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b226f6b223a747275657d",
+      "sequence": 0
+    },
+    {
+      "encoded_hex": "01130000000000000007000102030405060708090a0b0c0d0e0f0000000b7b226f6b223a747275657da1349f3e1307a637a026dd38548aca7d4add090cc30b9935db4a767d600dba9f",
+      "key_hex": "04b454493242f36bfa4e1bd1e9255131aa1e7360e8a28e4db2258660900dff3a",
+      "kind": 19,
+      "message_id_hex": "000102030405060708090a0b0c0d0e0f",
+      "payload_hex": "7b226f6b223a747275657d",
+      "sequence": 7
+    }
+  ],
+  "republish_lines": [
+    "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Ip\":\"127.0.0.1:4433\"}]}}",
+    "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[{\"Relay\":\"https://relay.example.invalid./\"},{\"Ip\":\"192.0.2.7:1\"}]}}",
+    "{\"event\":\"address_changed\",\"endpoint_id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"endpoint_addr\":{\"id\":\"677a74d964e4a84ffa5025a8b5537b5c4a37ad6d146e854783ac734684a207c4\",\"addrs\":[]}}"
+  ],
+  "republish_note": "sequence sent: id_only(=published), one_ip, one_ip, ip_and_relay, ip_and_relay, id_only; watch coalesces, so lines are the distinct transitions seen",
+  "rtt_window": {
+    "cold": 0.0,
+    "first": 6.0,
+    "last": 69.0,
+    "len": 64,
+    "relay_identity_after": "relay-x"
+  },
+  "same_effective_uid_for_own_connection": true,
+  "session_transcripts": [
+    {
+      "cases": [
+        {
+          "name": "wrong_secret",
+          "server_replied": false,
+          "session_result": "Err(Authentication)"
+        },
+        {
+          "name": "not_json",
+          "server_replied": false,
+          "session_result": "Err(Protocol)"
+        },
+        {
+          "name": "unknown_field",
+          "server_replied": false,
+          "session_result": "Err(Protocol)"
+        },
+        {
+          "name": "alias_fields_accepted_then_waits",
+          "server_replied": true,
+          "session_result": "still_running_after_5s"
+        },
+        {
+          "name": "wrong_protocol",
+          "server_replied": false,
+          "session_result": "Err(Authentication)"
+        },
+        {
+          "name": "hello_zero_length",
+          "server_replied": false,
+          "session_result": "Err(Protocol)"
+        },
+        {
+          "name": "hello_over_4096",
+          "server_replied": false,
+          "session_result": "Err(Protocol)"
+        }
+      ],
+      "name": "handshake_failures"
+    },
+    {
+      "elapsed_ms_at_least_2000": true,
+      "name": "silent_client",
+      "session_result": "Err(Timeout)"
+    },
+    {
+      "handshake": {
+        "server_hello_endpoint_id": "duplex-endpoint",
+        "server_hello_field_order": [
+          "protocol",
+          "server_nonce",
+          "endpoint_id",
+          "server_proof"
+        ],
+        "server_hello_text_starts_with": "{\"protocol\":\"mycelium.iroh_sidecar.local"
+      },
+      "name": "script_no_carrier",
+      "session_end": "Err(Disconnected)",
+      "steps": [
+        {
+          "request": {
+            "id_byte": 1,
+            "kind": 7,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "01010101010101010101010101010101",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 0
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 1,
+            "payload_hex": "000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 1
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 1,
+            "payload_hex": "000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 2
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 1,
+            "payload_hex": "000000ca7b22626f6479223a7b226163636570746564223a66616c73657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a352c227061796c6f61645f736861323536223a2264393239386131306431623037333538333764633462643835646163363431623066336365663237613437653564353361353466326633663562326663666661222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d6f74686572"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "7b22636f6465223a227265706c61795f636f6c6c6973696f6e227d",
+            "payload_text": "{\"code\":\"replay_collision\"}",
+            "sequence": 3
+          }
+        },
+        {
+          "request": {
+            "id_byte": 3,
+            "kind": 1,
+            "payload_hex": "000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "03030303030303030303030303030303",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 4
+          }
+        },
+        {
+          "request": {
+            "id_byte": 4,
+            "kind": 1,
+            "payload_hex": "000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "04040404040404040404040404040404",
+            "payload_hex": "7b22636f6465223a2271756575655f66756c6c227d",
+            "payload_text": "{\"code\":\"queue_full\"}",
+            "sequence": 5
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 5,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 6
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 5,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "7b22636f6465223a22756e6b6e6f776e5f6d657373616765227d",
+            "payload_text": "{\"code\":\"unknown_message\"}",
+            "sequence": 7
+          }
+        },
+        {
+          "request": {
+            "id_byte": 9,
+            "kind": 5,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "09090909090909090909090909090909",
+            "payload_hex": "7b22636f6465223a22756e6b6e6f776e5f6d657373616765227d",
+            "payload_text": "{\"code\":\"unknown_message\"}",
+            "sequence": 8
+          }
+        },
+        {
+          "request": {
+            "id_byte": 5,
+            "kind": 1,
+            "payload_hex": "6e6f742d612d6672616d65"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "05050505050505050505050505050505",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6672616d65227d",
+            "payload_text": "{\"code\":\"invalid_frame\"}",
+            "sequence": 9
+          }
+        },
+        {
+          "request": {
+            "id_byte": 5,
+            "kind": 1,
+            "payload_hex": "zeros:16777217"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "05050505050505050505050505050505",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6672616d65227d",
+            "payload_text": "{\"code\":\"invalid_frame\"}",
+            "sequence": 10
+          }
+        },
+        {
+          "request": {
+            "id_byte": 6,
+            "kind": 9,
+            "payload_hex": "000000000000000000000000000000"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "06060606060606060606060606060606",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f67656e65726174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_generation\"}",
+            "sequence": 11
+          }
+        },
+        {
+          "request": {
+            "id_byte": 6,
+            "kind": 9,
+            "payload_hex": "00000000000000000000000000000001000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "06060606060606060606060606060606",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f67656e65726174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_generation\"}",
+            "sequence": 12
+          }
+        },
+        {
+          "request": {
+            "id_byte": 6,
+            "kind": 9,
+            "payload_hex": "00000000000000010000000000000000000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "06060606060606060606060606060606",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f67656e65726174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_generation\"}",
+            "sequence": 13
+          }
+        },
+        {
+          "request": {
+            "id_byte": 6,
+            "kind": 9,
+            "payload_hex": "00000000000000010000000000000001626164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "06060606060606060606060606060606",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6672616d65227d",
+            "payload_text": "{\"code\":\"invalid_frame\"}",
+            "sequence": 14
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "07070707070707070707070707070707070707070707070707070707070707"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 15
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f67656e65726174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_generation\"}",
+            "sequence": 16
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "34b4d9043156cb6dcf0beb0a2949b7559c940d2bcb6dbe8c53a9b30278e3a74600000000000000000000000000000001000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f67656e65726174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_generation\"}",
+            "sequence": 17
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "34b4d9043156cb6dcf0beb0a2949b7559c940d2bcb6dbe8c53a9b30278e3a74600000000000000010000000000000001626164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6672616d65227d",
+            "payload_text": "{\"code\":\"invalid_frame\"}",
+            "sequence": 18
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "34b4d9043156cb6dcf0beb0a2949b7559c940d2bcb6dbe8c53a9b30278e3a74600000000000000010000000000000001000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22706565725f726f7461746564227d",
+            "payload_text": "{\"code\":\"peer_rotated\"}",
+            "sequence": 19
+          }
+        },
+        {
+          "request": {
+            "id_byte": 10,
+            "kind": 6,
+            "payload_hex": "67617262616765"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 20
+          }
+        },
+        {
+          "request": {
+            "id_byte": 10,
+            "kind": 6,
+            "payload_hex": "7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a317d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 21
+          }
+        },
+        {
+          "request": {
+            "id_byte": 10,
+            "kind": 6,
+            "payload_hex": "7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a317d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 22
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b5d7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 23
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b5d2c2278223a317d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 24
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a327d2c7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2235623634383963396337666430646366353035343565376331363438383665663430343931656330366337663162313233303431373937653831313735333565227d2c22656e64706f696e745f6964223a2235623634383963396337666430646366353035343565376331363438383665663430343931656330366337663162313233303431373937653831313735333565222c2267656e65726174696f6e223a317d5d7d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 25
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a317d5d7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 26
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a327d2c7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a337d5d7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 27
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a307d5d7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 28
+          }
+        },
+        {
+          "request": {
+            "id_byte": 11,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d2c22656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c2267656e65726174696f6e223a337d2c7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2235623634383963396337666430646366353035343565376331363438383665663430343931656330366337663162313233303431373937653831313735333565227d2c22656e64706f696e745f6964223a2235623634383963396337666430646366353035343565376331363438383665663430343931656330366337663162313233303431373937653831313735333565222c2267656e65726174696f6e223a327d5d7d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 29
+          }
+        },
+        {
+          "request": {
+            "id_byte": 12,
+            "kind": 14,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 15,
+            "message_id_hex": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+            "payload_hex": "7b2270726f746f636f6c223a226d7963656c69756d2e69726f685f736964656361722e7472616e73706f72745f6f62736572766174696f6e732e7631222c226f62736572766174696f6e73223a5b7b2270726f746f636f6c223a226d7963656c69756d2e69726f685f736964656361722e7472616e73706f72745f6f62736572766174696f6e2e7631222c2272656d6f74655f656e64706f696e745f6964223a2235623634383963396337666430646366353035343565376331363438383665663430343931656330366337663162313233303431373937653831313735333565222c22636f6e6e656374696f6e5f67656e65726174696f6e223a322c22706174685f636c617373223a22756e6b6e6f776e222c2272656c61795f6964656e74697479223a6e756c6c2c2272656c61795f726567696f6e223a6e756c6c2c22636f6c645f7274745f6d73223a302e302c227761726d5f7274745f6d73223a302e302c226f627365727665645f676f6f647075745f627073223a302e302c226a69747465725f6d73223a302e302c226c6f73735f726174696f223a302e302c2273616d706c655f636f756e74223a302c22636f6e6e656374696f6e735f6f70656e6564223a302c226672616d65735f73656e74223a302c227265636f6e6e6563745f636f756e74223a302c2273656c65637465645f706174685f6368616e676573223a302c226d656173757265645f61745f756e69785f6d73223a307d2c7b2270726f746f636f6c223a226d7963656c69756d2e69726f685f736964656361722e7472616e73706f72745f6f62736572766174696f6e2e7631222c2272656d6f74655f656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362222c22636f6e6e656374696f6e5f67656e65726174696f6e223a332c22706174685f636c617373223a22756e6b6e6f776e222c2272656c61795f6964656e74697479223a6e756c6c2c2272656c61795f726567696f6e223a6e756c6c2c22636f6c645f7274745f6d73223a302e302c227761726d5f7274745f6d73223a302e302c226f627365727665645f676f6f647075745f627073223a302e302c226a69747465725f6d73223a302e302c226c6f73735f726174696f223a302e302c2273616d706c655f636f756e74223a302c22636f6e6e656374696f6e735f6f70656e6564223a302c226672616d65735f73656e74223a302c227265636f6e6e6563745f636f756e74223a302c2273656c65637465645f706174685f6368616e676573223a302c226d656173757265645f61745f756e69785f6d73223a307d5d7d",
+            "payload_text": null,
+            "sequence": 30
+          }
+        },
+        {
+          "request": {
+            "id_byte": 13,
+            "kind": 2,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+            "payload_hex": "7b22636f6465223a22656d707479227d",
+            "payload_text": "{\"code\":\"empty\"}",
+            "sequence": 31
+          }
+        },
+        {
+          "request": {
+            "id_byte": 13,
+            "kind": 12,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+            "payload_hex": "7b22636f6465223a22656d707479227d",
+            "payload_text": "{\"code\":\"empty\"}",
+            "sequence": 32
+          }
+        },
+        {
+          "frame": "valid",
+          "generation": null,
+          "harness": "admit_inbound",
+          "id_byte": 49,
+          "outcome": "admitted",
+          "source_hex": null
+        },
+        {
+          "request": {
+            "id_byte": 13,
+            "kind": 2,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 3,
+            "message_id_hex": "31313131313131313131313131313131",
+            "payload_hex": "0000000000000000000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164",
+            "payload_text": null,
+            "sequence": 33
+          }
+        },
+        {
+          "request": {
+            "id_byte": 49,
+            "kind": 4,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "31313131313131313131313131313131",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 34
+          }
+        },
+        {
+          "request": {
+            "id_byte": 49,
+            "kind": 4,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "31313131313131313131313131313131",
+            "payload_hex": "7b22636f6465223a22756e6b6e6f776e5f64656c6976657279227d",
+            "payload_text": "{\"code\":\"unknown_delivery\"}",
+            "sequence": 35
+          }
+        },
+        {
+          "frame": "valid",
+          "generation": null,
+          "harness": "admit_inbound",
+          "id_byte": 50,
+          "source_hex": null
+        },
+        {
+          "request": {
+            "id_byte": 13,
+            "kind": 12,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 13,
+            "message_id_hex": "32323232323232323232323232323232",
+            "payload_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164",
+            "payload_text": null,
+            "sequence": 36
+          }
+        },
+        {
+          "request": {
+            "id_byte": 50,
+            "kind": 4,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "32323232323232323232323232323232",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 37
+          }
+        },
+        {
+          "frame": "valid",
+          "generation": 3,
+          "harness": "admit_inbound",
+          "id_byte": 51,
+          "source_hex": "e2fe2a39b7326642827d6d82d497622cd6c297fe78270eaa436b01f086b6f3cb"
+        },
+        {
+          "request": {
+            "id_byte": 13,
+            "kind": 12,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 13,
+            "message_id_hex": "33333333333333333333333333333333",
+            "payload_hex": "e2fe2a39b7326642827d6d82d497622cd6c297fe78270eaa436b01f086b6f3cb0000000000000003000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164",
+            "payload_text": null,
+            "sequence": 38
+          }
+        },
+        {
+          "request": {
+            "id_byte": 51,
+            "kind": 4,
+            "payload_hex": ""
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "33333333333333333333333333333333",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 39
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 3,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 40
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 13,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 41
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 15,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 42
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 17,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 43
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 19,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 44
+          }
+        },
+        {
+          "request": {
+            "id_byte": 14,
+            "kind": 8,
+            "payload_hex": "78"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f6b696e64227d",
+            "payload_text": "{\"code\":\"invalid_kind\"}",
+            "sequence": 45
+          }
+        },
+        {
+          "request": {
+            "id_byte": 15,
+            "kind": 16,
+            "payload_hex": "67617262616765"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f63616e6469646174655f656e64706f696e74227d",
+            "payload_text": "{\"code\":\"invalid_candidate_endpoint\"}",
+            "sequence": 46
+          }
+        },
+        {
+          "request": {
+            "id_byte": 15,
+            "kind": 16,
+            "payload_hex": "7b2263616e6469646174655f656e64706f696e745f6964223a226e6f7065227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f63616e6469646174655f656e64706f696e74227d",
+            "payload_text": "{\"code\":\"invalid_candidate_endpoint\"}",
+            "sequence": 47
+          }
+        },
+        {
+          "request": {
+            "id_byte": 15,
+            "kind": 16,
+            "payload_hex": "7b2263616e6469646174655f656e64706f696e745f6964223a2265326665326133396237333236363432383237643664383264343937363232636436633239376665373832373065616134333662303166303836623666336362227d"
+          },
+          "response": {
+            "kind": 17,
+            "message_id_hex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+            "payload_hex": "7b2270726f746f636f6c223a226d7963656c69756d2e69726f685f736964656361722e696e626f756e645f61646d697373696f6e2e7631222c22696e626f756e645f6964656e746974795f72656a656374696f6e73223a302c22696e626f756e645f6672616d65735f61646d6974746564223a302c2263616e6469646174655f6964656e746974795f72656a656374696f6e73223a302c226d656173757265645f61745f756e69785f6d73223a307d",
+            "payload_text": "{\"protocol\":\"mycelium.iroh_sidecar.inbound_admission.v1\",\"inbound_identity_rejections\":0,\"inbound_frames_admitted\":0,\"candidate_identity_rejections\":0,\"measured_at_unix_ms\":0}",
+            "sequence": 48
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f636f6e74726f6c5f63616c6c227d",
+            "payload_text": "{\"code\":\"invalid_control_call\"}",
+            "sequence": 49
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000003e878"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22636172726965725f756e617661696c61626c65227d",
+            "payload_text": "{\"code\":\"carrier_unavailable\"}",
+            "sequence": 50
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000ea6178"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22636f6e74726f6c5f74696d656f75745f6578636565646564227d",
+            "payload_text": "{\"code\":\"control_timeout_exceeded\"}",
+            "sequence": 51
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce000000000000000078"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f636f6e74726f6c5f63616c6c227d",
+            "payload_text": "{\"code\":\"invalid_control_call\"}",
+            "sequence": 52
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce00000000000003e8"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f636f6e74726f6c5f63616c6c227d",
+            "payload_text": "{\"code\":\"invalid_control_call\"}",
+            "sequence": 53
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce00000000000003e87b7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22636172726965725f756e617661696c61626c65227d",
+            "payload_text": "{\"code\":\"carrier_unavailable\"}",
+            "sequence": 54
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "0003000000000000000000000000000000000000000000000000000000000000"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 55
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 11,
+            "payload_hex": "000300000000000000000000000000000000000000000000000000000000000000000000000000010000000000000001000000c97b22626f6479223a7b226163636570746564223a747275657d2c226d6573736167655f74797065223a225265736572766174696f6e526573756c74222c227061796c6f61645f6c656e677468223a372c227061796c6f61645f736861323536223a2232333966353965643535653733376337373134376366353561643063316230333062366437656537343861373432363935326639623835326435613933356535222c2270726f746f636f6c223a226d7963656c69756d2e726f757465725f776972652e7631227d7061796c6f6164"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f70656572227d",
+            "payload_text": "{\"code\":\"invalid_peer\"}",
+            "sequence": 56
+          }
+        },
+        {
+          "request": {
+            "id_byte": 16,
+            "kind": 18,
+            "payload_hex": "000300000000000000000000000000000000000000000000000000000000000000000000000003e87b7d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "10101010101010101010101010101010",
+            "payload_hex": "7b22636f6465223a22696e76616c69645f636f6e74726f6c5f64657374696e6174696f6e227d",
+            "payload_text": "{\"code\":\"invalid_control_destination\"}",
+            "sequence": 57
+          }
+        }
+      ]
+    },
+    {
+      "name": "post_handshake_session_ends",
+      "record_length_over_cap": "Err(Protocol)",
+      "sequence_gap": "Err(Authentication)",
+      "unknown_kind_valid_tag": "Err(Authentication)",
+      "wrong_direction_key": "Err(Authentication)",
+      "zero_length_record": "Err(Protocol)"
+    },
+    {
+      "handshake": {
+        "server_hello_endpoint_id": "duplex-endpoint",
+        "server_hello_field_order": [
+          "protocol",
+          "server_nonce",
+          "endpoint_id",
+          "server_proof"
+        ],
+        "server_hello_text_starts_with": "{\"protocol\":\"mycelium.iroh_sidecar.local"
+      },
+      "name": "control_call_execution",
+      "phone_endpoint_id": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f73242",
+      "phone_received_commands": [
+        "{\"command\":\"health\"}",
+        "{\"command\":\"empty\"}",
+        "{\"command\":\"huge\"}",
+        "{\"command\":\"silent\"}",
+        "{\"command\":\"closed\"}"
+      ],
+      "steps": [
+        {
+          "request": {
+            "id_byte": 1,
+            "kind": 18,
+            "payload_hex": "c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a700000000000003e87b22636f6d6d616e64223a226865616c7468227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "01010101010101010101010101010101",
+            "payload_hex": "7b22636f6465223a22756e6b6e6f776e5f70656572227d",
+            "payload_text": "{\"code\":\"unknown_peer\"}",
+            "sequence": 0
+          }
+        },
+        {
+          "request": {
+            "id_byte": 2,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a3635323832227d5d2c226964223a2263363832323633376337643331306563353736323762653030626132353964323533373439663461616636343434373063666662653533613335663733323432227d2c22656e64706f696e745f6964223a2263363832323633376337643331306563353736323762653030626132353964323533373439663461616636343434373063666662653533613335663733323432222c2267656e65726174696f6e223a317d5d7d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "02020202020202020202020202020202",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 1
+          }
+        },
+        {
+          "request": {
+            "id_byte": 3,
+            "kind": 18,
+            "payload_hex": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f7324200000000000013887b22636f6d6d616e64223a226865616c7468227d"
+          },
+          "response": {
+            "kind": 19,
+            "message_id_hex": "03030303030303030303030303030303",
+            "payload_hex": "7b226f6b223a747275657d",
+            "payload_text": "{\"ok\":true}",
+            "sequence": 2
+          }
+        },
+        {
+          "request": {
+            "id_byte": 4,
+            "kind": 18,
+            "payload_hex": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f7324200000000000013887b22636f6d6d616e64223a22656d707479227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "04040404040404040404040404040404",
+            "payload_hex": "7b22636f6465223a22656d7074795f636f6e74726f6c5f63616c6c5f726573756c74227d",
+            "payload_text": "{\"code\":\"empty_control_call_result\"}",
+            "sequence": 3
+          }
+        },
+        {
+          "request": {
+            "id_byte": 5,
+            "kind": 18,
+            "payload_hex": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f7324200000000000027107b22636f6d6d616e64223a2268756765227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "05050505050505050505050505050505",
+            "payload_hex": "7b22636f6465223a22636f6e74726f6c5f726573706f6e73655f746f6f5f6c61726765227d",
+            "payload_text": "{\"code\":\"control_response_too_large\"}",
+            "sequence": 4
+          }
+        },
+        {
+          "request": {
+            "id_byte": 6,
+            "kind": 18,
+            "payload_hex": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f7324200000000000003207b22636f6d6d616e64223a2273696c656e74227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "06060606060606060606060606060606",
+            "payload_hex": "7b22636f6465223a22636f6e74726f6c5f726561645f74696d656f7574227d",
+            "payload_text": "{\"code\":\"control_read_timeout\"}",
+            "sequence": 5
+          }
+        },
+        {
+          "request": {
+            "id_byte": 7,
+            "kind": 18,
+            "payload_hex": "c6822637c7d310ec57627be00ba259d253749f4aaf644470cffbe53a35f732420000000000000bb87b22636f6d6d616e64223a22636c6f736564227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "07070707070707070707070707070707",
+            "payload_hex": "7b22636f6465223a22636f6e74726f6c5f726561645f6661696c6564227d",
+            "payload_text": "{\"code\":\"control_read_failed\"}",
+            "sequence": 6
+          }
+        },
+        {
+          "request": {
+            "id_byte": 8,
+            "kind": 10,
+            "payload_hex": "7b227065657273223a5b7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a39227d5d2c226964223a2265653331663833633838613731323139613666636639626565306461396263323236323035383866356131356136313435353533353034646639363439653563227d2c22656e64706f696e745f6964223a2265653331663833633838613731323139613666636639626565306461396263323236323035383866356131356136313435353533353034646639363439653563222c2267656e65726174696f6e223a317d2c7b22656e64706f696e745f61646472223a7b226164647273223a5b7b224970223a223132372e302e302e313a3635323832227d5d2c226964223a2263363832323633376337643331306563353736323762653030626132353964323533373439663461616636343434373063666662653533613335663733323432227d2c22656e64706f696e745f6964223a2263363832323633376337643331306563353736323762653030626132353964323533373439663461616636343434373063666662653533613335663733323432222c2267656e65726174696f6e223a327d5d7d"
+          },
+          "response": {
+            "kind": 4,
+            "message_id_hex": "08080808080808080808080808080808",
+            "payload_hex": "",
+            "payload_text": "",
+            "sequence": 0
+          }
+        },
+        {
+          "request": {
+            "id_byte": 9,
+            "kind": 18,
+            "payload_hex": "ee31f83c88a71219a6fcf9bee0da9bc22620588f5a15a6145553504df9649e5c00000000000005dc7b22636f6d6d616e64223a2264656164227d"
+          },
+          "response": {
+            "kind": 8,
+            "message_id_hex": "09090909090909090909090909090909",
+            "payload_hex": "7b22636f6465223a22636f6e74726f6c5f636f6e6e6563745f74696d656f7574227d",
+            "payload_text": "{\"code\":\"control_connect_timeout\"}",
+            "sequence": 1
+          }
+        }
+      ],
+      "unknown_endpoint_id": "c853ad0f0cd2b619aea92ceec4fd56a24d6499d584ce79257e45cfd8139b60a7"
+    }
+  ],
+  "sidecar_error_codes": {
+    "ArtifactSource": "artifact_source_invalid",
+    "BootstrapNotPipe": "bootstrap_not_pipe",
+    "EndpointBind": "endpoint_bind_error",
+    "EndpointSecretSecurity": "endpoint_secret_security_error",
+    "Filesystem": "filesystem_error",
+    "InvalidBootstrapFd": "invalid_bootstrap_fd",
+    "InvalidBootstrapLength": "invalid_bootstrap_length",
+    "InvalidNetworkMode": "invalid_network_mode",
+    "ReadyOutput": "ready_output_error",
+    "Runtime": "runtime_error",
+    "SocketBind": "socket_bind_error",
+    "SocketSecurity": "socket_security_error"
+  }
+}

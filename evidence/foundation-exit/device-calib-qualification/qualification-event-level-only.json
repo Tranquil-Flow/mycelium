@@ -1,0 +1,693 @@
+{
+  "schema_version": 3,
+  "method_version": "qualified-device-v1",
+  "declaration": {
+    "sha256": "d8f042df41f07a22cf703d302493e8020ae5c141e419d30fe2c1ea5ffd5afc07",
+    "trial_id": "device-calib-v014-a9-route-2026-10-28",
+    "reviewed_by": "foundation-exit lane round 4 (proposed; owner review pending)",
+    "review_note": "All seven DEVICE-CALIB windows: released v0.1.4 oracle f4e366e9 / exe 8fff4182, model a9-route, owner+laptop pair, same cycle_driver method. Failed windows are kept: their completed chats are valid samples and failed chats are counted, not dropped silently.",
+    "independence_basis": "Each chat is one request in a fixed 16 s-spaced series within a separate DEVICE.busy window (seven windows, 00:10-02:41 CET). Declared by the reviewer; NOT statistically tested (no autocorrelation test; shared host load and warm caches possible).",
+    "method": "v014-oracle-device-harness cycle_driver.py (device-calib 5e0fdd7)",
+    "independence": "declared_by_reviewer_not_statistically_tested"
+  },
+  "files": [
+    {
+      "path": "trial-declaration.json",
+      "sha256": "d8f042df41f07a22cf703d302493e8020ae5c141e419d30fe2c1ea5ffd5afc07",
+      "bytes": 2860,
+      "disposition": "TRIAL_DECLARATION"
+    },
+    {
+      "path": "attempt1/RESULT.json",
+      "sha256": "8ee9a10eac168cd0840b02915acc4aaf52f8adef4c3b7fe325fe6d06d4c7f4b8",
+      "bytes": 767,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt1/events.jsonl",
+      "sha256": "a405bd1bfc9f93be1ad4ab9f2bfeaf4566fdcdb6dd67dd115e3744c77b32c48e",
+      "bytes": 24509,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt2/RESULT.json",
+      "sha256": "2768e8b0dc79e38772bcdb7114d8a1e6a5642f75cade6d5d93faa14dae23b3af",
+      "bytes": 762,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt2/events.jsonl",
+      "sha256": "68a767bdf3bccc450d587c7644f602a1a5e9943bae2231588d0afdcc6097804b",
+      "bytes": 425134,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt3/RESULT.json",
+      "sha256": "c4fae1a6bfb248ce40da896b8e79c190bab318a1c3434b979e8420ecc379aa75",
+      "bytes": 841,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt3/events.jsonl",
+      "sha256": "2b0ac7754fc02bfe3fa9d2e491e4c795e9dcc43a9fd957118c687b6c6d5267ef",
+      "bytes": 670678,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt4/RESULT.json",
+      "sha256": "a2f4c087d43ee54ae63a399428b878fffa75ebcd4d00ef28967ae581b6ae8479",
+      "bytes": 785,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt4/events.jsonl",
+      "sha256": "43b8c53b174fa6a7bca9e2ccee6d17a4d80987d1b8f877dcec5f1ad4cbf1ba74",
+      "bytes": 70512,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt5/RESULT.json",
+      "sha256": "99109afa7ff85096ebc7f8092e109daf15f59e3b2dd0a9a0dab963e80617bfcc",
+      "bytes": 814,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt5/events.jsonl",
+      "sha256": "b3b6ed1482181e785bfd6afb319aa7001b1f215b39088a1f9f9853ff35e38dab",
+      "bytes": 916391,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt6/RESULT.json",
+      "sha256": "767f37f5aefa61d564eae32ee265150df86f13bb0d96263a7a9029a2991c13c9",
+      "bytes": 787,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt6/events.jsonl",
+      "sha256": "b35f5922f46b488271a7148e9124a37cdc4916edf0ae76b765f781555686ceb1",
+      "bytes": 589221,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    },
+    {
+      "path": "attempt7/RESULT.json",
+      "sha256": "cb5578b1f3a907acd65e7c38cbd20751cfc344d6639466c56a519df6350e9b2a",
+      "bytes": 915,
+      "disposition": "PROVENANCE_DECLARED"
+    },
+    {
+      "path": "attempt7/events.jsonl",
+      "sha256": "1613bcf3c3930299fd4cf2e86fc47473c77ee3e37eb95260e5b5d4b5bea65153",
+      "bytes": 401706,
+      "disposition": "PRIMARY_EVENTS_DECLARED"
+    }
+  ],
+  "attempts_pooled": [
+    "attempt1",
+    "attempt2",
+    "attempt3",
+    "attempt4",
+    "attempt5",
+    "attempt6",
+    "attempt7"
+  ],
+  "attempts_unpooled": [],
+  "cells": [
+    {
+      "phase": "compile",
+      "variant": "cache_hit",
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": true,
+      "exactness_basis": "reported_compiler_duration",
+      "n_observed": 10,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 10,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 5527.312541002175,
+      "descriptive_p99": 6970.822708994092,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "cache_hit_not_cold_compile",
+        "fewer_than_100_valid_exact_load_known_samples"
+      ],
+      "attempts": [
+        "attempt2",
+        "attempt3",
+        "attempt5",
+        "attempt6"
+      ]
+    },
+    {
+      "phase": "compile",
+      "variant": "cold_or_unknown",
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": true,
+      "exactness_basis": "reported_compiler_duration",
+      "n_observed": 0,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": null,
+      "descriptive_p99": null,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "no_samples",
+        "fewer_than_100_valid_exact_load_known_samples"
+      ],
+      "attempts": []
+    },
+    {
+      "phase": "publish",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 9,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 20912.672996520996,
+      "descriptive_p99": 61903.56206893921,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt2",
+        "attempt3",
+        "attempt5",
+        "attempt6"
+      ]
+    },
+    {
+      "phase": "start",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 8,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 102648.04100990295,
+      "descriptive_p99": 309347.50604629517,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt2",
+        "attempt3",
+        "attempt5",
+        "attempt6"
+      ]
+    },
+    {
+      "phase": "stop",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 10,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 6786.14354099409,
+      "descriptive_p99": 170692.7630420032,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt2",
+        "attempt3",
+        "attempt4",
+        "attempt5",
+        "attempt6"
+      ]
+    },
+    {
+      "phase": "close",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "no_ingestion_producer",
+      "n_observed": 0,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": null,
+      "descriptive_p99": null,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "no_close_samples"
+      ],
+      "attempts": []
+    },
+    {
+      "phase": "relay_rtt",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": true,
+      "exactness_basis": "carrier_probe_self_marked_exact",
+      "n_observed": 0,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": null,
+      "descriptive_p99": null,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "no_carrier_rtt_samples",
+        "fewer_than_100_valid_exact_load_known_samples"
+      ],
+      "attempts": []
+    },
+    {
+      "phase": "ttft",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 112,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 2428.773874999024,
+      "descriptive_p99": 3226.2150419992395,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt1",
+        "attempt2",
+        "attempt3",
+        "attempt4",
+        "attempt5",
+        "attempt6",
+        "attempt7"
+      ]
+    },
+    {
+      "phase": "decode",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "tokens/s",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 112,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 14.752438024068772,
+      "descriptive_p99": 19.750419466651465,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt1",
+        "attempt2",
+        "attempt3",
+        "attempt4",
+        "attempt5",
+        "attempt6",
+        "attempt7"
+      ]
+    },
+    {
+      "phase": "chat_total",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "client_observed_elapsed",
+      "n_observed": 112,
+      "n_failed": 3,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 6628.168333001668,
+      "descriptive_p99": 8762.495957998908,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "client_observed_elapsed_not_event_level"
+      ],
+      "attempts": [
+        "attempt1",
+        "attempt2",
+        "attempt3",
+        "attempt4",
+        "attempt5",
+        "attempt6",
+        "attempt7"
+      ]
+    },
+    {
+      "phase": "rollover",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "no_ingestion_producer",
+      "n_observed": 0,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": null,
+      "descriptive_p99": null,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "no_ingestion_producer"
+      ],
+      "attempts": []
+    },
+    {
+      "phase": "restart",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "no_ingestion_producer",
+      "n_observed": 0,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": null,
+      "descriptive_p99": null,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "no_ingestion_producer"
+      ],
+      "attempts": []
+    },
+    {
+      "phase": "quit",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": true,
+      "exact": false,
+      "exactness_basis": "polled_boundary",
+      "n_observed": 1,
+      "n_failed": 0,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 0,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 62060.0,
+      "descriptive_p99": 62060.0,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "polled_boundary_not_exact"
+      ],
+      "attempts": [
+        "attempt2"
+      ]
+    },
+    {
+      "phase": "relay_https_probe",
+      "variant": null,
+      "model": "a9-route",
+      "build": "f4e366e9",
+      "device": {
+        "laptop": {
+          "hardware": "Mac16,1",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (laptop M4); NOT recorded in events.jsonl",
+          "macos": "15.6.1"
+        },
+        "owner": {
+          "hardware": "Mac16,8",
+          "hardware_provenance": "declared_only",
+          "hardware_basis": "evidence/device-calib/README.md on v02/device-calib 5e0fdd7 (owner M4 Pro); NOT recorded in events.jsonl",
+          "macos": "26.5.1"
+        }
+      },
+      "unit": "ms",
+      "required_phase": false,
+      "exact": true,
+      "exactness_basis": "public_https_elapsed",
+      "n_observed": 109,
+      "n_failed": 1,
+      "n_load_unknown": 0,
+      "n_valid_exact_load_known": 109,
+      "p50": null,
+      "p99": null,
+      "descriptive_p50": 82.54520899936324,
+      "descriptive_p99": 228.2657920004567,
+      "status": "BLOCKED",
+      "blocked_reasons": [
+        "not_a_required_phase"
+      ],
+      "attempts": [
+        "attempt1",
+        "attempt2",
+        "attempt3",
+        "attempt4",
+        "attempt5",
+        "attempt6",
+        "attempt7"
+      ]
+    }
+  ]
+}

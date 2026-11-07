@@ -1,0 +1,7645 @@
+[
+  {
+    "canonical_utf8": "{\"api\":{\"inference_submit\":\"/api/v1/inference\",\"observatory_events\":\"/api/v1/observatory/events\",\"observatory_snapshot\":\"/api/v1/observatory/snapshot\",\"product_events\":\"/api/v1/product/events\",\"product_export\":\"/api/v1/product/export\",\"product_snapshot\":\"/api/v1/product/snapshot\",\"qualification_current\":\"/api/v1/qualification/current\",\"recovery_status\":\"/api/v1/recovery/status\",\"swarm_invites\":\"/api/v1/swarm/invites\",\"swarm_join\":\"/api/v1/swarm/join\",\"swarm_leave\":\"/api/v1/swarm/leave\",\"swarm_status\":\"/api/v1/swarm/status\"},\"limits\":{\"max_new_tokens\":4096,\"max_prompt_utf8_bytes\":131072},\"protocol\":\"mycelium.product_ui.bootstrap.v1\",\"qualification_authority\":\"mycelium_qualification.qualifier:RouteQualificationV1\",\"session\":{\"csrf_header\":\"X-Mycelium-CSRF\",\"csrf_token\":\"synthetic-fixture-csrf-token\",\"expires_at_unix_ms\":1900000000000},\"source_mode\":\"fixture\"}",
+    "cases": [
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": {
+          "api": {
+            "inference_submit": "/api/v1/inference",
+            "observatory_events": "/api/v1/observatory/events",
+            "observatory_snapshot": "/api/v1/observatory/snapshot",
+            "product_events": "/api/v1/product/events",
+            "product_export": "/api/v1/product/export",
+            "product_snapshot": "/api/v1/product/snapshot",
+            "qualification_current": "/api/v1/qualification/current",
+            "recovery_status": "/api/v1/recovery/status",
+            "swarm_invites": "/api/v1/swarm/invites",
+            "swarm_join": "/api/v1/swarm/join",
+            "swarm_leave": "/api/v1/swarm/leave",
+            "swarm_status": "/api/v1/swarm/status"
+          },
+          "limits": {
+            "max_new_tokens": 4096,
+            "max_prompt_utf8_bytes": 131072
+          },
+          "protocol": "mycelium.product_ui.bootstrap.v1",
+          "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
+          "session": {
+            "csrf_header": "X-Mycelium-CSRF",
+            "csrf_token": "synthetic-fixture-csrf-token",
+            "expires_at_unix_ms": 1900000000000
+          },
+          "source_mode": "fixture",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": {
+          "inference_submit": "/api/v1/inference",
+          "observatory_events": "/api/v1/observatory/events",
+          "observatory_snapshot": "/api/v1/observatory/snapshot",
+          "product_events": "/api/v1/product/events",
+          "product_export": "/api/v1/product/export",
+          "product_snapshot": "/api/v1/product/snapshot",
+          "qualification_current": "/api/v1/qualification/current",
+          "recovery_status": "/api/v1/recovery/status",
+          "swarm_invites": "/api/v1/swarm/invites",
+          "swarm_join": "/api/v1/swarm/join",
+          "swarm_leave": "/api/v1/swarm/leave",
+          "swarm_status": "/api/v1/swarm/status",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "inference_submit"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "observatory_events"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_events"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_export"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_snapshot"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "qualification_current"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "recovery_status"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_invites"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_join"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_leave"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_status"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": {
+          "max_new_tokens": 4096,
+          "max_prompt_utf8_bytes": 131072,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "protocol"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "qualification_authority"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": {
+          "csrf_header": "X-Mycelium-CSRF",
+          "csrf_token": "synthetic-fixture-csrf-token",
+          "expires_at_unix_ms": 1900000000000,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "csrf_header"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "source_mode"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 0.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740991.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740992.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 4096.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 131072.0
+      }
+    ],
+    "name": "registry",
+    "value": {
+      "api": {
+        "inference_submit": "/api/v1/inference",
+        "observatory_events": "/api/v1/observatory/events",
+        "observatory_snapshot": "/api/v1/observatory/snapshot",
+        "product_events": "/api/v1/product/events",
+        "product_export": "/api/v1/product/export",
+        "product_snapshot": "/api/v1/product/snapshot",
+        "qualification_current": "/api/v1/qualification/current",
+        "recovery_status": "/api/v1/recovery/status",
+        "swarm_invites": "/api/v1/swarm/invites",
+        "swarm_join": "/api/v1/swarm/join",
+        "swarm_leave": "/api/v1/swarm/leave",
+        "swarm_status": "/api/v1/swarm/status"
+      },
+      "limits": {
+        "max_new_tokens": 4096,
+        "max_prompt_utf8_bytes": 131072
+      },
+      "protocol": "mycelium.product_ui.bootstrap.v1",
+      "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
+      "session": {
+        "csrf_header": "X-Mycelium-CSRF",
+        "csrf_token": "synthetic-fixture-csrf-token",
+        "expires_at_unix_ms": 1900000000000
+      },
+      "source_mode": "fixture"
+    }
+  },
+  {
+    "canonical_utf8": "{\"api\":{\"inference_submit\":\"/api/v1/inference\",\"observatory_events\":\"/api/v1/observatory/events\",\"observatory_snapshot\":\"/api/v1/observatory/snapshot\",\"product_events\":\"/api/v1/product/events\",\"product_export\":\"/api/v1/product/export\",\"product_snapshot\":\"/api/v1/product/snapshot\",\"qualification_current\":\"/api/v1/qualification/current\",\"recovery_status\":\"/api/v1/recovery/status\",\"swarm_invites\":\"/api/v1/swarm/invites\",\"swarm_join\":\"/api/v1/swarm/join\",\"swarm_leave\":\"/api/v1/swarm/leave\",\"swarm_status\":\"/api/v1/swarm/status\"},\"features\":{\"speculation_preference\":true},\"limits\":{\"max_new_tokens\":4096,\"max_prompt_utf8_bytes\":131072},\"protocol\":\"mycelium.product_ui.bootstrap.v1\",\"qualification_authority\":\"mycelium_qualification.qualifier:RouteQualificationV1\",\"session\":{\"csrf_header\":\"X-Mycelium-CSRF\",\"csrf_token\":\"synthetic-fixture-csrf-token\",\"expires_at_unix_ms\":1900000000000},\"source_mode\":\"fixture\"}",
+    "cases": [
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "path": [],
+        "replacement": {
+          "api": {
+            "inference_submit": "/api/v1/inference",
+            "observatory_events": "/api/v1/observatory/events",
+            "observatory_snapshot": "/api/v1/observatory/snapshot",
+            "product_events": "/api/v1/product/events",
+            "product_export": "/api/v1/product/export",
+            "product_snapshot": "/api/v1/product/snapshot",
+            "qualification_current": "/api/v1/qualification/current",
+            "recovery_status": "/api/v1/recovery/status",
+            "swarm_invites": "/api/v1/swarm/invites",
+            "swarm_join": "/api/v1/swarm/join",
+            "swarm_leave": "/api/v1/swarm/leave",
+            "swarm_status": "/api/v1/swarm/status"
+          },
+          "features": {
+            "speculation_preference": true
+          },
+          "limits": {
+            "max_new_tokens": 4096,
+            "max_prompt_utf8_bytes": 131072
+          },
+          "protocol": "mycelium.product_ui.bootstrap.v1",
+          "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
+          "session": {
+            "csrf_header": "X-Mycelium-CSRF",
+            "csrf_token": "synthetic-fixture-csrf-token",
+            "expires_at_unix_ms": 1900000000000
+          },
+          "source_mode": "fixture",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api"
+        ],
+        "replacement": {
+          "inference_submit": "/api/v1/inference",
+          "observatory_events": "/api/v1/observatory/events",
+          "observatory_snapshot": "/api/v1/observatory/snapshot",
+          "product_events": "/api/v1/product/events",
+          "product_export": "/api/v1/product/export",
+          "product_snapshot": "/api/v1/product/snapshot",
+          "qualification_current": "/api/v1/qualification/current",
+          "recovery_status": "/api/v1/recovery/status",
+          "swarm_invites": "/api/v1/swarm/invites",
+          "swarm_join": "/api/v1/swarm/join",
+          "swarm_leave": "/api/v1/swarm/leave",
+          "swarm_status": "/api/v1/swarm/status",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "inference_submit"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "inference_submit"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_events"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "observatory_events"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "observatory_snapshot"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_events"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_events"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_export"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_export"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "product_snapshot"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "product_snapshot"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "qualification_current"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "qualification_current"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "recovery_status"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "recovery_status"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_invites"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_invites"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_join"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_join"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_leave"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_leave"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "api",
+          "swarm_status"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "api",
+          "swarm_status"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits"
+        ],
+        "replacement": {
+          "max_new_tokens": 4096,
+          "max_prompt_utf8_bytes": 131072,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "protocol"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "protocol"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "qualification_authority"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "qualification_authority"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session"
+        ],
+        "replacement": {
+          "csrf_header": "X-Mycelium-CSRF",
+          "csrf_token": "synthetic-fixture-csrf-token",
+          "expires_at_unix_ms": 1900000000000,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_header"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "csrf_header"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "source_mode"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "source_mode"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "delete": true,
+        "path": [
+          "features"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features"
+        ],
+        "replacement": {
+          "speculation_preference": true,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "path": [
+          "features",
+          "speculation_preference"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "path": [
+          "features",
+          "speculation_preference"
+        ]
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "csrf_token"
+        ],
+        "replacement": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 0.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740991.0
+      },
+      {
+        "accepted": false,
+        "path": [
+          "session",
+          "expires_at_unix_ms"
+        ],
+        "replacement": 9007199254740992.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "limits",
+          "max_new_tokens"
+        ],
+        "replacement": 4096.0
+      },
+      {
+        "accepted": true,
+        "path": [
+          "limits",
+          "max_prompt_utf8_bytes"
+        ],
+        "replacement": 131072.0
+      }
+    ],
+    "name": "optional-features",
+    "value": {
+      "api": {
+        "inference_submit": "/api/v1/inference",
+        "observatory_events": "/api/v1/observatory/events",
+        "observatory_snapshot": "/api/v1/observatory/snapshot",
+        "product_events": "/api/v1/product/events",
+        "product_export": "/api/v1/product/export",
+        "product_snapshot": "/api/v1/product/snapshot",
+        "qualification_current": "/api/v1/qualification/current",
+        "recovery_status": "/api/v1/recovery/status",
+        "swarm_invites": "/api/v1/swarm/invites",
+        "swarm_join": "/api/v1/swarm/join",
+        "swarm_leave": "/api/v1/swarm/leave",
+        "swarm_status": "/api/v1/swarm/status"
+      },
+      "features": {
+        "speculation_preference": true
+      },
+      "limits": {
+        "max_new_tokens": 4096,
+        "max_prompt_utf8_bytes": 131072
+      },
+      "protocol": "mycelium.product_ui.bootstrap.v1",
+      "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
+      "session": {
+        "csrf_header": "X-Mycelium-CSRF",
+        "csrf_token": "synthetic-fixture-csrf-token",
+        "expires_at_unix_ms": 1900000000000
+      },
+      "source_mode": "fixture"
+    }
+  }
+]

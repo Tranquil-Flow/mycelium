@@ -1,0 +1,1002 @@
+{
+ "cases": {
+  "assistant-after-last-user": {
+   "messages": [
+    {
+     "content": "Hi",
+     "role": "user"
+    },
+    {
+     "content": "Hello there.\n",
+     "role": "assistant"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     12675,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271,
+     9419,
+     1017,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nHello there.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "7106002d9c043ebe6e8eecefde4a3c500b3d33aa615926521f4b8958a0cacad6"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     12675,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271,
+     9419,
+     1017,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\nHello there.<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "14528ee5f72ce096e2b9a231a86828ce326950ee08323d4a696ccdb2f4f86b3a"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\nHello there.\n<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    12675,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    9419,
+    1017,
+    13,
+    198,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "empty-system": {
+   "messages": [
+    {
+     "content": "",
+     "role": "system"
+    },
+    {
+     "content": "x",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     87,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>system\n<|im_end|>\n<|im_start|>user\nx<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "5d0c114033bba5a0b92fd3bd833c2c3b0836d40ff7428a5823eec8618985f683"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     87,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>system\n<|im_end|>\n<|im_start|>user\nx<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "70fd6afd9d06dfc1c6f5c418d143740bf3233c5de1097d35dea45b6bcca1a7ea"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nx<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    87,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "multi-turn": {
+   "messages": [
+    {
+     "content": "Hi",
+     "role": "user"
+    },
+    {
+     "content": "Hello! How can I help?",
+     "role": "assistant"
+    },
+    {
+     "content": "Name a prime.",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     12675,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     9419,
+     0,
+     2500,
+     628,
+     353,
+     1438,
+     30,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     657,
+     264,
+     9944,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\nHello! How can I help?<|im_end|>\n<|im_start|>user\nName a prime.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "2f1d9e47c55c48a652083c89d461634e6e0b7615d4d18e52bae8308c382d93d5"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     12675,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     9419,
+     0,
+     2500,
+     628,
+     353,
+     1438,
+     30,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     657,
+     264,
+     9944,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\nHello! How can I help?<|im_end|>\n<|im_start|>user\nName a prime.<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "26b78077a3e6556bef2a06de636570d20e83d885e9d6f066cc97b285a90aeca5"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\nHello! How can I help?<|im_end|>\n<|im_start|>user\nName a prime.<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    12675,
+    248046,
+    198,
+    248045,
+    74455,
+    198,
+    9419,
+    0,
+    2500,
+    628,
+    353,
+    1438,
+    30,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    657,
+    264,
+    9944,
+    13,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "python-strip-whitespace": {
+   "messages": [
+    {
+     "content": "\u001c\u001f sys   ",
+     "role": "system"
+    },
+    {
+     "content": "\u001d　 q \u001e ",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     7545,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     80,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>system\nsys<|im_end|>\n<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "3f9a3d99015f87b353c77e35db6cd1b4ac8748abb42533a1e918cfbd3c2a6a3d"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     7545,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     80,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>system\nsys<|im_end|>\n<|im_start|>user\nq<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "568f32ff02ab673728796cb7e9d9e8941a8419616dcf6a8522de9f186900a381"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>system\n\u001c\u001f sys   <|im_end|>\n<|im_start|>user\n\u001d　 q \u001e <|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    8678,
+    198,
+    216,
+    219,
+    5530,
+    618,
+    225,
+    3966,
+    126,
+    227,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    217,
+    21742,
+    2715,
+    220,
+    218,
+    373,
+    101,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "qw2-prompt": {
+   "messages": [
+    {
+     "content": "Write one sentence about the sea.",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     7734,
+     799,
+     11316,
+     883,
+     279,
+     9117,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>user\nWrite one sentence about the sea.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "6d27fac314ae95456b168d73200be0b6cb52dd40bedec0c78f92643104b388e8"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     7734,
+     799,
+     11316,
+     883,
+     279,
+     9117,
+     13,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>user\nWrite one sentence about the sea.<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "090181708d2c6d96957c59f9e8e5c236b56de3c7ee496a0dcb93a43ce1edadcf"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nWrite one sentence about the sea.<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    7734,
+    799,
+    11316,
+    883,
+    279,
+    9117,
+    13,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "system-user": {
+   "messages": [
+    {
+     "content": "You are a concise assistant.",
+     "role": "system"
+    },
+    {
+     "content": "What is 2+2?",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     2523,
+     513,
+     264,
+     61446,
+     17313,
+     13,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     3710,
+     369,
+     220,
+     17,
+     10,
+     17,
+     30,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>system\nYou are a concise assistant.<|im_end|>\n<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "53e1d6c6f3922afcf2c980da6e878ec8e536994fa47ac2ff63f0526f6f40ca21"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     2523,
+     513,
+     264,
+     61446,
+     17313,
+     13,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     3710,
+     369,
+     220,
+     17,
+     10,
+     17,
+     30,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>system\nYou are a concise assistant.<|im_end|>\n<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "9662c7f59d5b779f6c496be989744867ccc353ee9d8edd8f1d283a66bc0339de"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>system\nYou are a concise assistant.<|im_end|>\n<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    264,
+    61446,
+    17313,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    3710,
+    369,
+    220,
+    17,
+    10,
+    17,
+    30,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "trim-and-multiline": {
+   "messages": [
+    {
+     "content": "  padded system  \n",
+     "role": "system"
+    },
+    {
+     "content": "\n  Line one\nLine two  \n\n",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     79,
+     16336,
+     1785,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     2380,
+     799,
+     198,
+     2380,
+     1330,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>system\npadded system<|im_end|>\n<|im_start|>user\nLine one\nLine two<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "22d5665ae47077e68306e725ac3cd26dc71ef7cdce4a930c18343d424de24bdd"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     8678,
+     198,
+     79,
+     16336,
+     1785,
+     248046,
+     198,
+     248045,
+     846,
+     198,
+     2380,
+     799,
+     198,
+     2380,
+     1330,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>system\npadded system<|im_end|>\n<|im_start|>user\nLine one\nLine two<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "243a17a1ded0d5e17eaca67c3917635c0c857c35d97eef7b792159e45a98a383"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>system\n  padded system  \n<|im_end|>\n<|im_start|>user\n\n  Line one\nLine two  \n\n<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    8678,
+    198,
+    220,
+    42417,
+    1785,
+    2228,
+    248046,
+    198,
+    248045,
+    846,
+    271,
+    220,
+    6863,
+    799,
+    198,
+    2380,
+    1330,
+    18050,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "unicode": {
+   "messages": [
+    {
+     "content": "Grüße, 世界! 😀 naïve café",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     6262,
+     2314,
+     22723,
+     11,
+     220,
+     96748,
+     0,
+     87209,
+     91603,
+     571,
+     50203,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>user\nGrüße, 世界! 😀 naïve café<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "1323cce9527ded70ac6acfa1ef45b42d84710bb5b88396fea69524de3751ef8e"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     6262,
+     2314,
+     22723,
+     11,
+     220,
+     96748,
+     0,
+     87209,
+     91603,
+     571,
+     50203,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>user\nGrüße, 世界! 😀 naïve café<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "2b610ee711f7b1d679d9e8fdc8bc32f5e7ac5dcf8bcc24427baf6d0c45f1aa9c"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nGrüße, 世界! 😀 naïve café<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    6262,
+    2314,
+    22723,
+    11,
+    220,
+    96748,
+    0,
+    87209,
+    91603,
+    571,
+    50203,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  },
+  "user-only": {
+   "messages": [
+    {
+     "content": "Hello",
+     "role": "user"
+    }
+   ],
+   "no_thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     9419,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     271,
+     248069,
+     271
+    ],
+    "prompt": "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+    "prompt_utf8_sha256": "13071b0f0e23e97681f6f39247dbb715973302580660a81dbae994fe8064e7d3"
+   },
+   "thinking": {
+    "ids": [
+     248045,
+     846,
+     198,
+     9419,
+     248046,
+     198,
+     248045,
+     74455,
+     198,
+     248068,
+     198
+    ],
+    "prompt": "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n<think>\n",
+    "prompt_utf8_sha256": "bcff7d22d26a515874d02d760f5e74dfd8a8ce843e7ed891465246371b3c7821"
+   },
+   "v014_build_qwen_chat_prompt": "<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n",
+   "v014_ids": [
+    248045,
+    846,
+    198,
+    9419,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+   ]
+  }
+ },
+ "eos_token_ids": [
+  248046,
+  248044
+ ],
+ "files": {
+  "chat_template.jinja": {
+   "bytes": 7764,
+   "sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259"
+  },
+  "config.json": {
+   "bytes": 3686,
+   "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99"
+  },
+  "generation_config.json": {
+   "bytes": 202,
+   "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"
+  },
+  "merges.txt": {
+   "bytes": 3353259,
+   "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"
+  },
+  "tokenizer.json": {
+   "bytes": 12807982,
+   "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+  },
+  "tokenizer_config.json": {
+   "bytes": 16718,
+   "sha256": "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b"
+  },
+  "vocab.json": {
+   "bytes": 6722759,
+   "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"
+  }
+ },
+ "generator_sha256": "1ca0e11c743e19a71ba5d06f32509116758c8efa3e38d3321f538bb8067b3514",
+ "libs": {
+  "jinja2": "3.1.6",
+  "tokenizers": "0.22.2",
+  "transformers": "4.57.6"
+ },
+ "machine": "macOS-26.5.1-arm64-arm-64bit",
+ "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "plain": {
+  "": {
+   "ids": [],
+   "text": ""
+  },
+  " leading space": {
+   "ids": [
+    6187,
+    3433
+   ],
+   "text": " leading space"
+  },
+  "12345 6789": {
+   "ids": [
+    16,
+    17,
+    18,
+    19,
+    20,
+    220,
+    21,
+    22,
+    23,
+    24
+   ],
+   "text": "12345 6789"
+  },
+  "<think>\n</think>\n\n": {
+   "ids": [
+    248068,
+    198,
+    248069,
+    271
+   ],
+   "text": "<think>\n</think>\n\n"
+  },
+  "<|im_start|>user\nhi<|im_end|>\n": {
+   "ids": [
+    248045,
+    846,
+    198,
+    5834,
+    248046,
+    198
+   ],
+   "text": "<|im_start|>user\nhi<|im_end|>\n"
+  },
+  "Grüße 世界 😀": {
+   "ids": [
+    6262,
+    2314,
+    22723,
+    220,
+    96748,
+    87209
+   ],
+   "text": "Grüße 世界 😀"
+  },
+  "Hello": {
+   "ids": [
+    9419
+   ],
+   "text": "Hello"
+  },
+  "Hello, world!": {
+   "ids": [
+    9419,
+    11,
+    1814,
+    0
+   ],
+   "text": "Hello, world!"
+  },
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…": {
+   "ids": [
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    67089,
+    27528
+   ],
+   "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "it's we're they'll": {
+   "ids": [
+    275,
+    579,
+    567,
+    2224,
+    781,
+    3172
+   ],
+   "text": "it's we're they'll"
+  },
+  "tabs\tand\nnewlines\n\n": {
+   "ids": [
+    29975,
+    50711,
+    198,
+    902,
+    7718,
+    271
+   ],
+   "text": "tabs\tand\nnewlines\n\n"
+  }
+ },
+ "schema": "l8-qwen36-tokenizer-identity-v1",
+ "snapshot": "995ad96eacd98c81ed38be0c5b274b04031597b0",
+ "specials": {
+  "</think>": 248069,
+  "<think>": 248068,
+  "<|endoftext|>": 248044,
+  "<|im_end|>": 248046,
+  "<|im_start|>": 248045
+ },
+ "vocab_size_with_added": 248070
+}

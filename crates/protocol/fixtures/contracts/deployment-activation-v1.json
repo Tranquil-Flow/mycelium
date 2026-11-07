@@ -1,0 +1,22 @@
+{
+  "busy_candidate_id": "12345678-1234-5678-1234-567812345678",
+  "candidates": [
+    {
+      "candidate_id": "12345678-1234-5678-1234-567812345678",
+      "completed_steps": 3,
+      "deployment_id": "12345678-1234-5678-1234-567812345678",
+      "model_id": "Qwen/Qwen2.5-3B-Instruct",
+      "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "phase": "qualifying_route",
+      "plan_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "quantization": "int8-weight-only",
+      "reason_code": null,
+      "state": "activating",
+      "topology_size": 3,
+      "total_steps": 4
+    }
+  ],
+  "generation": 3,
+  "invalid_candidate_count": 0,
+  "protocol": "mycelium.deployment_activation.v1"
+}

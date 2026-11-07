@@ -1,0 +1,25 @@
+{
+  "budget_id": "m12-interactive-v1",
+  "execution_scope": "sequential_observed",
+  "maximum_frames_per_request_by_stage": {
+    "stage-a": 512,
+    "stage-b": 512
+  },
+  "maximum_peak_rss_bytes_by_member": {
+    "member-a": 20000000000,
+    "member-b": 20000000000
+  },
+  "minimum_output_tokens_per_second": 0.1,
+  "minimum_sample_size": 5,
+  "protocol": "mycelium.performance_budget.v1",
+  "queueing_budget_state": "deferred_to_m16",
+  "tpot_ms": {
+    "maximum_p50": 2000.0,
+    "maximum_p95": 4000.0
+  },
+  "ttft_ms": {
+    "maximum_p50": 5000.0,
+    "maximum_p95": 10000.0
+  },
+  "workload_label": "interactive_chat_v1"
+}

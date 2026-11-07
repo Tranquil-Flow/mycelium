@@ -1,0 +1,549 @@
+{
+  "id": "FX-L1b-r17-misc",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "d27050efda51f59fec385cb0029d254980cd7bb448f5f3e9d3cf7b9e09ae7299",
+  "rows": [
+    {
+      "key": "mycelium_live/a4_contracts.py:172:67:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:197:51:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:202:67:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:264:58:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:265:57:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:267:61:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:269:62:validator-keyword:minimum",
+      "operand": 1,
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/capability_report.py:379:50:validator-keyword:maximum",
+      "operand": 128,
+      "helper": "nullable_text",
+      "kwargs": {
+        "maximum": 128
+      },
+      "cases": [
+        [
+          "empty",
+          "str:len=0",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "floor",
+          "str:len=1",
+          "accepted",
+          "str:len=1"
+        ],
+        [
+          "ceiling",
+          "str:len=128",
+          "accepted",
+          "str:len=128"
+        ],
+        [
+          "above",
+          "str:len=129",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "unicode",
+          "str:len=128",
+          "accepted",
+          "str:len=128"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "trim",
+          "str:len=2",
+          "refused",
+          "str:len=11"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:311:20:validator-keyword:maximum",
+      "operand": 64,
+      "helper": "nullable_text",
+      "kwargs": {
+        "maximum": 64
+      },
+      "cases": [
+        [
+          "empty",
+          "str:len=0",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "floor",
+          "str:len=1",
+          "accepted",
+          "str:len=1"
+        ],
+        [
+          "ceiling",
+          "str:len=64",
+          "accepted",
+          "str:len=64"
+        ],
+        [
+          "above",
+          "str:len=65",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "unicode",
+          "str:len=64",
+          "accepted",
+          "str:len=64"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ],
+        [
+          "trim",
+          "str:len=2",
+          "refused",
+          "str:len=11"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:322:24:validator-keyword:maximum",
+      "operand": 4,
+      "helper": "bounded_list",
+      "kwargs": {
+        "maximum": 4
+      },
+      "cases": [
+        [
+          "floor",
+          "list:len=0",
+          "accepted",
+          "list:len=0"
+        ],
+        [
+          "ceiling",
+          "list:len=4",
+          "accepted",
+          "list:len=4"
+        ],
+        [
+          "above",
+          "list:len=5",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "tuple",
+          "tuple:len=4",
+          "accepted",
+          "list:len=4"
+        ],
+        [
+          "string",
+          "str:len=1",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "str:len=11"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/peer_profile.py:329:77:validator-keyword:maximum",
+      "operand": 8,
+      "helper": "bounded_list",
+      "kwargs": {
+        "maximum": 8
+      },
+      "cases": [
+        [
+          "floor",
+          "list:len=0",
+          "accepted",
+          "list:len=0"
+        ],
+        [
+          "ceiling",
+          "list:len=8",
+          "accepted",
+          "list:len=8"
+        ],
+        [
+          "above",
+          "list:len=9",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "tuple",
+          "tuple:len=8",
+          "accepted",
+          "list:len=8"
+        ],
+        [
+          "string",
+          "str:len=1",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "str:len=11"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "str:len=11"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,520 @@
+{
+  "cases": [
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-2",
+        "membership_generation": 2,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        [
+          "enqueue",
+          64
+        ],
+        [
+          "result",
+          65
+        ]
+      ],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {
+          "hello-1": {
+            "binding": {
+              "deployment_id": "deployment",
+              "member_incarnation": "inc-2",
+              "membership_generation": 2,
+              "run_id": "run",
+              "target_endpoint_id": "member-endpoint",
+              "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "target_node_id": "member"
+            },
+            "digest": "sha256:d9feb05f908fdc5b97b35aa0fda9614a72883b62e2b4977f69eaf296607f141b",
+            "enqueue_confirmed": true,
+            "enqueue_request": {
+              "envelope": {
+                "protocol": "mycelium.managed_control.signed_envelope.v1",
+                "signature": {
+                  "algorithm": "ed25519",
+                  "signature": "RwRlVcdalT5AqdklqiY5tr1vXT/DbaDQgcgkoDAkhvU1uQYmesE5mX+pcUXBI8bmvyFvwEa/H2hNw8RUmHEWAQ==",
+                  "signed_statement_digest": "sha256:4ce9898f1410aae7bf0f796f97d7f1242a29c222d374b4db1219fc156676bf9e",
+                  "signer_endpoint_id": "owner-endpoint",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                },
+                "statement": {
+                  "deployment_id": "deployment",
+                  "expires_at": 1030.0,
+                  "issued_at": 1000.0,
+                  "member_incarnation": "inc-2",
+                  "membership_generation": 2,
+                  "native_command": {
+                    "command": "hello",
+                    "command_id": "hello-1",
+                    "deployment_id": "deployment",
+                    "payload": {},
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "run_id": "run"
+                  },
+                  "nonce": "00000000000000000000000000000036",
+                  "owner_node_id": "owner",
+                  "protocol": "mycelium.managed_control.owner_command.v1",
+                  "request_id": "00000000000000000000000000000037",
+                  "run_id": "run",
+                  "sequence": 64,
+                  "swarm_id": "swarm",
+                  "target_endpoint_id": "member-endpoint",
+                  "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_node_id": "member"
+                },
+                "verification_key": {
+                  "algorithm": "ed25519",
+                  "encoding": "base64",
+                  "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                }
+              },
+              "operation": "enqueue"
+            }
+          }
+        },
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 64,
+        "sequence_ceiling": 128,
+        "write_intents": 1
+      },
+      "name": "initial_live",
+      "outcome": {
+        "ok": {
+          "command_id": "hello-1",
+          "ok": true
+        }
+      }
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-1",
+        "membership_generation": 1,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {},
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 0,
+        "sequence_ceiling": 64,
+        "write_intents": 0
+      },
+      "name": "initial_revoked",
+      "outcome": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-2",
+        "membership_generation": 2,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        [
+          "enqueue",
+          64
+        ],
+        [
+          "result",
+          65
+        ]
+      ],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {
+          "hello-1": {
+            "binding": {
+              "deployment_id": "deployment",
+              "member_incarnation": "inc-1",
+              "membership_generation": 1,
+              "run_id": "run",
+              "target_endpoint_id": "member-endpoint",
+              "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "target_node_id": "member"
+            },
+            "digest": "sha256:d9feb05f908fdc5b97b35aa0fda9614a72883b62e2b4977f69eaf296607f141b",
+            "enqueue_confirmed": true,
+            "enqueue_request": {
+              "envelope": {
+                "protocol": "mycelium.managed_control.signed_envelope.v1",
+                "signature": {
+                  "algorithm": "ed25519",
+                  "signature": "cKAKjl0NJlPCR1M0ZaOr1u7NPXOWn2KRlFInX8CaMSs7lQgnbww3VnkZnGMnQJuCdtZtymwCBe4u2nziW85iDg==",
+                  "signed_statement_digest": "sha256:ff0f7e1757444f1094c20fd478e9ff6c0bf9ffaf43a73096cdc6d135ce4a0267",
+                  "signer_endpoint_id": "owner-endpoint",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                },
+                "statement": {
+                  "deployment_id": "deployment",
+                  "expires_at": 1030.0,
+                  "issued_at": 1000.0,
+                  "member_incarnation": "inc-1",
+                  "membership_generation": 1,
+                  "native_command": {
+                    "command": "hello",
+                    "command_id": "hello-1",
+                    "deployment_id": "deployment",
+                    "payload": {},
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "run_id": "run"
+                  },
+                  "nonce": "0000000000000000000000000000003a",
+                  "owner_node_id": "owner",
+                  "protocol": "mycelium.managed_control.owner_command.v1",
+                  "request_id": "0000000000000000000000000000003b",
+                  "run_id": "run",
+                  "sequence": 64,
+                  "swarm_id": "swarm",
+                  "target_endpoint_id": "member-endpoint",
+                  "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_node_id": "member"
+                },
+                "verification_key": {
+                  "algorithm": "ed25519",
+                  "encoding": "base64",
+                  "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                }
+              },
+              "operation": "enqueue"
+            }
+          }
+        },
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 64,
+        "sequence_ceiling": 128,
+        "write_intents": 1
+      },
+      "name": "before_result_live",
+      "outcome": {
+        "ok": {
+          "command_id": "hello-1",
+          "ok": true
+        }
+      }
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-1",
+        "membership_generation": 1,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        [
+          "enqueue",
+          64
+        ]
+      ],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {
+          "hello-1": {
+            "binding": {
+              "deployment_id": "deployment",
+              "member_incarnation": "inc-1",
+              "membership_generation": 1,
+              "run_id": "run",
+              "target_endpoint_id": "member-endpoint",
+              "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "target_node_id": "member"
+            },
+            "digest": "sha256:d9feb05f908fdc5b97b35aa0fda9614a72883b62e2b4977f69eaf296607f141b",
+            "enqueue_confirmed": true,
+            "enqueue_request": {
+              "envelope": {
+                "protocol": "mycelium.managed_control.signed_envelope.v1",
+                "signature": {
+                  "algorithm": "ed25519",
+                  "signature": "eZjbRf0Ebvw48k1QCcHzHABVOPyrb7cuyjPWEkFnt5KYUM0SH2wSWNIm63+yTFpVl6iohpbNbWFgc5UHOl6xAw==",
+                  "signed_statement_digest": "sha256:596fd54a98df3d7bdd1c5bec9ced8860291bdadd861e13be4c8d22d655ed7fb4",
+                  "signer_endpoint_id": "owner-endpoint",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                },
+                "statement": {
+                  "deployment_id": "deployment",
+                  "expires_at": 1030.0,
+                  "issued_at": 1000.0,
+                  "member_incarnation": "inc-1",
+                  "membership_generation": 1,
+                  "native_command": {
+                    "command": "hello",
+                    "command_id": "hello-1",
+                    "deployment_id": "deployment",
+                    "payload": {},
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "run_id": "run"
+                  },
+                  "nonce": "0000000000000000000000000000003e",
+                  "owner_node_id": "owner",
+                  "protocol": "mycelium.managed_control.owner_command.v1",
+                  "request_id": "0000000000000000000000000000003f",
+                  "run_id": "run",
+                  "sequence": 64,
+                  "swarm_id": "swarm",
+                  "target_endpoint_id": "member-endpoint",
+                  "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_node_id": "member"
+                },
+                "verification_key": {
+                  "algorithm": "ed25519",
+                  "encoding": "base64",
+                  "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                }
+              },
+              "operation": "enqueue"
+            }
+          }
+        },
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 64,
+        "sequence_ceiling": 128,
+        "write_intents": 1
+      },
+      "name": "before_result_revoked",
+      "outcome": {
+        "error": "managed_control_member_stale"
+      }
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-2",
+        "membership_generation": 2,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        [
+          "enqueue",
+          64
+        ],
+        [
+          "result",
+          65
+        ]
+      ],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {
+          "hello-1": {
+            "binding": {
+              "deployment_id": "deployment",
+              "member_incarnation": "inc-1",
+              "membership_generation": 1,
+              "run_id": "run",
+              "target_endpoint_id": "member-endpoint",
+              "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "target_node_id": "member"
+            },
+            "digest": "sha256:d9feb05f908fdc5b97b35aa0fda9614a72883b62e2b4977f69eaf296607f141b",
+            "enqueue_confirmed": true,
+            "enqueue_request": {
+              "envelope": {
+                "protocol": "mycelium.managed_control.signed_envelope.v1",
+                "signature": {
+                  "algorithm": "ed25519",
+                  "signature": "YLGW3owG6TU8Fh4GyF7cuvK3SupscLikmUb3a6WT11zsPXcMtVA2MhnqAxacQo8vI2M4ZEpK9O9cawlpyWfmAA==",
+                  "signed_statement_digest": "sha256:93cae8b3f0f5294facbfdf28123fb02e6a9072b27f62b352cb04c03f7abe137a",
+                  "signer_endpoint_id": "owner-endpoint",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                },
+                "statement": {
+                  "deployment_id": "deployment",
+                  "expires_at": 1030.0,
+                  "issued_at": 1000.0,
+                  "member_incarnation": "inc-1",
+                  "membership_generation": 1,
+                  "native_command": {
+                    "command": "hello",
+                    "command_id": "hello-1",
+                    "deployment_id": "deployment",
+                    "payload": {},
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "run_id": "run"
+                  },
+                  "nonce": "00000000000000000000000000000040",
+                  "owner_node_id": "owner",
+                  "protocol": "mycelium.managed_control.owner_command.v1",
+                  "request_id": "00000000000000000000000000000041",
+                  "run_id": "run",
+                  "sequence": 64,
+                  "swarm_id": "swarm",
+                  "target_endpoint_id": "member-endpoint",
+                  "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_node_id": "member"
+                },
+                "verification_key": {
+                  "algorithm": "ed25519",
+                  "encoding": "base64",
+                  "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                }
+              },
+              "operation": "enqueue"
+            }
+          }
+        },
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 64,
+        "sequence_ceiling": 128,
+        "write_intents": 1
+      },
+      "name": "terminal_live",
+      "outcome": {
+        "ok": {
+          "command_id": "hello-1",
+          "ok": true
+        }
+      }
+    },
+    {
+      "binding": {
+        "deployment_id": "deployment",
+        "member_incarnation": "inc-1",
+        "membership_generation": 1,
+        "run_id": "run",
+        "target_endpoint_id": "member-endpoint",
+        "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target_node_id": "member"
+      },
+      "calls": [
+        [
+          "enqueue",
+          64
+        ],
+        [
+          "result",
+          65
+        ]
+      ],
+      "journal": {
+        "authority": {
+          "key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "owner_node_id": "owner",
+          "swarm_id": "swarm"
+        },
+        "commands": {
+          "hello-1": {
+            "binding": {
+              "deployment_id": "deployment",
+              "member_incarnation": "inc-1",
+              "membership_generation": 1,
+              "run_id": "run",
+              "target_endpoint_id": "member-endpoint",
+              "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "target_node_id": "member"
+            },
+            "digest": "sha256:d9feb05f908fdc5b97b35aa0fda9614a72883b62e2b4977f69eaf296607f141b",
+            "enqueue_confirmed": true,
+            "enqueue_request": {
+              "envelope": {
+                "protocol": "mycelium.managed_control.signed_envelope.v1",
+                "signature": {
+                  "algorithm": "ed25519",
+                  "signature": "7hYlDlx3s6j/kC3/sD6Nyp1bIReBm5APn03MQq1ELz7aULNoc8mWe3oIe50NEFIJlqhqwEFpOdpkKb+9w17+DQ==",
+                  "signed_statement_digest": "sha256:8c89d3647de07c5433c652c7ab2c9ef60ce6f19b982ef9a28d54758c2f4c7f69",
+                  "signer_endpoint_id": "owner-endpoint",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                },
+                "statement": {
+                  "deployment_id": "deployment",
+                  "expires_at": 1030.0,
+                  "issued_at": 1000.0,
+                  "member_incarnation": "inc-1",
+                  "membership_generation": 1,
+                  "native_command": {
+                    "command": "hello",
+                    "command_id": "hello-1",
+                    "deployment_id": "deployment",
+                    "payload": {},
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "run_id": "run"
+                  },
+                  "nonce": "00000000000000000000000000000044",
+                  "owner_node_id": "owner",
+                  "protocol": "mycelium.managed_control.owner_command.v1",
+                  "request_id": "00000000000000000000000000000045",
+                  "run_id": "run",
+                  "sequence": 64,
+                  "swarm_id": "swarm",
+                  "target_endpoint_id": "member-endpoint",
+                  "target_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "target_node_id": "member"
+                },
+                "verification_key": {
+                  "algorithm": "ed25519",
+                  "encoding": "base64",
+                  "verification_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+                  "verification_key_digest": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+                }
+              },
+              "operation": "enqueue"
+            }
+          }
+        },
+        "protocol": "mycelium.a13.owner_control_journal.v3",
+        "sequence": 64,
+        "sequence_ceiling": 128,
+        "write_intents": 1
+      },
+      "name": "terminal_revoked",
+      "outcome": {
+        "error": "managed_control_member_stale"
+      }
+    }
+  ],
+  "source_hashes": {
+    "authority.py": "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4",
+    "control_session.py": "aac49ba38c2b247ef4c1af80dd50f1bde997123545f9d8df8c55a916caccf613",
+    "durable_requests.py": "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09",
+    "managed_control.py": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+    "session_factory.py": "62c0e0c1c45a9061fb3970f055319da0357430ad63e1c8b845afdbda69048eae"
+  },
+  "source_pin": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

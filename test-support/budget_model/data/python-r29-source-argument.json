@@ -1,0 +1,83 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "historical_oracle": "ef9ae61de0222c78d83c8133f8f709619394bf51",
+  "path": "mycelium_a13_macos/managed_runtime.py",
+  "full_source_sha256": "a4cdfd23bbc39b0ceb9e14ff423f2cf38a593f32c6a743c8bec6bfea54d9df3c",
+  "full_blobs_byte_equal": true,
+  "stores": [
+    [
+      155,
+      8
+    ],
+    [
+      463,
+      20
+    ],
+    [
+      471,
+      20
+    ]
+  ],
+  "key": "mycelium_a13_macos/managed_runtime.py:463:93:manual-bound:outbound_retry_multiplier",
+  "kind": "manual-bound",
+  "symbol": "outbound_retry_multiplier",
+  "expression": "2",
+  "column": 93,
+  "line": 463,
+  "scope": "ManagedTargetRuntime._serve",
+  "source": "                    self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))",
+  "source_expression": "min(1.0, max(0.1, self._outbound_retry_backoff * 2))",
+  "sequence": [
+    {
+      "event": "init",
+      "seconds": 0.1,
+      "milliseconds": 100.0
+    },
+    {
+      "event": "retry",
+      "seconds": 0.2,
+      "milliseconds": 200.0
+    },
+    {
+      "event": "retry",
+      "seconds": 0.4,
+      "milliseconds": 400.0
+    },
+    {
+      "event": "retry",
+      "seconds": 0.8,
+      "milliseconds": 800.0
+    },
+    {
+      "event": "retry",
+      "seconds": 1.0,
+      "milliseconds": 1000.0
+    },
+    {
+      "event": "retry",
+      "seconds": 1.0,
+      "milliseconds": 1000.0
+    },
+    {
+      "event": "reset",
+      "seconds": 0.1,
+      "milliseconds": 100.0
+    },
+    {
+      "event": "retry",
+      "seconds": 0.2,
+      "milliseconds": 200.0
+    }
+  ],
+  "claim": "Exact original AST statements executed with builtin min/max and private namespace; not ManagedTargetRuntime/native/pump behavioral execution",
+  "lines": {
+    "155": "        self._outbound_retry_backoff=.1",
+    "461": "                delay=.05",
+    "462": "                if isinstance(step,dict) and step.get('state')=='outbound_retryable':",
+    "463": "                    self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))",
+    "464": "                    delay=self._outbound_retry_backoff",
+    "469": "                    self._stop.wait(delay)",
+    "471": "                    self._outbound_retry_backoff=.1",
+    "479": "                    self.pump.wait_for_wake(delay)"
+  }
+}

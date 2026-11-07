@@ -1,0 +1,1379 @@
+[
+  {
+    "accepted": true,
+    "name": "valid",
+    "output": {
+      "command_id": "command-1",
+      "deployment_id": "deployment-1",
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "member_incarnation": "incarnation-2",
+      "membership_generation": 2,
+      "protocol": "mycelium.managed_control.token_progress_cancelled.v1",
+      "receipt_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+      "receipt_sequence": 0,
+      "request_id": "request-1",
+      "run_id": "run-1",
+      "target_endpoint_id": "endpoint-entry",
+      "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+      "target_node_id": "node-entry"
+    },
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "cancelled",
+    "output": null,
+    "value": {
+      "cancelled": false,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_closed",
+    "exception": "ManagedControlError",
+    "name": "closed",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": true,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "statement/command_id",
+    "output": null,
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "other",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_claim_token_mismatch",
+    "exception": "ManagedControlError",
+    "name": "statement/claim_token",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "wrong",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_claim_stale",
+    "exception": "ManagedControlError",
+    "name": "claim/state",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "completed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "grant_digest",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "target_endpoint_id",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "other"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "statement/receipt/statement",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": []
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "statement/receipt/signature",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": [],
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "statement/receipt/statement/sequence",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": true,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "token_progress_subject_mismatch",
+    "exception": "ManagedControlError",
+    "name": "statement/receipt/signature/signed_statement_digest",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:target_node_id",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "other"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:target_endpoint_id",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "other",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:target_key_digest",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "other",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:membership_generation",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 3,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:member_incarnation",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "other",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:run_id",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "other",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": false,
+    "error": "managed_control_command_binding_mismatch",
+    "exception": "ManagedControlError",
+    "name": "binding:deployment_id",
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "other",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "not-receipt-acceptance:signature",
+    "output": {
+      "command_id": "command-1",
+      "deployment_id": "deployment-1",
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "member_incarnation": "incarnation-2",
+      "membership_generation": 2,
+      "protocol": "mycelium.managed_control.token_progress_cancelled.v1",
+      "receipt_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+      "receipt_sequence": 0,
+      "request_id": "request-1",
+      "run_id": "run-1",
+      "target_endpoint_id": "endpoint-entry",
+      "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+      "target_node_id": "node-entry"
+    },
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "bad",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "endpoint-entry",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  },
+  {
+    "accepted": true,
+    "name": "not-receipt-acceptance:signer_endpoint_id",
+    "output": {
+      "command_id": "command-1",
+      "deployment_id": "deployment-1",
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "member_incarnation": "incarnation-2",
+      "membership_generation": 2,
+      "protocol": "mycelium.managed_control.token_progress_cancelled.v1",
+      "receipt_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+      "receipt_sequence": 0,
+      "request_id": "request-1",
+      "run_id": "run-1",
+      "target_endpoint_id": "endpoint-entry",
+      "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+      "target_node_id": "node-entry"
+    },
+    "value": {
+      "cancelled": true,
+      "claim": {
+        "claim_token": "claim-1",
+        "deployment_id": "deployment-1",
+        "envelope_json": "{\"statement\": {\"native_command\": {\"command\": \"infer_start\", \"payload\": {\"token_grant\": {\"signature\": {\"algorithm\": \"ed25519\", \"signature\": \"3BNXOVrZneZj2Ba8XYvNrnpItcNg0+LNF17sUKv4EKpySoLy8uB44nrRfulL3CjaLHESexs7XEgQz86iMCMzDA==\", \"signed_statement_digest\": \"sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929\", \"signer_endpoint_id\": \"endpoint-owner\", \"verification_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\"}, \"statement\": {\"expires_at_unix_ms\": 1100000, \"max_new_tokens\": 4, \"protocol\": \"mycelium.token_path_grant.v1\", \"scope\": {\"control\": {\"absolute_deadline_ms\": 1100000, \"cancellation_generation\": 0, \"command_id\": \"command-1\", \"deployment_epoch\": 2, \"deployment_id\": \"deployment-1\", \"path_attempt\": 0, \"path_digest\": \"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"path_id\": \"path-1\", \"publisher_generation\": 3, \"qualification_digest\": \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"request_attempt\": 1, \"topology_generation\": 4}, \"entry_endpoint_id\": \"endpoint-entry\", \"entry_key_digest\": \"sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534\", \"entry_node_id\": \"node-entry\", \"model_digest\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"owner_endpoint_id\": \"endpoint-owner\", \"owner_key_digest\": \"sha256:10ba682c8ad13513971e8b56881aab8bd702bb807796eca81932c735a94d6e6d\", \"participants\": [{\"endpoint_id\": \"endpoint-entry\", \"generation\": 2, \"node_id\": \"node-entry\"}], \"request_digest\": \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_id\": \"request-1\", \"requester_id\": \"requester-1\", \"run_id\": \"run-1\"}, \"stop_token_ids\": [2]}}}}}}",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "run_id": "run-1",
+        "state": "claimed",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "closed": false,
+      "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+      "statement": {
+        "claim_token": "claim-1",
+        "command_id": "command-1",
+        "deployment_id": "deployment-1",
+        "member_incarnation": "incarnation-2",
+        "membership_generation": 2,
+        "receipt": {
+          "signature": {
+            "algorithm": "ed25519",
+            "signature": "NTWGhkUaY3c6D3wgnlyj64D9vGqeRqiWsTmJR0qr9gB7bj69kX3qG08BiEpGfmARB/HmElCisEEgXeUCYHK4BQ==",
+            "signed_statement_digest": "sha256:3c829c623129b7328ef955d559dcffb96802aef2b3d327af2377dc67bf40b0e1",
+            "signer_endpoint_id": "other",
+            "verification_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534"
+          },
+          "statement": {
+            "end_index": 2,
+            "error_code": null,
+            "grant_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "previous_receipt_digest": "sha256:9665514b9d23e8623cfcd2348bec408255477dae1304c8037bb72a588cbae929",
+            "protocol": "mycelium.token_path_receipt.v1",
+            "sequence": 0,
+            "stage_receipt_refs": [
+              {
+                "node_id": "node-entry",
+                "receipt_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            ],
+            "start_index": 0,
+            "status": "DECODING",
+            "token_ids": [
+              10,
+              11
+            ]
+          }
+        },
+        "request_id": "request-1",
+        "run_id": "run-1",
+        "target_endpoint_id": "endpoint-entry",
+        "target_key_digest": "sha256:b0066359d64f97eb279947feeb083a96343d5f5a0a2c9cf82842f6f4749ff534",
+        "target_node_id": "node-entry"
+      },
+      "target_endpoint_id": "endpoint-entry"
+    }
+  }
+]

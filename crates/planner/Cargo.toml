@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "planner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+budgets = { path = "../budgets" }
+protocol = { path = "../protocol" }
+node = { path = "../node" }
+
+
+stage-contract = { path = "../stage-contract" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
+sha1 = "=0.10.6"
+
+[dev-dependencies]
+api = { path = "../api" }
+artifacts = { path = "../artifacts" }
+budgets = { path = "../budgets", features = ["trace-reads"] }
+control = { path = "../control" }
+
+[lints]
+workspace = true

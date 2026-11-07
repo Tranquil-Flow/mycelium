@@ -1,0 +1,125 @@
+[
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 999,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 999,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": true,
+    "canonical_utf8": "{\"statement\":{\"authority_generation\":2,\"capacity_profiles_digest\":\"sha256:6cdf4dbe085e9695fe7771919a923419897eb13915913c386f9196e2ea8cd39d\",\"captured_at_unix_ms\":1000,\"deployment_epoch\":1,\"deployment_id\":\"12345678-1234-5678-1234-567812345678\",\"evidence_bundle_digest\":\"sha256:3eb094fdd637e59cb6aafee58dccca8796a4dab719e6550f7ec2887a289ab7a8\",\"kind\":\"mycelium.gossip.evidence_bundle_statement.v1\",\"signer_endpoint_id\":\"seed-fixture\",\"snapshot_generation\":10,\"swarm_id\":\"swarm-a\",\"valid_until_unix_ms\":6000}}",
+    "now": 1000,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence authority is not trusted",
+    "exception": "SignedEvidenceBundleError",
+    "now": 1000,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": true,
+    "canonical_utf8": "{\"statement\":{\"authority_generation\":2,\"capacity_profiles_digest\":\"sha256:6cdf4dbe085e9695fe7771919a923419897eb13915913c386f9196e2ea8cd39d\",\"captured_at_unix_ms\":1000,\"deployment_epoch\":1,\"deployment_id\":\"12345678-1234-5678-1234-567812345678\",\"evidence_bundle_digest\":\"sha256:3eb094fdd637e59cb6aafee58dccca8796a4dab719e6550f7ec2887a289ab7a8\",\"kind\":\"mycelium.gossip.evidence_bundle_statement.v1\",\"signer_endpoint_id\":\"seed-fixture\",\"snapshot_generation\":10,\"swarm_id\":\"swarm-a\",\"valid_until_unix_ms\":6000}}",
+    "now": 1001,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence authority is not trusted",
+    "exception": "SignedEvidenceBundleError",
+    "now": 1001,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": true,
+    "canonical_utf8": "{\"statement\":{\"authority_generation\":2,\"capacity_profiles_digest\":\"sha256:6cdf4dbe085e9695fe7771919a923419897eb13915913c386f9196e2ea8cd39d\",\"captured_at_unix_ms\":1000,\"deployment_epoch\":1,\"deployment_id\":\"12345678-1234-5678-1234-567812345678\",\"evidence_bundle_digest\":\"sha256:3eb094fdd637e59cb6aafee58dccca8796a4dab719e6550f7ec2887a289ab7a8\",\"kind\":\"mycelium.gossip.evidence_bundle_statement.v1\",\"signer_endpoint_id\":\"seed-fixture\",\"snapshot_generation\":10,\"swarm_id\":\"swarm-a\",\"valid_until_unix_ms\":6000}}",
+    "now": 5999,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence authority is not trusted",
+    "exception": "SignedEvidenceBundleError",
+    "now": 5999,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 6000,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 6000,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": true,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": true,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": 1.5,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": 1.5,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": -1,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "now_unix_ms must be an exact non-negative integer",
+    "exception": "SignedEvidenceBundleError",
+    "now": -1,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+    "trust": "sha256:6a3803d5f059902a1c6dafbc9ba4729212f7caac08634cc3ae76b27529f03827"
+  },
+  {
+    "accepted": false,
+    "error": "signed evidence bundle is not current",
+    "exception": "SignedEvidenceBundleError",
+    "now": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+    "trust": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  }
+]

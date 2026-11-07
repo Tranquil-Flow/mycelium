@@ -1,0 +1,51 @@
+{
+  "provenance": {
+    "oracle": "mycelium-iroh-sidecar RELEASE profile (opt-level 0) of f4e366e98a1f705dfaf182897044500d290dbd7f",
+    "binary_sha256": "c2dcdb1820371cb6fc881b7a2342819e52cc0326c00578d40b5272aef5a63672",
+    "probe": "L9-evidence/r14-relay-probe.rb",
+    "probe_sha256": "780875da664c70a87d8f4d3d6620e38d2b56a7ff7545dc2a2b7da47617d1a5b8",
+    "sandbox_profile": "(version 1)\n(allow default)\n(deny network-outbound (remote ip))\n(allow network-outbound (remote ip \"localhost:*\"))\n",
+    "method": "EXECUTED under sandbox-exec: --endpoint-secret-file fixed (0x44*32), bootstrap 0x4f*32, SIGINT after the ready line",
+    "source_window": "native/iroh_transport/src/ready_address.rs:45 READY_ADDRESS_WINDOW = Duration::from_secs(3) (used at sidecar.rs:609)"
+  },
+  "cases": [
+    {
+      "flags": [
+        "--force-relay"
+      ],
+      "exit": 0,
+      "ready_after_ms": 3046,
+      "events": [
+        "{\"event\":\"ready_address_incomplete\"}"
+      ],
+      "ready_alpn": "mycelium.iroh.sidecar.v1",
+      "id_matches": true,
+      "endpoint_id": "d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48",
+      "addr_kinds": [
+
+      ],
+      "addr_count": 0,
+      "any_loopback": false,
+      "socket_left_behind": false
+    },
+    {
+      "flags": [
+
+      ],
+      "exit": 0,
+      "ready_after_ms": 3049,
+      "events": [
+        "{\"event\":\"ready_address_incomplete\"}"
+      ],
+      "ready_alpn": "mycelium.iroh.sidecar.v1",
+      "id_matches": true,
+      "endpoint_id": "d759793bbc13a2819a827c76adb6fba8a49aee007f49f2d0992d99b825ad2c48",
+      "addr_kinds": [
+        "Ip"
+      ],
+      "addr_count": 2,
+      "any_loopback": false,
+      "socket_left_behind": false
+    }
+  ]
+}

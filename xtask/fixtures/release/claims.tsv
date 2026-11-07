@@ -1,0 +1,9 @@
+id	lane	clause	verifier	status	evidence	blocked_by	critical	weight
+CL-X-01	X	source is formatted and lint clean	fmt+lint gates	met	-	-	yes	1
+CL-X-02	X	artifact builds	build gate	met	-	-	yes	1
+CL-X-03	X	full tests pass on the candidate	tests gate	open	-	-	yes	3
+CL-X-04	X	stranger install on a device	device receipt	partial	-	-	yes	3
+CL-X-05	X	contract inventory green	inventory gate	open	-	-	yes	2
+CL-X-06	X	relocation receipt bound to the exe	device receipt	open	-	-	yes	1
+CL-X-07	X	nice to have	none	open	-	-	no	1
+CL-Y-01	Y	other lane critical claim	none	open	-	-	yes	1

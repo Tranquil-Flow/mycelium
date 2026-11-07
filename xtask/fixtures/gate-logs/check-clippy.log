@@ -1,0 +1,10 @@
+    Checking libsqlite3-sys v0.30.1
+    Checking ring v0.17.14
+    Checking rusqlite v0.32.1
+    Checking control-runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/control-runtime)
+    Checking rustls-webpki v0.103.15
+    Checking rustls v0.23.45
+    Checking node v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/node)
+    Checking runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/runtime)
+    Checking api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-rs-l10/crates/api)
+    Finished `dev` profile [unoptimized] target(s) in 6.75s

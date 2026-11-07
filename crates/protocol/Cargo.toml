@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = "=0.22.1"
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+ed25519-dalek = "=2.2.0"
+hex = "=0.4.3"
+hkdf = { version = "=0.12.4", default-features = false }
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["float_roundtrip", "arbitrary_precision", "raw_value"] }
+sha1 = "=0.10.6"
+sha2 = "=0.10.9"
+thiserror = "=2.0.21"
+x25519-dalek = { version = "=2.0.1", default-features = false }
+zeroize = "=1.9.0"
+
+[dev-dependencies]
+# RFC 8439 section 2.5.2 asserts the audited Poly1305 directly (same locked package as chacha20poly1305 pulls in).
+poly1305 = { version = "=0.8.0", default-features = false }
+# Consumer-side proof of the two planner-owned identities (control-plane tranche and
+# layer-replan simulation report): the real L7 compiler/replanner, never a copy in protocol.
+planner = { path = "../planner" }

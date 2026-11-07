@@ -1,0 +1,1572 @@
+{
+ "oracle_exe_sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f",
+ "cases": [
+  {
+   "label": "status_fresh",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "private"
+    },
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": false,
+     "local_tls": "inactive",
+     "membership_state": "absent",
+     "member_count": 0,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": null,
+     "lease_state": "none",
+     "contribution_enabled": false,
+     "route_ready": false
+    },
+    "installation_role": "owner",
+    "running": true,
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "demo_target": null
+   },
+   "keys": [
+    "network",
+    "authority",
+    "installation_role",
+    "running",
+    "swarm",
+    "relay_wait",
+    "owner_run",
+    "serving",
+    "sharing",
+    "demo_target"
+   ]
+  },
+  {
+   "label": "start_empty",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {}
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_no_ack",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "max_seconds": 90
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_ack_false",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": false,
+     "max_seconds": 90
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_seconds_29",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 29,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_seconds_1801",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 1801,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_seconds_float",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90.0,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_seconds_bool",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": true,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_missing_origin",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_missing_port",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_extra_key",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0",
+     "extra": 1
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_provider_other",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "x"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_quick_with_origin",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "public_origin": "https://v02-test-20261028.mycelium.now"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_consent_required"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_origin_http",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "http://v02-test.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_origin_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_origin_local",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://x.local",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_origin_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_port_low",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": 80
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_proxy_port_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_port_str",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0:str"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_proxy_port_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_port_bool",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": true
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_proxy_port_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_renew_type",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0",
+     "auto_renew": 1
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_renewal_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_renew_cap_zero",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0",
+     "max_renewed_seconds": 0
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_renewal_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_renew_cap_huge",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0",
+     "max_renewed_seconds": 604801
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_renewal_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_all_renew_first",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "bad",
+     "proxy_port": 1,
+     "auto_renew": "x"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_renewal_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_bad_origin_then_port",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "bad",
+     "proxy_port": 1
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "relay_origin_invalid"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "status_after_refusals",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "private"
+    },
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": false,
+     "local_tls": "inactive",
+     "membership_state": "absent",
+     "member_count": 0,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": null,
+     "lease_state": "none",
+     "contribution_enabled": false,
+     "route_ready": false
+    }
+   },
+   "keys": [
+    "network",
+    "authority"
+   ]
+  },
+  {
+   "label": "start_port_busy",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT_BUSY"
+    }
+   },
+   "http": 409,
+   "body": {
+    "error": "action_not_completed"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "status_after_port_busy",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "private"
+    }
+   },
+   "keys": [
+    "network"
+   ]
+  },
+  {
+   "label": "start_external_ok",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 200,
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02-test-20261028.mycelium.now",
+    "error_code": null,
+    "seed_bound": false,
+    "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT0 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 90,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:@PORT0"
+   },
+   "keys": [
+    "state",
+    "provider",
+    "public_origin",
+    "error_code",
+    "seed_bound",
+    "privacy",
+    "relay_host_trust",
+    "auto_renew",
+    "long_lived",
+    "renewals",
+    "expires_in_seconds",
+    "renewal_cap_seconds",
+    "renewal_stopped",
+    "local_forward_target"
+   ],
+   "proxy_port_is": "@PORT"
+  },
+  {
+   "label": "status_after_start",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": false,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT0 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 90,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT0"
+    },
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": false,
+     "local_tls": "inactive",
+     "membership_state": "absent",
+     "member_count": 0,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": null,
+     "lease_state": "none",
+     "contribution_enabled": false,
+     "route_ready": false
+    },
+    "installation_role": "owner",
+    "running": true,
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "demo_target": null
+   },
+   "keys": [
+    "network",
+    "authority",
+    "installation_role",
+    "running",
+    "swarm",
+    "relay_wait",
+    "owner_run",
+    "serving",
+    "sharing",
+    "demo_target"
+   ]
+  },
+  {
+   "label": "start_twice",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_requires_fresh_owner"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "start_twice_other_port",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT2"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_requires_fresh_owner"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "create_after_relay",
+   "request": {
+    "method": "POST",
+    "path": "/api/create",
+    "body": {
+     "consent": {
+      "peer_visibility": true,
+      "power": "ac_only",
+      "storage_bytes": 4000000000,
+      "network": "unmetered_only",
+      "background": false,
+      "diagnostics": false,
+      "thermal": "stop_on_serious"
+     }
+    }
+   },
+   "http": 200,
+   "body": {
+    "protocol": "mycelium.demo_membership_result.v1",
+    "membership_state": "current",
+    "membership_generation": 1,
+    "lifecycle_state": "RUNNING",
+    "route_ready": false
+   },
+   "keys": [
+    "protocol",
+    "membership_state",
+    "membership_generation",
+    "lifecycle_state",
+    "route_ready"
+   ]
+  },
+  {
+   "label": "status_after_create",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT0 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 81,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT0"
+    },
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": true,
+     "local_tls": "pinned_loopback",
+     "membership_state": "current",
+     "member_count": 1,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": 1,
+     "lease_state": "fresh",
+     "contribution_enabled": false,
+     "route_ready": false,
+     "members": [
+      {
+       "node_id": "judge-mac-bdaa6f7f9e0e2b45",
+       "generation": 1,
+       "lifecycle_state": "RUNNING",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      }
+     ]
+    },
+    "installation_role": "owner",
+    "running": true,
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "demo_target": null,
+    "join_flow": {
+     "standing_disclosure": {
+      "text": "While this Mac is a member of the owner's swarm and this app is open, it will automatically: accept work the owner assigns to it; download and store only the model slice assigned to it; load that slice with MLX and compute it for requests routed through the swarm; and send the owner a capability report (chip, memory, free disk, MLX availability, power and thermal state) and a link measurement over the relay on join and before each run. Limits: at most the disk, memory, run time and command budget you choose below, only on the power and network policy you chose, and it stops on serious thermal pressure. Cooperative workers observe the activations they compute, so this is not confidential inference. You can withdraw this consent at any time from this app; automatic acceptance stops immediately.",
+      "digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19"
+     },
+     "pairing_windows": [],
+     "pending_windows": [],
+     "member_reports": {}
+    }
+   },
+   "keys": [
+    "network",
+    "authority",
+    "installation_role",
+    "running",
+    "swarm",
+    "relay_wait",
+    "owner_run",
+    "serving",
+    "sharing",
+    "demo_target",
+    "join_flow"
+   ]
+  },
+  {
+   "label": "start_after_create_running",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT0"
+    }
+   },
+   "http": 400,
+   "body": {
+    "error": "network_requires_fresh_owner"
+   },
+   "keys": [
+    "error"
+   ]
+  },
+  {
+   "label": "w_start_30",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 30,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT3"
+    }
+   },
+   "http": 200,
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02-test-20261028.mycelium.now",
+    "error_code": null,
+    "seed_bound": false,
+    "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 30,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:@PORT3"
+   },
+   "keys": [
+    "state",
+    "provider",
+    "public_origin",
+    "error_code",
+    "seed_bound",
+    "privacy",
+    "relay_host_trust",
+    "auto_renew",
+    "long_lived",
+    "renewals",
+    "expires_in_seconds",
+    "renewal_cap_seconds",
+    "renewal_stopped",
+    "local_forward_target"
+   ]
+  },
+  {
+   "label": "w_status_after_window",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "stopped",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": false,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": null,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT3"
+    }
+   },
+   "keys": [
+    "network"
+   ]
+  },
+  {
+   "label": "w_restart_same_start",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 30,
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "proxy_port": "@PORT3"
+    }
+   },
+   "http": 200,
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02-test-20261028.mycelium.now",
+    "error_code": null,
+    "seed_bound": false,
+    "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 30,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:@PORT3"
+   },
+   "keys": [
+    "state",
+    "provider",
+    "public_origin",
+    "error_code",
+    "seed_bound",
+    "privacy",
+    "relay_host_trust",
+    "auto_renew",
+    "long_lived",
+    "renewals",
+    "expires_in_seconds",
+    "renewal_cap_seconds",
+    "renewal_stopped",
+    "local_forward_target"
+   ]
+  },
+  {
+   "label": "w_status_after_reopen",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": false,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 30,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT3"
+    }
+   },
+   "keys": [
+    "network"
+   ]
+  },
+  {
+   "label": "w_create",
+   "request": {
+    "method": "POST",
+    "path": "/api/create",
+    "body": {
+     "consent": {
+      "peer_visibility": true,
+      "power": "ac_only",
+      "storage_bytes": 4000000000,
+      "network": "unmetered_only",
+      "background": false,
+      "diagnostics": false,
+      "thermal": "stop_on_serious"
+     }
+    }
+   },
+   "http": 200,
+   "body": {
+    "protocol": "mycelium.demo_membership_result.v1",
+    "membership_state": "current",
+    "membership_generation": 1,
+    "lifecycle_state": "RUNNING",
+    "route_ready": false
+   },
+   "keys": [
+    "protocol",
+    "membership_state",
+    "membership_generation",
+    "lifecycle_state",
+    "route_ready"
+   ]
+  },
+  {
+   "label": "w_network_restart",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/restart",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external"
+    }
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 90,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT3"
+    },
+    "recovery_card": null
+   },
+   "keys": [
+    "network",
+    "recovery_card"
+   ]
+  },
+  {
+   "label": "w_status_after_restart_action",
+   "request": {
+    "method": "GET",
+    "path": "/api/status"
+   },
+   "http": 200,
+   "body": {
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-test-20261028.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-test-20261028.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT3 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 90,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:@PORT3"
+    },
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": true,
+     "local_tls": "pinned_loopback",
+     "membership_state": "current",
+     "member_count": 1,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": 1,
+     "lease_state": "fresh",
+     "contribution_enabled": false,
+     "route_ready": false,
+     "members": [
+      {
+       "node_id": "judge-mac-7cf99a5f9fd9c639",
+       "generation": 1,
+       "lifecycle_state": "RUNNING",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      }
+     ]
+    }
+   },
+   "keys": [
+    "network",
+    "authority"
+   ]
+  },
+  {
+   "label": "upper_origin_accepted",
+   "request": {
+    "method": "POST",
+    "path": "/api/network/start",
+    "body": {
+     "relay_acknowledged": true,
+     "max_seconds": 90,
+     "provider": "external",
+     "public_origin": "https://V02.Mycelium.now",
+     "proxy_port": "@PORT4"
+    }
+   },
+   "http": 200,
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02.mycelium.now",
+    "error_code": null,
+    "seed_bound": false,
+    "privacy": "Your own address (v02.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:@PORT4 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 90,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:@PORT4"
+   },
+   "keys": [
+    "state",
+    "provider",
+    "public_origin",
+    "error_code",
+    "seed_bound",
+    "privacy",
+    "relay_host_trust",
+    "auto_renew",
+    "long_lived",
+    "renewals",
+    "expires_in_seconds",
+    "renewal_cap_seconds",
+    "renewal_stopped",
+    "local_forward_target"
+   ]
+  }
+ ],
+ "files_after_refusals": {
+  "authority": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "application.lock": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "native-control.json": {
+   "mode": "0o600",
+   "dir": false
+  }
+ },
+ "files_after_port_busy": {
+  "public-relay": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "authority": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "last-action-error.private.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"exception_module\": \"builtins\", \"exception_type\": \"ValueError\", \"path\": \"/api/network/start\", \"protocol\": \"mycelium.a13.action_failure.v1\", \"public_code\": \"action_not_completed\"}"
+  },
+  "application.lock": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "native-control.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "public-relay/relay-tail.log": {
+   "mode": "0o600",
+   "dir": false,
+   "content": ""
+  }
+ },
+ "files_after_start": {
+  "public-relay": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "authority": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "last-action-error.private.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"exception_module\": \"builtins\", \"exception_type\": \"ValueError\", \"path\": \"/api/network/start\", \"protocol\": \"mycelium.a13.action_failure.v1\", \"public_code\": \"action_not_completed\"}"
+  },
+  "application.lock": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "native-control.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "external-origin.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"cloudflare_front\":false,\"proxy_port\":\"@PORT0\",\"public_origin\":\"https://v02-test-20261028.mycelium.now\"}"
+  },
+  "public-relay/relay-tail.log": {
+   "mode": "0o600",
+   "dir": false,
+   "content": ""
+  }
+ },
+ "files_after_create": {
+  "public-relay": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "authority": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "last-action-error.private.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"exception_module\": \"builtins\", \"exception_type\": \"ValueError\", \"path\": \"/api/network/start\", \"protocol\": \"mycelium.a13.action_failure.v1\", \"public_code\": \"action_not_completed\"}"
+  },
+  "application.lock": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "resource-policy.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "native-control.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "external-origin.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"cloudflare_front\":false,\"proxy_port\":\"@PORT0\",\"public_origin\":\"https://v02-test-20261028.mycelium.now\"}"
+  },
+  "public-relay/relay-tail.log": {
+   "mode": "0o600",
+   "dir": false,
+   "content": ""
+  }
+ },
+ "quit": "done",
+ "files_w": {
+  "public-relay": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "authority": {
+   "mode": "0o700",
+   "dir": true
+  },
+  "application.lock": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "resource-policy.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "native-control.json": {
+   "mode": "0o600",
+   "dir": false
+  },
+  "external-origin.json": {
+   "mode": "0o600",
+   "dir": false,
+   "content": "{\"cloudflare_front\":false,\"proxy_port\":\"@PORT3\",\"public_origin\":\"https://v02-test-20261028.mycelium.now\"}"
+  },
+  "public-relay/relay-tail.log": {
+   "mode": "0o600",
+   "dir": false,
+   "content": ""
+  }
+ },
+ "w_quit": "done"
+}

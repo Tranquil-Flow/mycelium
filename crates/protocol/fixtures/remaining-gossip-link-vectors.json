@@ -1,0 +1,2338 @@
+[
+  {
+    "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+    "cases": [
+      {
+        "accepted": false,
+        "error": "argument of type 'NoneType' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'bool' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'bool' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'float' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'float' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "argument of type 'int' is not a container or iterable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "missing required field(s): protocol, src_node_id, dst_node_id, src_endpoint_id, dst_endpoint_id, reachable, sample_count, measurement_method",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "error": "unknown field(s): unexpected",
+        "exception": "SchemaError",
+        "path": [],
+        "replacement": {
+          "connect_rtt_ema_ms": 1.2,
+          "dst_endpoint_id": "http-overlay",
+          "dst_node_id": "node-b",
+          "goodput_mbps": 900.0,
+          "jitter_ms": 0.1,
+          "loss_ratio": 0.0,
+          "measurement_method": "active_probe",
+          "protocol": "mycelium.link_state.v1",
+          "reachable": true,
+          "rtt_p95_ms": 1.8,
+          "sample_count": 16,
+          "src_endpoint_id": "http-overlay",
+          "src_node_id": "node-a",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":null,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":0,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be finite and >= 0.0",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.0,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.5,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":9007199254740991,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":9007199254740992,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":18446744073709551616,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "connect_rtt_ema_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "connect_rtt_ema_ms"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "delete": true,
+        "path": [
+          "connect_rtt_ema_ms"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"x\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "dst_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): dst_endpoint_id",
+        "exception": "SchemaError",
+        "path": [
+          "dst_endpoint_id"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"x\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "dst_node_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): dst_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "dst_node_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":null,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":1,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be finite and >= 0.0",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":1.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":1.5,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":9007199254740991,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":9007199254740992,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":18446744073709551616,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "goodput_mbps must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "goodput_mbps"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "delete": true,
+        "path": [
+          "goodput_mbps"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":null,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be finite and >= 0.0",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":1.0,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":1.5,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":9007199254740991,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":9007199254740992,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":18446744073709551616,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "jitter_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "jitter_ms"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "delete": true,
+        "path": [
+          "jitter_ms"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":1,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be finite and >= 0.0",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":1.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be <= 1",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be <= 1",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be <= 1",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be <= 1",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be <= 1",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "loss_ratio must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "loss_ratio"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "delete": true,
+        "path": [
+          "loss_ratio"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"x\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "measurement_method must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): measurement_method",
+        "exception": "SchemaError",
+        "path": [
+          "measurement_method"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "link protocol must be mycelium.link_state.v1",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): protocol",
+        "exception": "SchemaError",
+        "path": [
+          "protocol"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":false,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "reachable"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "reachable"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "reachable must be boolean",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): reachable",
+        "exception": "SchemaError",
+        "path": [
+          "reachable"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":null,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":0,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be finite and >= 0.0",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.0,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.5,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":9007199254740991,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":9007199254740992,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":18446744073709551616,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "rtt_p95_ms must be numeric",
+        "exception": "SchemaError",
+        "path": [
+          "rtt_p95_ms"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"sample_count\":16,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "delete": true,
+        "path": [
+          "rtt_p95_ms"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":0,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":1,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":9007199254740991,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":9007199254740992,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":18446744073709551616,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,\"src_endpoint_id\":\"http-overlay\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "sample_count must be an integer >= 0",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): sample_count",
+        "exception": "SchemaError",
+        "path": [
+          "sample_count"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"connect_rtt_ema_ms\":1.2,\"dst_endpoint_id\":\"http-overlay\",\"dst_node_id\":\"node-b\",\"goodput_mbps\":900.0,\"jitter_ms\":0.1,\"loss_ratio\":0.0,\"measurement_method\":\"active_probe\",\"protocol\":\"mycelium.link_state.v1\",\"reachable\":true,\"rtt_p95_ms\":1.8,\"sample_count\":16,\"src_endpoint_id\":\"x\",\"src_node_id\":\"node-a\"}",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "src_endpoint_id must be a safe key segment",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): src_endpoint_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_endpoint_id"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "link src_node_id must match origin_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "missing required field(s): src_node_id",
+        "exception": "SchemaError",
+        "path": [
+          "src_node_id"
+        ]
+      }
+    ],
+    "name": "link",
+    "value": {
+      "connect_rtt_ema_ms": 1.2,
+      "dst_endpoint_id": "http-overlay",
+      "dst_node_id": "node-b",
+      "goodput_mbps": 900.0,
+      "jitter_ms": 0.1,
+      "loss_ratio": 0.0,
+      "measurement_method": "active_probe",
+      "protocol": "mycelium.link_state.v1",
+      "reachable": true,
+      "rtt_p95_ms": 1.8,
+      "sample_count": 16,
+      "src_endpoint_id": "http-overlay",
+      "src_node_id": "node-a"
+    }
+  }
+]

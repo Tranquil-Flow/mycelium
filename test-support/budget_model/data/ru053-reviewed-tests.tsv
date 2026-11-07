@@ -1,0 +1,2 @@
+test	path	line	sha256	text
+protocol::artifact_refusals::every_executed_oracle_grant_request_and_receipt_outcome_is_reproduced	crates/protocol/tests/artifact_refusals.rs	27	eca8fb36c32e8f1387316472ee1fea150842e6f1192200ec148c70d020e34f45	fn every_executed_oracle_grant_request_and_receipt_outcome_is_reproduced() {

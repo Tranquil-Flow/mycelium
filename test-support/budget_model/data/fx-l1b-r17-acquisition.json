@@ -1,0 +1,122 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "2a7ead11306414477d4b80bbe40bbff67f644e0e343d4578f4ecf5822bc16bfd",
+  "scope": "Pure _validate_manifest only; no download/filesystem acquisition executed",
+  "calls": [
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 535,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(manifest, model=model)",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 1097,
+      "callee": "_resolve_manifest",
+      "expression": "self._resolve_manifest()",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 1065,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(self._injected_manifest, model=self.model)",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 1112,
+      "callee": "_scan_stage",
+      "expression": "self._scan_stage(stage, manifest)",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 1074,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(source.resolve(self.model), model=self.model)",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/acquisition.py",
+      "line": 1139,
+      "callee": "_download_file",
+      "expression": "self._download_file(record, partial=partial, final=final, total=total, consent=consent)",
+      "file_sha256": "238eeff4e9d4b3358c0f173864c87d2cb8aa82531da2dfd172178c1601d958fa"
+    },
+    {
+      "path": "mycelium_a13_macos/model_import.py",
+      "line": 163,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(manifest, model=model)",
+      "file_sha256": "5ccb4ca90a1a13b8e5c15d88729febf22838e98d09e8cf517096024477d93f4f"
+    },
+    {
+      "path": "mycelium_a13_macos/peer_model_source.py",
+      "line": 344,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(manifest, model=model)",
+      "file_sha256": "f973794039669cf6e2563731dc1f79848d963bc2989840a34c78aa433244a1a0"
+    },
+    {
+      "path": "mycelium_a13_macos/peer_model_source.py",
+      "line": 873,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(document, model=model)",
+      "file_sha256": "f973794039669cf6e2563731dc1f79848d963bc2989840a34c78aa433244a1a0"
+    },
+    {
+      "path": "mycelium_a13_macos/peer_model_source.py",
+      "line": 239,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(manifest, model=model)",
+      "file_sha256": "f973794039669cf6e2563731dc1f79848d963bc2989840a34c78aa433244a1a0"
+    },
+    {
+      "path": "mycelium_demo/cli.py",
+      "line": 499,
+      "callee": "_validate_manifest",
+      "expression": "_validate_manifest(document, model=model)",
+      "file_sha256": "c62424657ac33b11a86213ec0e152d638395249c5042978a355de6ad237846fa"
+    }
+  ],
+  "cases": [
+    [
+      "aggregate-edge",
+      "9223372036854775806",
+      "accepted",
+      "9223372036854775807"
+    ],
+    [
+      "aggregate-over",
+      "9223372036854775807",
+      "refused",
+      "model_manifest_invalid"
+    ],
+    [
+      "individual-over",
+      "9223372036854775808",
+      "refused",
+      "model_manifest_invalid"
+    ],
+    [
+      "zero",
+      "0",
+      "refused",
+      "model_manifest_invalid"
+    ],
+    [
+      "boolean",
+      "True",
+      "refused",
+      "model_manifest_invalid"
+    ],
+    [
+      "small",
+      "1",
+      "accepted",
+      "2"
+    ]
+  ]
+}

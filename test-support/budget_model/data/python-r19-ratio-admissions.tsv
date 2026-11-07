@@ -1,0 +1,3 @@
+key	reviewer	verdict	target	entry_sha256
+mycelium_swarm_artifacts.py:1079:16:validator-keyword:maximum	L1b-KB-r2-ratio	bounded	PyKbR2SwarmRatioUpperL1079C16	c7305ae1ab03085629faca842d3517f7e6eb0e1865b87bc7c08f8bff441f7966
+mycelium_swarm_artifacts.py:1087:16:validator-keyword:maximum	L1b-KB-r2-ratio	bounded	PyKbR2SwarmRatioUpperL1087C16	ca905ba6737a097c6d6e93a5cdc1e373206ec235eeb1288bbbf5e3cf2213d7a8

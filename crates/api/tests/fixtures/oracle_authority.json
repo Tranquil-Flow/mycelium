@@ -1,0 +1,769 @@
+{
+ "oracle_exe_sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f",
+ "variants": [
+  {
+   "label": "baseline",
+   "edit": null,
+   "rows_in": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+     "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+     "peer_class": "mac_mlx_iroh",
+     "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+     "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+     "incarnation": "target-incarnation-296c77f0070e165b",
+     "generation": 1,
+     "lease_expires_at": 1793200254.911535,
+     "last_heartbeat_sequence": 1,
+     "last_liveness_at": 1793199954.911535,
+     "next_heartbeat_due_at": 1793199984.911535,
+     "last_activity_receipt_at": null,
+     "active_requests": 0,
+     "lifecycle_state": "RUNNING"
+    }
+   ],
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": true,
+    "local_tls": "pinned_loopback",
+    "membership_state": "current",
+    "member_count": 1,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": 2,
+    "lease_state": "fresh",
+    "contribution_enabled": false,
+    "route_ready": false,
+    "members": [
+     {
+      "node_id": "judge-mac-c1b44f224356ea99",
+      "generation": 2,
+      "lifecycle_state": "RUNNING",
+      "clock": {
+       "offset_seconds": null,
+       "exceeds_tolerance": false,
+       "tolerance_seconds": 30.0,
+       "samples": 0
+      }
+     }
+    ]
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready",
+    "members"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  },
+  {
+   "label": "lifecycle_stopping",
+   "edit": {
+    "sql": "update seed_members set lifecycle_state='STOPPING'",
+    "args": []
+   },
+   "rows_in": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+     "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+     "peer_class": "mac_mlx_iroh",
+     "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+     "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+     "incarnation": "target-incarnation-296c77f0070e165b",
+     "generation": 1,
+     "lease_expires_at": 1793200254.911535,
+     "last_heartbeat_sequence": 1,
+     "last_liveness_at": 1793199954.911535,
+     "next_heartbeat_due_at": 1793199984.911535,
+     "last_activity_receipt_at": null,
+     "active_requests": 0,
+     "lifecycle_state": "STOPPING"
+    }
+   ],
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": true,
+    "local_tls": "pinned_loopback",
+    "membership_state": "revoked",
+    "member_count": 1,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": 1,
+    "lease_state": "fresh",
+    "contribution_enabled": false,
+    "route_ready": false,
+    "members": [
+     {
+      "node_id": "judge-mac-c1b44f224356ea99",
+      "generation": 1,
+      "lifecycle_state": "STOPPING",
+      "clock": {
+       "offset_seconds": null,
+       "exceeds_tolerance": false,
+       "tolerance_seconds": 30.0,
+       "samples": 0
+      }
+     }
+    ]
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready",
+    "members"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  },
+  {
+   "label": "lifecycle_stopped",
+   "edit": {
+    "sql": "update seed_members set lifecycle_state='STOPPED'",
+    "args": []
+   },
+   "rows_in": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+     "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+     "peer_class": "mac_mlx_iroh",
+     "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+     "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+     "incarnation": "target-incarnation-296c77f0070e165b",
+     "generation": 1,
+     "lease_expires_at": 1793200254.911535,
+     "last_heartbeat_sequence": 1,
+     "last_liveness_at": 1793199954.911535,
+     "next_heartbeat_due_at": 1793199984.911535,
+     "last_activity_receipt_at": null,
+     "active_requests": 0,
+     "lifecycle_state": "STOPPED"
+    }
+   ],
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": true,
+    "local_tls": "pinned_loopback",
+    "membership_state": "revoked",
+    "member_count": 1,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": 1,
+    "lease_state": "fresh",
+    "contribution_enabled": false,
+    "route_ready": false,
+    "members": [
+     {
+      "node_id": "judge-mac-c1b44f224356ea99",
+      "generation": 1,
+      "lifecycle_state": "STOPPED",
+      "clock": {
+       "offset_seconds": null,
+       "exceeds_tolerance": false,
+       "tolerance_seconds": 30.0,
+       "samples": 0
+      }
+     }
+    ]
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready",
+    "members"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  },
+  {
+   "label": "generation_7",
+   "edit": {
+    "sql": "update seed_members set generation=7",
+    "args": []
+   },
+   "launch_failed": "no launcher_started {\"event\": \"launcher_failed\", \"code\": \"seed_resume_generation_stale\", \"error_type\": \"SeedHTTPError\", \"state_retained\": true}\n"
+  },
+  {
+   "label": "lease_in_the_past",
+   "edit": {
+    "sql": "update seed_members set lease_expires_at=1.0",
+    "args": []
+   },
+   "rows_in": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+     "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+     "peer_class": "mac_mlx_iroh",
+     "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+     "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+     "incarnation": "target-incarnation-296c77f0070e165b",
+     "generation": 1,
+     "lease_expires_at": 1.0,
+     "last_heartbeat_sequence": 1,
+     "last_liveness_at": 1793199954.911535,
+     "next_heartbeat_due_at": 1793199984.911535,
+     "last_activity_receipt_at": null,
+     "active_requests": 0,
+     "lifecycle_state": "RUNNING"
+    }
+   ],
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": true,
+    "local_tls": "pinned_loopback",
+    "membership_state": "current",
+    "member_count": 1,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": 2,
+    "lease_state": "fresh",
+    "contribution_enabled": false,
+    "route_ready": false,
+    "members": [
+     {
+      "node_id": "judge-mac-c1b44f224356ea99",
+      "generation": 2,
+      "lifecycle_state": "RUNNING",
+      "clock": {
+       "offset_seconds": null,
+       "exceeds_tolerance": false,
+       "tolerance_seconds": 30.0,
+       "samples": 0
+      }
+     }
+    ]
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready",
+    "members"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  },
+  {
+   "label": "lease_far_future",
+   "edit": {
+    "sql": "update seed_members set lease_expires_at=99999999999.0",
+    "args": []
+   },
+   "rows_in": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+     "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+     "peer_class": "mac_mlx_iroh",
+     "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+     "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+     "incarnation": "target-incarnation-296c77f0070e165b",
+     "generation": 1,
+     "lease_expires_at": 99999999999.0,
+     "last_heartbeat_sequence": 1,
+     "last_liveness_at": 1793199954.911535,
+     "next_heartbeat_due_at": 1793199984.911535,
+     "last_activity_receipt_at": null,
+     "active_requests": 0,
+     "lifecycle_state": "RUNNING"
+    }
+   ],
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": true,
+    "local_tls": "pinned_loopback",
+    "membership_state": "current",
+    "member_count": 1,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": 2,
+    "lease_state": "fresh",
+    "contribution_enabled": false,
+    "route_ready": false,
+    "members": [
+     {
+      "node_id": "judge-mac-c1b44f224356ea99",
+      "generation": 2,
+      "lifecycle_state": "RUNNING",
+      "clock": {
+       "offset_seconds": null,
+       "exceeds_tolerance": false,
+       "tolerance_seconds": 30.0,
+       "samples": 0
+      }
+     }
+    ]
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready",
+    "members"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  },
+  {
+   "label": "no_member_rows",
+   "edit": {
+    "sql": "delete from seed_members",
+    "args": []
+   },
+   "launch_failed": "no launcher_started {\"event\": \"launcher_failed\", \"code\": \"seed_member_unknown\", \"error_type\": \"SeedCoordinatorError\", \"state_retained\": true}\n"
+  },
+  {
+   "label": "other_target_node",
+   "edit": {
+    "authority_json": "target_node_id replaced"
+   },
+   "launch_failed": "no launcher_started {\"event\": \"launcher_failed\", \"code\": \"authority_membership_state_invalid\", \"error_type\": \"DemoAuthorityError\", \"state_retained\": true}\n"
+  },
+  {
+   "label": "authority_dir_removed",
+   "edit": {
+    "removed": "authority/"
+   },
+   "rows_in": null,
+   "http": 200,
+   "authority": {
+    "protocol": "mycelium.demo_authority_status.v1",
+    "started": true,
+    "swarm_created": false,
+    "local_tls": "inactive",
+    "membership_state": "absent",
+    "member_count": 0,
+    "capability_state": "not_reported",
+    "capability": null,
+    "membership_generation": null,
+    "lease_state": "none",
+    "contribution_enabled": false,
+    "route_ready": false
+   },
+   "authority_keys": [
+    "protocol",
+    "started",
+    "swarm_created",
+    "local_tls",
+    "membership_state",
+    "member_count",
+    "capability_state",
+    "capability",
+    "membership_generation",
+    "lease_state",
+    "contribution_enabled",
+    "route_ready"
+   ],
+   "installation_role": "owner",
+   "running": true,
+   "owner_run_state": "idle",
+   "swarm": {
+    "enabled": false,
+    "mode": null
+   },
+   "serving": {
+    "state": "not_yet_serving",
+    "route_ready": false,
+    "next_action": "Native route preparation and exact model execution approval required."
+   },
+   "sharing": {
+    "state": "idle",
+    "line": "Not sharing yet"
+   },
+   "resource_policy": {
+    "background": false,
+    "diagnostics": false,
+    "network": "unmetered_only",
+    "peer_visibility": true,
+    "power": "ac_only",
+    "storage_bytes": 4000000000,
+    "thermal": "stop_on_serious"
+   }
+  }
+ ],
+ "create_answer": {
+  "http": 200,
+  "body": {
+   "protocol": "mycelium.demo_membership_result.v1",
+   "membership_state": "current",
+   "membership_generation": 1,
+   "lifecycle_state": "RUNNING",
+   "route_ready": false
+  },
+  "keys": [
+   "protocol",
+   "membership_state",
+   "membership_generation",
+   "lifecycle_state",
+   "route_ready"
+  ]
+ },
+ "create_again": {
+  "http": 200,
+  "body": {
+   "protocol": "mycelium.demo_authority_status.v1",
+   "started": true,
+   "swarm_created": true,
+   "local_tls": "pinned_loopback",
+   "membership_state": "current",
+   "member_count": 1,
+   "capability_state": "not_reported",
+   "capability": null,
+   "membership_generation": 1,
+   "lease_state": "fresh",
+   "contribution_enabled": false,
+   "route_ready": false
+  },
+  "keys": [
+   "protocol",
+   "started",
+   "swarm_created",
+   "local_tls",
+   "membership_state",
+   "member_count",
+   "capability_state",
+   "capability",
+   "membership_generation",
+   "lease_state",
+   "contribution_enabled",
+   "route_ready"
+  ]
+ },
+ "status_after_create": {
+  "authority": {
+   "protocol": "mycelium.demo_authority_status.v1",
+   "started": true,
+   "swarm_created": true,
+   "local_tls": "pinned_loopback",
+   "membership_state": "current",
+   "member_count": 1,
+   "capability_state": "not_reported",
+   "capability": null,
+   "membership_generation": 1,
+   "lease_state": "fresh",
+   "contribution_enabled": false,
+   "route_ready": false,
+   "members": [
+    {
+     "node_id": "judge-mac-c1b44f224356ea99",
+     "generation": 1,
+     "lifecycle_state": "RUNNING",
+     "clock": {
+      "offset_seconds": null,
+      "exceeds_tolerance": false,
+      "tolerance_seconds": 30.0,
+      "samples": 0
+     }
+    }
+   ]
+  },
+  "authority_keys": [
+   "protocol",
+   "started",
+   "swarm_created",
+   "local_tls",
+   "membership_state",
+   "member_count",
+   "capability_state",
+   "capability",
+   "membership_generation",
+   "lease_state",
+   "contribution_enabled",
+   "route_ready",
+   "members"
+  ],
+  "owner_run_state": "idle",
+  "owner_run": {
+   "state": "idle",
+   "step": null,
+   "error_code": null,
+   "error_message": null,
+   "failed_step": null,
+   "steps": [
+    {
+     "name": "model",
+     "label": "Model ready on this Mac",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "contributor",
+     "label": "This Mac joins the run",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "descriptors",
+     "label": "Joined Macs report in",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "observe",
+     "label": "Native hello on every Mac",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "compile",
+     "label": "Compile the route over the current members",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "slices",
+     "label": "Every Mac fetches only its own slice",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "publish",
+     "label": "Publish work to every Mac",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "targets",
+     "label": "Every Mac accepts and starts its slice",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "activate",
+     "label": "Activate and qualify the route",
+     "state": "pending",
+     "detail": null
+    },
+    {
+     "name": "serving",
+     "label": "Serving prompts",
+     "state": "pending",
+     "detail": null
+    }
+   ],
+   "participants": null,
+   "registry_origin": null,
+   "route_ready": false,
+   "run_id": null
+  },
+  "swarm": {
+   "enabled": false,
+   "mode": null
+  },
+  "serving": {
+   "state": "not_yet_serving",
+   "route_ready": false,
+   "next_action": "Native route preparation and exact model execution approval required."
+  },
+  "sharing": {
+   "state": "idle",
+   "line": "Not sharing yet"
+  }
+ },
+ "authority_json": {
+  "consent": {
+   "contribution_enabled": false,
+   "cooperative_peer_visibility_acknowledged": true,
+   "resource_use_acknowledged": true
+  },
+  "peer_class": "mac_mlx_iroh",
+  "protocol": "mycelium.demo_authority_state.v1",
+  "seed_incarnation": "seed-incarnation-574629426f93cf6f",
+  "seed_node_id": "seed-b980c6d3e5f89a97",
+  "swarm_id": "swarm-ed23223a70ea69b00d337dd5",
+  "target_node_id": "judge-mac-c1b44f224356ea99"
+ },
+ "authority_json_mode": "0o600",
+ "seed_members_schema": "CREATE TABLE seed_members (\n                    node_id TEXT PRIMARY KEY NOT NULL,\n                    endpoint_id TEXT NOT NULL,\n                    endpoint_addrs_json TEXT NOT NULL,\n                    peer_class TEXT NOT NULL,\n                    runtime_capability_json TEXT NOT NULL,\n                    verification_key_digest TEXT NOT NULL,\n                    incarnation TEXT NOT NULL,\n                    generation INTEGER NOT NULL CHECK (generation >= 1),\n                    lease_expires_at REAL NOT NULL,\n                    last_heartbeat_sequence INTEGER NOT NULL\n                        CHECK (last_heartbeat_sequence >= 0),\n                    last_liveness_at REAL NOT NULL,\n                    next_heartbeat_due_at REAL NOT NULL,\n                    last_activity_receipt_at REAL,\n                    active_requests INTEGER NOT NULL CHECK (active_requests >= 0),\n                    lifecycle_state TEXT NOT NULL\n                ) WITHOUT ROWID",
+ "seed_members_rows_after_create": [
+  {
+   "node_id": "judge-mac-c1b44f224356ea99",
+   "endpoint_id": "node-identity-d34c49dffe3ec96b27564f1ec3609eb2",
+   "endpoint_addrs_json": "[\"https://node-identity-d34c49dffe3ec96b27564f1ec3609eb2.invalid/control\"]",
+   "peer_class": "mac_mlx_iroh",
+   "runtime_capability_json": "{\"activation_protocol\":\"mycelium.router_wire.v1\",\"runtime_backend\":\"mlx\",\"transport\":\"iroh\"}",
+   "verification_key_digest": "sha256:d34c49dffe3ec96b27564f1ec3609eb2ce9c88794b0b8562aeddcfa335245b09",
+   "incarnation": "target-incarnation-296c77f0070e165b",
+   "generation": 1,
+   "lease_expires_at": 1793200254.911535,
+   "last_heartbeat_sequence": 1,
+   "last_liveness_at": 1793199954.911535,
+   "next_heartbeat_due_at": 1793199984.911535,
+   "last_activity_receipt_at": null,
+   "active_requests": 0,
+   "lifecycle_state": "RUNNING"
+  }
+ ]
+}

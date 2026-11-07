@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+protocol = { path = "../protocol" }
+budgets = { path = "../budgets" }
+
+# Tests import the actual L9 carrier; the pure product library stays runtime-free.
+[dev-dependencies]
+runtime = { path = "../runtime", features = ["iroh-adapter"] }
+iroh = { version = "=1.0.2", default-features = false, features = ["tls-ring"] }
+tokio = { version = "=1.53.1", features = ["rt", "time", "io-util"] }

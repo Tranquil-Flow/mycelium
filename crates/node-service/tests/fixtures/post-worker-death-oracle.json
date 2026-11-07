@@ -1,0 +1,101 @@
+{
+ "cases": 4,
+ "id": "FX-SLICE1-post-worker-death",
+ "launcher": {
+  "cleanup_error_event": "launcher_cleanup_failed/cleanup_incomplete",
+  "quit_with_cleanup_error_exit_code": 3,
+  "quit_with_proven_cleanup_exit_code": 0,
+  "worker_death_exits_launcher_by_itself": false
+ },
+ "observations": {
+  "p0_real_worker_killed": {
+   "cleanup_proven_after_close": true,
+   "closed_set": true,
+   "detected_within_0p5s": true,
+   "error_code": "worker_native_exited",
+   "native_exit_diagnostic_error_code": "worker_native_exited",
+   "native_exit_diagnostic_keys": [
+    "error_code",
+    "error_detail",
+    "exception_types",
+    "frames",
+    "in_flight_commands",
+    "in_flight_count",
+    "node_id",
+    "protocol",
+    "returncode",
+    "run_id"
+   ],
+   "pid_gone": true,
+   "private_cause": {
+    "previous_error_code": "worker_native_exited",
+    "previous_returncode": -9,
+    "previous_shutdown_actor": "native_exit"
+   },
+   "process_group_present": false,
+   "send_after_death_raises": "worker_native_exited",
+   "status_error_code": "worker_native_exited",
+   "status_running": false
+  },
+  "p1_member_runtime": {
+   "close_with_cleanup_completed": true,
+   "error_after_death": "runtime_cold_restart_required",
+   "new_process_minted": false,
+   "old_worker_cleanup_proven": true,
+   "previous_error_code": "worker_native_exited",
+   "previous_shutdown_actor": "native_exit",
+   "replace_raises": "runtime_cold_restart_required",
+   "replacement_record_error_code": "runtime_cold_restart_required",
+   "replacement_record_outcome": "refused",
+   "route_ready": false,
+   "staging_cleanup_calls": 1,
+   "state_after_close": "closed",
+   "state_after_death": "blocked"
+  },
+  "p2_owner_run": {
+   "active_after_failure": false,
+   "cleanup_unproven": null,
+   "error_code": "worker_native_exited",
+   "failed_step": "serving",
+   "next_start_allowed": true,
+   "route_ready": false,
+   "second_run_error_code": null,
+   "second_run_id_differs": true,
+   "second_run_state": "serving",
+   "state_after_death": "failed",
+   "stop_on_failed_run_raises": false,
+   "stop_on_failed_run_state": "failed",
+   "teardown_failed_flag": true
+  },
+  "p3_unproven": {
+   "plain_start_after_unproven_failure": {
+    "cleanup_unproven": {
+     "code": "owner_target_cleanup_unproven",
+     "owner_lock_released": true
+    },
+    "first_error": "worker_native_exited",
+    "next_start_allowed": true,
+    "next_state": "serving"
+   },
+   "rollover_with_unproven_cleanup": {
+    "error_code": "rollover_cleanup_unproven",
+    "rollover_state": "failed",
+    "state": "failed"
+   }
+  }
+ },
+ "oracle": "mycelium-v014 f4e366e98a1f705dfaf182897044500d290dbd7f (executed from an APFS clone, python3.13)",
+ "probes": {
+  "launcher_probe.py": "fb21222acc1d553f6e921aa9dd2b9beac923c6931388c150468af5763b29cb70",
+  "observations": "124180ac342b829c8495afa6ebf93455cd8592a8ead4d52feff1056942e62a36",
+  "post_death_probe.py": "9e77c423c2af26c889a18a1623cd93605700f698c96f69b01b13735a1f436f26"
+ },
+ "sources": [
+  "worker.py:1459-1479 _watch",
+  "worker.py:1590-1620 cleanup_proven/close",
+  "managed_runtime.py:284-347 _replace_worker_if_dead",
+  "managed_runtime.py:412-470 close",
+  "owner_run.py:235-330 _main/_run_once",
+  "__main__.py:164-222 launcher loop"
+ ]
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "key": {
+      "format": "safetensors",
+      "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model_revision": "revision-one",
+      "quantization": "none",
+      "size_bytes": 18,
+      "tensor_digest": "sha256:9990f20b430f3344faf7cbc33360f5e7b98a76fd745dc7ad30384924e2a4e69b"
+    },
+    "object_id": "sha256:71c1918715e6e57a9062d39ce1f098c04f5d9806c8ecfb83af21c8573f307619"
+  },
+  {
+    "key": {
+      "format": "safetensors",
+      "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model_revision": "r\u00e9vision-\u4e8c",
+      "quantization": "none",
+      "size_bytes": 18,
+      "tensor_digest": "sha256:9990f20b430f3344faf7cbc33360f5e7b98a76fd745dc7ad30384924e2a4e69b"
+    },
+    "object_id": "sha256:99c5ca75d8490a0613af589197b899d878adecc2cb0fc190feeb075e3777ec9c"
+  }
+]

@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "node-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+metal = ["backend-mlx/metal", "dep:tokenizers", "iroh-loopback"]
+desktop-shell = ["metal", "dep:desktop", "desktop/dev-shell"]
+# The packaged `mycelium` executable: real node service + the unchanged window, no dev shell.
+packaged = ["metal", "dep:desktop", "desktop/tauri-shell"]
+# Test-only: adds the frozen-chat driver script. Never enabled for the shipped bundle.
+qualification-probe = ["packaged", "desktop/qualification-probe"]
+iroh-loopback = ["runtime/iroh-adapter", "dep:iroh", "dep:tokio", "dep:transport"]
+
+
+[[bin]]
+name = "mycelium-hello-bootstrap"
+path = "src/bin/mycelium-hello-bootstrap.rs"
+
+[[bin]]
+name = "mycelium"
+path = "src/bin/mycelium.rs"
+required-features = ["packaged"]
+
+[dependencies]
+api = { path = "../api" }
+backend-mlx = { path = "../backend-mlx" }
+budgets = { path = "../budgets" }
+control = { path = "../control" }
+desktop = { path = "../desktop", optional = true }
+iroh = { version = "=1.0.2", default-features = false, features = ["tls-ring"], optional = true }
+tokio = { version = "=1.53.1", features = ["rt", "rt-multi-thread", "time", "io-util", "net", "sync"], optional = true }
+transport = { path = "../transport", optional = true }
+rustix = { version = "=1.1.4", features = ["fs", "process"] }
+zeroize = "=1.9.0"
+
+node = { path = "../node" }
+owner-run = { path = "../owner-run" }
+planner = { path = "../planner" }
+protocol = { path = "../protocol" }
+router = { path = "../router" }
+runtime = { path = "../runtime" }
+stage-contract = { path = "../stage-contract" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"], optional = true }
+
+[dev-dependencies]
+# The packaged owner-renewal tests read the owner's lease from its seed's committed table, as
+# api's headless renewal journeys do (same pinned version and features as api, node and seed).
+rusqlite = { version = "=0.32.1", features = ["bundled"] }

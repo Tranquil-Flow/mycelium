@@ -1,0 +1,5154 @@
+[
+  {
+    "canonical_utf8": "{\"claim_boundary\":\"manual provisioning order only; not product Planner output\",\"model\":{\"manifest_digest\":\"sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e\",\"model_id\":\"org/model\",\"num_layers\":4,\"resolved_commit\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},\"node_order\":[\"node-a\",\"node-b\"],\"ok\":true,\"protocol\":\"mycelium.manual_provisioning_route.v1\",\"route\":[{\"node_id\":\"node-a\",\"range\":{\"end_layer_exclusive\":2,\"layer_count\":2,\"start_layer\":0}},{\"node_id\":\"node-b\",\"range\":{\"end_layer_exclusive\":4,\"layer_count\":2,\"start_layer\":2}}]}",
+    "cases": [
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "path": [],
+        "replacement": {
+          "claim_boundary": "manual provisioning order only; not product Planner output",
+          "model": {
+            "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+            "model_id": "org/model",
+            "num_layers": 4,
+            "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "node_order": [
+            "node-a",
+            "node-b"
+          ],
+          "ok": true,
+          "protocol": "mycelium.manual_provisioning_route.v1",
+          "route": [
+            {
+              "node_id": "node-a",
+              "range": {
+                "end_layer_exclusive": 2,
+                "layer_count": 2,
+                "start_layer": 0
+              }
+            },
+            {
+              "node_id": "node-b",
+              "range": {
+                "end_layer_exclusive": 4,
+                "layer_count": 2,
+                "start_layer": 2
+              }
+            }
+          ],
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "claim_boundary must be a non-empty string",
+        "exception": "ValueError",
+        "path": [
+          "claim_boundary"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "model must be an object",
+        "exception": "ValueError",
+        "path": [
+          "model"
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "model"
+        ],
+        "replacement": {
+          "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+          "model_id": "org/model",
+          "num_layers": 4,
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "manifest_digest must be sha256:<64 lowercase hex>",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "manifest_digest"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "model_id required",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "model_id"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "route gap after layer 3",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "route gap after layer 3",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "route gap after layer 3",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "route gap after layer 3",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "num_layers must be positive",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "num_layers"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "resolved_commit must be immutable 40-hex",
+        "exception": "ValueError",
+        "path": [
+          "model",
+          "resolved_commit"
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "node_order"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "delete": true,
+        "path": [
+          "node_order"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": [
+          "node-a",
+          "node-b",
+          "node-a",
+          "node-b"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order"
+        ],
+        "replacement": [
+          "node-b",
+          "node-a"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          0
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "node_order",
+          1
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "path": [
+          "ok"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route plan is not successful",
+        "exception": "ValueError",
+        "path": [
+          "ok"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "expected mycelium.manual_provisioning_route.v1",
+        "exception": "ValueError",
+        "path": [
+          "protocol"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route must contain at least one stage",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "duplicate primary route node: node-a",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": [
+          {
+            "node_id": "node-a",
+            "range": {
+              "end_layer_exclusive": 2,
+              "layer_count": 2,
+              "start_layer": 0
+            }
+          },
+          {
+            "node_id": "node-b",
+            "range": {
+              "end_layer_exclusive": 4,
+              "layer_count": 2,
+              "start_layer": 2
+            }
+          },
+          {
+            "node_id": "node-a",
+            "range": {
+              "end_layer_exclusive": 2,
+              "layer_count": 2,
+              "start_layer": 0
+            }
+          },
+          {
+            "node_id": "node-b",
+            "range": {
+              "end_layer_exclusive": 4,
+              "layer_count": 2,
+              "start_layer": 2
+            }
+          }
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "route gap before layer 2",
+        "exception": "ValueError",
+        "path": [
+          "route"
+        ],
+        "replacement": [
+          {
+            "node_id": "node-b",
+            "range": {
+              "end_layer_exclusive": 4,
+              "layer_count": 2,
+              "start_layer": 2
+            }
+          },
+          {
+            "node_id": "node-a",
+            "range": {
+              "end_layer_exclusive": 2,
+              "layer_count": 2,
+              "start_layer": 0
+            }
+          }
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "'NoneType' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "'list' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route gap before layer 2",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "route",
+          0
+        ],
+        "replacement": {
+          "node_id": "node-a",
+          "range": {
+            "end_layer_exclusive": 2,
+            "layer_count": 2,
+            "start_layer": 0
+          },
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "node_id"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route stage node-a requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range"
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "route",
+          0,
+          "range"
+        ],
+        "replacement": {
+          "end_layer_exclusive": 2,
+          "layer_count": 2,
+          "start_layer": 0,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "end_layer_exclusive"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "layer_count"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "start_layer must be non-negative",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          0,
+          "range",
+          "start_layer"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "'NoneType' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "'list' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route gap after layer 1",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "route",
+          1
+        ],
+        "replacement": {
+          "node_id": "node-b",
+          "range": {
+            "end_layer_exclusive": 4,
+            "layer_count": 2,
+            "start_layer": 2
+          },
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "node_order does not match route",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "every route stage requires node_id",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "node_id"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "route stage node-b requires range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range"
+        ]
+      },
+      {
+        "accepted": true,
+        "path": [
+          "route",
+          1,
+          "range"
+        ],
+        "replacement": {
+          "end_layer_exclusive": 4,
+          "layer_count": 2,
+          "start_layer": 2,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive exceeds num_layers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "end_layer_exclusive"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "layer_count"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "layer_count does not match half-open range",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "start_layer must be non-negative",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "end_layer_exclusive must be greater than start_layer",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "layer range fields must be integers",
+        "exception": "ValueError",
+        "path": [
+          "route",
+          1,
+          "range",
+          "start_layer"
+        ]
+      },
+      {
+        "accepted": true,
+        "name": "unbounded-range",
+        "path": [],
+        "replacement": {
+          "claim_boundary": "manual provisioning order only; not product Planner output",
+          "model": {
+            "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+            "model_id": "org/model",
+            "num_layers": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+            "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "ok": true,
+          "protocol": "mycelium.manual_provisioning_route.v1",
+          "route": [
+            {
+              "node_id": "node-a",
+              "range": {
+                "end_layer_exclusive": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "layer_count": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+                "start_layer": 0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "accepted": true,
+        "name": "unbounded-range",
+        "path": [],
+        "replacement": {
+          "claim_boundary": "manual provisioning order only; not product Planner output",
+          "model": {
+            "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+            "model_id": "org/model",
+            "num_layers": 18446744073709551616,
+            "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "ok": true,
+          "protocol": "mycelium.manual_provisioning_route.v1",
+          "route": [
+            {
+              "node_id": "node-a",
+              "range": {
+                "end_layer_exclusive": 18446744073709551616,
+                "layer_count": 18446744073709551616,
+                "start_layer": 0
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "name": "manual-route",
+    "value": {
+      "claim_boundary": "manual provisioning order only; not product Planner output",
+      "model": {
+        "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+        "model_id": "org/model",
+        "num_layers": 4,
+        "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "node_order": [
+        "node-a",
+        "node-b"
+      ],
+      "ok": true,
+      "protocol": "mycelium.manual_provisioning_route.v1",
+      "route": [
+        {
+          "node_id": "node-a",
+          "range": {
+            "end_layer_exclusive": 2,
+            "layer_count": 2,
+            "start_layer": 0
+          }
+        },
+        {
+          "node_id": "node-b",
+          "range": {
+            "end_layer_exclusive": 4,
+            "layer_count": 2,
+            "start_layer": 2
+          }
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,4 @@
+[
+  {"id": "O:path:test_alpha.py", "description": "fixture obligation", "destination": "x", "tier": "unit", "proof_state": "planned_not_executed"},
+  {"id": "O:path:test_beta.py", "description": "fixture obligation", "destination": "x", "tier": "unit", "proof_state": "planned_not_executed"}
+]

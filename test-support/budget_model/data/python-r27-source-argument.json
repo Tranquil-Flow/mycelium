@@ -1,0 +1,66 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "path": "mycelium_a13_macos/managed_runtime.py",
+  "full_source_sha256": "a4cdfd23bbc39b0ceb9e14ff423f2cf38a593f32c6a743c8bec6bfea54d9df3c",
+  "key": "mycelium_a13_macos/managed_runtime.py:461:16:assignment:delay",
+  "scope": "ManagedTargetRuntime._serve",
+  "symbol": "delay",
+  "expression": "0.05",
+  "kind": "assignment",
+  "column": 16,
+  "source": "                delay=.05",
+  "delay_writes": [
+    {
+      "line": 461,
+      "column": 16,
+      "expression": "0.05"
+    },
+    {
+      "line": 464,
+      "column": 20,
+      "expression": "self._outbound_retry_backoff"
+    }
+  ],
+  "waits": {
+    "retry": 469,
+    "delivery": 479
+  },
+  "executed_literal_seconds": 0.05,
+  "executed_literal_milliseconds": 50.0,
+  "claim": "STATIC AST/source plus executed literal calculation ONLY; no native loop/latency/API enforcement proof",
+  "lines": {
+    "447": "    def _serve(self):",
+    "448": "        try:",
+    "449": "            while not self._stop.is_set():",
+    "450": "                self._member()",
+    "451": "                if self._adaptive is not None: self._adaptive.tick()",
+    "452": "                if self._adaptive_drain is not None:",
+    "453": "                    try: self._adaptive_drain(self)",
+    "454": "                    except Exception: pass  # a drain fault leaves the model loaded; it never kills control",
+    "455": "                self._replace_worker_if_dead()",
+    "456": "                step=self.pump.step()",
+    "457": "                # A retrying outbound is a bounded recovery, not a death: back off a",
+    "458": "                # little so a down origin is not hammered at the 50 ms poll cadence.",
+    "459": "                # Bounded by the envelope's own signed TTL, and native dispatch is",
+    "460": "                # unaffected (it runs on the pump's executor, not on this wait).",
+    "461": "                delay=.05",
+    "462": "                if isinstance(step,dict) and step.get('state')=='outbound_retryable':",
+    "463": "                    self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))",
+    "464": "                    delay=self._outbound_retry_backoff",
+    "465": "                    # The retry backoff keeps its own wait on purpose: a peer that owes an",
+    "466": "                    # undone outbound cannot send anything new until that retry resolves, so",
+    "467": "                    # waking it early could only hammer a down origin -- the thing this",
+    "468": "                    # backoff exists to prevent.  Delivery promptness is not at stake here.",
+    "469": "                    self._stop.wait(delay)",
+    "470": "                else:",
+    "471": "                    self._outbound_retry_backoff=.1",
+    "472": "                    # Wait on the delivery wake-up with the cadence as the ceiling: a native",
+    "473": "                    # command finishing (which frees this peer's next claim slot, because the",
+    "474": "                    # ack is what retires the mailbox's claimed row), or an enqueue arriving",
+    "475": "                    # on an in-process mailbox, ends the wait at once.  The interval is",
+    "476": "                    # unchanged and still bounds the wait; only its promptness is.  This is",
+    "477": "                    # the delivery side of D9: p81r1's inversion was claim latency +",
+    "478": "                    # execution latency against a ~4.4 s window, not a window too small.",
+    "479": "                    self.pump.wait_for_wake(delay)"
+  }
+}

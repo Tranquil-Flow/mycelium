@@ -1,0 +1,1008 @@
+{
+  "base_plan_digest": "sha256:1b1fa5a005c0af462c336019a13f1f6b99930ce4e480848068ee9925e166110d",
+  "cases": [
+    {
+      "action": "existing_track_intent",
+      "affected_group_ids": [
+        "stage-003"
+      ],
+      "candidate_plan": null,
+      "candidate_plan_digest": null,
+      "capacity_gain_fraction": null,
+      "escalation_order": [],
+      "event_id": "replica-drop-n4",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "replica-drop",
+      "reason": "an unaffected legal placement-intent track survives; runtime readiness remains external",
+      "recommendation": "router_builder_validate_existing_track",
+      "snapshot_generation": 2,
+      "surviving_track_ids": [
+        "track-000"
+      ],
+      "urgency": "immediate"
+    },
+    {
+      "action": "full_replan",
+      "affected_group_ids": [
+        "stage-001"
+      ],
+      "candidate_plan": {
+        "diagnostics": {
+          "accepted_replica_nodes": [
+            "n5"
+          ],
+          "admitted_node_ids": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "candidate_node_ids": [
+            "n0",
+            "n2",
+            "n3",
+            "n4",
+            "n5"
+          ],
+          "decode_mode": "unknown",
+          "excluded_nodes": {
+            "n1": "topology_event:unique-stage-drop-n1:device_unavailable"
+          },
+          "frozen_primary_order": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "node_runtime": {},
+          "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+          "placement_provenance": "planner_v2",
+          "primary_order": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "primary_search": [
+            "primary order frozen from directed latency and jitter only",
+            "admitted_node_count=4",
+            "topology_cycle_cost_ms=6.9"
+          ],
+          "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "candidate_decisions": [
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 2.101151094615674,
+                "raw_gain_rps": 0.37860028625703124,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.34074025763132815
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 1.722550808358643,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 1.722550808358643,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.9953604442288084,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.8958243998059277
+              }
+            ],
+            "kv_locality": "request_track_pinned_no_migration",
+            "minimum_gain_fraction": 0.05,
+            "parallelism_label": "data_parallel_request_routing",
+            "request_routing_semantics": "one_complete_track_per_request",
+            "route_ready": false,
+            "uncertainty_fraction": 0.1,
+            "zero_flow_removed_placement_ids": []
+          },
+          "speculative": {
+            "enabled": false,
+            "target_fallback": true
+          },
+          "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
+          "unplaced_node_ids": [
+            "n5"
+          ],
+          "workload": {
+            "arrival_process": "poisson_capacity_sweep",
+            "mode": "sensitivity_grid",
+            "name": "interactive_chat_v1",
+            "network_size_changes_capacity_not_demand": true,
+            "source": "LMSYS-Chat-1M",
+            "user_scale": 2.0
+          }
+        },
+        "forward_edges": [
+          {
+            "capacity_rps": 6.581995871772189,
+            "cost_ms": 151.92960000000002,
+            "dst_placement_id": "stage-001-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-000-primary"
+          },
+          {
+            "capacity_rps": 2.7179112525874514,
+            "cost_ms": 367.9296,
+            "dst_placement_id": "stage-002-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 2.101151094615674,
+            "cost_ms": 475.92960000000005,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 2.101151094615674,
+            "cost_ms": 475.92960000000005,
+            "dst_placement_id": "stage-003-replica-n5",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          }
+        ],
+        "handoff_state": "placement_intent_only",
+        "legal_tracks": [
+          {
+            "cost_ms": 1576.3232000000003,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-primary"
+            ],
+            "track_id": "track-000",
+            "traffic_fraction": 0.6337774298990722
+          },
+          {
+            "cost_ms": 1683.8232000000003,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-replica-n5"
+            ],
+            "track_id": "track-001",
+            "traffic_fraction": 0.36622257010092785
+          }
+        ],
+        "loopbacks": [
+          {
+            "cost_ms": 580.5344000000001,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-primary"
+          },
+          {
+            "cost_ms": 688.0344000000001,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-replica-n5"
+          }
+        ],
+        "metrics": {
+          "primary_request_capacity_rps": 1.722550808358643,
+          "replica_capacity_gain_rps": 0.9953604442288084,
+          "replicated_output_capacity_tps": 584.350919306302,
+          "replicated_request_capacity_rps": 2.7179112525874514,
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
+              "decode_payload_bytes": 256,
+              "decode_transfer_ms": 7.307840000000001,
+              "expected_response_ms": 1591.4282,
+              "name": "interactive-c1",
+              "output_goodput_tps": 135.85406013444117,
+              "prefill_compute_ms": 3.71,
+              "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 5.1376,
+              "required_memory_bytes": 240291840.0,
+              "single_request_tps": 135.85406013444117,
+              "tpot_ms": 7.3608400000000005,
+              "ttft_ms": 8.8476
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
+              "decode_payload_bytes": 256,
+              "decode_transfer_ms": 7.307840000000001,
+              "expected_response_ms": 1591.4282,
+              "name": "interactive-c4",
+              "output_goodput_tps": 370.3484237971083,
+              "prefill_compute_ms": 3.71,
+              "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 5.1376,
+              "required_memory_bytes": 241167360.0,
+              "single_request_tps": 135.85406013444117,
+              "tpot_ms": 7.3608400000000005,
+              "ttft_ms": 8.8476
+            }
+          ],
+          "unmet_capacity_sweep_demand_rps": 67.45752734390378
+        },
+        "model": {
+          "architecture": "Decoder",
+          "dtype_bytes": 2,
+          "head_dim": 32,
+          "hidden_size": 128,
+          "kv_heads": 2,
+          "model_id": "org/model",
+          "num_layers": 4,
+          "revision": "immutable-revision",
+          "weight_bytes": 240000000,
+          "weight_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "placements": [
+          {
+            "layer_range": {
+              "end": 1,
+              "start": 0
+            },
+            "node_id": "n0",
+            "placement_id": "stage-000-primary",
+            "primary": true,
+            "replica_group_id": "stage-000",
+            "service_capacity_rps": 70.17543859649123
+          },
+          {
+            "layer_range": {
+              "end": 2,
+              "start": 1
+            },
+            "node_id": "n2",
+            "placement_id": "stage-001-primary",
+            "primary": true,
+            "replica_group_id": "stage-001",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n3",
+            "placement_id": "stage-002-primary",
+            "primary": true,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n4",
+            "placement_id": "stage-003-primary",
+            "primary": true,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n5",
+            "placement_id": "stage-003-replica-n5",
+            "primary": false,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          }
+        ],
+        "protocol": "mycelium.route_plan.v2",
+        "provenance": {
+          "budget_exhausted": false,
+          "candidate_budget": 100000,
+          "candidate_node_count": 4,
+          "explored_candidates": 6,
+          "globally_exact": true,
+          "mode": "exact_topology_enumeration"
+        },
+        "snapshot_digest": "sha256:c95c059ae9aa4cae688eeb0741bf26d400f292d55197e8d7e2b69a329d4bb89a",
+        "workload_name": "interactive_chat_v1"
+      },
+      "candidate_plan_digest": "sha256:a584a13c7c9797ebbcb2a3b2e35046a27caf995bc1c1e82bba6836ca43db8c96",
+      "capacity_gain_fraction": -0.2915763446551339,
+      "escalation_order": [
+        "successor_standby_candidate",
+        "full_replan"
+      ],
+      "event_id": "unique-stage-drop-n1",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "unique-interior-stage-drop",
+      "reason": "fresh placement intent computed from the supplied topology snapshot",
+      "recommendation": "prefer_route_ready_successor_standby_else_provision_candidate",
+      "snapshot_generation": 3,
+      "surviving_track_ids": [],
+      "urgency": "immediate"
+    },
+    {
+      "action": "existing_track_intent",
+      "affected_group_ids": [],
+      "candidate_plan": null,
+      "candidate_plan_digest": null,
+      "capacity_gain_fraction": null,
+      "escalation_order": [],
+      "event_id": "directed-edge-drop-n2-n3",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "directed-edge-drop",
+      "reason": "an unaffected legal placement-intent track survives; runtime readiness remains external",
+      "recommendation": "router_builder_validate_existing_track",
+      "snapshot_generation": 4,
+      "surviving_track_ids": [
+        "track-001"
+      ],
+      "urgency": "immediate"
+    },
+    {
+      "action": "candidate_replan",
+      "affected_group_ids": [],
+      "candidate_plan": {
+        "diagnostics": {
+          "accepted_replica_nodes": [
+            "n6",
+            "n5"
+          ],
+          "admitted_node_ids": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "candidate_node_ids": [
+            "n0",
+            "n1",
+            "n2",
+            "n3",
+            "n4",
+            "n5",
+            "n6"
+          ],
+          "decode_mode": "unknown",
+          "excluded_nodes": {},
+          "frozen_primary_order": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "node_runtime": {},
+          "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+          "placement_provenance": "planner_v2",
+          "primary_order": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "primary_search": [
+            "primary order frozen from directed latency and jitter only",
+            "admitted_node_count=4",
+            "topology_cycle_cost_ms=5.4"
+          ],
+          "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "candidate_decisions": [
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-000-replica-n4",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-001-replica-n4",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-002-replica-n4",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-003-replica-n4",
+                "proposed_admitted_rps": 3.8365619669551423,
+                "raw_gain_rps": 1.7225508083586432,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.5502957275227789
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 3.5674268599044567,
+                "raw_gain_rps": 1.4534157013079576,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.308074131177162
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-000-replica-n6",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-001-replica-n6",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-002-replica-n6",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-003-replica-n6",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 1.733184389736588,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.559865950762929
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-000-replica-n4",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-001-replica-n4",
+                "proposed_admitted_rps": 5.5597307580569995,
+                "raw_gain_rps": 1.7125352097239124,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 1.5412816887515213
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-002-replica-n4",
+                "proposed_admitted_rps": 6.581995871772189,
+                "raw_gain_rps": 2.7348003234391016,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 2.4613202910951917
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-003-replica-n4",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 5.292429283094543,
+                "raw_gain_rps": 1.4452337347614557,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 1.3007103612853101
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 6.581995871772189,
+                "raw_gain_rps": 2.7348003234391016,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 2.4613202910951917
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.0
+              }
+            ],
+            "kv_locality": "request_track_pinned_no_migration",
+            "minimum_gain_fraction": 0.05,
+            "parallelism_label": "data_parallel_request_routing",
+            "request_routing_semantics": "one_complete_track_per_request",
+            "route_ready": false,
+            "uncertainty_fraction": 0.1,
+            "zero_flow_removed_placement_ids": []
+          },
+          "speculative": {
+            "enabled": false,
+            "target_fallback": true
+          },
+          "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
+          "unplaced_node_ids": [
+            "n4",
+            "n5",
+            "n6"
+          ],
+          "workload": {
+            "arrival_process": "poisson_capacity_sweep",
+            "mode": "sensitivity_grid",
+            "name": "interactive_chat_v1",
+            "network_size_changes_capacity_not_demand": true,
+            "source": "LMSYS-Chat-1M",
+            "user_scale": 2.0
+          }
+        },
+        "forward_edges": [
+          {
+            "capacity_rps": 6.581995871772189,
+            "cost_ms": 151.92960000000002,
+            "dst_placement_id": "stage-001-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-000-primary"
+          },
+          {
+            "capacity_rps": 3.847195548333087,
+            "cost_ms": 259.9296,
+            "dst_placement_id": "stage-002-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 3.847195548333087,
+            "cost_ms": 259.9296,
+            "dst_placement_id": "stage-002-replica-n5",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 2.7179112525874514,
+            "cost_ms": 367.9296,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 38.471955483330866,
+            "cost_ms": 25.992960000000004,
+            "dst_placement_id": "stage-003-replica-n6",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 1.4452337347614557,
+            "cost_ms": 691.9295999999999,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-replica-n5"
+          },
+          {
+            "capacity_rps": 38.471955483330866,
+            "cost_ms": 25.992960000000004,
+            "dst_placement_id": "stage-003-replica-n6",
+            "kind": "forward",
+            "src_placement_id": "stage-002-replica-n5"
+          }
+        ],
+        "handoff_state": "placement_intent_only",
+        "legal_tracks": [
+          {
+            "cost_ms": 463.6556,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-replica-n6"
+            ],
+            "track_id": "track-000",
+            "traffic_fraction": 0.5845028807800267
+          },
+          {
+            "cost_ms": 463.6556,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-replica-n5",
+              "stage-003-replica-n6"
+            ],
+            "track_id": "track-001",
+            "traffic_fraction": 0.41549711921997334
+          }
+        ],
+        "loopbacks": [
+          {
+            "cost_ms": 473.03440000000006,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-primary"
+          },
+          {
+            "cost_ms": 25.803440000000002,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-replica-n6"
+          }
+        ],
+        "metrics": {
+          "primary_request_capacity_rps": 2.114011158596499,
+          "replica_capacity_gain_rps": 4.46798471317569,
+          "replicated_output_capacity_tps": 1415.1291124310205,
+          "replicated_request_capacity_rps": 6.581995871772189,
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
+              "decode_payload_bytes": 256,
+              "decode_transfer_ms": 5.807840000000001,
+              "expected_response_ms": 1267.9282,
+              "name": "interactive-c1",
+              "output_goodput_tps": 170.62400611516438,
+              "prefill_compute_ms": 3.71,
+              "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 4.1376,
+              "required_memory_bytes": 240291840.0,
+              "single_request_tps": 170.62400611516438,
+              "tpot_ms": 5.86084,
+              "ttft_ms": 7.8476
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
+              "decode_payload_bytes": 256,
+              "decode_transfer_ms": 5.807840000000001,
+              "expected_response_ms": 1267.9282,
+              "name": "interactive-c4",
+              "output_goodput_tps": 454.51239909824733,
+              "prefill_compute_ms": 3.71,
+              "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 4.1376,
+              "required_memory_bytes": 241167360.0,
+              "single_request_tps": 170.62400611516438,
+              "tpot_ms": 5.86084,
+              "ttft_ms": 7.8476
+            }
+          ],
+          "unmet_capacity_sweep_demand_rps": 63.59344272471905
+        },
+        "model": {
+          "architecture": "Decoder",
+          "dtype_bytes": 2,
+          "head_dim": 32,
+          "hidden_size": 128,
+          "kv_heads": 2,
+          "model_id": "org/model",
+          "num_layers": 4,
+          "revision": "immutable-revision",
+          "weight_bytes": 240000000,
+          "weight_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "placements": [
+          {
+            "layer_range": {
+              "end": 1,
+              "start": 0
+            },
+            "node_id": "n0",
+            "placement_id": "stage-000-primary",
+            "primary": true,
+            "replica_group_id": "stage-000",
+            "service_capacity_rps": 70.17543859649123
+          },
+          {
+            "layer_range": {
+              "end": 2,
+              "start": 1
+            },
+            "node_id": "n1",
+            "placement_id": "stage-001-primary",
+            "primary": true,
+            "replica_group_id": "stage-001",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n2",
+            "placement_id": "stage-002-primary",
+            "primary": true,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n5",
+            "placement_id": "stage-002-replica-n5",
+            "primary": false,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n3",
+            "placement_id": "stage-003-primary",
+            "primary": true,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n6",
+            "placement_id": "stage-003-replica-n6",
+            "primary": false,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 35087.71929824561
+          }
+        ],
+        "protocol": "mycelium.route_plan.v2",
+        "provenance": {
+          "budget_exhausted": false,
+          "candidate_budget": 100000,
+          "candidate_node_count": 4,
+          "explored_candidates": 6,
+          "globally_exact": true,
+          "mode": "exact_topology_enumeration"
+        },
+        "snapshot_digest": "sha256:2452db9c216eae5b9df44198a521cbe71cb823ea32879001ff82b056ec01bbbc",
+        "workload_name": "interactive_chat_v1"
+      },
+      "candidate_plan_digest": "sha256:544e9103b49994a70cb8832d100499be5c15b79142f3ac472b2da64fb4e2a604",
+      "capacity_gain_fraction": 0.7155974355331315,
+      "escalation_order": [
+        "full_replan"
+      ],
+      "event_id": "fast-node-join-n6",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "fast-node-join",
+      "reason": "fresh placement intent computed from the supplied topology snapshot",
+      "recommendation": "provision_candidate",
+      "snapshot_generation": 5,
+      "surviving_track_ids": [
+        "track-000",
+        "track-001"
+      ],
+      "urgency": "deferred"
+    }
+  ],
+  "handoff_state": "placement_intent_only",
+  "protocol": "mycelium.layer_replan_simulation_report.v1"
+}

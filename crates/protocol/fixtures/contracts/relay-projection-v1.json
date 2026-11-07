@@ -1,0 +1,8 @@
+{
+  "observed_at_unix_ms": 1752500000000,
+  "projection_generation": 1,
+  "protocol": "mycelium.relay_projection.v1",
+  "region": "unknown",
+  "relay_reference": "hmac-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "stable": true
+}

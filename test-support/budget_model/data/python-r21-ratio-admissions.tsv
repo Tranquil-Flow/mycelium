@@ -1,0 +1,3 @@
+key	reviewer	verdict	target	row_sha256
+mycelium_swarm_artifacts.py:1076:4:assignment:serving_reserve	L1b-r21-local-ratio	derived	PyKbR2SwarmRatioUpperL1079C16	4c37f3b7b2f5ecfc9f80e3c0345a9af03c0bd63b57e32cef88d00d4836085e4f
+mycelium_swarm_artifacts.py:1110:11:comparison:serving_reserve	L1b-r21-local-ratio	bounded	PyR21ServingReserveStrictThresholdL1110C11	c220a602d093b5b2e960cf3219c042b6d4ff2fb25724b31245fd34462f47e3d3

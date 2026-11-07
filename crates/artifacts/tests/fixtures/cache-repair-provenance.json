@@ -1,0 +1,14 @@
+{
+  "claim": "actual oracle outcomes and complete on-disk state after every step of scripted cache scenarios (damage, repair, eviction, pins, materialization); synthetic bytes, no model",
+  "counts": {
+    "scenarios": 34,
+    "steps": 223
+  },
+  "generator_sha256": "14b381f15465162da729a90e532d05f00f22876314f715058b92fd09d2fa83e0",
+  "imported_sources": {
+    "mycelium_assignment_cache.py": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": "254396d67176aa86875248bdbe4dce1f5ac4c8238a2c5d87db9707384777a6f9",
+  "python": "3.14.8"
+}

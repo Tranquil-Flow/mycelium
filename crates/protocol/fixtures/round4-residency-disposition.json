@@ -1,0 +1,31 @@
+{
+  "protocol": "mycelium.deployment_residency_physical_gate.v1",
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "disposition": "historical-observation-retained-no-runtime-validator",
+  "review": "L5 source review of the pinned tree and packaging closure; not owner release acceptance",
+  "definition": "scripts/generate_contract_fixtures.py:1813-1846",
+  "definition_kind": "constant historical observation, no live measurement or validator",
+  "callers": ["scripts/generate_contract_fixtures.py:2412 (fixture inventory construction)"],
+  "references": [
+    "scripts/contract_registry.py:535-536 (registry entry)",
+    "contracts/contract-manifest.v1.json:221,257 (fixture and identity)",
+    "tests/contracts/test_contract_fixtures.py:165-166 (fixture/identity mapping)",
+    "docs/handover/a5-integration-source-manifest.v1.json:45 (source inventory)",
+    "docs/handover/a8-source-manifest.v1.json:45 (source inventory)",
+    "docs/superpowers/specs/2026-08-11-mycelium-deployment-residency-control.md:56 (historical evidence reference)"
+  ],
+  "ships": {
+    "generator_source_data": true,
+    "fixture_in_compiler_source_data": false,
+    "runtime_callers": [],
+    "explanation": "Do not equate source-data packaging with runtime invocation. build_qwen_live_route.py:770-798 follows package-head imports and includes every scripts/*.py through mycelium_live/model_capacity.py:27 importing scripts.assemble_m17_swarm_evidence. build_a13_macos.py:248-263 stages that closure, and :313 adds it as a13-runtime-source. This includes the fixture generator as inert source data, but no runtime caller of this constant producer exists at the pin. The only call constructs the offline fixture inventory. No installed app was inspected or run."
+  },
+  "fixture_path": "contracts/deployment-residency-physical-v1.json",
+  "fixture_sha256": "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445",
+  "negative_claim_controls": [
+    "historical route_ready remains false",
+    "source_commit remains 5b876403f15a8af75b7453f00a5762c0e5be0ae2, not the Rust candidate",
+    "the schema dispatcher must not accept this document as current validation/readiness"
+  ],
+  "claim_boundary": "Retained immutable compatibility evidence, not a Rust readiness gate or current residency measurement. This identity is dispositioned, not behavior-implemented. Original fixture, canonical bytes and hash stay unchanged."
+}

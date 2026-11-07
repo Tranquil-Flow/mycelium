@@ -1,0 +1,25 @@
+{
+  "claim_boundary": "Pure external oracle signing/validation only; no services, persistence, network or release executed",
+  "cryptography": "46.0.5",
+  "generator_sha256": "92891f322d93432ada862b72a12c9fe3000988b29e562d408ec2a2dbae6274b3",
+  "inputs": [
+    {
+      "path": "mycelium_qualification/signing.py",
+      "sha256": "62843f064b501553ba45f552a3279789b06485707c9e7c0f8b40112cc4a05aa5"
+    },
+    {
+      "path": "mycelium_qualification/evidence.py",
+      "sha256": "847f1cec93a523b09ba0926659165e39e56a47df1684b7a538790a6e693c5f0c"
+    },
+    {
+      "path": "mycelium_membership/contracts.py",
+      "sha256": "df93138166c4d08fd51c5cedb260e50536b3b3343840caeaab9a1a008d018ab2"
+    },
+    {
+      "path": "mycelium_a13_macos/managed_control.py",
+      "sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457"
+    }
+  ],
+  "oracle_commit": "27fdd49de7e18b58affa85b8a31e9a734d7b4d1e",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

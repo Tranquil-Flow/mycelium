@@ -1,0 +1,1706 @@
+{
+  "source_sha": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "manifest": {
+    "path": "artifacts/a6/source-manifest-v1.json",
+    "sha256": "95b11297bac9d6384bdfb8cbae98c60b91e265b289f6f1f385f9190208a44c9f",
+    "size_bytes": 254979
+  },
+  "history_files": [
+    {
+      "path": "baseline.json",
+      "sha256": "fe76322403377a1fca52701e15ef6f3e3aa0d9c5fd3630960882726c6b96d3c2",
+      "size_bytes": 690504
+    },
+    {
+      "path": "a6-source-manifest.json",
+      "sha256": "54ad1c2a25d6a909426926115d6347b53520785bab5eea4df4595a74587008a3",
+      "size_bytes": 252869
+    },
+    {
+      "path": "paths.json",
+      "sha256": "5efb44cfa96dd920be6be206a7846a409e7ef23e11d51cfa9fc6673bd1b9749e",
+      "size_bytes": 1156044
+    },
+    {
+      "path": "obligations.json",
+      "sha256": "dd66d71134e8b8f099333269ce5236f62cc44626aa6ba8752ba345497a3af7cb",
+      "size_bytes": 851927
+    },
+    {
+      "path": "test-groups.json",
+      "sha256": "851d2ba3571f0f0cf363a4598c94191f8a633fa2302a0bf34347d03abf8e2875",
+      "size_bytes": 1731510
+    },
+    {
+      "path": "contracts.json",
+      "sha256": "025536a925089040632ed5e7ec7269769950016e0f3176d0799efe6c17c2fdee",
+      "size_bytes": 97144
+    },
+    {
+      "path": "contract-manifest.json",
+      "sha256": "9bde583ab290cac3d03ebf105cac0f318b84ec03caa4f21896de924b31a218c0",
+      "size_bytes": 71574
+    },
+    {
+      "path": "destinations.json",
+      "sha256": "faa3cf96a505a6fc3a5ed3b19d8787da4cb0e24f1e362297a0a2dbf0e98c5bb6",
+      "size_bytes": 7757
+    },
+    {
+      "path": "escapes.json",
+      "sha256": "60775b76d396882fc5a5c6d2f1ec67acad80ee7f0e8e3800617e8dd2b439650d",
+      "size_bytes": 7407
+    },
+    {
+      "path": "supported-cells.json",
+      "sha256": "c22e128fe8de095b8f82a733dd158e921068bdcc85d4b481210b6c4c65fe503c",
+      "size_bytes": 13476
+    },
+    {
+      "path": "counts.json",
+      "sha256": "9575a2626c19838c0d48d45e227e09b11bb856bf1de174a1d000502b775e2dec",
+      "size_bytes": 592
+    },
+    {
+      "path": "accepted-contract-binding.json",
+      "sha256": "b24984779025711ff4b545bf276c4438fe981384ac1a49413974cf6699e1073e",
+      "size_bytes": 140630
+    },
+    {
+      "path": "accepted-contract-manifest.json",
+      "sha256": "dde648d2af8cc77e0a697cac820a3ef7ea2a043537ca542106038467cc19aa4e",
+      "size_bytes": 71574
+    }
+  ],
+  "paths": [
+    {
+      "id": "P:tests/a13_macos/inflight_stop_support.py",
+      "path": "tests/a13_macos/inflight_stop_support.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "desktop::quit"
+      },
+      "obligation_id": "O:path:tests/a13_macos/inflight_stop_support.py",
+      "citation": "tests/a13_macos/inflight_stop_support.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_inflight_chat_teardown.py",
+      "path": "tests/a13_macos/test_inflight_chat_teardown.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "desktop::quit"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_chat_teardown.py",
+      "citation": "tests/a13_macos/test_inflight_chat_teardown.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_inflight_progress_retirement.py",
+      "path": "tests/a13_macos/test_inflight_progress_retirement.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_retirement.py",
+      "citation": "tests/a13_macos/test_inflight_progress_retirement.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_inflight_progress_stop.py",
+      "path": "tests/a13_macos/test_inflight_progress_stop.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_stop.py",
+      "citation": "tests/a13_macos/test_inflight_progress_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_inflight_route_stop.py",
+      "path": "tests/a13_macos/test_inflight_route_stop.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_route_stop.py",
+      "citation": "tests/a13_macos/test_inflight_route_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_inflight_stop_order.py",
+      "path": "tests/a13_macos/test_inflight_stop_order.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "desktop::quit"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_stop_order.py",
+      "citation": "tests/a13_macos/test_inflight_stop_order.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_registry_stop_drain.py",
+      "path": "tests/a13_macos/test_registry_stop_drain.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_registry_stop_drain.py",
+      "citation": "tests/a13_macos/test_registry_stop_drain.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_serving_discovery_failure.py",
+      "path": "tests/a13_macos/test_serving_discovery_failure.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "desktop::quit"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_serving_discovery_failure.py",
+      "citation": "tests/a13_macos/test_serving_discovery_failure.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/a13_macos/test_token_progress_retirement.py",
+      "path": "tests/a13_macos/test_token_progress_retirement.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/a13_macos/test_token_progress_retirement.py",
+      "citation": "tests/a13_macos/test_token_progress_retirement.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    },
+    {
+      "id": "P:tests/live/test_completion_cleanup_stop.py",
+      "path": "tests/live/test_completion_cleanup_stop.py",
+      "disposition": {
+        "kind": "rust",
+        "destination": "runtime::route"
+      },
+      "obligation_id": "O:path:tests/live/test_completion_cleanup_stop.py",
+      "citation": "tests/live/test_completion_cleanup_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "O:path:tests/a13_macos/inflight_stop_support.py",
+      "description": "Delayed signed cancellation proof remains real; worker double rejects commands only after target runtime stop. Helper is not a test body or cleanup authority.",
+      "destination": "desktop::quit",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_inflight_chat_teardown.py",
+      "description": "Cancel must precede HTTP listener teardown; authenticated cancelled terminal, 13 tokens, stopped announcement and no live router threads; controlled native progress, not device proof.",
+      "destination": "desktop::quit",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_inflight_progress_retirement.py",
+      "description": "Cancellation after owner stream removal must still collect signed native cleanup, close pending router workers and retain stale decode-generation refusal.",
+      "destination": "runtime::route",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_inflight_progress_stop.py",
+      "description": "Progress pump closure over two controlled transports and late prefix orderings must drain workers without pump errors.",
+      "destination": "runtime::route",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_inflight_route_stop.py",
+      "description": "Withheld bind/start/snapshot/stream replies retire only after authenticated cleanup; no late bind, no success on incomplete/tampered proof; chat terminal precedes owner channel release.",
+      "destination": "runtime::route",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_inflight_stop_order.py",
+      "description": "Even failed drain announces stopped, records rebuild_stop_timeout and retains cleanup_unproven/owner lock not released.",
+      "destination": "desktop::quit",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_registry_stop_drain.py",
+      "description": "Registry drains gateway before route worker deadline; route close still occurs after gateway drain failure; compute/startup controlled.",
+      "destination": "runtime::route",
+      "tier": "journey"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_serving_discovery_failure.py",
+      "description": "Read-only discovery transport failures are observations only for a healthy current admitted worker; authority/mutation/unknown/stale/native failures stay fatal; cleanup remains reachable.",
+      "destination": "desktop::quit",
+      "tier": "unit"
+    },
+    {
+      "id": "O:path:tests/a13_macos/test_token_progress_retirement.py",
+      "description": "Signed cancellation retirement binds exact live claim/grant/receipt but is neither receipt ACK nor cleanup authority; bridge waits for actual native terminal; reject unsigned/forged/transplanted/stale envelopes.",
+      "destination": "runtime::route",
+      "tier": "unit"
+    },
+    {
+      "id": "O:a6-delta:tests/a13_macos/test_worker_replacement_readiness.py",
+      "description": "Added delivered/lost stop-ACK test: owner-requested loaded worker exit preserves control loop, records worker_owner_stopped and rejects late inference. Old seven tests remain; new obligation UNPROVEN.",
+      "destination": "node::supervisor",
+      "tier": "unit"
+    },
+    {
+      "id": "O:a6-delta:tests/live/local_token_authority.py",
+      "description": "Helper close_token_progress accepts cancelled keyword. No test body changed; caller compatibility/equivalence is an UNPROVEN successor obligation, not inherited python_only retirement.",
+      "destination": "runtime::composition",
+      "tier": "unit"
+    },
+    {
+      "id": "O:path:tests/live/test_completion_cleanup_stop.py",
+      "description": "Stop changes completion terminal intent without inventing generation/deadline/CAS; exact duplicate cleanup remains valid in both receipt orderings.",
+      "destination": "runtime::route",
+      "tier": "unit"
+    },
+    {
+      "id": "O:a6-delta:tests/live/test_governed_completion_snapshot_refresh.py",
+      "description": "send_before now permits snapshot with positive <= _CLEANUP_SNAPSHOT_SLICE_SECONDS allowance and delegates send. Four test bodies unchanged; helper/body context change remains UNPROVEN.",
+      "destination": "runtime::route",
+      "tier": "unit"
+    },
+    {
+      "id": "O:a6-delta:tests/live/test_token_path_owner.py",
+      "description": "Mailbox helper accepts cancelled keyword; eight test bodies byte-identical, surrounding helper changed. Whole-module behavior equivalence remains UNPROVEN.",
+      "destination": "runtime::route",
+      "tier": "unit"
+    }
+  ],
+  "test_groups": [
+    {
+      "id": "T:tests/a13_macos/inflight_stop_support.py",
+      "source": "tests/a13_macos/inflight_stop_support.py",
+      "destination": "desktop::quit",
+      "obligation_id": "O:path:tests/a13_macos/inflight_stop_support.py",
+      "citation": "tests/a13_macos/inflight_stop_support.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [],
+      "role": "support_or_fixture",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_inflight_chat_teardown.py",
+      "source": "tests/a13_macos/test_inflight_chat_teardown.py",
+      "destination": "desktop::quit",
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_chat_teardown.py",
+      "citation": "tests/a13_macos/test_inflight_chat_teardown.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_teardown_cancels_streaming_chat_before_listener_stop",
+          "line": 23,
+          "end_line": 114,
+          "sha256": "3e98ed62f0e03e0437db1e8bd0202878554c7181ec298eec3c42a92c68e281a6",
+          "size_bytes": 5015,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_inflight_progress_retirement.py",
+      "source": "tests/a13_macos/test_inflight_progress_retirement.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_retirement.py",
+      "citation": "tests/a13_macos/test_inflight_progress_retirement.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_stop_after_owner_progress_close_still_collects_native_cleanup",
+          "line": 9,
+          "end_line": 82,
+          "sha256": "619f1a5d55723bbd818130ad091ffe8feedda602b631a8239d57dc8b38fba73e",
+          "size_bytes": 3501,
+          "parameterization": []
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_inflight_progress_stop.py",
+      "source": "tests/a13_macos/test_inflight_progress_stop.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_stop.py",
+      "citation": "tests/a13_macos/test_inflight_progress_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_real_progress_pump_stop_drains_router_worker",
+          "line": 159,
+          "end_line": 213,
+          "sha256": "30f66ba2f8be99a953f2cf7197443feea1b32571beeb4951c46c870762193e10",
+          "size_bytes": 2932,
+          "parameterization": [
+            "pytest.mark.parametrize('transport', [progress_transport, native_progress_transport])",
+            "pytest.mark.parametrize('late_prefix', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_inflight_route_stop.py",
+      "source": "tests/a13_macos/test_inflight_route_stop.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_route_stop.py",
+      "citation": "tests/a13_macos/test_inflight_route_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_stop_retires_withheld_waiter_after_authenticated_cleanup",
+          "line": 180,
+          "end_line": 208,
+          "sha256": "87508dd715a3bd33dc93da6f14300f948bc9a1878eb2e6538b1048e3ff2f0256",
+          "size_bytes": 1754,
+          "parameterization": [
+            "pytest.mark.parametrize('held_command', ['bind_request_control', 'infer_start', 'snapshot', 'streaming'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_request_cannot_enqueue_another_bind",
+          "line": 211,
+          "end_line": 231,
+          "sha256": "339b8f5a87431a8555e5ce8278fc2cf739413a1024de68bfb08e66ffcf6c759d",
+          "size_bytes": 1297,
+          "parameterization": []
+        },
+        {
+          "name": "test_unproven_cleanup_does_not_retire_bind_or_publish_success",
+          "line": 234,
+          "end_line": 252,
+          "sha256": "16cf2468e68b38ef7b52a41c474b4cd15190f2a33a86696f77b3d3d85f036d0d",
+          "size_bytes": 1120,
+          "parameterization": [
+            "pytest.mark.parametrize('proof', ['incomplete', 'bad-signature'])"
+          ]
+        },
+        {
+          "name": "test_chat_stop_terminal_precedes_channel_release",
+          "line": 255,
+          "end_line": 301,
+          "sha256": "96f636f8b969d59f46919e72ba9174b5b4c8cf5fb2908761b31f7ade59f59257",
+          "size_bytes": 2408,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_inflight_stop_order.py",
+      "source": "tests/a13_macos/test_inflight_stop_order.py",
+      "destination": "desktop::quit",
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_stop_order.py",
+      "citation": "tests/a13_macos/test_inflight_stop_order.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_failed_drain_announces_stop_without_claiming_cleanup",
+          "line": 10,
+          "end_line": 30,
+          "sha256": "d455e6e028594d926f1650a1356b58725aa3ebaa39819dd162a5c1e9652cdb68",
+          "size_bytes": 1244,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_registry_stop_drain.py",
+      "source": "tests/a13_macos/test_registry_stop_drain.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/a13_macos/test_registry_stop_drain.py",
+      "citation": "tests/a13_macos/test_registry_stop_drain.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_registry_stop_drains_gateway_before_router_worker_deadline",
+          "line": 17,
+          "end_line": 84,
+          "sha256": "129eb810c244ff7f813f9f3e3cb5422d092b325b6e8f26c49f252fcde4c15c28",
+          "size_bytes": 3845,
+          "parameterization": []
+        },
+        {
+          "name": "test_registry_always_retires_routes_after_gateway_drain",
+          "line": 87,
+          "end_line": 114,
+          "sha256": "feaf8bdb31a983bed9970b6de5825748462f510d26bd664cb3d2d0487e53ecac",
+          "size_bytes": 1597,
+          "parameterization": [
+            "pytest.mark.parametrize('drain_error', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_serving_discovery_failure.py",
+      "source": "tests/a13_macos/test_serving_discovery_failure.py",
+      "destination": "desktop::quit",
+      "obligation_id": "O:path:tests/a13_macos/test_serving_discovery_failure.py",
+      "citation": "tests/a13_macos/test_serving_discovery_failure.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_socket_failure_during_serving_is_not_a_dead_worker",
+          "line": 43,
+          "end_line": 70,
+          "sha256": "1caaf402080f8900094b338a77b5c5e2eff7e0bde227dbcff73fde4b48fba5d3",
+          "size_bytes": 1475,
+          "parameterization": [
+            "pytest.mark.parametrize('local', [False, True])",
+            "pytest.mark.parametrize('method,path', READS)"
+          ]
+        },
+        {
+          "name": "test_read_timeout_uses_same_observation_boundary",
+          "line": 73,
+          "end_line": 81,
+          "sha256": "656618b7e2ee562569e3e7dec409fd8e1321208909707210f87a5f41d7cb79a9",
+          "size_bytes": 472,
+          "parameterization": [
+            "pytest.mark.parametrize('method,path', READS)"
+          ]
+        },
+        {
+          "name": "test_authority_unknown_and_mutating_failures_remain_fatal",
+          "line": 84,
+          "end_line": 101,
+          "sha256": "b39cc2dcff2781178e1c907f4341b0952a4863995aa7b01c5682f54841a22a23",
+          "size_bytes": 1183,
+          "parameterization": [
+            "pytest.mark.parametrize('error', [ManagedControlError('managed_control_signature_invalid', request_path=READS[0][1]), ManagedControlError('managed_control_unreachable', request_path=READS[0][1], cause_code='relay_dns_nonpublic'), ManagedControlError('managed_control_unreachable', request_path=READS[0][1], cause_code='unknown_guard'), ManagedControlError('managed_control_unreachable', status=400, request_path=READS[0][1]), ManagedControlError('managed_control_remote_error', status=403, request_path=READS[0][1]), ManagedControlError('managed_control_remote_error', status=503, request_path=READS[0][1]), ManagedControlError('managed_control_unreachable', request_path='/managed-control/staging/ack'), ManagedControlError('managed_control_unreachable', request_path=None), ValueError('managed_control_unreachable')])"
+          ]
+        },
+        {
+          "name": "test_no_healthy_current_runtime_means_no_observation_exception",
+          "line": 104,
+          "end_line": 117,
+          "sha256": "7113d54cf40dbe019d7758c839610cf00abaafb4c35507592d830cf569f95a1b",
+          "size_bytes": 922,
+          "parameterization": [
+            "pytest.mark.parametrize('change', ['old_run', 'old_deployment', 'no_runtime', 'worker_dead', 'not_admitted'])"
+          ]
+        },
+        {
+          "name": "test_repeated_read_failure_cannot_hide_a_blocked_native_pump",
+          "line": 120,
+          "end_line": 134,
+          "sha256": "31ebed8e4d8c1f31c63144ee8fc891548f139e94abbb916e36988f9689546ff2",
+          "size_bytes": 784,
+          "parameterization": []
+        },
+        {
+          "name": "test_owner_monitor_keeps_healthy_run_but_still_fails_a_dead_worker",
+          "line": 137,
+          "end_line": 158,
+          "sha256": "ace03a07475acd18fcea5b29eb2f2b45864d88b813cc1cb9a36ab41635f22ad8",
+          "size_bytes": 1217,
+          "parameterization": []
+        },
+        {
+          "name": "test_unreadable_native_status_is_fatal_not_an_escaped_monitor_exception",
+          "line": 161,
+          "end_line": 170,
+          "sha256": "3c43f3805725b31ee9d3554756b0ca6a61b392431ef09b44147b6a97ae1c6fa8",
+          "size_bytes": 551,
+          "parameterization": []
+        },
+        {
+          "name": "test_other_phases_keep_fail_closed_discovery_behavior",
+          "line": 173,
+          "end_line": 181,
+          "sha256": "42fb1b8dce6c68d54cdc7870dc02ec08424438639a1af0551228f1469c301675",
+          "size_bytes": 515,
+          "parameterization": [
+            "pytest.mark.parametrize('phase', ['collect', 'work', 'stopped'])"
+          ]
+        },
+        {
+          "name": "test_cleanup_after_a_missed_read_still_stops_and_detaches",
+          "line": 184,
+          "end_line": 194,
+          "sha256": "d40e94b4417d79e1e30be808b6f9671701883f5e7a5ee154b3529d1f63fd08ca",
+          "size_bytes": 666,
+          "parameterization": []
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/a13_macos/test_token_progress_retirement.py",
+      "source": "tests/a13_macos/test_token_progress_retirement.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/a13_macos/test_token_progress_retirement.py",
+      "citation": "tests/a13_macos/test_token_progress_retirement.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_owner_marks_only_its_authorized_cancellation",
+          "line": 18,
+          "end_line": 32,
+          "sha256": "05e62de2fda20215d96df4db2fb14f32c9bc87ccfc6618e7cd873529b576da0c",
+          "size_bytes": 761,
+          "parameterization": [
+            "pytest.mark.parametrize('cancelled', [False, True])"
+          ]
+        },
+        {
+          "name": "test_owner_finalizer_closes_on_authority_failure_without_rechecking_authorized_cancel",
+          "line": 35,
+          "end_line": 57,
+          "sha256": "8e8eac30e16cd83989357d7cd653dda99940496e93fff03274ad35edf364c664",
+          "size_bytes": 1189,
+          "parameterization": [
+            "pytest.mark.parametrize('authority', ['unproven', 'already-authorized'])"
+          ]
+        },
+        {
+          "name": "test_unsigned_disabled_error_never_authorizes_progress_retirement",
+          "line": 60,
+          "end_line": 73,
+          "sha256": "2750d836bb4702a72310b13ab080b19669e2ac22cc40ae6da00df14cbbb569be",
+          "size_bytes": 776,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancelled_stream_returns_bound_signed_retirement_not_receipt_ack",
+          "line": 77,
+          "end_line": 119,
+          "sha256": "adfe105298da7058d42aac0c17959e293593cc6ed21a00265deec2fc97a6f3fc",
+          "size_bytes": 2580,
+          "parameterization": [
+            "pytest.mark.parametrize('ordering', ['before-lookup', 'before-accept'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_progress_rejects_malformed_receipt_with_typed_refusal",
+          "line": 122,
+          "end_line": 130,
+          "sha256": "ecc3fe405d82dd0c49a2b3372ad68f5b65d2a6990b801c252f07325042d1c0c2",
+          "size_bytes": 540,
+          "parameterization": [
+            "pytest.mark.parametrize('field', ['statement', 'signature'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_stream_still_requires_exact_live_claim",
+          "line": 133,
+          "end_line": 153,
+          "sha256": "5751211fad9dd313a30a245aed87d5e75a9539552701b7afc8cd4b6a9eb275f5",
+          "size_bytes": 1084,
+          "parameterization": [
+            "pytest.mark.parametrize('fault', ['claim', 'grant', 'command', 'generation'])"
+          ]
+        },
+        {
+          "name": "test_client_rejects_forged_or_transplanted_retirement",
+          "line": 156,
+          "end_line": 173,
+          "sha256": "729b99d888d230e489eb2610d835bd41cb87fa48d3ce7a8b2ac29c4e3a0cb995",
+          "size_bytes": 1087,
+          "parameterization": [
+            "pytest.mark.parametrize('fault', ['signature', 'request_id', 'command_id', 'grant_digest', 'receipt_digest', 'receipt_sequence'])"
+          ]
+        },
+        {
+          "name": "test_bridge_durably_retires_progress_without_native_ack_or_terminal",
+          "line": 176,
+          "end_line": 205,
+          "sha256": "5d3a0dc41f8d3d8d5a8a2a7c9351cfe297903e8e44dc82b82c0a574c24f21dc5",
+          "size_bytes": 2027,
+          "parameterization": []
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    },
+    {
+      "id": "T:tests/live/test_completion_cleanup_stop.py",
+      "source": "tests/live/test_completion_cleanup_stop.py",
+      "destination": "runtime::route",
+      "obligation_id": "O:path:tests/live/test_completion_cleanup_stop.py",
+      "citation": "tests/live/test_completion_cleanup_stop.py:1 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+      "source_tests": [
+        {
+          "name": "test_stop_preserves_original_completion_cleanup_proof",
+          "line": 11,
+          "end_line": 38,
+          "sha256": "a3c1377a6828be0f784df9dbbddc052fb88bf8c19d4945a2fb24ef0d35f134b6",
+          "size_bytes": 1636,
+          "parameterization": [
+            "pytest.mark.parametrize('receipt_first', [False, True])"
+          ]
+        }
+      ],
+      "role": "test_file",
+      "proof_state": "unproven"
+    }
+  ],
+  "body_rows": [
+    {
+      "path": "tests/a13_macos/inflight_stop_support.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/inflight_stop_support.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/inflight_stop_support.py",
+      "destination": "desktop::quit",
+      "review": "Delayed signed cancellation proof remains real; worker double rejects commands only after target runtime stop. Helper is not a test body or cleanup authority.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_inflight_chat_teardown.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_teardown_cancels_streaming_chat_before_listener_stop",
+          "line": 23,
+          "end_line": 114,
+          "sha256": "3e98ed62f0e03e0437db1e8bd0202878554c7181ec298eec3c42a92c68e281a6",
+          "size_bytes": 5015,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_inflight_chat_teardown.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_chat_teardown.py",
+      "destination": "desktop::quit",
+      "review": "Cancel must precede HTTP listener teardown; authenticated cancelled terminal, 13 tokens, stopped announcement and no live router threads; controlled native progress, not device proof.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_inflight_progress_retirement.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_stop_after_owner_progress_close_still_collects_native_cleanup",
+          "line": 9,
+          "end_line": 82,
+          "sha256": "619f1a5d55723bbd818130ad091ffe8feedda602b631a8239d57dc8b38fba73e",
+          "size_bytes": 3501,
+          "parameterization": []
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_inflight_progress_retirement.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_retirement.py",
+      "destination": "runtime::route",
+      "review": "Cancellation after owner stream removal must still collect signed native cleanup, close pending router workers and retain stale decode-generation refusal.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_inflight_progress_stop.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_real_progress_pump_stop_drains_router_worker",
+          "line": 159,
+          "end_line": 213,
+          "sha256": "30f66ba2f8be99a953f2cf7197443feea1b32571beeb4951c46c870762193e10",
+          "size_bytes": 2932,
+          "parameterization": [
+            "pytest.mark.parametrize('transport', [progress_transport, native_progress_transport])",
+            "pytest.mark.parametrize('late_prefix', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_inflight_progress_stop.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_progress_stop.py",
+      "destination": "runtime::route",
+      "review": "Progress pump closure over two controlled transports and late prefix orderings must drain workers without pump errors.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_inflight_route_stop.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_stop_retires_withheld_waiter_after_authenticated_cleanup",
+          "line": 180,
+          "end_line": 208,
+          "sha256": "87508dd715a3bd33dc93da6f14300f948bc9a1878eb2e6538b1048e3ff2f0256",
+          "size_bytes": 1754,
+          "parameterization": [
+            "pytest.mark.parametrize('held_command', ['bind_request_control', 'infer_start', 'snapshot', 'streaming'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_request_cannot_enqueue_another_bind",
+          "line": 211,
+          "end_line": 231,
+          "sha256": "339b8f5a87431a8555e5ce8278fc2cf739413a1024de68bfb08e66ffcf6c759d",
+          "size_bytes": 1297,
+          "parameterization": []
+        },
+        {
+          "name": "test_unproven_cleanup_does_not_retire_bind_or_publish_success",
+          "line": 234,
+          "end_line": 252,
+          "sha256": "16cf2468e68b38ef7b52a41c474b4cd15190f2a33a86696f77b3d3d85f036d0d",
+          "size_bytes": 1120,
+          "parameterization": [
+            "pytest.mark.parametrize('proof', ['incomplete', 'bad-signature'])"
+          ]
+        },
+        {
+          "name": "test_chat_stop_terminal_precedes_channel_release",
+          "line": 255,
+          "end_line": 301,
+          "sha256": "96f636f8b969d59f46919e72ba9174b5b4c8cf5fb2908761b31f7ade59f59257",
+          "size_bytes": 2408,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_inflight_route_stop.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_route_stop.py",
+      "destination": "runtime::route",
+      "review": "Withheld bind/start/snapshot/stream replies retire only after authenticated cleanup; no late bind, no success on incomplete/tampered proof; chat terminal precedes owner channel release.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_inflight_stop_order.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_failed_drain_announces_stop_without_claiming_cleanup",
+          "line": 10,
+          "end_line": 30,
+          "sha256": "d455e6e028594d926f1650a1356b58725aa3ebaa39819dd162a5c1e9652cdb68",
+          "size_bytes": 1244,
+          "parameterization": [
+            "pytest.mark.parametrize('rollover', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_inflight_stop_order.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_inflight_stop_order.py",
+      "destination": "desktop::quit",
+      "review": "Even failed drain announces stopped, records rebuild_stop_timeout and retains cleanup_unproven/owner lock not released.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_registry_stop_drain.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_registry_stop_drains_gateway_before_router_worker_deadline",
+          "line": 17,
+          "end_line": 84,
+          "sha256": "129eb810c244ff7f813f9f3e3cb5422d092b325b6e8f26c49f252fcde4c15c28",
+          "size_bytes": 3845,
+          "parameterization": []
+        },
+        {
+          "name": "test_registry_always_retires_routes_after_gateway_drain",
+          "line": 87,
+          "end_line": 114,
+          "sha256": "feaf8bdb31a983bed9970b6de5825748462f510d26bd664cb3d2d0487e53ecac",
+          "size_bytes": 1597,
+          "parameterization": [
+            "pytest.mark.parametrize('drain_error', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_registry_stop_drain.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_registry_stop_drain.py",
+      "destination": "runtime::route",
+      "review": "Registry drains gateway before route worker deadline; route close still occurs after gateway drain failure; compute/startup controlled.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_serving_discovery_failure.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_socket_failure_during_serving_is_not_a_dead_worker",
+          "line": 43,
+          "end_line": 70,
+          "sha256": "1caaf402080f8900094b338a77b5c5e2eff7e0bde227dbcff73fde4b48fba5d3",
+          "size_bytes": 1475,
+          "parameterization": [
+            "pytest.mark.parametrize('local', [False, True])",
+            "pytest.mark.parametrize('method,path', READS)"
+          ]
+        },
+        {
+          "name": "test_read_timeout_uses_same_observation_boundary",
+          "line": 73,
+          "end_line": 81,
+          "sha256": "656618b7e2ee562569e3e7dec409fd8e1321208909707210f87a5f41d7cb79a9",
+          "size_bytes": 472,
+          "parameterization": [
+            "pytest.mark.parametrize('method,path', READS)"
+          ]
+        },
+        {
+          "name": "test_authority_unknown_and_mutating_failures_remain_fatal",
+          "line": 84,
+          "end_line": 101,
+          "sha256": "b39cc2dcff2781178e1c907f4341b0952a4863995aa7b01c5682f54841a22a23",
+          "size_bytes": 1183,
+          "parameterization": [
+            "pytest.mark.parametrize('error', [ManagedControlError('managed_control_signature_invalid', request_path=READS[0][1]), ManagedControlError('managed_control_unreachable', request_path=READS[0][1], cause_code='relay_dns_nonpublic'), ManagedControlError('managed_control_unreachable', request_path=READS[0][1], cause_code='unknown_guard'), ManagedControlError('managed_control_unreachable', status=400, request_path=READS[0][1]), ManagedControlError('managed_control_remote_error', status=403, request_path=READS[0][1]), ManagedControlError('managed_control_remote_error', status=503, request_path=READS[0][1]), ManagedControlError('managed_control_unreachable', request_path='/managed-control/staging/ack'), ManagedControlError('managed_control_unreachable', request_path=None), ValueError('managed_control_unreachable')])"
+          ]
+        },
+        {
+          "name": "test_no_healthy_current_runtime_means_no_observation_exception",
+          "line": 104,
+          "end_line": 117,
+          "sha256": "7113d54cf40dbe019d7758c839610cf00abaafb4c35507592d830cf569f95a1b",
+          "size_bytes": 922,
+          "parameterization": [
+            "pytest.mark.parametrize('change', ['old_run', 'old_deployment', 'no_runtime', 'worker_dead', 'not_admitted'])"
+          ]
+        },
+        {
+          "name": "test_repeated_read_failure_cannot_hide_a_blocked_native_pump",
+          "line": 120,
+          "end_line": 134,
+          "sha256": "31ebed8e4d8c1f31c63144ee8fc891548f139e94abbb916e36988f9689546ff2",
+          "size_bytes": 784,
+          "parameterization": []
+        },
+        {
+          "name": "test_owner_monitor_keeps_healthy_run_but_still_fails_a_dead_worker",
+          "line": 137,
+          "end_line": 158,
+          "sha256": "ace03a07475acd18fcea5b29eb2f2b45864d88b813cc1cb9a36ab41635f22ad8",
+          "size_bytes": 1217,
+          "parameterization": []
+        },
+        {
+          "name": "test_unreadable_native_status_is_fatal_not_an_escaped_monitor_exception",
+          "line": 161,
+          "end_line": 170,
+          "sha256": "3c43f3805725b31ee9d3554756b0ca6a61b392431ef09b44147b6a97ae1c6fa8",
+          "size_bytes": 551,
+          "parameterization": []
+        },
+        {
+          "name": "test_other_phases_keep_fail_closed_discovery_behavior",
+          "line": 173,
+          "end_line": 181,
+          "sha256": "42fb1b8dce6c68d54cdc7870dc02ec08424438639a1af0551228f1469c301675",
+          "size_bytes": 515,
+          "parameterization": [
+            "pytest.mark.parametrize('phase', ['collect', 'work', 'stopped'])"
+          ]
+        },
+        {
+          "name": "test_cleanup_after_a_missed_read_still_stops_and_detaches",
+          "line": 184,
+          "end_line": 194,
+          "sha256": "d40e94b4417d79e1e30be808b6f9671701883f5e7a5ee154b3529d1f63fd08ca",
+          "size_bytes": 666,
+          "parameterization": []
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_serving_discovery_failure.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_serving_discovery_failure.py",
+      "destination": "desktop::quit",
+      "review": "Read-only discovery transport failures are observations only for a healthy current admitted worker; authority/mutation/unknown/stale/native failures stay fatal; cleanup remains reachable.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_token_progress_retirement.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_owner_marks_only_its_authorized_cancellation",
+          "line": 18,
+          "end_line": 32,
+          "sha256": "05e62de2fda20215d96df4db2fb14f32c9bc87ccfc6618e7cd873529b576da0c",
+          "size_bytes": 761,
+          "parameterization": [
+            "pytest.mark.parametrize('cancelled', [False, True])"
+          ]
+        },
+        {
+          "name": "test_owner_finalizer_closes_on_authority_failure_without_rechecking_authorized_cancel",
+          "line": 35,
+          "end_line": 57,
+          "sha256": "8e8eac30e16cd83989357d7cd653dda99940496e93fff03274ad35edf364c664",
+          "size_bytes": 1189,
+          "parameterization": [
+            "pytest.mark.parametrize('authority', ['unproven', 'already-authorized'])"
+          ]
+        },
+        {
+          "name": "test_unsigned_disabled_error_never_authorizes_progress_retirement",
+          "line": 60,
+          "end_line": 73,
+          "sha256": "2750d836bb4702a72310b13ab080b19669e2ac22cc40ae6da00df14cbbb569be",
+          "size_bytes": 776,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancelled_stream_returns_bound_signed_retirement_not_receipt_ack",
+          "line": 77,
+          "end_line": 119,
+          "sha256": "adfe105298da7058d42aac0c17959e293593cc6ed21a00265deec2fc97a6f3fc",
+          "size_bytes": 2580,
+          "parameterization": [
+            "pytest.mark.parametrize('ordering', ['before-lookup', 'before-accept'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_progress_rejects_malformed_receipt_with_typed_refusal",
+          "line": 122,
+          "end_line": 130,
+          "sha256": "ecc3fe405d82dd0c49a2b3372ad68f5b65d2a6990b801c252f07325042d1c0c2",
+          "size_bytes": 540,
+          "parameterization": [
+            "pytest.mark.parametrize('field', ['statement', 'signature'])"
+          ]
+        },
+        {
+          "name": "test_cancelled_stream_still_requires_exact_live_claim",
+          "line": 133,
+          "end_line": 153,
+          "sha256": "5751211fad9dd313a30a245aed87d5e75a9539552701b7afc8cd4b6a9eb275f5",
+          "size_bytes": 1084,
+          "parameterization": [
+            "pytest.mark.parametrize('fault', ['claim', 'grant', 'command', 'generation'])"
+          ]
+        },
+        {
+          "name": "test_client_rejects_forged_or_transplanted_retirement",
+          "line": 156,
+          "end_line": 173,
+          "sha256": "729b99d888d230e489eb2610d835bd41cb87fa48d3ce7a8b2ac29c4e3a0cb995",
+          "size_bytes": 1087,
+          "parameterization": [
+            "pytest.mark.parametrize('fault', ['signature', 'request_id', 'command_id', 'grant_digest', 'receipt_digest', 'receipt_sequence'])"
+          ]
+        },
+        {
+          "name": "test_bridge_durably_retires_progress_without_native_ack_or_terminal",
+          "line": 176,
+          "end_line": 205,
+          "sha256": "5d3a0dc41f8d3d8d5a8a2a7c9351cfe297903e8e44dc82b82c0a574c24f21dc5",
+          "size_bytes": 2027,
+          "parameterization": []
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/a13_macos/test_token_progress_retirement.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/a13_macos/test_token_progress_retirement.py",
+      "destination": "runtime::route",
+      "review": "Signed cancellation retirement binds exact live claim/grant/receipt but is neither receipt ACK nor cleanup authority; bridge waits for actual native terminal; reject unsigned/forged/transplanted/stale envelopes.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/a13_macos/test_worker_replacement_readiness.py",
+      "old_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+      "old_pin": {
+        "path": "tests/a13_macos/test_worker_replacement_readiness.py",
+        "sha256": "e42c7ccd87148514793d16ece562a387a7151c1ccaeb96d52b9703ac00f461b0",
+        "size_bytes": 8753
+      },
+      "source_tests": [
+        {
+          "name": "test_loaded_worker_death_requires_cold_run_not_startup_replay",
+          "line": 61,
+          "end_line": 82,
+          "sha256": "e259a1b9e7f3776e11cdbf7deb669e03541a2c752d3a225551f67db10fcda85f",
+          "size_bytes": 1172,
+          "parameterization": [
+            "pytest.mark.parametrize('permit', [True, False])",
+            "pytest.mark.parametrize('attempts', [0, 3])"
+          ]
+        },
+        {
+          "name": "test_owner_requested_stop_of_a_loaded_worker_keeps_the_control_loop_alive",
+          "line": 85,
+          "end_line": 123,
+          "sha256": "5c3877e0341492d6bb44762ff37d3c95107698fd24f31d1e1cee1a6004c23d24",
+          "size_bytes": 2299,
+          "parameterization": [
+            "pytest.mark.parametrize('ack', ['delivered', 'lost'])"
+          ]
+        },
+        {
+          "name": "test_preload_replacement_needs_fresh_exact_authorization",
+          "line": 126,
+          "end_line": 143,
+          "sha256": "af2a7758f8543c3db8cb0d6202249471db07872c47da524f3dfda21482562184",
+          "size_bytes": 1086,
+          "parameterization": []
+        },
+        {
+          "name": "test_preload_replacement_refuses_revoked_grant",
+          "line": 146,
+          "end_line": 156,
+          "sha256": "0989e37114d04a963ca34f06f30909f0c19563a21d3d85766d8d7c8e9e82f90c",
+          "size_bytes": 592,
+          "parameterization": []
+        },
+        {
+          "name": "test_stop_during_start_cannot_publish_replacement",
+          "line": 167,
+          "end_line": 185,
+          "sha256": "fb4ecf71097685d85a1a03086482cd33a213e8a0b6936fdce55c72e1d37e02ff",
+          "size_bytes": 763,
+          "parameterization": []
+        },
+        {
+          "name": "test_close_interrupts_unpublished_replacement_before_join",
+          "line": 188,
+          "end_line": 208,
+          "sha256": "5653ffbb560b60deb64d9d9d4125cbb00c2d1101632cfcdd62020056c00ef1eb",
+          "size_bytes": 863,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_replacement_cleanup_remains_owned_and_stops_runtime",
+          "line": 211,
+          "end_line": 231,
+          "sha256": "27dc29348b24a12e4f01de1e0af0051b93920f4b5545aa481850a170eb563eb9",
+          "size_bytes": 1052,
+          "parameterization": [
+            "pytest.mark.parametrize('close_outcome', ['raises', 'returns_live'])"
+          ]
+        },
+        {
+          "name": "test_native_startup_refusal_never_publishes_replacement",
+          "line": 234,
+          "end_line": 247,
+          "sha256": "106d04d22ac16174a01240dfc18903b05e3cd9e7979e9c67fb793c95c13c3ac0",
+          "size_bytes": 660,
+          "parameterization": []
+        }
+      ],
+      "old_source_tests": [
+        {
+          "name": "test_loaded_worker_death_requires_cold_run_not_startup_replay",
+          "line": 61,
+          "end_line": 82,
+          "sha256": "e259a1b9e7f3776e11cdbf7deb669e03541a2c752d3a225551f67db10fcda85f",
+          "size_bytes": 1172,
+          "parameterization": [
+            "pytest.mark.parametrize('permit', [True, False])",
+            "pytest.mark.parametrize('attempts', [0, 3])"
+          ]
+        },
+        {
+          "name": "test_preload_replacement_needs_fresh_exact_authorization",
+          "line": 85,
+          "end_line": 102,
+          "sha256": "af2a7758f8543c3db8cb0d6202249471db07872c47da524f3dfda21482562184",
+          "size_bytes": 1086,
+          "parameterization": []
+        },
+        {
+          "name": "test_preload_replacement_refuses_revoked_grant",
+          "line": 105,
+          "end_line": 115,
+          "sha256": "0989e37114d04a963ca34f06f30909f0c19563a21d3d85766d8d7c8e9e82f90c",
+          "size_bytes": 592,
+          "parameterization": []
+        },
+        {
+          "name": "test_stop_during_start_cannot_publish_replacement",
+          "line": 126,
+          "end_line": 144,
+          "sha256": "fb4ecf71097685d85a1a03086482cd33a213e8a0b6936fdce55c72e1d37e02ff",
+          "size_bytes": 763,
+          "parameterization": []
+        },
+        {
+          "name": "test_close_interrupts_unpublished_replacement_before_join",
+          "line": 147,
+          "end_line": 167,
+          "sha256": "5653ffbb560b60deb64d9d9d4125cbb00c2d1101632cfcdd62020056c00ef1eb",
+          "size_bytes": 863,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_replacement_cleanup_remains_owned_and_stops_runtime",
+          "line": 170,
+          "end_line": 190,
+          "sha256": "27dc29348b24a12e4f01de1e0af0051b93920f4b5545aa481850a170eb563eb9",
+          "size_bytes": 1052,
+          "parameterization": [
+            "pytest.mark.parametrize('close_outcome', ['raises', 'returns_live'])"
+          ]
+        },
+        {
+          "name": "test_native_startup_refusal_never_publishes_replacement",
+          "line": 193,
+          "end_line": 206,
+          "sha256": "106d04d22ac16174a01240dfc18903b05e3cd9e7979e9c67fb793c95c13c3ac0",
+          "size_bytes": 660,
+          "parameterization": []
+        }
+      ],
+      "group_id": "T:tests/a13_macos/test_worker_replacement_readiness.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:a6-delta:tests/a13_macos/test_worker_replacement_readiness.py",
+      "destination": "node::supervisor",
+      "review": "Added delivered/lost stop-ACK test: owner-requested loaded worker exit preserves control loop, records worker_owner_stopped and rejects late inference. Old seven tests remain; new obligation UNPROVEN.",
+      "tb4_baseline": {
+        "group_id": "T:tests/a13_macos/test_worker_replacement_readiness.py",
+        "path": "tests/a13_macos/test_worker_replacement_readiness.py",
+        "n_tests": "7",
+        "disposition": "evidence_for",
+        "b_ids": "B-RUN-12;B-FAIL-10",
+        "reason_or_reachability": "Worker replacement.",
+        "source_step": "TB-4-P1",
+        "confidence": "high"
+      },
+      "tb4_baseline_pin": {
+        "path": "registry/TEST-GROUP-DISPOSITIONS.final.tsv",
+        "sha256": "592375bc13ee9f02b7393418b808b96bb6d231ea523706176604baa686fb44af",
+        "size_bytes": 558930
+      },
+      "historical_group": {
+        "id": "T:tests/a13_macos/test_worker_replacement_readiness.py",
+        "source": "tests/a13_macos/test_worker_replacement_readiness.py",
+        "destination": "node::supervisor",
+        "owning_crate": "node",
+        "obligation_id": "O:path:tests/a13_macos/test_worker_replacement_readiness.py",
+        "citation": "tests/a13_macos/test_worker_replacement_readiness.py:63 @ f5bfb709",
+        "tier": "unit",
+        "role": "test_file",
+        "source_tests": [
+          {
+            "name": "test_loaded_worker_death_requires_cold_run_not_startup_replay",
+            "line": 63
+          },
+          {
+            "name": "test_preload_replacement_needs_fresh_exact_authorization",
+            "line": 85
+          },
+          {
+            "name": "test_preload_replacement_refuses_revoked_grant",
+            "line": 105
+          },
+          {
+            "name": "test_stop_during_start_cannot_publish_replacement",
+            "line": 126
+          },
+          {
+            "name": "test_close_interrupts_unpublished_replacement_before_join",
+            "line": 147
+          },
+          {
+            "name": "test_failed_replacement_cleanup_remains_owned_and_stops_runtime",
+            "line": 171
+          },
+          {
+            "name": "test_native_startup_refusal_never_publishes_replacement",
+            "line": 193
+          }
+        ],
+        "imported_sources": [
+          "mycelium_a13_macos/managed_runtime.py",
+          "mycelium_a13_macos/worker.py"
+        ],
+        "destination_basis": "mycelium_a13_macos/managed_runtime.py",
+        "migration_state": "retain_until_replacement_proven",
+        "collected_parameter_ids": "unknown: static discovery only, old suite not executed"
+      }
+    },
+    {
+      "path": "tests/live/local_token_authority.py",
+      "old_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+      "old_pin": {
+        "path": "tests/live/local_token_authority.py",
+        "sha256": "04b922e79585621ff59288ed296b9701729601341c25555a76d40373530df6c2",
+        "size_bytes": 7071
+      },
+      "source_tests": [],
+      "old_source_tests": [],
+      "group_id": "T:tests/live/local_token_authority.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:a6-delta:tests/live/local_token_authority.py",
+      "destination": "runtime::composition",
+      "review": "Helper close_token_progress accepts cancelled keyword. No test body changed; caller compatibility/equivalence is an UNPROVEN successor obligation, not inherited python_only retirement.",
+      "tb4_baseline": {
+        "group_id": "T:tests/live/local_token_authority.py",
+        "path": "tests/live/local_token_authority.py",
+        "n_tests": "0",
+        "disposition": "python_only",
+        "b_ids": "",
+        "reason_or_reachability": "support_or_fixture file with 0 tests (local_token_authority.py: conftest/fixture/helper/data); it imports shipped: mycelium_a13_macos.token_owner@L14; mycelium_a13_macos.managed_control@L15; mycelium_live.token_path_activation@L16; mycelium_qualification.signing@L17 | role=support_or_fixture;tier=unit;helper-drives-shipped-code | TB-4c: Python/pytest mechanics (venv, PyInstaller, fixtures, test doubles); nothing to port.",
+        "source_step": "TB-3",
+        "confidence": "medium"
+      },
+      "tb4_baseline_pin": {
+        "path": "registry/TEST-GROUP-DISPOSITIONS.final.tsv",
+        "sha256": "592375bc13ee9f02b7393418b808b96bb6d231ea523706176604baa686fb44af",
+        "size_bytes": 558930
+      },
+      "historical_group": {
+        "id": "T:tests/live/local_token_authority.py",
+        "source": "tests/live/local_token_authority.py",
+        "destination": "runtime::composition",
+        "owning_crate": "runtime",
+        "obligation_id": "O:path:tests/live/local_token_authority.py",
+        "citation": "tests/live/local_token_authority.py:1 @ f5bfb709",
+        "tier": "unit",
+        "role": "support_or_fixture",
+        "source_tests": [],
+        "imported_sources": [
+          "mycelium_a13_macos/token_owner.py",
+          "mycelium_a13_macos/managed_control.py",
+          "mycelium_live/token_path_activation.py",
+          "mycelium_qualification/signing.py"
+        ],
+        "destination_basis": "mycelium_a13_macos/token_owner.py",
+        "migration_state": "retain_until_replacement_proven",
+        "collected_parameter_ids": "unknown: static discovery only, old suite not executed"
+      }
+    },
+    {
+      "path": "tests/live/test_completion_cleanup_stop.py",
+      "old_source_sha": null,
+      "old_pin": null,
+      "source_tests": [
+        {
+          "name": "test_stop_preserves_original_completion_cleanup_proof",
+          "line": 11,
+          "end_line": 38,
+          "sha256": "a3c1377a6828be0f784df9dbbddc052fb88bf8c19d4945a2fb24ef0d35f134b6",
+          "size_bytes": 1636,
+          "parameterization": [
+            "pytest.mark.parametrize('receipt_first', [False, True])"
+          ]
+        }
+      ],
+      "old_source_tests": [],
+      "group_id": "T:tests/live/test_completion_cleanup_stop.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:path:tests/live/test_completion_cleanup_stop.py",
+      "destination": "runtime::route",
+      "review": "Stop changes completion terminal intent without inventing generation/deadline/CAS; exact duplicate cleanup remains valid in both receipt orderings.",
+      "tb4_baseline": null,
+      "tb4_baseline_pin": null,
+      "historical_group": null
+    },
+    {
+      "path": "tests/live/test_governed_completion_snapshot_refresh.py",
+      "old_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+      "old_pin": {
+        "path": "tests/live/test_governed_completion_snapshot_refresh.py",
+        "sha256": "1599aa91289aafb593070ef6db9ccec3cfeac4a815bce8b2a52c8b4e54ab06ac",
+        "size_bytes": 19347
+      },
+      "source_tests": [
+        {
+          "name": "test_governed_completion_refreshes_peers_after_sealed_cleanup",
+          "line": 339,
+          "end_line": 390,
+          "sha256": "4de441dbe4da45a6e58ca4962a9426bd4d21ec0a9bb23f60d52651f7eb33b69e",
+          "size_bytes": 2105,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_refresh_keeps_the_request_completed_and_is_recorded",
+          "line": 393,
+          "end_line": 414,
+          "sha256": "2ff6a2219bd7c4b0e52f57ba8e41e9aa53f5fe86da256b379d15ef1526c9aa68",
+          "size_bytes": 935,
+          "parameterization": []
+        },
+        {
+          "name": "test_non_started_infer_start_status_fails_closed",
+          "line": 417,
+          "end_line": 430,
+          "sha256": "f1ce4e4567e85e20817e1d7d2fd4290c73b9f5564f8722184db36feecc5dbb92",
+          "size_bytes": 772,
+          "parameterization": [
+            "pytest.mark.parametrize('status', ['FAILED', 'PREFILL', None])"
+          ]
+        },
+        {
+          "name": "test_node_inference_start_failed_reaches_the_route_as_a_failure",
+          "line": 433,
+          "end_line": 494,
+          "sha256": "c7cacdcad02582521ba370171e979142b81894222288c41142c674b472bc6332",
+          "size_bytes": 2775,
+          "parameterization": []
+        }
+      ],
+      "old_source_tests": [
+        {
+          "name": "test_governed_completion_refreshes_peers_after_sealed_cleanup",
+          "line": 335,
+          "end_line": 386,
+          "sha256": "4de441dbe4da45a6e58ca4962a9426bd4d21ec0a9bb23f60d52651f7eb33b69e",
+          "size_bytes": 2105,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_refresh_keeps_the_request_completed_and_is_recorded",
+          "line": 389,
+          "end_line": 410,
+          "sha256": "2ff6a2219bd7c4b0e52f57ba8e41e9aa53f5fe86da256b379d15ef1526c9aa68",
+          "size_bytes": 935,
+          "parameterization": []
+        },
+        {
+          "name": "test_non_started_infer_start_status_fails_closed",
+          "line": 413,
+          "end_line": 426,
+          "sha256": "f1ce4e4567e85e20817e1d7d2fd4290c73b9f5564f8722184db36feecc5dbb92",
+          "size_bytes": 772,
+          "parameterization": [
+            "pytest.mark.parametrize('status', ['FAILED', 'PREFILL', None])"
+          ]
+        },
+        {
+          "name": "test_node_inference_start_failed_reaches_the_route_as_a_failure",
+          "line": 429,
+          "end_line": 490,
+          "sha256": "c7cacdcad02582521ba370171e979142b81894222288c41142c674b472bc6332",
+          "size_bytes": 2775,
+          "parameterization": []
+        }
+      ],
+      "group_id": "T:tests/live/test_governed_completion_snapshot_refresh.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:a6-delta:tests/live/test_governed_completion_snapshot_refresh.py",
+      "destination": "runtime::route",
+      "review": "send_before now permits snapshot with positive <= _CLEANUP_SNAPSHOT_SLICE_SECONDS allowance and delegates send. Four test bodies unchanged; helper/body context change remains UNPROVEN.",
+      "tb4_baseline": {
+        "group_id": "T:tests/live/test_governed_completion_snapshot_refresh.py",
+        "path": "tests/live/test_governed_completion_snapshot_refresh.py",
+        "n_tests": "4",
+        "disposition": "evidence_for",
+        "b_ids": "B-FAIL-04;B-CHAT-08;B-AUTH-14",
+        "reason_or_reachability": "EXECUTED. a13 DemoApp -> serving.RegistryLaunch.run (serving.py:469) -> mycelium_live.supervisor.run_registry_server -> live.route/router_port/registry/health/liveness, request_gateway, product_spine, router (relay, mlx_runtime, iroh transport), physical_inference_node via worker.native_main (--managed-node, __main__.py:121); qualification via control_session/managed_staging | live route / registry / health mechanics | TB-4b-K CONFIRM: governed completion refreshes peers after sealed cleanup; product.",
+        "source_step": "TB-4-P2",
+        "confidence": "medium"
+      },
+      "tb4_baseline_pin": {
+        "path": "registry/TEST-GROUP-DISPOSITIONS.final.tsv",
+        "sha256": "592375bc13ee9f02b7393418b808b96bb6d231ea523706176604baa686fb44af",
+        "size_bytes": 558930
+      },
+      "historical_group": {
+        "id": "T:tests/live/test_governed_completion_snapshot_refresh.py",
+        "source": "tests/live/test_governed_completion_snapshot_refresh.py",
+        "destination": "runtime::route",
+        "owning_crate": "runtime",
+        "obligation_id": "O:path:tests/live/test_governed_completion_snapshot_refresh.py",
+        "citation": "tests/live/test_governed_completion_snapshot_refresh.py:335 @ f5bfb709",
+        "tier": "unit",
+        "role": "test_file",
+        "source_tests": [
+          {
+            "name": "test_governed_completion_refreshes_peers_after_sealed_cleanup",
+            "line": 335
+          },
+          {
+            "name": "test_failed_refresh_keeps_the_request_completed_and_is_recorded",
+            "line": 389
+          },
+          {
+            "name": "test_non_started_infer_start_status_fails_closed",
+            "line": 414
+          },
+          {
+            "name": "test_node_inference_start_failed_reaches_the_route_as_a_failure",
+            "line": 429
+          }
+        ],
+        "imported_sources": [
+          "mycelium_live/route.py",
+          "mycelium_request_gateway/contracts.py",
+          "mycelium_router/serialization.py",
+          "mycelium_router/validation.py",
+          "mycelium_node/process.py",
+          "physical_inference_node.py"
+        ],
+        "destination_basis": "mycelium_live/route.py",
+        "migration_state": "retain_until_replacement_proven",
+        "collected_parameter_ids": "unknown: static discovery only, old suite not executed"
+      }
+    },
+    {
+      "path": "tests/live/test_token_path_owner.py",
+      "old_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+      "old_pin": {
+        "path": "tests/live/test_token_path_owner.py",
+        "sha256": "f9e2df3330f1ab739108ee7d7a18c23a59030996df6b5a3c56d31df425018370",
+        "size_bytes": 8946
+      },
+      "source_tests": [
+        {
+          "name": "test_preflight_fallback_has_no_grant_registration_or_send",
+          "line": 47,
+          "end_line": 51,
+          "sha256": "d14c7e1c0d6f5f23062fa5f35c082041a9db72baf616300bb2c8d47b7404ae21",
+          "size_bytes": 323,
+          "parameterization": [
+            "pytest.mark.parametrize('enabled,capable', [(False, True), (True, False)])"
+          ]
+        },
+        {
+          "name": "test_single_start_delivers_verified_deltas_before_final_response",
+          "line": 54,
+          "end_line": 78,
+          "sha256": "66a7e5c0695dbd11b2aee204828a072633e229497c9a8d28bfd611ed7779f621",
+          "size_bytes": 1271,
+          "parameterization": []
+        },
+        {
+          "name": "test_command_success_without_terminal_receipt_is_never_completion",
+          "line": 81,
+          "end_line": 86,
+          "sha256": "0ee74ee78dbc35246049c5af1916033c3823c3149eff29eeea0c2c257780918f",
+          "size_bytes": 334,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancel_before_dispatch_sends_no_start",
+          "line": 89,
+          "end_line": 95,
+          "sha256": "b51fab6d4ad150b31724546e52205254b5cd9a2c216bbdb24d23570e14cb9d8e",
+          "size_bytes": 315,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancel_interrupts_held_start_without_waiting_for_compute",
+          "line": 98,
+          "end_line": 116,
+          "sha256": "754a649707c88b60bcf7a2bbb80a165d97c187ab00cfcd848bef242683b62430",
+          "size_bytes": 716,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_start_never_retries_or_falls_back",
+          "line": 119,
+          "end_line": 128,
+          "sha256": "edb12c954f5eb704a4f9de1d51b8bdf895e4bd768f28ecf8dfa261f4a2749a76",
+          "size_bytes": 417,
+          "parameterization": []
+        },
+        {
+          "name": "test_wrong_route_or_key_cannot_issue_a_grant",
+          "line": 131,
+          "end_line": 146,
+          "sha256": "2f8df7b1413abf352b4b968f3f14e5772233ced20f78919caf57df0d5b665a3b",
+          "size_bytes": 913,
+          "parameterization": [
+            "pytest.mark.parametrize('change', ['participants', 'stops', 'manifest', 'owner', 'entry'])"
+          ]
+        },
+        {
+          "name": "test_timeout_then_command_completion_drains_verified_prefix",
+          "line": 149,
+          "end_line": 214,
+          "sha256": "fef671f54bc22acdb30d1141012c4065cf8dfbc6de0ee1335e8692113f97043d",
+          "size_bytes": 3054,
+          "parameterization": [
+            "pytest.mark.parametrize('outcome', ['refused', 'missing-terminal', 'completed', 'revoked'])"
+          ]
+        }
+      ],
+      "old_source_tests": [
+        {
+          "name": "test_preflight_fallback_has_no_grant_registration_or_send",
+          "line": 47,
+          "end_line": 51,
+          "sha256": "d14c7e1c0d6f5f23062fa5f35c082041a9db72baf616300bb2c8d47b7404ae21",
+          "size_bytes": 323,
+          "parameterization": [
+            "pytest.mark.parametrize('enabled,capable', [(False, True), (True, False)])"
+          ]
+        },
+        {
+          "name": "test_single_start_delivers_verified_deltas_before_final_response",
+          "line": 54,
+          "end_line": 78,
+          "sha256": "66a7e5c0695dbd11b2aee204828a072633e229497c9a8d28bfd611ed7779f621",
+          "size_bytes": 1271,
+          "parameterization": []
+        },
+        {
+          "name": "test_command_success_without_terminal_receipt_is_never_completion",
+          "line": 81,
+          "end_line": 86,
+          "sha256": "0ee74ee78dbc35246049c5af1916033c3823c3149eff29eeea0c2c257780918f",
+          "size_bytes": 334,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancel_before_dispatch_sends_no_start",
+          "line": 89,
+          "end_line": 95,
+          "sha256": "b51fab6d4ad150b31724546e52205254b5cd9a2c216bbdb24d23570e14cb9d8e",
+          "size_bytes": 315,
+          "parameterization": []
+        },
+        {
+          "name": "test_cancel_interrupts_held_start_without_waiting_for_compute",
+          "line": 98,
+          "end_line": 116,
+          "sha256": "754a649707c88b60bcf7a2bbb80a165d97c187ab00cfcd848bef242683b62430",
+          "size_bytes": 716,
+          "parameterization": []
+        },
+        {
+          "name": "test_failed_start_never_retries_or_falls_back",
+          "line": 119,
+          "end_line": 128,
+          "sha256": "edb12c954f5eb704a4f9de1d51b8bdf895e4bd768f28ecf8dfa261f4a2749a76",
+          "size_bytes": 417,
+          "parameterization": []
+        },
+        {
+          "name": "test_wrong_route_or_key_cannot_issue_a_grant",
+          "line": 131,
+          "end_line": 146,
+          "sha256": "2f8df7b1413abf352b4b968f3f14e5772233ced20f78919caf57df0d5b665a3b",
+          "size_bytes": 913,
+          "parameterization": [
+            "pytest.mark.parametrize('change', ['participants', 'stops', 'manifest', 'owner', 'entry'])"
+          ]
+        },
+        {
+          "name": "test_timeout_then_command_completion_drains_verified_prefix",
+          "line": 149,
+          "end_line": 214,
+          "sha256": "fef671f54bc22acdb30d1141012c4065cf8dfbc6de0ee1335e8692113f97043d",
+          "size_bytes": 3054,
+          "parameterization": [
+            "pytest.mark.parametrize('outcome', ['refused', 'missing-terminal', 'completed', 'revoked'])"
+          ]
+        }
+      ],
+      "group_id": "T:tests/live/test_token_path_owner.py",
+      "proof_state": "unproven",
+      "retired": false,
+      "obligation_id": "O:a6-delta:tests/live/test_token_path_owner.py",
+      "destination": "runtime::route",
+      "review": "Mailbox helper accepts cancelled keyword; eight test bodies byte-identical, surrounding helper changed. Whole-module behavior equivalence remains UNPROVEN.",
+      "tb4_baseline": {
+        "group_id": "T:tests/live/test_token_path_owner.py",
+        "path": "tests/live/test_token_path_owner.py",
+        "n_tests": "8",
+        "disposition": "evidence_for",
+        "b_ids": "B-CHAT-20;B-AUTH-01;B-AUTH-02;B-AUTH-14;B-NUM-07;B-ROLL-07",
+        "reason_or_reachability": "EXECUTED. a13 DemoApp -> serving.RegistryLaunch.run (serving.py:469) -> mycelium_live.supervisor.run_registry_server -> live.route/router_port/registry/health/liveness, request_gateway, product_spine, router (relay, mlx_runtime, iroh transport), physical_inference_node via worker.native_main (--managed-node, __main__.py:121); qualification via control_session/managed_staging | token path (fast/normal token control, signed receipts) is the product serving path",
+        "source_step": "TB-4-P2",
+        "confidence": "medium"
+      },
+      "tb4_baseline_pin": {
+        "path": "registry/TEST-GROUP-DISPOSITIONS.final.tsv",
+        "sha256": "592375bc13ee9f02b7393418b808b96bb6d231ea523706176604baa686fb44af",
+        "size_bytes": 558930
+      },
+      "historical_group": {
+        "id": "T:tests/live/test_token_path_owner.py",
+        "source": "tests/live/test_token_path_owner.py",
+        "destination": "runtime::route",
+        "owning_crate": "runtime",
+        "obligation_id": "O:path:tests/live/test_token_path_owner.py",
+        "citation": "tests/live/test_token_path_owner.py:48 @ f5bfb709",
+        "tier": "unit",
+        "role": "test_file",
+        "source_tests": [
+          {
+            "name": "test_preflight_fallback_has_no_grant_registration_or_send",
+            "line": 48
+          },
+          {
+            "name": "test_single_start_delivers_verified_deltas_before_final_response",
+            "line": 54
+          },
+          {
+            "name": "test_command_success_without_terminal_receipt_is_never_completion",
+            "line": 81
+          },
+          {
+            "name": "test_cancel_before_dispatch_sends_no_start",
+            "line": 89
+          },
+          {
+            "name": "test_cancel_interrupts_held_start_without_waiting_for_compute",
+            "line": 98
+          },
+          {
+            "name": "test_failed_start_never_retries_or_falls_back",
+            "line": 119
+          },
+          {
+            "name": "test_wrong_route_or_key_cannot_issue_a_grant",
+            "line": 132
+          },
+          {
+            "name": "test_timeout_then_command_completion_drains_verified_prefix",
+            "line": 150
+          }
+        ],
+        "imported_sources": [
+          "mycelium_live/token_path_owner.py",
+          "mycelium_a13_macos/token_receipt_mailbox.py",
+          "mycelium_router/token_path_authority.py",
+          "mycelium_router/token_path.py"
+        ],
+        "destination_basis": "mycelium_live/token_path_owner.py",
+        "migration_state": "retain_until_replacement_proven",
+        "collected_parameter_ids": "unknown: static discovery only, old suite not executed"
+      }
+    }
+  ]
+}

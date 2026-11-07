@@ -1,0 +1,12 @@
+{
+  "cases": 19,
+  "claim": "Actual safetensors-header accounting; synthetic tensor bytes, no model execution.",
+  "fixture_sha256": "f7fb1fb55fdbf5ed66c302e5e8b1e1fbd193c170308d9592e7a2d78a6edeeacd",
+  "generator_sha256": "d0e043024b041afb7c84ef86d172d1b44d73db5203b4d28e2b78affeed783104",
+  "imported_sources": {
+    "mycelium_a13_macos/__init__.py": "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707",
+    "mycelium_a13_macos/layer_split.py": "e3dd6b7ee8827675ad7fae669d607ea3cb8bda6d2e2ff1d404c22218146e0f60",
+    "tests/a13_macos/_nhost_fixtures.py": "49bdba05da43f404d8e0bfafde4f723d730ef955e6ec15099cc99411e64b0eda"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f"
+}

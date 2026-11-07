@@ -1,0 +1,18 @@
+constant	value	source	probe
+REGISTRY_SERVER_POLL_SECONDS	0.5	mycelium_live/supervisor.py:580	probe_closewait.py
+ROUTER_CLOSE_TIMEOUT_SECONDS	4.0	mycelium_live/router_port.py:217	probe_closewait.py
+_MAX_CANCELLATION_AND_CLEANUP_SECONDS	8.0	mycelium_live/route.py:174	probe_closewait.py
+ROUTE_CLOSE_MONITOR_JOIN_SECONDS	1.0	mycelium_live/route.py:103	probe_closewait.py
+NODE_SESSION_TIMEOUT_SECONDS	930.0	physical_inference_qualification.py:92	probe_closewait.py
+STAGE_CLEANUP_TIMEOUT_SECONDS	30.0	physical_inference_qualification.py:93	probe_closewait.py
+MIN_HOSTS	2	mycelium_a13_macos/layer_split.py:44	probe_closewait.py
+MAX_HOSTS	8	mycelium_a13_macos/layer_split.py:45	probe_closewait.py
+close_wait_seconds(peers=0)	13.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 0 peers)	probe_closewait.py
+close_wait_seconds(peers=1)	1903.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 1 peers)	probe_closewait.py
+close_wait_seconds(peers=2)	3793.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 2 peers)	probe_closewait.py
+close_wait_seconds(peers=3)	5683.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 3 peers)	probe_closewait.py
+close_wait_seconds(peers=4)	7573.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 4 peers)	probe_closewait.py
+close_wait_seconds(peers=5)	9463.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 5 peers)	probe_closewait.py
+close_wait_seconds(peers=6)	11353.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 6 peers)	probe_closewait.py
+close_wait_seconds(peers=7)	13243.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 7 peers)	probe_closewait.py
+close_wait_seconds(peers=8)	15133.5	mycelium_a13_macos/workflow.py:249-267 (ManagedServingWorkflow.close_wait_seconds, executed with 8 peers)	probe_closewait.py

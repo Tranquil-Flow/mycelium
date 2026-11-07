@@ -1,0 +1,13 @@
+{
+  "boundary": "Projection envelope and private-data rejection; pure historical registry normalization/filtering with forbidden runtime callback, injected time/incarnation, no live state, publication or gate authority.",
+  "generator_sha256": "90ca6b76aaa323611e4acb1c8beec45e33081e6c91b509a95e007ae8500f3f71",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_evidence.py",
+      "sha256": "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

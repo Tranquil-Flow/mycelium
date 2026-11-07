@@ -1,0 +1,139 @@
+{
+  "base": "0395cc5a55ef46fd3129f0e8f135ad7db1f62745",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "keys": [
+    "mycelium_a13_macos/managed_control.py:104:0:assignment:_MAX_ACTIVE_WORK",
+    "mycelium_a13_macos/managed_control.py:105:0:assignment:_MAX_ACTIVE_CONTROL",
+    "mycelium_a13_macos/managed_offers.py:61:59:manual-bound:maximum_preposition_path_characters"
+  ],
+  "source_argument": [
+    {
+      "path": "mycelium_a13_macos/managed_control.py",
+      "sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+      "constant_decl_and_consumer_uses": [
+        {
+          "name": "_MAX_ACTIVE_WORK",
+          "context": "Store",
+          "line": 104,
+          "column": 0,
+          "source": "_MAX_ACTIVE_WORK = 1"
+        },
+        {
+          "name": "_MAX_ACTIVE_CONTROL",
+          "context": "Store",
+          "line": 105,
+          "column": 0,
+          "source": "_MAX_ACTIVE_CONTROL = 2"
+        },
+        {
+          "name": "_MAX_ACTIVE_WORK",
+          "context": "Load",
+          "line": 1480,
+          "column": 65,
+          "source": "            _require(isinstance(active, dict) and len(active) <= _MAX_ACTIVE_WORK + _MAX_ACTIVE_CONTROL,"
+        },
+        {
+          "name": "_MAX_ACTIVE_CONTROL",
+          "context": "Load",
+          "line": 1480,
+          "column": 84,
+          "source": "            _require(isinstance(active, dict) and len(active) <= _MAX_ACTIVE_WORK + _MAX_ACTIVE_CONTROL,"
+        },
+        {
+          "name": "_MAX_ACTIVE_WORK",
+          "context": "Load",
+          "line": 1554,
+          "column": 47,
+          "source": "                        _require(work_count <= _MAX_ACTIVE_WORK and control_count <= _MAX_ACTIVE_CONTROL,"
+        },
+        {
+          "name": "_MAX_ACTIVE_CONTROL",
+          "context": "Load",
+          "line": 1554,
+          "column": 85,
+          "source": "                        _require(work_count <= _MAX_ACTIVE_WORK and control_count <= _MAX_ACTIVE_CONTROL,"
+        },
+        {
+          "name": "_MAX_ACTIVE_WORK",
+          "context": "Load",
+          "line": 1574,
+          "column": 71,
+          "source": "                            if concurrent and ((work and work_count >= _MAX_ACTIVE_WORK)"
+        },
+        {
+          "name": "_MAX_ACTIVE_CONTROL",
+          "context": "Load",
+          "line": 1575,
+          "column": 70,
+          "source": "                                    or (not work and control_count >= _MAX_ACTIVE_CONTROL)):"
+        }
+      ]
+    },
+    {
+      "path": "mycelium_a13_macos/managed_offers.py",
+      "sha256": "f6438a70d08a047a76c652b9e9df821f7f2c771e005c6fa4aa3f9f568d9fb771",
+      "constant_decl_and_consumer_uses": []
+    }
+  ],
+  "path_guard_lines": {
+    "48": "def _preposition(value):",
+    "59": "        for key in ('source_path','destination_path'):",
+    "60": "            text=row[key]",
+    "61": "            _require(isinstance(text,str) and 0<len(text)<=4096 and '\\x00' not in text,'offer_preposition_invalid')",
+    "62": "            path=Path(text)",
+    "63": "            _require(str(path)==text and '..' not in path.parts and '.' not in path.parts,'offer_preposition_invalid')",
+    "64": "            _require(path.is_absolute()==(key=='source_path'),'offer_preposition_invalid')",
+    "67": "    return json.loads(_preposition_bytes(value))",
+    "75": "        preposition=_preposition(offer['preposition'])",
+    "112": "        preposition=_preposition(preposition)",
+    "219": "    def read_offer(self,envelope):",
+    "242": "    def _stage_ack(offer,ack):",
+    "246": "        _require(isinstance(root,str) and len(root)<=4096 and",
+    "248": "            '..' not in PurePosixPath(root).parts,'offer_ack_invalid')",
+    "287": "    @staticmethod",
+    "294": "            isinstance(root,str) and len(root)<=4096 and PurePosixPath(root).is_absolute() and",
+    "295": "            str(PurePosixPath(root))==root and '..' not in PurePosixPath(root).parts,'offer_cleanup_ack_invalid')"
+  },
+  "path_primary_origin": 61,
+  "other_path_guards": "246 staging_root and294 cleanup staging_root inspected separately; not implicit aliases, discoveries or reviews of those sites. SourceArgument only; API caller owns actual consumption.",
+  "absence_full_table_scan": {
+    "python-candidates.tsv": {
+      "rows": 8252,
+      "exact_coordinate_matches": []
+    },
+    "python-bounds.tsv": {
+      "rows": 6953,
+      "exact_coordinate_matches": []
+    },
+    "python-adjudication-a.tsv": {
+      "rows": 571,
+      "exact_coordinate_matches": []
+    },
+    "python-adjudication-b.tsv": {
+      "rows": 656,
+      "exact_coordinate_matches": []
+    }
+  },
+  "prior_hashes": {
+    "python-candidates.tsv": "9d87c2648c4cc8d9f9e277a6e5da75cb01fdfa3fecfa1111d030bb4c2f8b13e8",
+    "python-bounds.tsv": "5957b1df69fd644bd65c00be47dd9c92a18e1a000ed92a386db3577ec2373278",
+    "python-scope.tsv": "d532777d2211682c1ebb4ccea71b82697e19edbc91b0497e738b434d49c37319",
+    "python-adjudication-a.tsv": "85fde7dbe8b80def1ae47f5dd9f63514c592eab6b2da21b8690bcbc2b800ad3c",
+    "python-adjudication-b.tsv": "e2d0ec85c3bf648c038a09fb56abb47b9ba5d8d783114eaffab96a754d292010",
+    "python-adjudication-partitions.tsv": "1d380103733722cb1e3b7e99575af98a82febf6bbf5fd7ea92db2e193fe637f0"
+  },
+  "prior_lines": {
+    "python-candidates.tsv": 8253,
+    "python-bounds.tsv": 6954,
+    "python-scope.tsv": 726,
+    "python-adjudication-a.tsv": 572,
+    "python-adjudication-b.tsv": 657,
+    "python-adjudication-partitions.tsv": 1300
+  },
+  "manifest_sha256": "2264339462758573d6d592c7d71e8f26016368e107c5df243abc435e1bddb900",
+  "discoveries": 3,
+  "reviews": 3,
+  "net_pending_reduction": 0,
+  "prior_pending_preserved": true,
+  "census": 8255
+}

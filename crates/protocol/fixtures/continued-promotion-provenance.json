@@ -1,0 +1,17 @@
+{
+  "boundary": "Pure complete report reconstruction from typed observations and validated v1 performance budget, including median/p95 and ordered reasons; no actual canary, route activation, provenance authentication or measurements.",
+  "generator_sha256": "1f6340ea2a7e25a3a42e7f9692e4fbfcf763c5190b244460c84fd355c552ce7d",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_candidate_promotion.py",
+      "sha256": "978282695d805995a18b3da6db5ba219ac01c861b14f9dcb9007c598ebe73ee2"
+    },
+    {
+      "path": "mycelium_performance_budget.py",
+      "sha256": "1ab1022b8b01fd49b1ef1023a6395ecd3fffb97a1d1ee8b5579e030c061554de"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

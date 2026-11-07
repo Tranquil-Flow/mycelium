@@ -1,0 +1,138 @@
+{
+  "schema": "mycelium.foundation.evidence-seal.v1",
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "algorithm": "SHA-256 of exact bytes; no signature claim",
+  "files": [
+    {
+      "path": "evidence/foundation-exit/README.md",
+      "size_bytes": 5519,
+      "sha256": "17cef94642b808c32c8549dbd7c84e320e17093e748561c61fb4c8cc78c35d7a",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/native-inputs.json",
+      "size_bytes": 44299,
+      "sha256": "320c010f869eab91307d71b0ef1f21fd80e63d79369c4480704b418b893bf4dc",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/native-inputs.minos-26.5.1.superseded.json",
+      "size_bytes": 34209,
+      "sha256": "40a9980d20a18e051eecb67ccfe16c45bfe79f45a6afb1a946d8a30e32542061",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/native-inputs.minos-26.5.1.superseded.NOTE.md",
+      "size_bytes": 1406,
+      "sha256": "7362a9bec0520b1efbe41376dd9f42d50f3034afdd4839872344b2f638c57833",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/oracle-provenance.json",
+      "size_bytes": 9282,
+      "sha256": "9e2d4decd952d6e0164e5d9e7176279d911b6a5f1b42f1ba11d17d10562af5b2",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/oracle-target.json",
+      "size_bytes": 403,
+      "sha256": "5de9ac3ac80462d15c8034ee1d6a5d056f6f0ca3d9f552e03b09c037b014035c",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/package-reconciliation.json",
+      "size_bytes": 988892,
+      "sha256": "4f4491a5b93566de9f48264f14c58d49b5e50f2cfb339df86d6bfc0fd7781d1e",
+      "path_base": "repository"
+    },
+    {
+      "path": "evidence/foundation-exit/preflight-readiness.json",
+      "size_bytes": 3884,
+      "sha256": "32190f713efe5e6033f0a2f84f1233f9fed322a85c708cedf5886aefc39b70f3",
+      "path_base": "repository"
+    }
+  ],
+  "acquisition_and_verification": [
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/build-manifests.rb",
+      "size_bytes": 8791,
+      "sha256": "a4b9b57efd81c3585934c4a61c78412c45326d844ae7c56bc06a0c67e4aaefbe"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/reconcile-package.rb",
+      "size_bytes": 6244,
+      "sha256": "c84582491d255f4a9d9f8f09e484bc4a79056442d822327909be2a3e4de3fab8"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/verify-manifests.rb",
+      "size_bytes": 3983,
+      "sha256": "928c4d1fac4fbbf21d95e282692239315a2a02138c0d413b342f68285df9574d"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/content-verification.json",
+      "size_bytes": 18563,
+      "sha256": "6e2f2d6fff1e1efbc1313434cbbaa8ab4bfa5f792f9a44cb6d8ac91c465c15be"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/cargo-guard.rb",
+      "size_bytes": 2543,
+      "sha256": "9c587b9b4dd5f0322367bb2932adad1e8f7ef38f2f37b0774366b8b783c3b267"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-before.log",
+      "size_bytes": 1190,
+      "sha256": "ffdc72e8d1a23e0bade490599b8ff0ec4481b7b2f59e5c3da77545fd6fa6d709"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-before.json",
+      "size_bytes": 874,
+      "sha256": "0df2a0718d381106847bb246dbd1ad29119218161c277aa719fa980d4479d95e"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-final.log",
+      "size_bytes": 588,
+      "sha256": "9038de4109aee095e25597b524c9205daa6da507febf81fbdd70260fe65b55fd"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round2/preflight-final.json",
+      "size_bytes": 1129,
+      "sha256": "ea80d8e9858dcdca56278fe6ef9ae85ce7d73b5899ffae74ba08becc65e23400"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round5/verify-candidate.rb",
+      "size_bytes": 5966,
+      "sha256": "e17f7eea4233d293db8cfc99c2e1354c59cf69ec4347d0d799fc743f99f785cb"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round5/verify-candidate.log",
+      "size_bytes": 6604,
+      "sha256": "4dba05141d80bc0468d7e0621b9b5705662e462ad08f8b5900b96e4f9fdda821"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round5/make-native-inputs.rb",
+      "size_bytes": 9508,
+      "sha256": "7be4031044d7fcdaa0cf700cf4169ac3c2e2e075d6ef165ed4856049a34c3dbc"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round5/reseal.rb",
+      "size_bytes": 2003,
+      "sha256": "208ef84e42db499118f0565bb867b551510ce788cd25245bdae726b95822ebe4"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-round5/guard.sh",
+      "size_bytes": 1000,
+      "sha256": "fcb24ea242aee992a415b6f75b6b0c259da0cff390cfe0050da907976046c7e2"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-evidence/native-inputs-candidate-minos14.json",
+      "size_bytes": 12299,
+      "sha256": "b5fa6dee034720c8739f47382be6f943c035097ab712aa5b076a6763b0bd7b99"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/L8-evidence/MINOS-LOAD-PROOF.md",
+      "size_bytes": 7073,
+      "sha256": "ad189277da1c527c79c1b353516152011c20f5b8107f69cb12779aece9324cb1"
+    }
+  ],
+  "round5_note": "Round 5 switched native-inputs.json to the L8 minos-14.0 pin set; the acquisition_and_verification receipts above this note for round 2 describe the superseded minos-26.5.1 manifest and are retained unchanged. preflight-readiness.json and oracle-* are unchanged from round 2."
+}

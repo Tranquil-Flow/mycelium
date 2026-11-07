@@ -1,0 +1,7003 @@
+[
+  {
+    "accepted": true,
+    "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+    "cases": [
+      {
+        "accepted": false,
+        "error": "'NoneType' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "list indices must be integers or slices, not str",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "'caps'",
+        "exception": "KeyError",
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [],
+        "replacement": {
+          "caps": {
+            "max_commands": 100,
+            "max_memory_bytes": 1073741824,
+            "max_wall_seconds": 120,
+            "storage_bytes": 200000000
+          },
+          "device_memory_bytes": 8589934592,
+          "policy": {
+            "storage_bytes": 400000000
+          },
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'caps'",
+        "exception": "KeyError",
+        "path": [
+          "caps"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps"
+        ],
+        "replacement": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":1,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 1,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'policy'",
+        "exception": "KeyError",
+        "path": [
+          "policy"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "policy"
+        ],
+        "replacement": {
+          "storage_bytes": 400000000,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "policy",
+          "storage_bytes"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_memory_exceeds_device",
+        "exception": "StandingConsentError",
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'device_memory_bytes'",
+        "exception": "KeyError",
+        "path": [
+          "device_memory_bytes"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 99999999
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":100000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 100000000
+        },
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 100000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":400000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 400000000
+        },
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 400000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 400000001
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 268435455
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":268435456,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 268435456,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 268435456
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_memory_exceeds_device",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 549755813888
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 549755813889
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":6442450944,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 6442450944,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 6442450944
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_memory_exceeds_device",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 6442450945
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 59
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":60,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 60,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 60
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":3600,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 3600,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 3600
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 3601
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":1,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 1,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":10000,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 10000,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 10000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_caps_invalid",
+        "exception": "StandingConsentError",
+        "path": [
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 10001
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "standing_consent_memory_exceeds_device",
+        "exception": "StandingConsentError",
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1431655765
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "{\"max_commands\":100,\"max_memory_bytes\":1073741824,\"max_wall_seconds\":120,\"storage_bytes\":200000000}",
+        "output": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "path": [
+          "device_memory_bytes"
+        ],
+        "replacement": 1431655766
+      }
+    ],
+    "kind": "caps",
+    "output": {
+      "max_commands": 100,
+      "max_memory_bytes": 1073741824,
+      "max_wall_seconds": 120,
+      "storage_bytes": 200000000
+    },
+    "value": {
+      "caps": {
+        "max_commands": 100,
+        "max_memory_bytes": 1073741824,
+        "max_wall_seconds": 120,
+        "storage_bytes": 200000000
+      },
+      "device_memory_bytes": 8589934592,
+      "policy": {
+        "storage_bytes": 400000000
+      }
+    }
+  },
+  {
+    "accepted": true,
+    "canonical_utf8": "null",
+    "cases": [
+      {
+        "accepted": false,
+        "error": "'NoneType' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "list indices must be integers or slices, not str",
+        "exception": "TypeError",
+        "path": [],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "'grant'",
+        "exception": "KeyError",
+        "path": [],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [],
+        "replacement": {
+          "binding": {
+            "node_id": "node-test",
+            "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swarm_id": "swarm-test"
+          },
+          "grant": {
+            "binding": {
+              "node_id": "node-test",
+              "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "swarm_id": "swarm-test"
+            },
+            "bound_at": 2.0,
+            "caps": {
+              "max_commands": 100,
+              "max_memory_bytes": 1073741824,
+              "max_wall_seconds": 120,
+              "storage_bytes": 200000000
+            },
+            "disclosure_digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19",
+            "granted_at": 1.0,
+            "protocol": "mycelium.a13_standing_consent.v1",
+            "state": "granted",
+            "withdrawn_at": null
+          },
+          "offer": {
+            "archive_bytes": 100000000,
+            "target_node_id": "node-test"
+          },
+          "resource_violation": null,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_missing\"",
+        "output": "standing_consent_missing",
+        "path": [
+          "grant"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "list indices must be integers or slices, not str",
+        "exception": "TypeError",
+        "path": [
+          "grant"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "'state'",
+        "exception": "KeyError",
+        "path": [
+          "grant"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'grant'",
+        "exception": "KeyError",
+        "path": [
+          "grant"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant"
+        ],
+        "replacement": {
+          "binding": {
+            "node_id": "node-test",
+            "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swarm_id": "swarm-test"
+          },
+          "bound_at": 2.0,
+          "caps": {
+            "max_commands": 100,
+            "max_memory_bytes": 1073741824,
+            "max_wall_seconds": 120,
+            "storage_bytes": 200000000
+          },
+          "disclosure_digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19",
+          "granted_at": 1.0,
+          "protocol": "mycelium.a13_standing_consent.v1",
+          "state": "granted",
+          "unexpected": true,
+          "withdrawn_at": null
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "protocol"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "disclosure_digest"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "'NoneType' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not subscriptable",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "string indices must be integers, not 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "list indices must be integers or slices, not str",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "'storage_bytes'",
+        "exception": "KeyError",
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'caps'",
+        "exception": "KeyError",
+        "path": [
+          "grant",
+          "caps"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps"
+        ],
+        "replacement": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000,
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'NoneType'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'str'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'list'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": false,
+        "error": "'>' not supported between instances of 'int' and 'dict'",
+        "exception": "TypeError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'storage_bytes'",
+        "exception": "KeyError",
+        "path": [
+          "grant",
+          "caps",
+          "storage_bytes"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_memory_bytes"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_wall_seconds"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "caps",
+          "max_commands"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "granted_at"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'binding'",
+        "exception": "KeyError",
+        "path": [
+          "grant",
+          "binding"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding"
+        ],
+        "replacement": {
+          "node_id": "node-test",
+          "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm_id": "swarm-test",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "swarm_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "node_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "grant",
+          "binding",
+          "seed_key_digest"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "bound_at"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "delete": true,
+        "output": null,
+        "path": [
+          "grant",
+          "withdrawn_at"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'state'",
+        "exception": "KeyError",
+        "path": [
+          "grant",
+          "state"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"membership_required\"",
+        "output": "membership_required",
+        "path": [
+          "binding"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object is not iterable",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "dictionary update sequence element #0 has length 1; 2 is required",
+        "exception": "ValueError",
+        "path": [
+          "binding"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "dictionary update sequence element #0 has length 1; 2 is required",
+        "exception": "ValueError",
+        "path": [
+          "binding"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "dictionary update sequence element #0 has length 1; 2 is required",
+        "exception": "ValueError",
+        "path": [
+          "binding"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'binding'",
+        "exception": "KeyError",
+        "path": [
+          "binding"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding"
+        ],
+        "replacement": {
+          "node_id": "node-test",
+          "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm_id": "swarm-test",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "swarm_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "node_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_owner_mismatch\"",
+        "delete": true,
+        "output": "standing_consent_owner_mismatch",
+        "path": [
+          "binding",
+          "seed_key_digest"
+        ]
+      },
+      {
+        "accepted": false,
+        "error": "'NoneType' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": false,
+        "error": "'bool' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": false,
+        "error": "'float' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": false,
+        "error": "'int' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": false,
+        "error": "'str' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": false,
+        "error": "'list' object has no attribute 'get'",
+        "exception": "AttributeError",
+        "path": [
+          "offer"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": false,
+        "delete": true,
+        "error": "'offer'",
+        "exception": "KeyError",
+        "path": [
+          "offer"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer"
+        ],
+        "replacement": {
+          "archive_bytes": 100000000,
+          "target_node_id": "node-test",
+          "unexpected": true
+        }
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_not_for_this_member\"",
+        "delete": true,
+        "output": "standing_offer_not_for_this_member",
+        "path": [
+          "offer",
+          "target_node_id"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": false
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": true
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 1.0
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 1.5
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 9007199254740991
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 9007199254740992
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 18446744073709551616
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": []
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": {}
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "delete": true,
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ]
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"x\"",
+        "output": "x",
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": "x"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"é\"",
+        "output": "é",
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": "é"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"",
+        "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_unbound\"",
+        "output": "standing_consent_unbound",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "granted_unbound"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_consent_withdrawn\"",
+        "output": "standing_consent_withdrawn",
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "withdrawn"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "grant",
+          "state"
+        ],
+        "replacement": "granted"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": ""
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": null
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"thermal_pressure\"",
+        "output": "thermal_pressure",
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": "thermal_pressure"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"power_policy\"",
+        "output": "power_policy",
+        "path": [
+          "resource_violation"
+        ],
+        "replacement": "power_policy"
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": -1
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "null",
+        "output": null,
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 200000000
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 200000001
+      },
+      {
+        "accepted": true,
+        "canonical_utf8": "\"standing_offer_exceeds_caps\"",
+        "output": "standing_offer_exceeds_caps",
+        "path": [
+          "offer",
+          "archive_bytes"
+        ],
+        "replacement": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+      },
+      {
+        "accepted": false,
+        "error": "list indices must be integers or slices, not str",
+        "exception": "TypeError",
+        "path": [
+          "binding"
+        ],
+        "replacement": [
+          [
+            "swarm_id",
+            "swarm-test"
+          ],
+          [
+            "node_id",
+            "node-test"
+          ],
+          [
+            "seed_key_digest",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ]
+        ]
+      }
+    ],
+    "kind": "admission",
+    "output": null,
+    "value": {
+      "binding": {
+        "node_id": "node-test",
+        "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "swarm_id": "swarm-test"
+      },
+      "grant": {
+        "binding": {
+          "node_id": "node-test",
+          "seed_key_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "swarm_id": "swarm-test"
+        },
+        "bound_at": 2.0,
+        "caps": {
+          "max_commands": 100,
+          "max_memory_bytes": 1073741824,
+          "max_wall_seconds": 120,
+          "storage_bytes": 200000000
+        },
+        "disclosure_digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19",
+        "granted_at": 1.0,
+        "protocol": "mycelium.a13_standing_consent.v1",
+        "state": "granted",
+        "withdrawn_at": null
+      },
+      "offer": {
+        "archive_bytes": 100000000,
+        "target_node_id": "node-test"
+      },
+      "resource_violation": null
+    }
+  }
+]

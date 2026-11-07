@@ -1,0 +1,644 @@
+{
+  "provenance": {
+    "oracle": "mycelium-iroh-sidecar RELEASE profile (opt-level 0) of f4e366e98a1f705dfaf182897044500d290dbd7f (native/iroh_transport + native/mobile_core, git archive)",
+    "binary_sha256": "c2dcdb1820371cb6fc881b7a2342819e52cc0326c00578d40b5272aef5a63672",
+    "probe": "L9-evidence/r14-artifact-probe.rb",
+    "probe_sha256": "f3748e60ecba63c007a8d254067c4f3ee9515baf8e250ce6a994aea65d264f7c",
+    "method": "EXECUTED: each case spawns the oracle with --local-only and the four --artifact-* flags over a fresh 0700 dir, a pre-seeded state dir, waits for the ready line, sends SIGINT",
+    "cases": 27
+  },
+  "cases": [
+    {
+      "name": "fresh_state_dir",
+      "note": "no ledger: created with genesis = now",
+      "ledger_before": null,
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"3ae54bef43fdad17d6d2dd1c00fd5a1479aebb1d92342c5d0684abe4c7e33a46\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1793228994930,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228992858,
+        1793228994950
+      ]
+    },
+    {
+      "name": "header_only_complete",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"e0f476478101b636e32fc466e4210cf73e9ed2342767da44306789c0847a6723\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228994955,
+        1793228995020
+      ]
+    },
+    {
+      "name": "header_protocol_first",
+      "note": "key order of the input header is irrelevant; rewritten sorted",
+      "ledger_before": "{\"protocol\":\"mycelium.artifact_source_ledger.v1\",\"genesis_unix_ms\":1000}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"51e7cdfbcc6eb7cbda5b7326ab0041650314ce2118d718ad9a03939657ddcf0c\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995022,
+        1793228995142
+      ]
+    },
+    {
+      "name": "header_extra_key",
+      "note": "",
+      "ledger_before": "{\"extra\":1,\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"cc16109663c19e44bf9f16abe1e3eb50f7c23567adcb5c71ea238b8bc67b4a4a\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995147,
+        1793228995227
+      ]
+    },
+    {
+      "name": "header_only_no_newline",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995229,
+        1793228995350
+      ]
+    },
+    {
+      "name": "live_entries_kept",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"11149986bd8b979b7779e262ecd7a84d42a5ffab9259d492264446a4437f3ecf\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995353,
+        1793228995450
+      ]
+    },
+    {
+      "name": "expired_entry_dropped",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":1,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":1}\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"1c5d3ad7b5caaafd68d9e669438c5c3f46b331edce957298bbad89d04be282ed\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995451,
+        1793228995567
+      ]
+    },
+    {
+      "name": "torn_final_line_dropped",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n{\"e\":4000000000000,\"f\":\"ab",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"432773f499ec66e9f00f0d3baebb4b02891f57d36b9f6c86c47094172eee082b\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995570,
+        1793228995625
+      ]
+    },
+    {
+      "name": "torn_final_line_after_header_only",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":1",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"d79217287efa4c9d5096cf20615c26d21c6984638987d3cf8c9b033744f4fadd\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995628,
+        1793228995689
+      ]
+    },
+    {
+      "name": "malformed_middle_line",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\nnot json\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\nnot json\n{\"e\":4000000000000,\"f\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"g\":\"g2\",\"n\":20,\"x\":4000000000000}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995691,
+        1793228995804
+      ]
+    },
+    {
+      "name": "malformed_final_line_complete",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\nnot json\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\nnot json\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995806,
+        1793228995912
+      ]
+    },
+    {
+      "name": "blank_final_line",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000}\n\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228995915,
+        1793228996097
+      ]
+    },
+    {
+      "name": "empty_file",
+      "note": "",
+      "ledger_before": "",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996099,
+        1793228996246
+      ]
+    },
+    {
+      "name": "wrong_protocol",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v0\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v0\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996249,
+        1793228996356
+      ]
+    },
+    {
+      "name": "genesis_is_a_string",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":\"1000\",\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":\"1000\",\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996359,
+        1793228996492
+      ]
+    },
+    {
+      "name": "genesis_is_negative",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":-1,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":-1,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996495,
+        1793228996609
+      ]
+    },
+    {
+      "name": "header_is_not_an_object",
+      "note": "",
+      "ledger_before": "[1,2]\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "[1,2]\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996612,
+        1793228996711
+      ]
+    },
+    {
+      "name": "entry_n_is_a_string",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":\"10\",\"x\":4000000000000}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":\"10\",\"x\":4000000000000}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996713,
+        1793228996817
+      ]
+    },
+    {
+      "name": "entry_missing_x",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996819,
+        1793228996939
+      ]
+    },
+    {
+      "name": "entry_extra_key_kept_verbatim",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000,\"z\":1}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"c76f9cd888e965a39f1c7f19a90897c5f328496a313fc058c0f4633fdd3639bf\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":4000000000000,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":4000000000000,\"z\":1}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228996941,
+        1793228997059
+      ]
+    },
+    {
+      "name": "entry_expiry_exactly_within_skew",
+      "note": "e + skew < now, long past",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n{\"e\":0,\"f\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"g\":\"g1\",\"n\":10,\"x\":0}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"98e1b980c1d6633d05e44ea9e394021190a84224d697712b97546f1ae4d6135e\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997062,
+        1793228997127
+      ]
+    },
+    {
+      "name": "ledger_is_a_directory",
+      "note": "",
+      "ledger_before": null,
+      "kind": "directory",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "<directory>",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997130,
+        1793228997232
+      ]
+    },
+    {
+      "name": "ledger_is_a_symlink_to_a_valid_file",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "symlink",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "<symlink>",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997234,
+        1793228997421
+      ]
+    },
+    {
+      "name": "ledger_unreadable_mode_000",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 0,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997423,
+        1793228997592
+      ]
+    },
+    {
+      "name": "state_path_is_a_file",
+      "note": "",
+      "ledger_before": null,
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": true,
+      "closed_fd": false,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"fatal\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": null,
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997596,
+        1793228997715
+      ]
+    },
+    {
+      "name": "tmp_leftover_is_overwritten",
+      "note": "",
+      "ledger_before": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": true,
+      "state_is_file": false,
+      "closed_fd": false,
+      "exit": 0,
+      "ready_line": true,
+      "events": [
+        "{\"event\":\"address_ready\"}",
+        "{\"endpoint_id\":\"3c38f54e81ec483081fc1a308f7db58139784a292aa3ce3f5cd8dac33ff2c2ce\",\"event\":\"artifact_source_ready\",\"verification_key_digest\":\"sha256:1325b850c2871916eae203f0efc3c8987f64e5e3cdb27679e6d1fa97808357e6\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": "{\"genesis_unix_ms\":1000,\"protocol\":\"mycelium.artifact_source_ledger.v1\"}\n",
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997719,
+        1793228997794
+      ]
+    },
+    {
+      "name": "closed_bootstrap_fd",
+      "note": "fd 3 is not open in the child",
+      "ledger_before": null,
+      "kind": "file",
+      "mode": 384,
+      "tmp_leftover": false,
+      "state_is_file": false,
+      "closed_fd": true,
+      "exit": 1,
+      "ready_line": false,
+      "events": [
+        "{\"event\":\"bootstrap_rejected\"}"
+      ],
+      "stderr_is_event_free": false,
+      "ledger_after": null,
+      "socket_left_behind": false,
+      "tmp_after": false,
+      "window_ms": [
+        1793228997797,
+        1793228997864
+      ]
+    }
+  ]
+}

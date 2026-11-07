@@ -1,0 +1,16 @@
+{
+  "claim": "actual oracle plans at fraction f, nextafter(f,-inf), nextafter(f,+inf), where current_admitted * f == a first-iteration candidate robust gain exactly; synthetic fleets, no model loaded",
+  "counts": {
+    "accept": 10,
+    "cases": 20,
+    "plans": 60,
+    "reason": 10
+  },
+  "generator_sha256": "2b7fae4e75aaeb7ac12b270c05178f840a58758fe94971881ebd4745e6741ae6",
+  "imported_sources": {
+    "replication.py": "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": "278d80f858fb84c3d388cd67f9b922b49532bfcb6d074f4227110e87fa822933",
+  "python": "3.14.8"
+}

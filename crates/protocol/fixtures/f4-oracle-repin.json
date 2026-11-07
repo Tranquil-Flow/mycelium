@@ -1,0 +1,3239 @@
+{
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "previous_oracle_commit": "941765e882ed3eea9a5576cc53e525c4caa20300",
+  "contract_count": 87,
+  "boundary": "87 frozen contract blobs unchanged. Historical provenance preserved, not relabeled. New progress client/pump/subject fixtures use the accepted pin; changed live orchestration is not claimed ported.",
+  "changed_since_previous_pin": [
+    "artifacts/a6/source-manifest-v1.json",
+    "mycelium_a13_macos/demo_target.py",
+    "mycelium_a13_macos/token_progress_pump.py",
+    "mycelium_a13_macos/token_receipt_mailbox.py",
+    "mycelium_live/token_path_owner.py"
+  ],
+  "inputs": [
+    {
+      "path": "artifacts/a6/source-manifest-v1.json",
+      "sha256": "95b11297bac9d6384bdfb8cbae98c60b91e265b289f6f1f385f9190208a44c9f",
+      "size_bytes": 254979,
+      "previous_pin_sha256": "c5be02c44d7dec3130211fe32cd1e2f232f1899bdc512f82532c57e9c62ca093",
+      "changed_since_previous_pin": true,
+      "historical_record_sha256": [
+
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/artifact-verification-report-v1.json",
+      "sha256": "cb07ec1c0d5c468d0c494983b640e1972816ab9cf56c752fd35604c21635107e",
+      "size_bytes": 1283,
+      "previous_pin_sha256": "cb07ec1c0d5c468d0c494983b640e1972816ab9cf56c752fd35604c21635107e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "cb07ec1c0d5c468d0c494983b640e1972816ab9cf56c752fd35604c21635107e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/assignment-artifact-cache-v1.json",
+      "sha256": "54ace05f35bd4dbfd5b44804a28e9dd62fbc799ef37676561961d0a3a3fb8569",
+      "size_bytes": 149,
+      "previous_pin_sha256": "54ace05f35bd4dbfd5b44804a28e9dd62fbc799ef37676561961d0a3a3fb8569",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "54ace05f35bd4dbfd5b44804a28e9dd62fbc799ef37676561961d0a3a3fb8569"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/assignment-materialization-v1.json",
+      "sha256": "7aaa2c6461f1d499a065200ee4a4b115dba27c458633d16f50e469c360ad6b29",
+      "size_bytes": 950,
+      "previous_pin_sha256": "7aaa2c6461f1d499a065200ee4a4b115dba27c458633d16f50e469c360ad6b29",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "7aaa2c6461f1d499a065200ee4a4b115dba27c458633d16f50e469c360ad6b29"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/candidate-promotion-report-v1.json",
+      "sha256": "2854e33780bb9ecbc091861c3ad4c3de63c6eef21c1a0a3cf2c3890a9138b792",
+      "size_bytes": 3607,
+      "previous_pin_sha256": "2854e33780bb9ecbc091861c3ad4c3de63c6eef21c1a0a3cf2c3890a9138b792",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2854e33780bb9ecbc091861c3ad4c3de63c6eef21c1a0a3cf2c3890a9138b792"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/capacity-profile-v1.json",
+      "sha256": "a550479cf389cb591e7b5a6bb4e38a5d2f6336efc3402be44c4e1fa9f59d55e2",
+      "size_bytes": 1431,
+      "previous_pin_sha256": "a550479cf389cb591e7b5a6bb4e38a5d2f6336efc3402be44c4e1fa9f59d55e2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a550479cf389cb591e7b5a6bb4e38a5d2f6336efc3402be44c4e1fa9f59d55e2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/coarse-region-evidence-v1.json",
+      "sha256": "0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185",
+      "size_bytes": 614,
+      "previous_pin_sha256": "0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "0d78445c2d3a31d706ebfa19d230be99f6bf1cc28574ee05a5a483a243685185"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/concurrent-request-runtime-v1.json",
+      "sha256": "ddc31e07ca33c8ce5ef9d188b705e9d6811e018999eb29035b8c7f401c97cbc4",
+      "size_bytes": 1370,
+      "previous_pin_sha256": "ddc31e07ca33c8ce5ef9d188b705e9d6811e018999eb29035b8c7f401c97cbc4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ddc31e07ca33c8ce5ef9d188b705e9d6811e018999eb29035b8c7f401c97cbc4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/control-plane-tranche-v1.json",
+      "sha256": "07030c947741389aebf560a2bd84ba75a43f2ec35ab1900bcc0f9ebd07f790e9",
+      "size_bytes": 37871,
+      "previous_pin_sha256": "07030c947741389aebf560a2bd84ba75a43f2ec35ab1900bcc0f9ebd07f790e9",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "07030c947741389aebf560a2bd84ba75a43f2ec35ab1900bcc0f9ebd07f790e9"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/deployment-activation-v1.json",
+      "sha256": "c1c3e945373ca5d9c1ae3afce68fd29f86358182effd855bcefcde67fb602bdd",
+      "size_bytes": 748,
+      "previous_pin_sha256": "c1c3e945373ca5d9c1ae3afce68fd29f86358182effd855bcefcde67fb602bdd",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c1c3e945373ca5d9c1ae3afce68fd29f86358182effd855bcefcde67fb602bdd"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/deployment-residency-physical-v1.json",
+      "sha256": "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445",
+      "size_bytes": 1184,
+      "previous_pin_sha256": "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/evidence-history-v1.json",
+      "sha256": "ec888d300a2fdda0f83d9977b5ab990e72948a1a3be7cb46f3ff2882387a2407",
+      "size_bytes": 648,
+      "previous_pin_sha256": "ec888d300a2fdda0f83d9977b5ab990e72948a1a3be7cb46f3ff2882387a2407",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ec888d300a2fdda0f83d9977b5ab990e72948a1a3be7cb46f3ff2882387a2407"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/evidence-projection-v1.json",
+      "sha256": "708e60ce266819e6980c28889aa81fc470625a2169379f0b9400bbccb019adf2",
+      "size_bytes": 495,
+      "previous_pin_sha256": "708e60ce266819e6980c28889aa81fc470625a2169379f0b9400bbccb019adf2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "708e60ce266819e6980c28889aa81fc470625a2169379f0b9400bbccb019adf2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/execution-graph-v1.json",
+      "sha256": "53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5",
+      "size_bytes": 3146,
+      "previous_pin_sha256": "53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-gate-v1.json",
+      "sha256": "8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
+      "size_bytes": 418,
+      "previous_pin_sha256": "8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-intent-v1.json",
+      "sha256": "1d14e03f0a0d8eea0596ceb28dd470866e8bdb4a91418ff9244c888db3308db0",
+      "size_bytes": 1000,
+      "previous_pin_sha256": "1d14e03f0a0d8eea0596ceb28dd470866e8bdb4a91418ff9244c888db3308db0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1d14e03f0a0d8eea0596ceb28dd470866e8bdb4a91418ff9244c888db3308db0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-qualification-v1.json",
+      "sha256": "f9a91c5bf634029ad05bfa2dbd3dfb73d01fbd1a1cfd90bc1445a18d4163e3db",
+      "size_bytes": 2936,
+      "previous_pin_sha256": "f9a91c5bf634029ad05bfa2dbd3dfb73d01fbd1a1cfd90bc1445a18d4163e3db",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f9a91c5bf634029ad05bfa2dbd3dfb73d01fbd1a1cfd90bc1445a18d4163e3db"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-runtime-v1.json",
+      "sha256": "b399ad6cf7450e19441b93704b45873c8fcd0598a4dde253a5e69521979c52b5",
+      "size_bytes": 870,
+      "previous_pin_sha256": "b399ad6cf7450e19441b93704b45873c8fcd0598a4dde253a5e69521979c52b5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b399ad6cf7450e19441b93704b45873c8fcd0598a4dde253a5e69521979c52b5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/gossip-allocator-view-v1.json",
+      "sha256": "1f0e93f5d8612cf5aa3917d4f73c7747ae9ae26e8c580f23dd403d683a238543",
+      "size_bytes": 2322,
+      "previous_pin_sha256": "1f0e93f5d8612cf5aa3917d4f73c7747ae9ae26e8c580f23dd403d683a238543",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1f0e93f5d8612cf5aa3917d4f73c7747ae9ae26e8c580f23dd403d683a238543"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/gossip-evidence-bundle-v1.json",
+      "sha256": "d79d954a59d3ec931d2fe2b4679c216509f60c5fb7a6cf0a25b90cf151793253",
+      "size_bytes": 18770,
+      "previous_pin_sha256": "d79d954a59d3ec931d2fe2b4679c216509f60c5fb7a6cf0a25b90cf151793253",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d79d954a59d3ec931d2fe2b4679c216509f60c5fb7a6cf0a25b90cf151793253"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/gossip-router-view-v1.json",
+      "sha256": "2e134de5433ded3025c51eafd7acd5070956f762cc42e4d4aa75d53b21eca8cf",
+      "size_bytes": 4906,
+      "previous_pin_sha256": "2e134de5433ded3025c51eafd7acd5070956f762cc42e4d4aa75d53b21eca8cf",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2e134de5433ded3025c51eafd7acd5070956f762cc42e4d4aa75d53b21eca8cf"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/governance-readiness-v1.json",
+      "sha256": "8f8d99c07e4842abb5d4f0490d94a2522d5eb2e5a47db75ade5488529f8934a7",
+      "size_bytes": 813,
+      "previous_pin_sha256": "8f8d99c07e4842abb5d4f0490d94a2522d5eb2e5a47db75ade5488529f8934a7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8f8d99c07e4842abb5d4f0490d94a2522d5eb2e5a47db75ade5488529f8934a7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/internet-activation-observation-v1.json",
+      "sha256": "bcf703ead3a422125a79b4f8de1d8cfc0cde6f10dc57b1e147023dc0248e7d3b",
+      "size_bytes": 641,
+      "previous_pin_sha256": "bcf703ead3a422125a79b4f8de1d8cfc0cde6f10dc57b1e147023dc0248e7d3b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bcf703ead3a422125a79b4f8de1d8cfc0cde6f10dc57b1e147023dc0248e7d3b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/internet-bootstrap-status-v1.json",
+      "sha256": "36700b1c145f0e53c8ad898f71e7d70f2b53e42115cfa5ba36f42bf146f15a4a",
+      "size_bytes": 399,
+      "previous_pin_sha256": "36700b1c145f0e53c8ad898f71e7d70f2b53e42115cfa5ba36f42bf146f15a4a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "36700b1c145f0e53c8ad898f71e7d70f2b53e42115cfa5ba36f42bf146f15a4a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/internet-native-qualification-v1.json",
+      "sha256": "91c626f44b1067ef516c37b8993ec283c92c56eb9ecbc42ee3e3d5c4fb2dd72d",
+      "size_bytes": 799,
+      "previous_pin_sha256": "91c626f44b1067ef516c37b8993ec283c92c56eb9ecbc42ee3e3d5c4fb2dd72d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "91c626f44b1067ef516c37b8993ec283c92c56eb9ecbc42ee3e3d5c4fb2dd72d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/interruptible-stage-command-v1.json",
+      "sha256": "f3b24baf289b21874903af48c1fa52d4719453d954b759b87409650914eea1a8",
+      "size_bytes": 1032,
+      "previous_pin_sha256": "f3b24baf289b21874903af48c1fa52d4719453d954b759b87409650914eea1a8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f3b24baf289b21874903af48c1fa52d4719453d954b759b87409650914eea1a8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/layer-assignment-v2.json",
+      "sha256": "889f91027af2d193ebda162ad47636eaf9ad9ead81f57205f1d2d89dcf3b939b",
+      "size_bytes": 3832,
+      "previous_pin_sha256": "889f91027af2d193ebda162ad47636eaf9ad9ead81f57205f1d2d89dcf3b939b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "889f91027af2d193ebda162ad47636eaf9ad9ead81f57205f1d2d89dcf3b939b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/layer-load-proof-v1.json",
+      "sha256": "2fa57869d5e4e2de0cb3e79f927cc360f3ed5605a59c3e1293d9e6f46bbf55f2",
+      "size_bytes": 3196,
+      "previous_pin_sha256": "2fa57869d5e4e2de0cb3e79f927cc360f3ed5605a59c3e1293d9e6f46bbf55f2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2fa57869d5e4e2de0cb3e79f927cc360f3ed5605a59c3e1293d9e6f46bbf55f2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/layer-planner-snapshot-v1.json",
+      "sha256": "d5b214938863b3f0b8dcac0a0b5acb7ae33a460a9d91a3c49aec05b088e37388",
+      "size_bytes": 2375,
+      "previous_pin_sha256": "d5b214938863b3f0b8dcac0a0b5acb7ae33a460a9d91a3c49aec05b088e37388",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d5b214938863b3f0b8dcac0a0b5acb7ae33a460a9d91a3c49aec05b088e37388"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/layer-replan-simulation-report-v1.json",
+      "sha256": "107c177a0c4e52d24d9ba656346897822db9ec18070be0d540a942e1f9910551",
+      "size_bytes": 38011,
+      "previous_pin_sha256": "107c177a0c4e52d24d9ba656346897822db9ec18070be0d540a942e1f9910551",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "107c177a0c4e52d24d9ba656346897822db9ec18070be0d540a942e1f9910551"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/link-state-v1.json",
+      "sha256": "810edcf50b37c1598e535ed9e45e83bffa98f5af8f2de584cb1e3e9ba267a9e5",
+      "size_bytes": 376,
+      "previous_pin_sha256": "810edcf50b37c1598e535ed9e45e83bffa98f5af8f2de584cb1e3e9ba267a9e5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "810edcf50b37c1598e535ed9e45e83bffa98f5af8f2de584cb1e3e9ba267a9e5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/live-route-incident-v1.json",
+      "sha256": "3261768db8a2a856e98f0cdedfd34be408974964a243375e0fb6316524dc951e",
+      "size_bytes": 271,
+      "previous_pin_sha256": "3261768db8a2a856e98f0cdedfd34be408974964a243375e0fb6316524dc951e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "3261768db8a2a856e98f0cdedfd34be408974964a243375e0fb6316524dc951e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/live-route-status-v1.json",
+      "sha256": "81a67c0d803cf65f8d4fdb637a880a5e4a82e77030522646eb3a241dfb6c8137",
+      "size_bytes": 5577,
+      "previous_pin_sha256": "81a67c0d803cf65f8d4fdb637a880a5e4a82e77030522646eb3a241dfb6c8137",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "81a67c0d803cf65f8d4fdb637a880a5e4a82e77030522646eb3a241dfb6c8137"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/m13-placement-projection-v1.json",
+      "sha256": "bfcd246ad24cb510fb20cecf4e022df56750fa6c5cd9a527c472909e1de59621",
+      "size_bytes": 1686,
+      "previous_pin_sha256": "bfcd246ad24cb510fb20cecf4e022df56750fa6c5cd9a527c472909e1de59621",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bfcd246ad24cb510fb20cecf4e022df56750fa6c5cd9a527c472909e1de59621"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/m14-topology-projection-v1.json",
+      "sha256": "479a830dc622846acfb7b0d5653504896eba7b0d38943fdc50cc13824f08391b",
+      "size_bytes": 6274,
+      "previous_pin_sha256": "479a830dc622846acfb7b0d5653504896eba7b0d38943fdc50cc13824f08391b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "479a830dc622846acfb7b0d5653504896eba7b0d38943fdc50cc13824f08391b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/m15-plan-comparison-v1.json",
+      "sha256": "59a30e530a512ef2f9133d7e4d9c162cf58895b08bdca12523faa780b204a975",
+      "size_bytes": 22489,
+      "previous_pin_sha256": "59a30e530a512ef2f9133d7e4d9c162cf58895b08bdca12523faa780b204a975",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "59a30e530a512ef2f9133d7e4d9c162cf58895b08bdca12523faa780b204a975"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/m23-kv-gate-v1.json",
+      "sha256": "21dd576bdcc449c1e5ef8972fef5e0e301b1354b35b6a0390159a4c8a07468fa",
+      "size_bytes": 1411,
+      "previous_pin_sha256": "21dd576bdcc449c1e5ef8972fef5e0e301b1354b35b6a0390159a4c8a07468fa",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "21dd576bdcc449c1e5ef8972fef5e0e301b1354b35b6a0390159a4c8a07468fa"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/manual-provisioning-route-v1.json",
+      "sha256": "c38e02de62391296be46857132edbcc79ef9ad3f06676a56b45de4ebacf27e3a",
+      "size_bytes": 753,
+      "previous_pin_sha256": "c38e02de62391296be46857132edbcc79ef9ad3f06676a56b45de4ebacf27e3a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c38e02de62391296be46857132edbcc79ef9ad3f06676a56b45de4ebacf27e3a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-assignment-offer-v1.json",
+      "sha256": "6cc2a7ba9aab44c74dc86dcfc9a657fcd577dbe4da3f2f3ec03cb469f0d6633a",
+      "size_bytes": 1044,
+      "previous_pin_sha256": "6cc2a7ba9aab44c74dc86dcfc9a657fcd577dbe4da3f2f3ec03cb469f0d6633a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6cc2a7ba9aab44c74dc86dcfc9a657fcd577dbe4da3f2f3ec03cb469f0d6633a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-assignment-result-v1.json",
+      "sha256": "e0878ad6e1c51fe0c4e32d8277f8d52ebafabed47bb890839fc91b5024ca625f",
+      "size_bytes": 671,
+      "previous_pin_sha256": "e0878ad6e1c51fe0c4e32d8277f8d52ebafabed47bb890839fc91b5024ca625f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e0878ad6e1c51fe0c4e32d8277f8d52ebafabed47bb890839fc91b5024ca625f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-capability-report-v1.json",
+      "sha256": "53642168d3a8ef099efc159570802561a709a5148b51dd7bd22da43c015de4fb",
+      "size_bytes": 555,
+      "previous_pin_sha256": "53642168d3a8ef099efc159570802561a709a5148b51dd7bd22da43c015de4fb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "53642168d3a8ef099efc159570802561a709a5148b51dd7bd22da43c015de4fb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-drain-ack-v1.json",
+      "sha256": "55b28a1bb3f7e05e0b5cbc3960a46f4cc85d32612a42d43fc2607d954fda0dda",
+      "size_bytes": 444,
+      "previous_pin_sha256": "55b28a1bb3f7e05e0b5cbc3960a46f4cc85d32612a42d43fc2607d954fda0dda",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "55b28a1bb3f7e05e0b5cbc3960a46f4cc85d32612a42d43fc2607d954fda0dda"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-heartbeat-v1.json",
+      "sha256": "d1c6302eec3bce8909d68acd40f1877b17deace0972d9e05aa6e7297a361187f",
+      "size_bytes": 555,
+      "previous_pin_sha256": "d1c6302eec3bce8909d68acd40f1877b17deace0972d9e05aa6e7297a361187f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d1c6302eec3bce8909d68acd40f1877b17deace0972d9e05aa6e7297a361187f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-join-acceptance-v1.json",
+      "sha256": "8f644836d7d2ac330fab694fb42a5edc98f7a29c14f4121faa0d440f6374d29b",
+      "size_bytes": 535,
+      "previous_pin_sha256": "8f644836d7d2ac330fab694fb42a5edc98f7a29c14f4121faa0d440f6374d29b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8f644836d7d2ac330fab694fb42a5edc98f7a29c14f4121faa0d440f6374d29b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-join-request-v1.json",
+      "sha256": "68b057a917dc7698e8a0d697dc9effb9906a62d21bac9c132998a734e6b94ca8",
+      "size_bytes": 698,
+      "previous_pin_sha256": "68b057a917dc7698e8a0d697dc9effb9906a62d21bac9c132998a734e6b94ca8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "68b057a917dc7698e8a0d697dc9effb9906a62d21bac9c132998a734e6b94ca8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-lease-renewal-v1.json",
+      "sha256": "8edc4dee64b21c31569e69df38b5c7456b21767d4046251d664efb81d6f0ab31",
+      "size_bytes": 496,
+      "previous_pin_sha256": "8edc4dee64b21c31569e69df38b5c7456b21767d4046251d664efb81d6f0ab31",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8edc4dee64b21c31569e69df38b5c7456b21767d4046251d664efb81d6f0ab31"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-link-probe-report-v1.json",
+      "sha256": "798442a92dcbf653e4ee4798bbbeebeaab6596aa5b4ec5e60192ee999abd3075",
+      "size_bytes": 530,
+      "previous_pin_sha256": "798442a92dcbf653e4ee4798bbbeebeaab6596aa5b4ec5e60192ee999abd3075",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "798442a92dcbf653e4ee4798bbbeebeaab6596aa5b4ec5e60192ee999abd3075"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-resume-acceptance-v1.json",
+      "sha256": "a9090196e9309ae0d3516d7e00e4b92a4a425382204357da2145acd2b2a68c7e",
+      "size_bytes": 580,
+      "previous_pin_sha256": "a9090196e9309ae0d3516d7e00e4b92a4a425382204357da2145acd2b2a68c7e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a9090196e9309ae0d3516d7e00e4b92a4a425382204357da2145acd2b2a68c7e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-resume-request-v1.json",
+      "sha256": "36d259c4ec72678a28e22496a515f1417c1fec3d84888566555020cd4e464cb8",
+      "size_bytes": 716,
+      "previous_pin_sha256": "36d259c4ec72678a28e22496a515f1417c1fec3d84888566555020cd4e464cb8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "36d259c4ec72678a28e22496a515f1417c1fec3d84888566555020cd4e464cb8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-seed-rotation-ack-v1.json",
+      "sha256": "4b7a4c9eadf52b053c5d0d6e8aa5542599c1b8258fbe7877f483e174d502ae80",
+      "size_bytes": 479,
+      "previous_pin_sha256": "4b7a4c9eadf52b053c5d0d6e8aa5542599c1b8258fbe7877f483e174d502ae80",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4b7a4c9eadf52b053c5d0d6e8aa5542599c1b8258fbe7877f483e174d502ae80"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/membership-signed-message-v1.json",
+      "sha256": "23285ece7a71bbab99f79f7468bc49bc3ce58b563b9d1324f5671c2e01bcc4f2",
+      "size_bytes": 1495,
+      "previous_pin_sha256": "23285ece7a71bbab99f79f7468bc49bc3ce58b563b9d1324f5671c2e01bcc4f2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "23285ece7a71bbab99f79f7468bc49bc3ce58b563b9d1324f5671c2e01bcc4f2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/model-preparation-authorization-v2.json",
+      "sha256": "808df63a4dd7868872053edf0892ca51c800ed990fb57b6083a19782b1902453",
+      "size_bytes": 2019,
+      "previous_pin_sha256": "808df63a4dd7868872053edf0892ca51c800ed990fb57b6083a19782b1902453",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "808df63a4dd7868872053edf0892ca51c800ed990fb57b6083a19782b1902453"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/observatory-event-v1.json",
+      "sha256": "e2a42e20f62d6ae95cb5f0d4fe66242aa4b7ec07c725d742fc276a7d03c14f39",
+      "size_bytes": 6546,
+      "previous_pin_sha256": "e2a42e20f62d6ae95cb5f0d4fe66242aa4b7ec07c725d742fc276a7d03c14f39",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e2a42e20f62d6ae95cb5f0d4fe66242aa4b7ec07c725d742fc276a7d03c14f39"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/observatory-snapshot-v1.json",
+      "sha256": "95ff558ebf5fe344341adcb6270f411405164fb4306edf88feaf2997770401c7",
+      "size_bytes": 5994,
+      "previous_pin_sha256": "95ff558ebf5fe344341adcb6270f411405164fb4306edf88feaf2997770401c7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "95ff558ebf5fe344341adcb6270f411405164fb4306edf88feaf2997770401c7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/path-manifest-v1.json",
+      "sha256": "b0f759ec7fb7417ea573ac8b3be828a7ad0a55166ff9596020968d1502b70487",
+      "size_bytes": 825,
+      "previous_pin_sha256": "b0f759ec7fb7417ea573ac8b3be828a7ad0a55166ff9596020968d1502b70487",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b0f759ec7fb7417ea573ac8b3be828a7ad0a55166ff9596020968d1502b70487"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/performance-budget-v1.json",
+      "sha256": "1d1b220eb80d1e35cee2e2375de4bc32849d77148cd437d48a0c942a157c2212",
+      "size_bytes": 628,
+      "previous_pin_sha256": "1d1b220eb80d1e35cee2e2375de4bc32849d77148cd437d48a0c942a157c2212",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1d1b220eb80d1e35cee2e2375de4bc32849d77148cd437d48a0c942a157c2212"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/performance-budget-v2.json",
+      "sha256": "e1e99bfc62d878fbbd1a64892a32a4905a07f6a15a4fba4e3fd0876817d8f7ee",
+      "size_bytes": 800,
+      "previous_pin_sha256": "e1e99bfc62d878fbbd1a64892a32a4905a07f6a15a4fba4e3fd0876817d8f7ee",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e1e99bfc62d878fbbd1a64892a32a4905a07f6a15a4fba4e3fd0876817d8f7ee"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/performance-budget-v3.json",
+      "sha256": "0fd60d1236905c39f511121ddab7e4fb88127c92991cca4a7386898a8cbfdec7",
+      "size_bytes": 2685,
+      "previous_pin_sha256": "0fd60d1236905c39f511121ddab7e4fb88127c92991cca4a7386898a8cbfdec7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "0fd60d1236905c39f511121ddab7e4fb88127c92991cca4a7386898a8cbfdec7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/private-request-replay-checkpoint-v1.json",
+      "sha256": "b820928148a33a32f8d20f60e72c0907d0f49982f1df1236f5a3ba9cc42805f5",
+      "size_bytes": 1473,
+      "previous_pin_sha256": "b820928148a33a32f8d20f60e72c0907d0f49982f1df1236f5a3ba9cc42805f5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b820928148a33a32f8d20f60e72c0907d0f49982f1df1236f5a3ba9cc42805f5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-concurrency-liveness-qualification-v1.json",
+      "sha256": "e635436fed13e9e4789468606b9db670ddf3d6ae68c3dc6cb3d10a2cdbfc3a6f",
+      "size_bytes": 623,
+      "previous_pin_sha256": "e635436fed13e9e4789468606b9db670ddf3d6ae68c3dc6cb3d10a2cdbfc3a6f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e635436fed13e9e4789468606b9db670ddf3d6ae68c3dc6cb3d10a2cdbfc3a6f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-event-v1.json",
+      "sha256": "30872dc0aa48f53ec1de23f1834052ea04deee0ecadb5e8e73db90341491b93d",
+      "size_bytes": 6162,
+      "previous_pin_sha256": "30872dc0aa48f53ec1de23f1834052ea04deee0ecadb5e8e73db90341491b93d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "30872dc0aa48f53ec1de23f1834052ea04deee0ecadb5e8e73db90341491b93d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-snapshot-v1.json",
+      "sha256": "c59a39e8cc2e0982117b0c0699863d02ba26e032d47b9380875f28083a91d996",
+      "size_bytes": 5650,
+      "previous_pin_sha256": "c59a39e8cc2e0982117b0c0699863d02ba26e032d47b9380875f28083a91d996",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c59a39e8cc2e0982117b0c0699863d02ba26e032d47b9380875f28083a91d996"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-ui-bootstrap-v1.json",
+      "sha256": "a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3",
+      "size_bytes": 1006,
+      "previous_pin_sha256": "a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-ui-swarm-v1.json",
+      "sha256": "5a64353ba036a3bb9fe33ac92564a432027256dfe0d5b5efc6084c9f8f611318",
+      "size_bytes": 299,
+      "previous_pin_sha256": "5a64353ba036a3bb9fe33ac92564a432027256dfe0d5b5efc6084c9f8f611318",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5a64353ba036a3bb9fe33ac92564a432027256dfe0d5b5efc6084c9f8f611318"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/provisioning-audit-v1.json",
+      "sha256": "fb059043c388b8f8036ce053bd8c699336ca5492823aa02a5e0d241fa7b93013",
+      "size_bytes": 1152,
+      "previous_pin_sha256": "fb059043c388b8f8036ce053bd8c699336ca5492823aa02a5e0d241fa7b93013",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fb059043c388b8f8036ce053bd8c699336ca5492823aa02a5e0d241fa7b93013"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/relay-projection-v1.json",
+      "sha256": "eb2c378acaadfbcfdbfe6cbcffd05ea824c9da52fd6d8b77d37cc86783336081",
+      "size_bytes": 261,
+      "previous_pin_sha256": "eb2c378acaadfbcfdbfe6cbcffd05ea824c9da52fd6d8b77d37cc86783336081",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "eb2c378acaadfbcfdbfe6cbcffd05ea824c9da52fd6d8b77d37cc86783336081"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/replica-benchmark-v1.json",
+      "sha256": "b33c7de2981894c655a44106397e699cb30ea0cee30c84c917c752d951a494a4",
+      "size_bytes": 1219,
+      "previous_pin_sha256": "b33c7de2981894c655a44106397e699cb30ea0cee30c84c917c752d951a494a4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b33c7de2981894c655a44106397e699cb30ea0cee30c84c917c752d951a494a4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/replica-benchmark-v2.json",
+      "sha256": "502bd9b19873dbb9dec842b489814aa7c18e780f7dd8884b1581a726feee9bef",
+      "size_bytes": 2779,
+      "previous_pin_sha256": "502bd9b19873dbb9dec842b489814aa7c18e780f7dd8884b1581a726feee9bef",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "502bd9b19873dbb9dec842b489814aa7c18e780f7dd8884b1581a726feee9bef"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/replica-plan-v1.json",
+      "sha256": "1559db8ab48613bf6c5c211a12bb02e7c92fbd4967a1df703d1bfe719d70c17e",
+      "size_bytes": 1360,
+      "previous_pin_sha256": "1559db8ab48613bf6c5c211a12bb02e7c92fbd4967a1df703d1bfe719d70c17e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1559db8ab48613bf6c5c211a12bb02e7c92fbd4967a1df703d1bfe719d70c17e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/replica-qualification-v1.json",
+      "sha256": "7522f908edb8656a8faf5d4aa27eb4c2e5e60a4a5dab00d8dcbf3e55c549b895",
+      "size_bytes": 1371,
+      "previous_pin_sha256": "7522f908edb8656a8faf5d4aa27eb4c2e5e60a4a5dab00d8dcbf3e55c549b895",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "7522f908edb8656a8faf5d4aa27eb4c2e5e60a4a5dab00d8dcbf3e55c549b895"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/replica-runtime-v1.json",
+      "sha256": "9b34847fd1fe80969fc76f9ab2172f894f2e328f1c949d084697f0c32bffe5ee",
+      "size_bytes": 754,
+      "previous_pin_sha256": "9b34847fd1fe80969fc76f9ab2172f894f2e328f1c949d084697f0c32bffe5ee",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9b34847fd1fe80969fc76f9ab2172f894f2e328f1c949d084697f0c32bffe5ee"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/request-event-v1.json",
+      "sha256": "16893f5355ff65545aa38b36d11f859e7d6afa98417ff040fab09a3cbe92a132",
+      "size_bytes": 193,
+      "previous_pin_sha256": "16893f5355ff65545aa38b36d11f859e7d6afa98417ff040fab09a3cbe92a132",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "16893f5355ff65545aa38b36d11f859e7d6afa98417ff040fab09a3cbe92a132"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/request-event-v2.json",
+      "sha256": "e41c51ffe2272cf10a8b821f938d97fffebf4816139d82f958cdca4158929940",
+      "size_bytes": 172,
+      "previous_pin_sha256": "e41c51ffe2272cf10a8b821f938d97fffebf4816139d82f958cdca4158929940",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e41c51ffe2272cf10a8b821f938d97fffebf4816139d82f958cdca4158929940"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/request-gateway-v1.json",
+      "sha256": "06443c0cb7f24fc3d760a5d012f03e3ce23987bc9dec580a7984ab78aa107c1a",
+      "size_bytes": 869,
+      "previous_pin_sha256": "06443c0cb7f24fc3d760a5d012f03e3ce23987bc9dec580a7984ab78aa107c1a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "06443c0cb7f24fc3d760a5d012f03e3ce23987bc9dec580a7984ab78aa107c1a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/request-gateway-v2.json",
+      "sha256": "fbbdc4342c144c92713c456f2719e1b70f791a2f4e3e32ad856529cb046e82bf",
+      "size_bytes": 947,
+      "previous_pin_sha256": "fbbdc4342c144c92713c456f2719e1b70f791a2f4e3e32ad856529cb046e82bf",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fbbdc4342c144c92713c456f2719e1b70f791a2f4e3e32ad856529cb046e82bf"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/route-explorer-v1.json",
+      "sha256": "a71747e193b5ad1827fc4f2e8d5878c9efcba64f202b2aeec2f3602394ab6112",
+      "size_bytes": 337,
+      "previous_pin_sha256": "a71747e193b5ad1827fc4f2e8d5878c9efcba64f202b2aeec2f3602394ab6112",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a71747e193b5ad1827fc4f2e8d5878c9efcba64f202b2aeec2f3602394ab6112"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/route-plan-v2.json",
+      "sha256": "42501a5a19bc1261ec6429d77724a00b1bd6dc1804d767c75f7afb91e1635166",
+      "size_bytes": 5036,
+      "previous_pin_sha256": "42501a5a19bc1261ec6429d77724a00b1bd6dc1804d767c75f7afb91e1635166",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "42501a5a19bc1261ec6429d77724a00b1bd6dc1804d767c75f7afb91e1635166"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/route-qualification-v1.json",
+      "sha256": "1adf6b3fcb0231851e11379a30c66ef58918fdb4b6646dea58eacf70048ae916",
+      "size_bytes": 3682,
+      "previous_pin_sha256": "1adf6b3fcb0231851e11379a30c66ef58918fdb4b6646dea58eacf70048ae916",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1adf6b3fcb0231851e11379a30c66ef58918fdb4b6646dea58eacf70048ae916"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/router-wire-v1.json",
+      "sha256": "ab1f0a8f57629834d1e4b039d1e62204b8d711c277f2125a3e6b374a24633e1b",
+      "size_bytes": 3763,
+      "previous_pin_sha256": "ab1f0a8f57629834d1e4b039d1e62204b8d711c277f2125a3e6b374a24633e1b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ab1f0a8f57629834d1e4b039d1e62204b8d711c277f2125a3e6b374a24633e1b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/scoped-runtime-incident-v1.json",
+      "sha256": "106dcd12f2f7dc61f4a07e646137cab6e77c74f1fad93f631193f04c874e4189",
+      "size_bytes": 810,
+      "previous_pin_sha256": "106dcd12f2f7dc61f4a07e646137cab6e77c74f1fad93f631193f04c874e4189",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "106dcd12f2f7dc61f4a07e646137cab6e77c74f1fad93f631193f04c874e4189"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/seed-backup-v1.json",
+      "sha256": "ef15ddf5d1133066bcf96a20c0132fe4ffa31ca1ed35e1f7ca2bb012025916df",
+      "size_bytes": 305,
+      "previous_pin_sha256": "ef15ddf5d1133066bcf96a20c0132fe4ffa31ca1ed35e1f7ca2bb012025916df",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ef15ddf5d1133066bcf96a20c0132fe4ffa31ca1ed35e1f7ca2bb012025916df"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/seed-key-transition-v1.json",
+      "sha256": "508165d6dea086e411aee703cd7d1773bf41689235a849c4320667f657a09455",
+      "size_bytes": 1920,
+      "previous_pin_sha256": "508165d6dea086e411aee703cd7d1773bf41689235a849c4320667f657a09455",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "508165d6dea086e411aee703cd7d1773bf41689235a849c4320667f657a09455"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/seed-operator-inventory-v1.json",
+      "sha256": "8c964089c5425c121e64fb745b167a2c3ff1b93fc8bb328b6b05e5b146f480b4",
+      "size_bytes": 589,
+      "previous_pin_sha256": "8c964089c5425c121e64fb745b167a2c3ff1b93fc8bb328b6b05e5b146f480b4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8c964089c5425c121e64fb745b167a2c3ff1b93fc8bb328b6b05e5b146f480b4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/seed-operator-revocation-v1.json",
+      "sha256": "d5f658d70ed1cbd4e16325b271a8f71f700c85e353951ab7765c18e80fb71a65",
+      "size_bytes": 387,
+      "previous_pin_sha256": "d5f658d70ed1cbd4e16325b271a8f71f700c85e353951ab7765c18e80fb71a65",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d5f658d70ed1cbd4e16325b271a8f71f700c85e353951ab7765c18e80fb71a65"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/seed-operator-rotation-v1.json",
+      "sha256": "bcbf553b76cff72198eb34cd1a93dcd7e902ffee2960a271be5b00be06134860",
+      "size_bytes": 486,
+      "previous_pin_sha256": "bcbf553b76cff72198eb34cd1a93dcd7e902ffee2960a271be5b00be06134860",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bcbf553b76cff72198eb34cd1a93dcd7e902ffee2960a271be5b00be06134860"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/signed-gossip-evidence-bundle-v1.json",
+      "sha256": "fc88193b56f97b04163a6220892dde417c73496d32ec0f8fdefac258b9a36835",
+      "size_bytes": 24573,
+      "previous_pin_sha256": "fc88193b56f97b04163a6220892dde417c73496d32ec0f8fdefac258b9a36835",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fc88193b56f97b04163a6220892dde417c73496d32ec0f8fdefac258b9a36835"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/traffic-liveness-v1.json",
+      "sha256": "6fb8dd75a03a513626e3cbc413c3ab66918c847bc4d159cb5027baafe4b9876a",
+      "size_bytes": 200,
+      "previous_pin_sha256": "6fb8dd75a03a513626e3cbc413c3ab66918c847bc4d159cb5027baafe4b9876a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6fb8dd75a03a513626e3cbc413c3ab66918c847bc4d159cb5027baafe4b9876a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "contracts/compatibility-fixtures/transport-path-observation-v1.json",
+      "sha256": "b4e0ae55a01ee48ad9a41c04681decac321f1c5e88980a2db50a819370ab535a",
+      "size_bytes": 741,
+      "previous_pin_sha256": "b4e0ae55a01ee48ad9a41c04681decac321f1c5e88980a2db50a819370ab535a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b4e0ae55a01ee48ad9a41c04681decac321f1c5e88980a2db50a819370ab535a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-11-mycelium-a1-live-evidence-separation.md",
+      "sha256": "cb14cfcb7e0922d2bca5146ad438656158e6733d84a5b4312e876ca637648a5e",
+      "size_bytes": 11505,
+      "previous_pin_sha256": "cb14cfcb7e0922d2bca5146ad438656158e6733d84a5b4312e876ca637648a5e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "cb14cfcb7e0922d2bca5146ad438656158e6733d84a5b4312e876ca637648a5e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-11-mycelium-deployment-residency-control.md",
+      "sha256": "ec1f0d00231388770bff196b32685671b5ed3335d12bb39317358cb9a32004e1",
+      "size_bytes": 3299,
+      "previous_pin_sha256": "ec1f0d00231388770bff196b32685671b5ed3335d12bb39317358cb9a32004e1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ec1f0d00231388770bff196b32685671b5ed3335d12bb39317358cb9a32004e1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/__init__.py",
+      "sha256": "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707",
+      "size_bytes": 142,
+      "previous_pin_sha256": "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f50c39d4e65e03e81d8b1cdf670f09439f194159fc617f280d82e24f05092707"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/authority.py",
+      "sha256": "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4",
+      "size_bytes": 52988,
+      "previous_pin_sha256": "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2838737d400b78b19296613d6db805e2513ca2287ee50fed646c50b5bd5f7ea4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/child_environment.py",
+      "sha256": "5427f109973d282fc301c08fb745f68f258ed80ff847d232e1af683bb182be04",
+      "size_bytes": 1331,
+      "previous_pin_sha256": "5427f109973d282fc301c08fb745f68f258ed80ff847d232e1af683bb182be04",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5427f109973d282fc301c08fb745f68f258ed80ff847d232e1af683bb182be04"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/control_pump.py",
+      "sha256": "b15668bd28eec7b2b563d7268265f084983337b0f54af3a8630de5d47c488d49",
+      "size_bytes": 21713,
+      "previous_pin_sha256": "b15668bd28eec7b2b563d7268265f084983337b0f54af3a8630de5d47c488d49",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b15668bd28eec7b2b563d7268265f084983337b0f54af3a8630de5d47c488d49"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/demo_target.py",
+      "sha256": "b48d7421137e44fc0e7b3438c266903e63bf78d1a7179158d487d6062dae2cb4",
+      "size_bytes": 40640,
+      "previous_pin_sha256": "84a4bf0d69f1f5268a0dc8f4b19195f88dec358812a309ebc93483d129d726f1",
+      "changed_since_previous_pin": true,
+      "historical_record_sha256": [
+
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/durable_requests.py",
+      "sha256": "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09",
+      "size_bytes": 6195,
+      "previous_pin_sha256": "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "287d2db547674663702c19ed4a112aa12fe267fb88a05df4c72993c28800be09"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/managed_control.py",
+      "sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+      "size_bytes": 122419,
+      "previous_pin_sha256": "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6b8b4cab5dc6598007ffaf30453ca8407bb57e13c8d29f1ceb04fe7ac52f0457"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/pairing.py",
+      "sha256": "fa5454eee7b31b93af0c6b2b2b54640941a6149a7579129f722264b8a62942b5",
+      "size_bytes": 41397,
+      "previous_pin_sha256": "fa5454eee7b31b93af0c6b2b2b54640941a6149a7579129f722264b8a62942b5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fa5454eee7b31b93af0c6b2b2b54640941a6149a7579129f722264b8a62942b5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/resources.py",
+      "sha256": "b8e90a4d12f9dd61f9e72027bd3a90febb6b6c6571d103a0e83fdfcc86dc6d41",
+      "size_bytes": 8938,
+      "previous_pin_sha256": "b8e90a4d12f9dd61f9e72027bd3a90febb6b6c6571d103a0e83fdfcc86dc6d41",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b8e90a4d12f9dd61f9e72027bd3a90febb6b6c6571d103a0e83fdfcc86dc6d41"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/tls.py",
+      "sha256": "5208ab05c54b780fcdb726186f201e314a4295e3fa9fc4260a09e2ee2e5d6705",
+      "size_bytes": 19974,
+      "previous_pin_sha256": "5208ab05c54b780fcdb726186f201e314a4295e3fa9fc4260a09e2ee2e5d6705",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5208ab05c54b780fcdb726186f201e314a4295e3fa9fc4260a09e2ee2e5d6705"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/token_progress_pump.py",
+      "sha256": "3d6c75595429bfd2cbc825df6ac7dd34e96fe587b26602199c4d2da09c0f2795",
+      "size_bytes": 12715,
+      "previous_pin_sha256": "1294f51270b8e5e0e57bb7c6015d9da949d9fb3e52d86ecaa600c6ad8154d1b0",
+      "changed_since_previous_pin": true,
+      "historical_record_sha256": [
+        "3d6c75595429bfd2cbc825df6ac7dd34e96fe587b26602199c4d2da09c0f2795"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/token_receipt_mailbox.py",
+      "sha256": "c6616d48fbbe9748f99dfbcd59e2ba15a897d467d8cb16169608300a39fbbf3a",
+      "size_bytes": 19254,
+      "previous_pin_sha256": "8793f70f8871a089342b9e3021e7468c4a9d573386aec5db164110ba8d2926f2",
+      "changed_since_previous_pin": true,
+      "historical_record_sha256": [
+        "8793f70f8871a089342b9e3021e7468c4a9d573386aec5db164110ba8d2926f2",
+        "c6616d48fbbe9748f99dfbcd59e2ba15a897d467d8cb16169608300a39fbbf3a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a13_macos/worker.py",
+      "sha256": "40f340ebe766f2aa2600e7846f31f046e8eff861389d4b4c387af7491d27b4f5",
+      "size_bytes": 72038,
+      "previous_pin_sha256": "40f340ebe766f2aa2600e7846f31f046e8eff861389d4b4c387af7491d27b4f5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "40f340ebe766f2aa2600e7846f31f046e8eff861389d4b4c387af7491d27b4f5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a6_gateway.py",
+      "sha256": "da3ee50aeb3bd8419a9f28f7108203b1017f8f6383b445d3a0a8231731d6a3d5",
+      "size_bytes": 8779,
+      "previous_pin_sha256": "da3ee50aeb3bd8419a9f28f7108203b1017f8f6383b445d3a0a8231731d6a3d5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "da3ee50aeb3bd8419a9f28f7108203b1017f8f6383b445d3a0a8231731d6a3d5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a6_m16.py",
+      "sha256": "e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1",
+      "size_bytes": 11370,
+      "previous_pin_sha256": "e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_a6_recovery.py",
+      "sha256": "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3",
+      "size_bytes": 84761,
+      "previous_pin_sha256": "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_assignment_cache.py",
+      "sha256": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea",
+      "size_bytes": 17717,
+      "previous_pin_sha256": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_candidate_promotion.py",
+      "sha256": "978282695d805995a18b3da6db5ba219ac01c861b14f9dcb9007c598ebe73ee2",
+      "size_bytes": 8267,
+      "previous_pin_sha256": "978282695d805995a18b3da6db5ba219ac01c861b14f9dcb9007c598ebe73ee2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "978282695d805995a18b3da6db5ba219ac01c861b14f9dcb9007c598ebe73ee2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/__init__.py",
+      "sha256": "c5908bdf3bb41db9d8a9d7675c415756f49d7ca03c4125e1d6547bd474fb57e8",
+      "size_bytes": 1564,
+      "previous_pin_sha256": "c5908bdf3bb41db9d8a9d7675c415756f49d7ca03c4125e1d6547bd474fb57e8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c5908bdf3bb41db9d8a9d7675c415756f49d7ca03c4125e1d6547bd474fb57e8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/catalog.py",
+      "sha256": "068798f8ab807c34a9497a4b3b231702ed402343247a1569f0c271b2008234c2",
+      "size_bytes": 11845,
+      "previous_pin_sha256": "068798f8ab807c34a9497a4b3b231702ed402343247a1569f0c271b2008234c2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "068798f8ab807c34a9497a4b3b231702ed402343247a1569f0c271b2008234c2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/compiler.py",
+      "sha256": "f94e7d3a33024574d2499421cad0606796382210d791fa5fc566e050918ff7b4",
+      "size_bytes": 7607,
+      "previous_pin_sha256": "f94e7d3a33024574d2499421cad0606796382210d791fa5fc566e050918ff7b4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f94e7d3a33024574d2499421cad0606796382210d791fa5fc566e050918ff7b4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/contracts.py",
+      "sha256": "63ca5a8b4930d78e206c4ef407d56d53f2f5f50d9f187e35b05a07a5461273ee",
+      "size_bytes": 8810,
+      "previous_pin_sha256": "63ca5a8b4930d78e206c4ef407d56d53f2f5f50d9f187e35b05a07a5461273ee",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "63ca5a8b4930d78e206c4ef407d56d53f2f5f50d9f187e35b05a07a5461273ee"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/document.py",
+      "sha256": "39a7463fdb861370c6b3e4d31acae53868f266431efc2bc8f57f33632e070103",
+      "size_bytes": 5980,
+      "previous_pin_sha256": "39a7463fdb861370c6b3e4d31acae53868f266431efc2bc8f57f33632e070103",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "39a7463fdb861370c6b3e4d31acae53868f266431efc2bc8f57f33632e070103"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_capacity_profiles/status.py",
+      "sha256": "936db9a76690710f448fc782ca4473346d27a92d816c0d8bc33f08b498873f6e",
+      "size_bytes": 2673,
+      "previous_pin_sha256": "936db9a76690710f448fc782ca4473346d27a92d816c0d8bc33f08b498873f6e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "936db9a76690710f448fc782ca4473346d27a92d816c0d8bc33f08b498873f6e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_deadlines.py",
+      "sha256": "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0",
+      "size_bytes": 72818,
+      "previous_pin_sha256": "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_demo/product_stack.py",
+      "sha256": "d825b5357af6a44244c6cdbde7525978307fa9626eae6164b5228f30346f008b",
+      "size_bytes": 4367,
+      "previous_pin_sha256": "d825b5357af6a44244c6cdbde7525978307fa9626eae6164b5228f30346f008b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d825b5357af6a44244c6cdbde7525978307fa9626eae6164b5228f30346f008b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_evidence.py",
+      "sha256": "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72",
+      "size_bytes": 10863,
+      "previous_pin_sha256": "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d84e3ac69436cfb6db5026d19451bb4ca37f9a2ce0f5665bd5ef5ea4584c3b72"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gateway/semantic.py",
+      "sha256": "ca514d3781e58532b2b0f792cf927d6f91288d68dc3b88fe5a582c8819c31137",
+      "size_bytes": 30925,
+      "previous_pin_sha256": "ca514d3781e58532b2b0f792cf927d6f91288d68dc3b88fe5a582c8819c31137",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ca514d3781e58532b2b0f792cf927d6f91288d68dc3b88fe5a582c8819c31137"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/__init__.py",
+      "sha256": "13319287774f8d6e34d7184b92328473f5addb2843bb7361b83bf0b9e0d12f11",
+      "size_bytes": 300,
+      "previous_pin_sha256": "13319287774f8d6e34d7184b92328473f5addb2843bb7361b83bf0b9e0d12f11",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "13319287774f8d6e34d7184b92328473f5addb2843bb7361b83bf0b9e0d12f11"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/evidence_bundle.py",
+      "sha256": "020624f985ed3e64ba53edfc068992d5694d19906bbbb4365d52ae85151b40da",
+      "size_bytes": 15170,
+      "previous_pin_sha256": "020624f985ed3e64ba53edfc068992d5694d19906bbbb4365d52ae85151b40da",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "020624f985ed3e64ba53edfc068992d5694d19906bbbb4365d52ae85151b40da"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/registry.py",
+      "sha256": "ff797578cecf04deb72ba5bc027f70121ddf606bb974998284b833a823fdb8df",
+      "size_bytes": 10230,
+      "previous_pin_sha256": "ff797578cecf04deb72ba5bc027f70121ddf606bb974998284b833a823fdb8df",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ff797578cecf04deb72ba5bc027f70121ddf606bb974998284b833a823fdb8df"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/schema.py",
+      "sha256": "2c693d2f4d37fc19bba1fc038fc56b9ae3026cd77f26af3af61f55fbe9320932",
+      "size_bytes": 19872,
+      "previous_pin_sha256": "2c693d2f4d37fc19bba1fc038fc56b9ae3026cd77f26af3af61f55fbe9320932",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2c693d2f4d37fc19bba1fc038fc56b9ae3026cd77f26af3af61f55fbe9320932"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/service.py",
+      "sha256": "301d2474bbd473ac20b1a0a53425d570016554066939a4204e1d89c5fbe54110",
+      "size_bytes": 38075,
+      "previous_pin_sha256": "301d2474bbd473ac20b1a0a53425d570016554066939a4204e1d89c5fbe54110",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "301d2474bbd473ac20b1a0a53425d570016554066939a4204e1d89c5fbe54110"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/signed_bundle.py",
+      "sha256": "5161191f6bd97079c36d30489b513bb9f0a9345a6caa2e392dc24cdd4b4fef21",
+      "size_bytes": 10986,
+      "previous_pin_sha256": "5161191f6bd97079c36d30489b513bb9f0a9345a6caa2e392dc24cdd4b4fef21",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5161191f6bd97079c36d30489b513bb9f0a9345a6caa2e392dc24cdd4b4fef21"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/state.py",
+      "sha256": "fa0c8fdfe71d9cd50eb59328d826fd32dec74fbe0bd9f4c4b08acecfa598338a",
+      "size_bytes": 9604,
+      "previous_pin_sha256": "fa0c8fdfe71d9cd50eb59328d826fd32dec74fbe0bd9f4c4b08acecfa598338a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fa0c8fdfe71d9cd50eb59328d826fd32dec74fbe0bd9f4c4b08acecfa598338a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/transport.py",
+      "sha256": "1e5fc0480f02c8535cff226dcb4d625c57f89ce57c86867dd17e189ca063a1ac",
+      "size_bytes": 13959,
+      "previous_pin_sha256": "1e5fc0480f02c8535cff226dcb4d625c57f89ce57c86867dd17e189ca063a1ac",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1e5fc0480f02c8535cff226dcb4d625c57f89ce57c86867dd17e189ca063a1ac"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_gossip/views.py",
+      "sha256": "a0f4f758997144708d931c07d3b8eebadd6c4c94e63ef9832c2def6e30344c77",
+      "size_bytes": 17555,
+      "previous_pin_sha256": "a0f4f758997144708d931c07d3b8eebadd6c4c94e63ef9832c2def6e30344c77",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a0f4f758997144708d931c07d3b8eebadd6c4c94e63ef9832c2def6e30344c77"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_governance.py",
+      "sha256": "26373620e51730d27470571964ee239e3851ddf53af90958926e05558adecaf7",
+      "size_bytes": 2567,
+      "previous_pin_sha256": "26373620e51730d27470571964ee239e3851ddf53af90958926e05558adecaf7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "26373620e51730d27470571964ee239e3851ddf53af90958926e05558adecaf7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_host_platform/__init__.py",
+      "sha256": "34c8a2aa326f4691962718f545e74c2c41dfd1ad785d81ae3520f7382b67fe0f",
+      "size_bytes": 7627,
+      "previous_pin_sha256": "34c8a2aa326f4691962718f545e74c2c41dfd1ad785d81ae3520f7382b67fe0f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "34c8a2aa326f4691962718f545e74c2c41dfd1ad785d81ae3520f7382b67fe0f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_host_platform/_common.py",
+      "sha256": "90461bf31dc6fb4cce9f2c101bafa5a7ad63218b73ad8de9cb3621e58fdefc8e",
+      "size_bytes": 1738,
+      "previous_pin_sha256": "90461bf31dc6fb4cce9f2c101bafa5a7ad63218b73ad8de9cb3621e58fdefc8e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "90461bf31dc6fb4cce9f2c101bafa5a7ad63218b73ad8de9cb3621e58fdefc8e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_host_platform/stop_request.py",
+      "sha256": "5521664a31639642224851d8f0418fa9bf0f82cdb03dee88fb031d3fcd19ff3c",
+      "size_bytes": 2328,
+      "previous_pin_sha256": "5521664a31639642224851d8f0418fa9bf0f82cdb03dee88fb031d3fcd19ff3c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5521664a31639642224851d8f0418fa9bf0f82cdb03dee88fb031d3fcd19ff3c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_http_identity.py",
+      "sha256": "f17a2c5466281ce232ccdead5ca20759fd6007d5a5655b6c2461ba32fe58f292",
+      "size_bytes": 1285,
+      "previous_pin_sha256": "f17a2c5466281ce232ccdead5ca20759fd6007d5a5655b6c2461ba32fe58f292",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f17a2c5466281ce232ccdead5ca20759fd6007d5a5655b6c2461ba32fe58f292"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_internet/__init__.py",
+      "sha256": "9ae8ad751a77a49dea9ff9a795c502e359df685e113fd62279d395457e8bfccb",
+      "size_bytes": 156,
+      "previous_pin_sha256": "9ae8ad751a77a49dea9ff9a795c502e359df685e113fd62279d395457e8bfccb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9ae8ad751a77a49dea9ff9a795c502e359df685e113fd62279d395457e8bfccb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_internet/bootstrap.py",
+      "sha256": "d5d3d0652972f0da5be2cfbbf41817bc2e45042f4c363c435e8de4e83b98a66a",
+      "size_bytes": 14426,
+      "previous_pin_sha256": "d5d3d0652972f0da5be2cfbbf41817bc2e45042f4c363c435e8de4e83b98a66a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d5d3d0652972f0da5be2cfbbf41817bc2e45042f4c363c435e8de4e83b98a66a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_internet/contracts.py",
+      "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+      "size_bytes": 20600,
+      "previous_pin_sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_invite/__init__.py",
+      "sha256": "e271fcaa01785155272a435c4da09f47e1262d97da82086d8378ba90ec0fe68c",
+      "size_bytes": 554,
+      "previous_pin_sha256": "e271fcaa01785155272a435c4da09f47e1262d97da82086d8378ba90ec0fe68c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e271fcaa01785155272a435c4da09f47e1262d97da82086d8378ba90ec0fe68c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_invite/bundle.py",
+      "sha256": "8385d7f45fc6e4e5ce3ff17aede81c90abe34c8a6600c65b6022bb4bcb9650dd",
+      "size_bytes": 2462,
+      "previous_pin_sha256": "8385d7f45fc6e4e5ce3ff17aede81c90abe34c8a6600c65b6022bb4bcb9650dd",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8385d7f45fc6e4e5ce3ff17aede81c90abe34c8a6600c65b6022bb4bcb9650dd"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_invite/sqlite_registry.py",
+      "sha256": "721a13f1cbb4c16e7e034bef4a2dc4ab4ca7a8feab3babf098af3baa213793f0",
+      "size_bytes": 8079,
+      "previous_pin_sha256": "721a13f1cbb4c16e7e034bef4a2dc4ab4ca7a8feab3babf098af3baa213793f0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "721a13f1cbb4c16e7e034bef4a2dc4ab4ca7a8feab3babf098af3baa213793f0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_invite/token.py",
+      "sha256": "0da5ecde07e4c4539db7c9f98b98c269dff1b210ff927180fedc6b8d051ea7bb",
+      "size_bytes": 6271,
+      "previous_pin_sha256": "0da5ecde07e4c4539db7c9f98b98c269dff1b210ff927180fedc6b8d051ea7bb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "0da5ecde07e4c4539db7c9f98b98c269dff1b210ff927180fedc6b8d051ea7bb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_iroh_sidecar/__init__.py",
+      "sha256": "4fa8235a68ce2aa3c4226c09f6da92ba3c5b0d46b4ef3bd4515481498456cfee",
+      "size_bytes": 720,
+      "previous_pin_sha256": "4fa8235a68ce2aa3c4226c09f6da92ba3c5b0d46b4ef3bd4515481498456cfee",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4fa8235a68ce2aa3c4226c09f6da92ba3c5b0d46b4ef3bd4515481498456cfee"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_iroh_sidecar/client.py",
+      "sha256": "33ab1cb93fdffe19bf25f875e2d0773fce48774f9d2acbc2784fd9403f06bcbe",
+      "size_bytes": 50626,
+      "previous_pin_sha256": "33ab1cb93fdffe19bf25f875e2d0773fce48774f9d2acbc2784fd9403f06bcbe",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "33ab1cb93fdffe19bf25f875e2d0773fce48774f9d2acbc2784fd9403f06bcbe"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/__init__.py",
+      "sha256": "950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf",
+      "size_bytes": 701,
+      "previous_pin_sha256": "950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/allocation.py",
+      "sha256": "2c7e64ab6aea252075392a29e24a840d063a04a3b8081589514e50e5065dbf44",
+      "size_bytes": 4801,
+      "previous_pin_sha256": "2c7e64ab6aea252075392a29e24a840d063a04a3b8081589514e50e5065dbf44",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2c7e64ab6aea252075392a29e24a840d063a04a3b8081589514e50e5065dbf44"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/contracts.py",
+      "sha256": "038b579c1d7779598aca2303b6cecb3126926b897db0f051feac1d0aa1da3b90",
+      "size_bytes": 12914,
+      "previous_pin_sha256": "038b579c1d7779598aca2303b6cecb3126926b897db0f051feac1d0aa1da3b90",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "038b579c1d7779598aca2303b6cecb3126926b897db0f051feac1d0aa1da3b90"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/cycle_search.py",
+      "sha256": "bea863d4e4928f3ec31251602bff808e3589271389948371f31587716136e675",
+      "size_bytes": 8455,
+      "previous_pin_sha256": "bea863d4e4928f3ec31251602bff808e3589271389948371f31587716136e675",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bea863d4e4928f3ec31251602bff808e3589271389948371f31587716136e675"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/flow.py",
+      "sha256": "38297c7229ee3053641c86e196aefb34277e973b086bd77c09b7c6f4d6892c10",
+      "size_bytes": 12226,
+      "previous_pin_sha256": "38297c7229ee3053641c86e196aefb34277e973b086bd77c09b7c6f4d6892c10",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "38297c7229ee3053641c86e196aefb34277e973b086bd77c09b7c6f4d6892c10"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/gossip_adapter.py",
+      "sha256": "bb272810f1e5414f3e34854a1081e8e1f728f8b01fb82e195737a632442fea5a",
+      "size_bytes": 19865,
+      "previous_pin_sha256": "bb272810f1e5414f3e34854a1081e8e1f728f8b01fb82e195737a632442fea5a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bb272810f1e5414f3e34854a1081e8e1f728f8b01fb82e195737a632442fea5a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/network_cost.py",
+      "sha256": "2619c0506d51ee92d653c7eb945ffa8c3e5581f3c88832e2472766c56160ccae",
+      "size_bytes": 2833,
+      "previous_pin_sha256": "2619c0506d51ee92d653c7eb945ffa8c3e5581f3c88832e2472766c56160ccae",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2619c0506d51ee92d653c7eb945ffa8c3e5581f3c88832e2472766c56160ccae"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/phase_score.py",
+      "sha256": "b78053ce4bb224a47b0a4be8fca1d8bc135cf4d1092b0cc6211f6eacd3d01f57",
+      "size_bytes": 4242,
+      "previous_pin_sha256": "b78053ce4bb224a47b0a4be8fca1d8bc135cf4d1092b0cc6211f6eacd3d01f57",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b78053ce4bb224a47b0a4be8fca1d8bc135cf4d1092b0cc6211f6eacd3d01f57"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/physical_graph.py",
+      "sha256": "e299f4c9ea9f2581e63ca5fda74dc6579d80a2cf9d720a5d55266900f774a98d",
+      "size_bytes": 2464,
+      "previous_pin_sha256": "e299f4c9ea9f2581e63ca5fda74dc6579d80a2cf9d720a5d55266900f774a98d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e299f4c9ea9f2581e63ca5fda74dc6579d80a2cf9d720a5d55266900f774a98d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/planner.py",
+      "sha256": "2c3b152aef10ac9e865de9ad2c0250eb52c91018041b7aad92cce82e1f28d33c",
+      "size_bytes": 10512,
+      "previous_pin_sha256": "2c3b152aef10ac9e865de9ad2c0250eb52c91018041b7aad92cce82e1f28d33c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2c3b152aef10ac9e865de9ad2c0250eb52c91018041b7aad92cce82e1f28d33c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/primary_plan.py",
+      "sha256": "997b76db4254a338eb7a4a47fb64c213ae3686fec41da990ddef56a6f28ef938",
+      "size_bytes": 10012,
+      "previous_pin_sha256": "997b76db4254a338eb7a4a47fb64c213ae3686fec41da990ddef56a6f28ef938",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "997b76db4254a338eb7a4a47fb64c213ae3686fec41da990ddef56a6f28ef938"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/public_projection.py",
+      "sha256": "9efcddf90c779827a921818aebb2016b20944d6e73998fc845f1769266269f73",
+      "size_bytes": 8896,
+      "previous_pin_sha256": "9efcddf90c779827a921818aebb2016b20944d6e73998fc845f1769266269f73",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9efcddf90c779827a921818aebb2016b20944d6e73998fc845f1769266269f73"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/recovery_intent.py",
+      "sha256": "3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9",
+      "size_bytes": 1183,
+      "previous_pin_sha256": "3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/replan_simulator.py",
+      "sha256": "21546475e2ba4e66f6e1e1153fa39ec2dffcfad25a2bf2c12805503f69e92d97",
+      "size_bytes": 4999,
+      "previous_pin_sha256": "21546475e2ba4e66f6e1e1153fa39ec2dffcfad25a2bf2c12805503f69e92d97",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "21546475e2ba4e66f6e1e1153fa39ec2dffcfad25a2bf2c12805503f69e92d97"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/replanning.py",
+      "sha256": "35fe72d9bd10597de7c2898c76a674a341492830f3ea598893dff9beee80ced7",
+      "size_bytes": 18026,
+      "previous_pin_sha256": "35fe72d9bd10597de7c2898c76a674a341492830f3ea598893dff9beee80ced7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "35fe72d9bd10597de7c2898c76a674a341492830f3ea598893dff9beee80ced7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/replication.py",
+      "sha256": "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5",
+      "size_bytes": 17326,
+      "previous_pin_sha256": "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6427fe253617bf44fa1c90ca8289aa21907a0332215e08bde49a63c7e12696b5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/serialization.py",
+      "sha256": "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c",
+      "size_bytes": 3248,
+      "previous_pin_sha256": "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/speculative.py",
+      "sha256": "2e47662403dc8d701cc83661b37951a04c64affab2fe773ac0cd35d0cbbf4d51",
+      "size_bytes": 3056,
+      "previous_pin_sha256": "2e47662403dc8d701cc83661b37951a04c64affab2fe773ac0cd35d0cbbf4d51",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2e47662403dc8d701cc83661b37951a04c64affab2fe773ac0cd35d0cbbf4d51"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/validation.py",
+      "sha256": "84f688f4e3fbb12ec109c782352cb12b5baa199225fac9a6b46edaad09e775e3",
+      "size_bytes": 5006,
+      "previous_pin_sha256": "84f688f4e3fbb12ec109c782352cb12b5baa199225fac9a6b46edaad09e775e3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "84f688f4e3fbb12ec109c782352cb12b5baa199225fac9a6b46edaad09e775e3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/workload.py",
+      "sha256": "2c1d7080039ed06c856fdbfbbd6ea0d6d9d8cad9c3140cd47c36d6b383d8aa73",
+      "size_bytes": 7103,
+      "previous_pin_sha256": "2c1d7080039ed06c856fdbfbbd6ea0d6d9d8cad9c3140cd47c36d6b383d8aa73",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2c1d7080039ed06c856fdbfbbd6ea0d6d9d8cad9c3140cd47c36d6b383d8aa73"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_layer_planner/workload_intelligence.py",
+      "sha256": "75cc9cedf86fc4645cf1338c799c97ea09a3c30c993f16912e183a37cd39f98a",
+      "size_bytes": 26762,
+      "previous_pin_sha256": "75cc9cedf86fc4645cf1338c799c97ea09a3c30c993f16912e183a37cd39f98a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "75cc9cedf86fc4645cf1338c799c97ea09a3c30c993f16912e183a37cd39f98a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/__init__.py",
+      "sha256": "6920be48b22b438052cea4d2e7bd7c6d635f926e57859343ebc7137d6a6906f1",
+      "size_bytes": 74,
+      "previous_pin_sha256": "6920be48b22b438052cea4d2e7bd7c6d635f926e57859343ebc7137d6a6906f1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6920be48b22b438052cea4d2e7bd7c6d635f926e57859343ebc7137d6a6906f1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/a4_contracts.py",
+      "sha256": "f56f96269e58d3a5e3905fc4ad0570b0668cf7450512f6bc95789189f06677b2",
+      "size_bytes": 16598,
+      "previous_pin_sha256": "f56f96269e58d3a5e3905fc4ad0570b0668cf7450512f6bc95789189f06677b2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f56f96269e58d3a5e3905fc4ad0570b0668cf7450512f6bc95789189f06677b2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/a6_recovery.py",
+      "sha256": "8f4d69d8bbbf8ab6167d4da1b14fbce2d2ffcdfe12de0f7d6fd28e25d3a8aed8",
+      "size_bytes": 25404,
+      "previous_pin_sha256": "8f4d69d8bbbf8ab6167d4da1b14fbce2d2ffcdfe12de0f7d6fd28e25d3a8aed8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8f4d69d8bbbf8ab6167d4da1b14fbce2d2ffcdfe12de0f7d6fd28e25d3a8aed8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/activation.py",
+      "sha256": "2e90076fe9a262029ed90fe546542fdbe18a1dd201be39ecc7c6bfb9caa8a6cf",
+      "size_bytes": 21826,
+      "previous_pin_sha256": "2e90076fe9a262029ed90fe546542fdbe18a1dd201be39ecc7c6bfb9caa8a6cf",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2e90076fe9a262029ed90fe546542fdbe18a1dd201be39ecc7c6bfb9caa8a6cf"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/command_controller.py",
+      "sha256": "719782dac80b95ed92cdd4e60b9e416c64ab482dccc6197da1df18f9f0e2cd13",
+      "size_bytes": 37417,
+      "previous_pin_sha256": "719782dac80b95ed92cdd4e60b9e416c64ab482dccc6197da1df18f9f0e2cd13",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "719782dac80b95ed92cdd4e60b9e416c64ab482dccc6197da1df18f9f0e2cd13"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/liveness.py",
+      "sha256": "63f27987c8097a980afd9db4a3eca7338c9ce4345143b803c316535959f8dd72",
+      "size_bytes": 30929,
+      "previous_pin_sha256": "63f27987c8097a980afd9db4a3eca7338c9ce4345143b803c316535959f8dd72",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "63f27987c8097a980afd9db4a3eca7338c9ce4345143b803c316535959f8dd72"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/local_preparer.py",
+      "sha256": "4f934464e6a392a07e615ab374bf8a2ed7f8dad69e639117287651d3b4227e0a",
+      "size_bytes": 112025,
+      "previous_pin_sha256": "4f934464e6a392a07e615ab374bf8a2ed7f8dad69e639117287651d3b4227e0a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4f934464e6a392a07e615ab374bf8a2ed7f8dad69e639117287651d3b4227e0a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/phone_stage_session.py",
+      "sha256": "a0ae4821136288eda215421910ff46406fa76db3201975bfb8eaf534ca9d4570",
+      "size_bytes": 17682,
+      "previous_pin_sha256": "a0ae4821136288eda215421910ff46406fa76db3201975bfb8eaf534ca9d4570",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "a0ae4821136288eda215421910ff46406fa76db3201975bfb8eaf534ca9d4570"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/preparation.py",
+      "sha256": "313d48b625e8a39bd8132ef36ec829dd3935bf205c2761d9f2c1d96e99930983",
+      "size_bytes": 22595,
+      "previous_pin_sha256": "313d48b625e8a39bd8132ef36ec829dd3935bf205c2761d9f2c1d96e99930983",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "313d48b625e8a39bd8132ef36ec829dd3935bf205c2761d9f2c1d96e99930983"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/registry.py",
+      "sha256": "72031549ceb48d770a3db23bcfeadc4c48d261392e170b4566c3a19effdc4eeb",
+      "size_bytes": 42111,
+      "previous_pin_sha256": "72031549ceb48d770a3db23bcfeadc4c48d261392e170b4566c3a19effdc4eeb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "72031549ceb48d770a3db23bcfeadc4c48d261392e170b4566c3a19effdc4eeb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/route.py",
+      "sha256": "0ec515d6d29579eb318229fef59be5bb7a4350f0d2d7c0083d6e250d69235e13",
+      "size_bytes": 331126,
+      "previous_pin_sha256": "0ec515d6d29579eb318229fef59be5bb7a4350f0d2d7c0083d6e250d69235e13",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "0ec515d6d29579eb318229fef59be5bb7a4350f0d2d7c0083d6e250d69235e13"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/router_port.py",
+      "sha256": "e67dd8d7f03945a235a4d3f43aef414d91c6931af973c95d85e2603c67b29357",
+      "size_bytes": 161799,
+      "previous_pin_sha256": "e67dd8d7f03945a235a4d3f43aef414d91c6931af973c95d85e2603c67b29357",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e67dd8d7f03945a235a4d3f43aef414d91c6931af973c95d85e2603c67b29357"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/supervisor.py",
+      "sha256": "dbe6cb0096e75290e4c009cecfcfe490ef37194612b2221b187ce1c93397eb24",
+      "size_bytes": 233667,
+      "previous_pin_sha256": "dbe6cb0096e75290e4c009cecfcfe490ef37194612b2221b187ce1c93397eb24",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "7543ec025ba6562040fc13beb8cd264861742f49da63b33c18e366c037a7994f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_live/token_path_owner.py",
+      "sha256": "e9df2753c985ba8441c8e5c65c038321749783d7b5fe3e14f18811847e3f4077",
+      "size_bytes": 9095,
+      "previous_pin_sha256": "e7585067389f3e02f85ad89ffde22c9fc0e80d9e0cda6e5020a41117eb8c67bf",
+      "changed_since_previous_pin": true,
+      "historical_record_sha256": [
+
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_m16_runtime.py",
+      "sha256": "0b05323c9afa0bed3d4f6b2eb72d6b8fd782f7e815eecd9c492d67e5636154dc",
+      "size_bytes": 49134,
+      "previous_pin_sha256": "0b05323c9afa0bed3d4f6b2eb72d6b8fd782f7e815eecd9c492d67e5636154dc",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "0b05323c9afa0bed3d4f6b2eb72d6b8fd782f7e815eecd9c492d67e5636154dc"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_m23_kv.py",
+      "sha256": "712cd835edd153db38e3cbb6b9b002660c0e29a233b20aa88b7e8b1c313e197b",
+      "size_bytes": 5456,
+      "previous_pin_sha256": "712cd835edd153db38e3cbb6b9b002660c0e29a233b20aa88b7e8b1c313e197b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "712cd835edd153db38e3cbb6b9b002660c0e29a233b20aa88b7e8b1c313e197b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_membership/__init__.py",
+      "sha256": "12646897cbba6780de8ece24b430a25b31e50ef4d88ee816a9cf49bd4a41aa63",
+      "size_bytes": 1788,
+      "previous_pin_sha256": "12646897cbba6780de8ece24b430a25b31e50ef4d88ee816a9cf49bd4a41aa63",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "12646897cbba6780de8ece24b430a25b31e50ef4d88ee816a9cf49bd4a41aa63"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_membership/contracts.py",
+      "sha256": "df93138166c4d08fd51c5cedb260e50536b3b3343840caeaab9a1a008d018ab2",
+      "size_bytes": 32968,
+      "previous_pin_sha256": "df93138166c4d08fd51c5cedb260e50536b3b3343840caeaab9a1a008d018ab2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "df93138166c4d08fd51c5cedb260e50536b3b3343840caeaab9a1a008d018ab2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_mobile/__init__.py",
+      "sha256": "43817244af1f9e063a2b3300aa98ec6c49593d7b989223e6f389e00160ab4d20",
+      "size_bytes": 214,
+      "previous_pin_sha256": "43817244af1f9e063a2b3300aa98ec6c49593d7b989223e6f389e00160ab4d20",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "43817244af1f9e063a2b3300aa98ec6c49593d7b989223e6f389e00160ab4d20"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_mobile/artifact_grant.py",
+      "sha256": "c999b834ae96e333913475ff4b5b663dfe76c82e0908e27f1081cc8608033b6d",
+      "size_bytes": 16671,
+      "previous_pin_sha256": "c999b834ae96e333913475ff4b5b663dfe76c82e0908e27f1081cc8608033b6d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c999b834ae96e333913475ff4b5b663dfe76c82e0908e27f1081cc8608033b6d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_mobile/pixel_stage.py",
+      "sha256": "4e60c7c6df95316e5b5abf81c81b6e88b8c9616108ffbe3fb2c977eb29113ae6",
+      "size_bytes": 34204,
+      "previous_pin_sha256": "4e60c7c6df95316e5b5abf81c81b6e88b8c9616108ffbe3fb2c977eb29113ae6",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4e60c7c6df95316e5b5abf81c81b6e88b8c9616108ffbe3fb2c977eb29113ae6"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_mobile/qwen_stage_manifest.py",
+      "sha256": "dcd25702f99c40b4398b5a01dc3d66c021cd640cc0ea131ee5a7e6774ccbc6f1",
+      "size_bytes": 23861,
+      "previous_pin_sha256": "dcd25702f99c40b4398b5a01dc3d66c021cd640cc0ea131ee5a7e6774ccbc6f1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "dcd25702f99c40b4398b5a01dc3d66c021cd640cc0ea131ee5a7e6774ccbc6f1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/__init__.py",
+      "sha256": "fb3aa74134b87786de8e8a3fd197f0fa62ecc8c076d7c2c0fd25ea193448c322",
+      "size_bytes": 707,
+      "previous_pin_sha256": "fb3aa74134b87786de8e8a3fd197f0fa62ecc8c076d7c2c0fd25ea193448c322",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fb3aa74134b87786de8e8a3fd197f0fa62ecc8c076d7c2c0fd25ea193448c322"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/durable_membership.py",
+      "sha256": "2413b13787286c39e540bc3830ef3ddffb1cc02bc981e10fe66a29fea5b430d5",
+      "size_bytes": 11597,
+      "previous_pin_sha256": "2413b13787286c39e540bc3830ef3ddffb1cc02bc981e10fe66a29fea5b430d5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2413b13787286c39e540bc3830ef3ddffb1cc02bc981e10fe66a29fea5b430d5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/identity.py",
+      "sha256": "fcdd889a72eb3b6db7aa567bf90a25ab37d8ce34b94c43b2ee9c91ca3e5eb59d",
+      "size_bytes": 13884,
+      "previous_pin_sha256": "fcdd889a72eb3b6db7aa567bf90a25ab37d8ce34b94c43b2ee9c91ca3e5eb59d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fcdd889a72eb3b6db7aa567bf90a25ab37d8ce34b94c43b2ee9c91ca3e5eb59d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/membership.py",
+      "sha256": "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2",
+      "size_bytes": 39028,
+      "previous_pin_sha256": "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2bc7531d9f83227358bf255e7f204e3012e679b07dc5c3eb17f3a8eedac824b2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/process.py",
+      "sha256": "e4c9fdaaca238d17989d8b52db4bfb2df795d08f0a45248d791adc602a659deb",
+      "size_bytes": 132903,
+      "previous_pin_sha256": "e4c9fdaaca238d17989d8b52db4bfb2df795d08f0a45248d791adc602a659deb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e4c9fdaaca238d17989d8b52db4bfb2df795d08f0a45248d791adc602a659deb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/token_admission.py",
+      "sha256": "1a1b8dd4ffa2d13b78fe0c6324a6e02d5b2dc7064eafe04e91065944d699b32b",
+      "size_bytes": 4818,
+      "previous_pin_sha256": "1a1b8dd4ffa2d13b78fe0c6324a6e02d5b2dc7064eafe04e91065944d699b32b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1a1b8dd4ffa2d13b78fe0c6324a6e02d5b2dc7064eafe04e91065944d699b32b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/token_participants.py",
+      "sha256": "b494006382eaf4789b92fe75bcd5e268c8766cf37aacb4461bd340bd5467450d",
+      "size_bytes": 7005,
+      "previous_pin_sha256": "b494006382eaf4789b92fe75bcd5e268c8766cf37aacb4461bd340bd5467450d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b494006382eaf4789b92fe75bcd5e268c8766cf37aacb4461bd340bd5467450d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/token_progress.py",
+      "sha256": "cd011667fcce251a02e6d66b9e8106999ab65bf39387f8ffa13f1aae8e22fb0f",
+      "size_bytes": 7278,
+      "previous_pin_sha256": "cd011667fcce251a02e6d66b9e8106999ab65bf39387f8ffa13f1aae8e22fb0f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "cd011667fcce251a02e6d66b9e8106999ab65bf39387f8ffa13f1aae8e22fb0f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_node/token_provisioning.py",
+      "sha256": "98f1de95b26bba7dd2c6d039140e5a1cb828723d7e473baf655090eead36d995",
+      "size_bytes": 16358,
+      "previous_pin_sha256": "98f1de95b26bba7dd2c6d039140e5a1cb828723d7e473baf655090eead36d995",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "98f1de95b26bba7dd2c6d039140e5a1cb828723d7e473baf655090eead36d995"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_performance_budget.py",
+      "sha256": "1ab1022b8b01fd49b1ef1023a6395ecd3fffb97a1d1ee8b5579e030c061554de",
+      "size_bytes": 9240,
+      "previous_pin_sha256": "1ab1022b8b01fd49b1ef1023a6395ecd3fffb97a1d1ee8b5579e030c061554de",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "1ab1022b8b01fd49b1ef1023a6395ecd3fffb97a1d1ee8b5579e030c061554de"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/__init__.py",
+      "sha256": "e04d895724d1f3ff9a3c3226f7346fe8314c02e81b2a4c47727523b8e4ee32fc",
+      "size_bytes": 660,
+      "previous_pin_sha256": "e04d895724d1f3ff9a3c3226f7346fe8314c02e81b2a4c47727523b8e4ee32fc",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e04d895724d1f3ff9a3c3226f7346fe8314c02e81b2a4c47727523b8e4ee32fc"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/app.py",
+      "sha256": "4c67013636546293e92ae13f677f1cbc8688512967ed786bf69ef62d6497f559",
+      "size_bytes": 14266,
+      "previous_pin_sha256": "4c67013636546293e92ae13f677f1cbc8688512967ed786bf69ef62d6497f559",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4c67013636546293e92ae13f677f1cbc8688512967ed786bf69ef62d6497f559"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/coarse_region.py",
+      "sha256": "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2",
+      "size_bytes": 8187,
+      "previous_pin_sha256": "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/contracts.py",
+      "sha256": "9db268274b837bd898fce61a00cbd668c7119cba9c48ad28106559f5da1be27f",
+      "size_bytes": 29195,
+      "previous_pin_sha256": "9db268274b837bd898fce61a00cbd668c7119cba9c48ad28106559f5da1be27f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9db268274b837bd898fce61a00cbd668c7119cba9c48ad28106559f5da1be27f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/projector.py",
+      "sha256": "f8dba1be39396b599700ea5fe8ad0a5110d384c83f12faa9ea702fab5bac64f1",
+      "size_bytes": 60770,
+      "previous_pin_sha256": "f8dba1be39396b599700ea5fe8ad0a5110d384c83f12faa9ea702fab5bac64f1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f8dba1be39396b599700ea5fe8ad0a5110d384c83f12faa9ea702fab5bac64f1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/route_explorer.py",
+      "sha256": "29f7e0cf42d311f2dc2bb47fd233c0e533187ad062ef63c9e1b7cdb597f0386f",
+      "size_bytes": 11936,
+      "previous_pin_sha256": "29f7e0cf42d311f2dc2bb47fd233c0e533187ad062ef63c9e1b7cdb597f0386f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "29f7e0cf42d311f2dc2bb47fd233c0e533187ad062ef63c9e1b7cdb597f0386f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/state.py",
+      "sha256": "d764926f81d246400b3e648011d61bd13fd80381cc09a50ce97bd011734c5add",
+      "size_bytes": 16674,
+      "previous_pin_sha256": "d764926f81d246400b3e648011d61bd13fd80381cc09a50ce97bd011734c5add",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d764926f81d246400b3e648011d61bd13fd80381cc09a50ce97bd011734c5add"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_product_spine/transport_history.py",
+      "sha256": "c3297c21ed62c7d76ede73cb314b49aa80b7a951dbba8ebd24cfed441b033183",
+      "size_bytes": 8900,
+      "previous_pin_sha256": "c3297c21ed62c7d76ede73cb314b49aa80b7a951dbba8ebd24cfed441b033183",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c3297c21ed62c7d76ede73cb314b49aa80b7a951dbba8ebd24cfed441b033183"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/__init__.py",
+      "sha256": "ef6ac26debaaaa38430f1a8c9932ac7ae51123ccdab1c799ee36d5b323fef004",
+      "size_bytes": 1360,
+      "previous_pin_sha256": "ef6ac26debaaaa38430f1a8c9932ac7ae51123ccdab1c799ee36d5b323fef004",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ef6ac26debaaaa38430f1a8c9932ac7ae51123ccdab1c799ee36d5b323fef004"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/authority.py",
+      "sha256": "24a22ef2b95ca3143b0d4cf76820e3b98503e493ee8a5072db1a314080d608f0",
+      "size_bytes": 10906,
+      "previous_pin_sha256": "24a22ef2b95ca3143b0d4cf76820e3b98503e493ee8a5072db1a314080d608f0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "24a22ef2b95ca3143b0d4cf76820e3b98503e493ee8a5072db1a314080d608f0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/contracts.py",
+      "sha256": "e9082e565d6ee5d9415aff46e1704b20c1dbd9e2bc624daf1c909e6902150422",
+      "size_bytes": 19703,
+      "previous_pin_sha256": "e9082e565d6ee5d9415aff46e1704b20c1dbd9e2bc624daf1c909e6902150422",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e9082e565d6ee5d9415aff46e1704b20c1dbd9e2bc624daf1c909e6902150422"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/evidence.py",
+      "sha256": "847f1cec93a523b09ba0926659165e39e56a47df1684b7a538790a6e693c5f0c",
+      "size_bytes": 9740,
+      "previous_pin_sha256": "847f1cec93a523b09ba0926659165e39e56a47df1684b7a538790a6e693c5f0c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "847f1cec93a523b09ba0926659165e39e56a47df1684b7a538790a6e693c5f0c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/live.py",
+      "sha256": "5645b92ca678f68fe2cb9b9bf64ce7200e4ae0b94bd599c7ba8cf9db5d4929de",
+      "size_bytes": 28827,
+      "previous_pin_sha256": "5645b92ca678f68fe2cb9b9bf64ce7200e4ae0b94bd599c7ba8cf9db5d4929de",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5645b92ca678f68fe2cb9b9bf64ce7200e4ae0b94bd599c7ba8cf9db5d4929de"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/qualifier.py",
+      "sha256": "8ef78c55bbd66aae9bae00986f11f4ca740737d1c26b403842911f20c4f19aa1",
+      "size_bytes": 95311,
+      "previous_pin_sha256": "8ef78c55bbd66aae9bae00986f11f4ca740737d1c26b403842911f20c4f19aa1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8ef78c55bbd66aae9bae00986f11f4ca740737d1c26b403842911f20c4f19aa1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/sealer.py",
+      "sha256": "379ee20d9f36b99054b66ec631b703df435da1b1e9f2f9b1f929028de7396047",
+      "size_bytes": 13358,
+      "previous_pin_sha256": "379ee20d9f36b99054b66ec631b703df435da1b1e9f2f9b1f929028de7396047",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "379ee20d9f36b99054b66ec631b703df435da1b1e9f2f9b1f929028de7396047"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_qualification/signing.py",
+      "sha256": "62843f064b501553ba45f552a3279789b06485707c9e7c0f8b40112cc4a05aa5",
+      "size_bytes": 7237,
+      "previous_pin_sha256": "62843f064b501553ba45f552a3279789b06485707c9e7c0f8b40112cc4a05aa5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "62843f064b501553ba45f552a3279789b06485707c9e7c0f8b40112cc4a05aa5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_replica_contracts.py",
+      "sha256": "cec659b0a76a328e8a24f8889e42dbf19b203cd5c9abe3cd6cb3230d003e7cf1",
+      "size_bytes": 40437,
+      "previous_pin_sha256": "cec659b0a76a328e8a24f8889e42dbf19b203cd5c9abe3cd6cb3230d003e7cf1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "cec659b0a76a328e8a24f8889e42dbf19b203cd5c9abe3cd6cb3230d003e7cf1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/__init__.py",
+      "sha256": "259e0b6c9111bd6394a486edc5a9c19cbe0634f3488f2384c97d0282721d196c",
+      "size_bytes": 862,
+      "previous_pin_sha256": "259e0b6c9111bd6394a486edc5a9c19cbe0634f3488f2384c97d0282721d196c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "259e0b6c9111bd6394a486edc5a9c19cbe0634f3488f2384c97d0282721d196c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/asgi.py",
+      "sha256": "f509f1d6f3ad47236a62609008adc7a868d5999067fdbcb81ab1d6ab9eef2459",
+      "size_bytes": 14495,
+      "previous_pin_sha256": "f509f1d6f3ad47236a62609008adc7a868d5999067fdbcb81ab1d6ab9eef2459",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f509f1d6f3ad47236a62609008adc7a868d5999067fdbcb81ab1d6ab9eef2459"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/auth.py",
+      "sha256": "f744268dbc286c56cea4a6ed22df81c66325cb4af49d0356ece4018267b8d442",
+      "size_bytes": 1677,
+      "previous_pin_sha256": "f744268dbc286c56cea4a6ed22df81c66325cb4af49d0356ece4018267b8d442",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f744268dbc286c56cea4a6ed22df81c66325cb4af49d0356ece4018267b8d442"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/backend.py",
+      "sha256": "e020a6802d2f2ec7cd66aeb40f48c3f1b0668414b3a6a500d089f438860f2072",
+      "size_bytes": 31308,
+      "previous_pin_sha256": "e020a6802d2f2ec7cd66aeb40f48c3f1b0668414b3a6a500d089f438860f2072",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e020a6802d2f2ec7cd66aeb40f48c3f1b0668414b3a6a500d089f438860f2072"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/client.py",
+      "sha256": "fbb6cf354365b928205a0debf2439a78cdfd3066e84437828076dfccf57c4f38",
+      "size_bytes": 15505,
+      "previous_pin_sha256": "fbb6cf354365b928205a0debf2439a78cdfd3066e84437828076dfccf57c4f38",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "fbb6cf354365b928205a0debf2439a78cdfd3066e84437828076dfccf57c4f38"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/contracts.py",
+      "sha256": "23013353d9ac7204ba94a55ba8376e1e0429814b5c4e563432c5858bee50d109",
+      "size_bytes": 17784,
+      "previous_pin_sha256": "23013353d9ac7204ba94a55ba8376e1e0429814b5c4e563432c5858bee50d109",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "23013353d9ac7204ba94a55ba8376e1e0429814b5c4e563432c5858bee50d109"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/init.py",
+      "sha256": "4557520f6cb0f473b85182cd87aa52d5bfed91421b3dc11ef51ac35217ece7fb",
+      "size_bytes": 3569,
+      "previous_pin_sha256": "4557520f6cb0f473b85182cd87aa52d5bfed91421b3dc11ef51ac35217ece7fb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4557520f6cb0f473b85182cd87aa52d5bfed91421b3dc11ef51ac35217ece7fb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/observability.py",
+      "sha256": "d1724d6283c2e36f8d9193cfdf9b1e78567408bdef12f81576142837b46285c3",
+      "size_bytes": 855,
+      "previous_pin_sha256": "d1724d6283c2e36f8d9193cfdf9b1e78567408bdef12f81576142837b46285c3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d1724d6283c2e36f8d9193cfdf9b1e78567408bdef12f81576142837b46285c3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/qualification.py",
+      "sha256": "3815c60c9a74e7538264d1ee1f4a4d0d6e365a6b5cf8248490e4e8cb4415dcaf",
+      "size_bytes": 3752,
+      "previous_pin_sha256": "3815c60c9a74e7538264d1ee1f4a4d0d6e365a6b5cf8248490e4e8cb4415dcaf",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "3815c60c9a74e7538264d1ee1f4a4d0d6e365a6b5cf8248490e4e8cb4415dcaf"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_request_gateway/service.py",
+      "sha256": "d11b2af2d269f45610a8ec8d204e42718f8e187ba688b0e1eaf337e2533b5bcb",
+      "size_bytes": 64378,
+      "previous_pin_sha256": "d11b2af2d269f45610a8ec8d204e42718f8e187ba688b0e1eaf337e2533b5bcb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d11b2af2d269f45610a8ec8d204e42718f8e187ba688b0e1eaf337e2533b5bcb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/__init__.py",
+      "sha256": "5e7d02f1a5f11b72a0d5652fc664056bd8d490aeb27f918029d00d753cf49c51",
+      "size_bytes": 269,
+      "previous_pin_sha256": "5e7d02f1a5f11b72a0d5652fc664056bd8d490aeb27f918029d00d753cf49c51",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5e7d02f1a5f11b72a0d5652fc664056bd8d490aeb27f918029d00d753cf49c51"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/a10_batch_admission.py",
+      "sha256": "453829850622fb770c418dc0398502d48099936c66116a36539c871f5593fe4b",
+      "size_bytes": 40113,
+      "previous_pin_sha256": "453829850622fb770c418dc0398502d48099936c66116a36539c871f5593fe4b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "453829850622fb770c418dc0398502d48099936c66116a36539c871f5593fe4b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/a10_batch_producer.py",
+      "sha256": "afff25ef97cf801a332bc3ab9f5c06a6d7dd52f6fa9a196c28766e091386a3ef",
+      "size_bytes": 8025,
+      "previous_pin_sha256": "afff25ef97cf801a332bc3ab9f5c06a6d7dd52f6fa9a196c28766e091386a3ef",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "afff25ef97cf801a332bc3ab9f5c06a6d7dd52f6fa9a196c28766e091386a3ef"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/a10_member_isolation.py",
+      "sha256": "c48fb521b1717344908072557537ad1179053f065ab11dd9c8352d08c6e96b35",
+      "size_bytes": 12100,
+      "previous_pin_sha256": "c48fb521b1717344908072557537ad1179053f065ab11dd9c8352d08c6e96b35",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c48fb521b1717344908072557537ad1179053f065ab11dd9c8352d08c6e96b35"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/a10_runtime_batch.py",
+      "sha256": "e959dc5b4933cd683e33499415612168461e3eddb73c2b8b2be847ee96c29ef9",
+      "size_bytes": 21058,
+      "previous_pin_sha256": "e959dc5b4933cd683e33499415612168461e3eddb73c2b8b2be847ee96c29ef9",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e959dc5b4933cd683e33499415612168461e3eddb73c2b8b2be847ee96c29ef9"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/batching.py",
+      "sha256": "bca078016ccb2969d572b266ae20b4f840e8035887461b8941891a33fa1e6c1b",
+      "size_bytes": 10495,
+      "previous_pin_sha256": "bca078016ccb2969d572b266ae20b4f840e8035887461b8941891a33fa1e6c1b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bca078016ccb2969d572b266ae20b4f840e8035887461b8941891a33fa1e6c1b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/contracts.py",
+      "sha256": "c67deb1d8c8aa9938dd227ea634808e61491fbafca31ee0069dc386147cfd911",
+      "size_bytes": 13623,
+      "previous_pin_sha256": "c67deb1d8c8aa9938dd227ea634808e61491fbafca31ee0069dc386147cfd911",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c67deb1d8c8aa9938dd227ea634808e61491fbafca31ee0069dc386147cfd911"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/entry.py",
+      "sha256": "bc745e6b5ac29feaf48a12b2f49508c4d6b8853c8c6c7dc4e2aa28d5e3370b67",
+      "size_bytes": 81722,
+      "previous_pin_sha256": "bc745e6b5ac29feaf48a12b2f49508c4d6b8853c8c6c7dc4e2aa28d5e3370b67",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bc745e6b5ac29feaf48a12b2f49508c4d6b8853c8c6c7dc4e2aa28d5e3370b67"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/hop_join.py",
+      "sha256": "640739451d1092abf0e8b57782ba818e1b1259ed1c370564eb647ddc9ac10b79",
+      "size_bytes": 6005,
+      "previous_pin_sha256": "640739451d1092abf0e8b57782ba818e1b1259ed1c370564eb647ddc9ac10b79",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "640739451d1092abf0e8b57782ba818e1b1259ed1c370564eb647ddc9ac10b79"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/idempotency.py",
+      "sha256": "9dfe5d54b85856242aaeb87103491c0449bda32d7463d1d6107b954c90b96b77",
+      "size_bytes": 3853,
+      "previous_pin_sha256": "9dfe5d54b85856242aaeb87103491c0449bda32d7463d1d6107b954c90b96b77",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9dfe5d54b85856242aaeb87103491c0449bda32d7463d1d6107b954c90b96b77"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/layer_builder.py",
+      "sha256": "4836db459e9cf1743f3d1e4f9acf828c032d4f882137cf431ace870643bd43be",
+      "size_bytes": 19700,
+      "previous_pin_sha256": "4836db459e9cf1743f3d1e4f9acf828c032d4f882137cf431ace870643bd43be",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4836db459e9cf1743f3d1e4f9acf828c032d4f882137cf431ace870643bd43be"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/leases.py",
+      "sha256": "f354635a1c40cd5e249db08c317ed6cd1407dedd870b5134ecd73cf71381b88a",
+      "size_bytes": 4307,
+      "previous_pin_sha256": "f354635a1c40cd5e249db08c317ed6cd1407dedd870b5134ecd73cf71381b88a",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f354635a1c40cd5e249db08c317ed6cd1407dedd870b5134ecd73cf71381b88a"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/payloads.py",
+      "sha256": "2cf8748436007d8cd0c9e4333b6d98d4e83f4abf5e592ae80acdf4aaeda48df8",
+      "size_bytes": 8727,
+      "previous_pin_sha256": "2cf8748436007d8cd0c9e4333b6d98d4e83f4abf5e592ae80acdf4aaeda48df8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2cf8748436007d8cd0c9e4333b6d98d4e83f4abf5e592ae80acdf4aaeda48df8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/relay.py",
+      "sha256": "8f4c39d7660c55b613813fabe8cabcfefe80bd3fd98ff2f295cfcac0efbbba2c",
+      "size_bytes": 141208,
+      "previous_pin_sha256": "8f4c39d7660c55b613813fabe8cabcfefe80bd3fd98ff2f295cfcac0efbbba2c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8f4c39d7660c55b613813fabe8cabcfefe80bd3fd98ff2f295cfcac0efbbba2c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/router.py",
+      "sha256": "86f2db6b8b8893b4a59b9721e469609a3882ae739f6b2fe316acefd2bcc775e3",
+      "size_bytes": 8775,
+      "previous_pin_sha256": "86f2db6b8b8893b4a59b9721e469609a3882ae739f6b2fe316acefd2bcc775e3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "86f2db6b8b8893b4a59b9721e469609a3882ae739f6b2fe316acefd2bcc775e3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/routing.py",
+      "sha256": "6277c6aa10704d46b5d7e96ec3896907bb869441c1021cec9998d019d0e2af3d",
+      "size_bytes": 10542,
+      "previous_pin_sha256": "6277c6aa10704d46b5d7e96ec3896907bb869441c1021cec9998d019d0e2af3d",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6277c6aa10704d46b5d7e96ec3896907bb869441c1021cec9998d019d0e2af3d"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/rtt_measurement.py",
+      "sha256": "54317bae95a5237c560c84b2cfad965c4148c1b04db60abd5f09982b9dba2390",
+      "size_bytes": 15396,
+      "previous_pin_sha256": "54317bae95a5237c560c84b2cfad965c4148c1b04db60abd5f09982b9dba2390",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "54317bae95a5237c560c84b2cfad965c4148c1b04db60abd5f09982b9dba2390"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/scheduler.py",
+      "sha256": "95200cd9112590900f15621992e25b4f1787ab34a57e257ae8dc09a6595861be",
+      "size_bytes": 10405,
+      "previous_pin_sha256": "95200cd9112590900f15621992e25b4f1787ab34a57e257ae8dc09a6595861be",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "95200cd9112590900f15621992e25b4f1787ab34a57e257ae8dc09a6595861be"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/scoring.py",
+      "sha256": "33c834e82b97a519309957492c97ca6354bd90b7671cc668cffd16f51b5911c1",
+      "size_bytes": 9594,
+      "previous_pin_sha256": "33c834e82b97a519309957492c97ca6354bd90b7671cc668cffd16f51b5911c1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "33c834e82b97a519309957492c97ca6354bd90b7671cc668cffd16f51b5911c1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/serialization.py",
+      "sha256": "64436ac337689a1b04a112d460c091603d36354b82b328dc953d908cd4eb3faa",
+      "size_bytes": 9381,
+      "previous_pin_sha256": "64436ac337689a1b04a112d460c091603d36354b82b328dc953d908cd4eb3faa",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "64436ac337689a1b04a112d460c091603d36354b82b328dc953d908cd4eb3faa"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/stage_signatures.py",
+      "sha256": "8f2be735ef451f1aedda3f9f47e4b3c9380da2be39333e334ed63f30164c044c",
+      "size_bytes": 3988,
+      "previous_pin_sha256": "8f2be735ef451f1aedda3f9f47e4b3c9380da2be39333e334ed63f30164c044c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8f2be735ef451f1aedda3f9f47e4b3c9380da2be39333e334ed63f30164c044c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/state.py",
+      "sha256": "e513db56864011a796c3b5a9c9a077c1415706562ee7974cb5753dd0413448bb",
+      "size_bytes": 3248,
+      "previous_pin_sha256": "e513db56864011a796c3b5a9c9a077c1415706562ee7974cb5753dd0413448bb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e513db56864011a796c3b5a9c9a077c1415706562ee7974cb5753dd0413448bb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/token_path.py",
+      "sha256": "6dde259e2b4c695a7c25d1e34fa13a672e57806dd4cd23c237ebaa7c5dcca08c",
+      "size_bytes": 5650,
+      "previous_pin_sha256": "6dde259e2b4c695a7c25d1e34fa13a672e57806dd4cd23c237ebaa7c5dcca08c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6dde259e2b4c695a7c25d1e34fa13a672e57806dd4cd23c237ebaa7c5dcca08c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/token_path_authority.py",
+      "sha256": "849ed23f842ea63c6e9fa1dd6fad60059e0b70438677bc8a19d529ed45debcc2",
+      "size_bytes": 17179,
+      "previous_pin_sha256": "849ed23f842ea63c6e9fa1dd6fad60059e0b70438677bc8a19d529ed45debcc2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "849ed23f842ea63c6e9fa1dd6fad60059e0b70438677bc8a19d529ed45debcc2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/transports/__init__.py",
+      "sha256": "59b20392f0bab9b8da05d799db27246d70b1e03988f49a49633e3c36bd44fa9e",
+      "size_bytes": 46,
+      "previous_pin_sha256": "59b20392f0bab9b8da05d799db27246d70b1e03988f49a49633e3c36bd44fa9e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "59b20392f0bab9b8da05d799db27246d70b1e03988f49a49633e3c36bd44fa9e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/transports/iroh.py",
+      "sha256": "6cb944104fa12623978c0321535f977ad818f54b9cdbd8f481eac0c0c32d8407",
+      "size_bytes": 217422,
+      "previous_pin_sha256": "6cb944104fa12623978c0321535f977ad818f54b9cdbd8f481eac0c0c32d8407",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6cb944104fa12623978c0321535f977ad818f54b9cdbd8f481eac0c0c32d8407"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/validation.py",
+      "sha256": "11fd503321971e4fdb305f521baf4208069d6e2478aa5c3c6a008283530190dd",
+      "size_bytes": 8229,
+      "previous_pin_sha256": "11fd503321971e4fdb305f521baf4208069d6e2478aa5c3c6a008283530190dd",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "11fd503321971e4fdb305f521baf4208069d6e2478aa5c3c6a008283530190dd"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_router/wire.py",
+      "sha256": "5caacad55af2b7d7ec2c74b658c7b36ef3d9c06c1bd357933fa1dddb47d82bc3",
+      "size_bytes": 19420,
+      "previous_pin_sha256": "5caacad55af2b7d7ec2c74b658c7b36ef3d9c06c1bd357933fa1dddb47d82bc3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5caacad55af2b7d7ec2c74b658c7b36ef3d9c06c1bd357933fa1dddb47d82bc3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/__init__.py",
+      "sha256": "2051c3300569a27b37e15f5d558c0c41b44d8cdcf40681346d746fc183b13c8f",
+      "size_bytes": 1087,
+      "previous_pin_sha256": "2051c3300569a27b37e15f5d558c0c41b44d8cdcf40681346d746fc183b13c8f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2051c3300569a27b37e15f5d558c0c41b44d8cdcf40681346d746fc183b13c8f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/authority.py",
+      "sha256": "07d4fc3f2de53f7b7565cac82f961bc3e35c340d2b112810367d87824e5f0f4c",
+      "size_bytes": 4608,
+      "previous_pin_sha256": "07d4fc3f2de53f7b7565cac82f961bc3e35c340d2b112810367d87824e5f0f4c",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "07d4fc3f2de53f7b7565cac82f961bc3e35c340d2b112810367d87824e5f0f4c"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/coordinator.py",
+      "sha256": "2612a51acce2d43626ec69cd7dc19db080e595915c82030d3ec8d5f7a4456f15",
+      "size_bytes": 71492,
+      "previous_pin_sha256": "2612a51acce2d43626ec69cd7dc19db080e595915c82030d3ec8d5f7a4456f15",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2612a51acce2d43626ec69cd7dc19db080e595915c82030d3ec8d5f7a4456f15"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/http.py",
+      "sha256": "3e9100411634e2bd7f68fc45a90a3e55fb17b2a297f69b6b8f319592ae0dcc8b",
+      "size_bytes": 45148,
+      "previous_pin_sha256": "3e9100411634e2bd7f68fc45a90a3e55fb17b2a297f69b6b8f319592ae0dcc8b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "3e9100411634e2bd7f68fc45a90a3e55fb17b2a297f69b6b8f319592ae0dcc8b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/invite_batch.py",
+      "sha256": "694a46172a2f1ea365c05aae54777d1e272536edf1906cfcb6fdcedac7d89f51",
+      "size_bytes": 8386,
+      "previous_pin_sha256": "694a46172a2f1ea365c05aae54777d1e272536edf1906cfcb6fdcedac7d89f51",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "694a46172a2f1ea365c05aae54777d1e272536edf1906cfcb6fdcedac7d89f51"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/operator.py",
+      "sha256": "371796541d025c1188adb4c60edad09ee3527805da4491bf3f050c9b55150587",
+      "size_bytes": 36378,
+      "previous_pin_sha256": "371796541d025c1188adb4c60edad09ee3527805da4491bf3f050c9b55150587",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "371796541d025c1188adb4c60edad09ee3527805da4491bf3f050c9b55150587"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/placement.py",
+      "sha256": "be0512753894566e18d98a0664b71b2e04f7e8bebab14e99ef5cbf175769a478",
+      "size_bytes": 15320,
+      "previous_pin_sha256": "be0512753894566e18d98a0664b71b2e04f7e8bebab14e99ef5cbf175769a478",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "be0512753894566e18d98a0664b71b2e04f7e8bebab14e99ef5cbf175769a478"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/route_assignment.py",
+      "sha256": "02fd08798cdd64ab3507d4eab12493d04f9e43adb941dc1e5ed6c1b4e7930402",
+      "size_bytes": 42451,
+      "previous_pin_sha256": "02fd08798cdd64ab3507d4eab12493d04f9e43adb941dc1e5ed6c1b4e7930402",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "02fd08798cdd64ab3507d4eab12493d04f9e43adb941dc1e5ed6c1b4e7930402"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_seed/state.py",
+      "sha256": "2d1087ab257241bcc2a130092becbe0ae4748f0df1b89d511c92b2d18e706af5",
+      "size_bytes": 102109,
+      "previous_pin_sha256": "2d1087ab257241bcc2a130092becbe0ae4748f0df1b89d511c92b2d18e706af5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2d1087ab257241bcc2a130092becbe0ae4748f0df1b89d511c92b2d18e706af5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_topology_evidence.py",
+      "sha256": "d63e83f6b1404532b9d6b7be7ef0441f31018526eeed8a9797a2e40fff6387b0",
+      "size_bytes": 17480,
+      "previous_pin_sha256": "d63e83f6b1404532b9d6b7be7ef0441f31018526eeed8a9797a2e40fff6387b0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d63e83f6b1404532b9d6b7be7ef0441f31018526eeed8a9797a2e40fff6387b0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_ui_gateway/app.py",
+      "sha256": "e37cae1d9304ef975bdd690398d621c879793749b7857d87457fe5ab4e1899f9",
+      "size_bytes": 43356,
+      "previous_pin_sha256": "e37cae1d9304ef975bdd690398d621c879793749b7857d87457fe5ab4e1899f9",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "2fb03d337e8b7766c8999d4cc0c761f2a05026cbfd7d025c15c9fa151f710c22"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "mycelium_ui_gateway/validation.py",
+      "sha256": "29e7005afa12ab3dc43ec096df892d2010f95b13eab1c423d048c98360e45331",
+      "size_bytes": 31792,
+      "previous_pin_sha256": "29e7005afa12ab3dc43ec096df892d2010f95b13eab1c423d048c98360e45331",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "29e7005afa12ab3dc43ec096df892d2010f95b13eab1c423d048c98360e45331"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "runtime_contracts.py",
+      "sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5",
+      "size_bytes": 34135,
+      "previous_pin_sha256": "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ca80ebf6d4dbb9a518586ef32876fd58e8ad34a0ebdc86f5284c868522d6b0c5"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "runtime_loader.py",
+      "sha256": "bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1",
+      "size_bytes": 110699,
+      "previous_pin_sha256": "bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "bb48f92fea15f25eaa6ef01b889cb41dd484566e04d636ed497f06b34d8d1df1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/build_qwen_live_route.py",
+      "sha256": "60c7a12915aa9ffb6a7e0c15043617e3cb1068fd4605ad736b339df62b0f6e0f",
+      "size_bytes": 114305,
+      "previous_pin_sha256": "60c7a12915aa9ffb6a7e0c15043617e3cb1068fd4605ad736b339df62b0f6e0f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "60c7a12915aa9ffb6a7e0c15043617e3cb1068fd4605ad736b339df62b0f6e0f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/generate_router_wire_golden.py",
+      "sha256": "5e71c74107fcf809e71c9ab7435a74b7f725806739e9b3feb9acf85cb5587d3e",
+      "size_bytes": 9036,
+      "previous_pin_sha256": "5e71c74107fcf809e71c9ab7435a74b7f725806739e9b3feb9acf85cb5587d3e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "5e71c74107fcf809e71c9ab7435a74b7f725806739e9b3feb9acf85cb5587d3e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/manage_seed_membership.py",
+      "sha256": "d9ee080230cbf75183f178501160b76018625d920b7e88b6833ae5b3000a508f",
+      "size_bytes": 3744,
+      "previous_pin_sha256": "d9ee080230cbf75183f178501160b76018625d920b7e88b6833ae5b3000a508f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "d9ee080230cbf75183f178501160b76018625d920b7e88b6833ae5b3000a508f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/run_a6_recovery_case.py",
+      "sha256": "f9edcb49a62fbe5f01f974e7991e322798e0318fece05067b5dee55daac07a34",
+      "size_bytes": 18406,
+      "previous_pin_sha256": "f9edcb49a62fbe5f01f974e7991e322798e0318fece05067b5dee55daac07a34",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f9edcb49a62fbe5f01f974e7991e322798e0318fece05067b5dee55daac07a34"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/run_a6_recovery_gate.py",
+      "sha256": "ba8caee1d6cf8d180418b9d4f9d9627ac9c36bbbc9b032edae947a8b179ddfd7",
+      "size_bytes": 15855,
+      "previous_pin_sha256": "ba8caee1d6cf8d180418b9d4f9d9627ac9c36bbbc9b032edae947a8b179ddfd7",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ba8caee1d6cf8d180418b9d4f9d9627ac9c36bbbc9b032edae947a8b179ddfd7"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "scripts/run_m23_kv_gate.py",
+      "sha256": "6a458403b586043ace15650ae7a62bcfa3e06e6a7fcf396d7ddd3ba982b8cbb6",
+      "size_bytes": 17447,
+      "previous_pin_sha256": "6a458403b586043ace15650ae7a62bcfa3e06e6a7fcf396d7ddd3ba982b8cbb6",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "6a458403b586043ace15650ae7a62bcfa3e06e6a7fcf396d7ddd3ba982b8cbb6"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
+      "sha256": "b779d6351213d3fca1ccf1b845e790dc4aedbe7535205e7130dae9b7d2f6d253",
+      "size_bytes": 2660,
+      "previous_pin_sha256": "b779d6351213d3fca1ccf1b845e790dc4aedbe7535205e7130dae9b7d2f6d253",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b779d6351213d3fca1ccf1b845e790dc4aedbe7535205e7130dae9b7d2f6d253"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
+      "sha256": "347f8e80da539468bc5a4bf34dd27ffe2a187bd66194e31287461a476926f7e8",
+      "size_bytes": 28528,
+      "previous_pin_sha256": "347f8e80da539468bc5a4bf34dd27ffe2a187bd66194e31287461a476926f7e8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "347f8e80da539468bc5a4bf34dd27ffe2a187bd66194e31287461a476926f7e8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/app/contracts.ts",
+      "sha256": "8c11371980c5a997af2669fdb4030ea8ac94168b2ce9dedb1a2dea9390f7d2fa",
+      "size_bytes": 38899,
+      "previous_pin_sha256": "8c11371980c5a997af2669fdb4030ea8ac94168b2ce9dedb1a2dea9390f7d2fa",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8c11371980c5a997af2669fdb4030ea8ac94168b2ce9dedb1a2dea9390f7d2fa"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
+      "sha256": "7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1",
+      "size_bytes": 4710,
+      "previous_pin_sha256": "7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "7760bc16e27b98a4a9dad29eb8dff1c4300c3c49753793816daa10e0ff44d4e1"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/evidence/evidenceProjection.ts",
+      "sha256": "10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544",
+      "size_bytes": 8954,
+      "previous_pin_sha256": "10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "10eb3e0dcb2b0fa64343adadd229b69b70da7b2fcad796cdfd2a668ad03b9544"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
+      "sha256": "9782c6bfcd85ae4c88fd73a51a834ea70e0a2834f78bccb35fb5a0e4588396f8",
+      "size_bytes": 2688,
+      "previous_pin_sha256": "9782c6bfcd85ae4c88fd73a51a834ea70e0a2834f78bccb35fb5a0e4588396f8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "9782c6bfcd85ae4c88fd73a51a834ea70e0a2834f78bccb35fb5a0e4588396f8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/governance/governanceReadiness.ts",
+      "sha256": "f9429b0519f684eb1be5c610c94133000f0e5fc729bcd33d026098a1b6d7477b",
+      "size_bytes": 3848,
+      "previous_pin_sha256": "f9429b0519f684eb1be5c610c94133000f0e5fc729bcd33d026098a1b6d7477b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f9429b0519f684eb1be5c610c94133000f0e5fc729bcd33d026098a1b6d7477b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/inference/useInferenceSession.ts",
+      "sha256": "b6f97d451a49ff7b35d2c324fa09677913f9164f95fcf49f2462b9d5b8f2e7bd",
+      "size_bytes": 29323,
+      "previous_pin_sha256": "b6f97d451a49ff7b35d2c324fa09677913f9164f95fcf49f2462b9d5b8f2e7bd",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "b6f97d451a49ff7b35d2c324fa09677913f9164f95fcf49f2462b9d5b8f2e7bd"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/M13PlacementPanel.tsx",
+      "sha256": "ad16294cc853d399768ba34f9c24c157590c6f7c05479c08d09a11ab3821eaa0",
+      "size_bytes": 4486,
+      "previous_pin_sha256": "ad16294cc853d399768ba34f9c24c157590c6f7c05479c08d09a11ab3821eaa0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ad16294cc853d399768ba34f9c24c157590c6f7c05479c08d09a11ab3821eaa0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/M14TopologyPanel.tsx",
+      "sha256": "697772331ea707d5aa21371297e0062cb3b153d9d817111f6a22126751dd0dcc",
+      "size_bytes": 9679,
+      "previous_pin_sha256": "697772331ea707d5aa21371297e0062cb3b153d9d817111f6a22126751dd0dcc",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "697772331ea707d5aa21371297e0062cb3b153d9d817111f6a22126751dd0dcc"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/M15WorkloadPanel.tsx",
+      "sha256": "c117f8d89215daa3eb406d5419ff4ab337502ec14633d99e1800893f8ea62299",
+      "size_bytes": 4911,
+      "previous_pin_sha256": "c117f8d89215daa3eb406d5419ff4ab337502ec14633d99e1800893f8ea62299",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c117f8d89215daa3eb406d5419ff4ab337502ec14633d99e1800893f8ea62299"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
+      "sha256": "f15acd07c1b494afdb0b5e4f165f0c7c2d086ce1ef7b131a71af94025f7246d3",
+      "size_bytes": 3435,
+      "previous_pin_sha256": "f15acd07c1b494afdb0b5e4f165f0c7c2d086ce1ef7b131a71af94025f7246d3",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f15acd07c1b494afdb0b5e4f165f0c7c2d086ce1ef7b131a71af94025f7246d3"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/M23KvPanel.tsx",
+      "sha256": "c730a9f7b59113f4f118fdf04682e56a5fbc08d43cae27e084e432fba92da85e",
+      "size_bytes": 2664,
+      "previous_pin_sha256": "c730a9f7b59113f4f118fdf04682e56a5fbc08d43cae27e084e432fba92da85e",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "c730a9f7b59113f4f118fdf04682e56a5fbc08d43cae27e084e432fba92da85e"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
+      "sha256": "395697ee4a5e61d70e4935de29945a57676dd7b467d2ab6aa42739cbe9a75dfd",
+      "size_bytes": 5112,
+      "previous_pin_sha256": "395697ee4a5e61d70e4935de29945a57676dd7b467d2ab6aa42739cbe9a75dfd",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "395697ee4a5e61d70e4935de29945a57676dd7b467d2ab6aa42739cbe9a75dfd"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
+      "sha256": "8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4",
+      "size_bytes": 8014,
+      "previous_pin_sha256": "8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "8d4ffdb7861ddf9a6c213d621ebce5547d6e670ee2b7da47866e282885f805a4"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m15Comparison.ts",
+      "sha256": "e545b32530d6efe84bcaec755a1ae9c6d1a5a1bdfa83486970b280fc9f615457",
+      "size_bytes": 23795,
+      "previous_pin_sha256": "e545b32530d6efe84bcaec755a1ae9c6d1a5a1bdfa83486970b280fc9f615457",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e545b32530d6efe84bcaec755a1ae9c6d1a5a1bdfa83486970b280fc9f615457"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
+      "sha256": "aa203b882e47e9535df6a6802169f541e840db8e70b27ef011835d88bbb9c2cb",
+      "size_bytes": 14127,
+      "previous_pin_sha256": "aa203b882e47e9535df6a6802169f541e840db8e70b27ef011835d88bbb9c2cb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "aa203b882e47e9535df6a6802169f541e840db8e70b27ef011835d88bbb9c2cb"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/m23Kv.ts",
+      "sha256": "4d321aa4bcb9eac20a1a066c0ce206ed77f213bbdf14bf41f69885386144ba4b",
+      "size_bytes": 5767,
+      "previous_pin_sha256": "4d321aa4bcb9eac20a1a066c0ce206ed77f213bbdf14bf41f69885386144ba4b",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "4d321aa4bcb9eac20a1a066c0ce206ed77f213bbdf14bf41f69885386144ba4b"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/liveRoute/routeStatus.ts",
+      "sha256": "96461612dc0f94782a4201bca2dc430f8b2efb06ecc2b7fd9d8107a838085f70",
+      "size_bytes": 56768,
+      "previous_pin_sha256": "96461612dc0f94782a4201bca2dc430f8b2efb06ecc2b7fd9d8107a838085f70",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "96461612dc0f94782a4201bca2dc430f8b2efb06ecc2b7fd9d8107a838085f70"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/models/ModelCatalogControlPanel.tsx",
+      "sha256": "e442f4369e62e22efa2f54605a2da2906d73e9d00ef73e55d385d49b3944349f",
+      "size_bytes": 15618,
+      "previous_pin_sha256": "e442f4369e62e22efa2f54605a2da2906d73e9d00ef73e55d385d49b3944349f",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "e442f4369e62e22efa2f54605a2da2906d73e9d00ef73e55d385d49b3944349f"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/models/modelPreparation.ts",
+      "sha256": "3544fa7299f316f6204648d1afad3693049f1e30b485e42ed352a7f393d63ec0",
+      "size_bytes": 3632,
+      "previous_pin_sha256": "3544fa7299f316f6204648d1afad3693049f1e30b485e42ed352a7f393d63ec0",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "3544fa7299f316f6204648d1afad3693049f1e30b485e42ed352a7f393d63ec0"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/productEvidence/contracts.ts",
+      "sha256": "f0cca441cbbced0e2d7fd54b49b1092a2c9def756577b0bd1a48437a0513f2b2",
+      "size_bytes": 45584,
+      "previous_pin_sha256": "f0cca441cbbced0e2d7fd54b49b1092a2c9def756577b0bd1a48437a0513f2b2",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "f0cca441cbbced0e2d7fd54b49b1092a2c9def756577b0bd1a48437a0513f2b2"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
+      "sha256": "ca0c9de62de3da866877931675655bcd794a12e6b95ba81775c3ee32dd362cc8",
+      "size_bytes": 3994,
+      "previous_pin_sha256": "ca0c9de62de3da866877931675655bcd794a12e6b95ba81775c3ee32dd362cc8",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "ca0c9de62de3da866877931675655bcd794a12e6b95ba81775c3ee32dd362cc8"
+      ],
+      "disk_matches": true
+    },
+    {
+      "path": "ui/web/src/features/routeExplorer/contracts.ts",
+      "sha256": "31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb",
+      "size_bytes": 11591,
+      "previous_pin_sha256": "31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb",
+      "changed_since_previous_pin": false,
+      "historical_record_sha256": [
+        "31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb"
+      ],
+      "disk_matches": true
+    }
+  ]
+}

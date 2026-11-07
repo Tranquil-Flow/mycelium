@@ -1,0 +1,1608 @@
+{
+  "id": "FX-L1b-r17-numeric",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "b1eaafc9c2b571d6d0d0716c7cd37bce92d5a744de6ffb29cf09a64093a24484",
+  "scope": "Exact source operands and actual helper/default range; per-helper success, not whole validator success",
+  "rows": [
+    {
+      "key": "mycelium_live/command_controller.py:141:68:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:144:66:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:148:74:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:150:76:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:151:76:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "milliseconds",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:182:78:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "bytes",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:183:80:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "bytes",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:306:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:313:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:320:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "milliseconds",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:325:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "milliseconds",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:409:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:424:24:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "milliseconds",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:520:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:525:20:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:767:79:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/command_controller.py:786:82:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "_integer",
+      "kwargs": {
+        "minimum": 1
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "9223372036854775807"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture must be an integer in [1, 9223372036854775807]"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:102:75:validator-keyword:minimum",
+      "operand": 0,
+      "canonical": 0,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 4294967296
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:102:86:validator-keyword:maximum",
+      "operand": 4294967296,
+      "canonical": 4294967296,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 4294967296
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:108:71:validator-keyword:minimum",
+      "operand": 0,
+      "canonical": 0,
+      "unit": "bytes",
+      "helper": "nullable_bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1152921504606846976
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:108:82:validator-keyword:maximum",
+      "operand": 1152921504606846976,
+      "canonical": 1152921504606846976,
+      "unit": "bytes",
+      "helper": "nullable_bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1152921504606846976
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "accepted",
+          "None"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:208:24:validator-keyword:minimum",
+      "operand": 0,
+      "canonical": 0,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1099511627776
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1099511627776",
+          "accepted",
+          "1099511627776"
+        ],
+        [
+          "above",
+          "1099511627777",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:209:24:validator-keyword:maximum",
+      "operand": 1099511627776,
+      "canonical": 1099511627776,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1099511627776
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1099511627776",
+          "accepted",
+          "1099511627776"
+        ],
+        [
+          "above",
+          "1099511627777",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:214:24:validator-keyword:minimum",
+      "operand": 0,
+      "canonical": 0,
+      "unit": "bytes",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1152921504606846976
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:215:24:validator-keyword:maximum",
+      "operand": 1152921504606846976,
+      "canonical": 1152921504606846976,
+      "unit": "bytes",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1152921504606846976
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:223:24:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 1048576
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "1048576",
+          "accepted",
+          "1048576"
+        ],
+        [
+          "above",
+          "1048577",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:224:24:validator-keyword:maximum",
+      "operand": 1048576,
+      "canonical": 1048576,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 1048576
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "1048576",
+          "accepted",
+          "1048576"
+        ],
+        [
+          "above",
+          "1048577",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:229:24:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 1073741824
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:230:24:validator-keyword:maximum",
+      "operand": 1073741824,
+      "canonical": 1073741824,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 1073741824
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:235:24:validator-keyword:minimum",
+      "operand": 0,
+      "canonical": 0,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1073741824
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:236:24:validator-keyword:maximum",
+      "operand": 1073741824,
+      "canonical": 1073741824,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 0,
+        "maximum": 1073741824
+      },
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:241:24:validator-keyword:minimum",
+      "operand": 1,
+      "canonical": 1,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 4294967296
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/stage_performance.py:242:24:validator-keyword:maximum",
+      "operand": 4294967296,
+      "canonical": 4294967296,
+      "unit": "entries",
+      "helper": "bounded_int",
+      "kwargs": {
+        "minimum": 1,
+        "maximum": 4294967296
+      },
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r17_fixture"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "r17_fixture"
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+key	unit	canonical	case	input	status	result
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	below	-1.0	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	floor	0.0	accepted	0.0
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	within	0.5	accepted	0.5
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	large-unbounded	1e+20	accepted	1e+20
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	larger-unbounded	1e+100	accepted	1e+100
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	boolean	True	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	none	None	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	nan	nan	refused	r17_fixture
+mycelium_platform_neutral/runtime_efficiency.py:242:24:validator-keyword:minimum	entries-per-second	0	infinity	inf	refused	r17_fixture

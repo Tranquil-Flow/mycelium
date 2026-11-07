@@ -1,0 +1,621 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "cases": [
+  {
+   "label": "ok",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 100,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "ok_bf16_alias",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 100,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "ok_qwen3",
+   "model_index": 2,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca",
+     "model_id": "Qwen/Qwen3-0.6B",
+     "requested_revision": "main",
+     "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 100,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "root_symlink",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_root_symlink"
+   }
+  },
+  {
+   "label": "root_missing",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_root_missing"
+   }
+  },
+  {
+   "label": "root_is_file",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_root_not_directory"
+   }
+  },
+  {
+   "label": "snapshot_name_wrong",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_revision_mismatch"
+   }
+  },
+  {
+   "label": "parent_name_wrong",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_revision_mismatch"
+   }
+  },
+  {
+   "label": "model_dir_wrong",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_revision_mismatch"
+   }
+  },
+  {
+   "label": "config_missing",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_not_json",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_list",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_utf8_bad",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_symlink",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_too_big",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_config_invalid"
+   }
+  },
+  {
+   "label": "config_exact_max",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 100,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "arch_mismatch",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_architecture_mismatch"
+   }
+  },
+  {
+   "label": "dtype_float16",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_architecture_mismatch"
+   }
+  },
+  {
+   "label": "dtype_missing",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_architecture_mismatch"
+   }
+  },
+  {
+   "label": "model_type_missing",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_architecture_mismatch"
+   }
+  },
+  {
+   "label": "no_weights",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_safetensors_missing"
+   }
+  },
+  {
+   "label": "weights_other_ext",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_safetensors_missing"
+   }
+  },
+  {
+   "label": "weights_two_sum",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 107,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "weights_hardlink_once",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 100,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "weights_broken_symlink",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_safetensors_invalid"
+   }
+  },
+  {
+   "label": "weights_symlink_counts_target",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": true,
+    "source_bytes": 33,
+    "manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "source_root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+    "chain": [
+     "LocalModelSource",
+     "compile_local_model_manifest",
+     "compile_model_manifest"
+    ]
+   }
+  },
+  {
+   "label": "weights_is_dir",
+   "model_index": 1,
+   "calls": [],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "source_safetensors_invalid"
+   }
+  },
+  {
+   "label": "compiler_serving_error",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "boom_code"
+   }
+  },
+  {
+   "label": "compiler_other_error",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_compile_failed"
+   }
+  },
+  {
+   "label": "compiler_value_error",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_compile_failed"
+   }
+  },
+  {
+   "label": "compiler_returns_list",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "compiler_returns_pairs",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_id_wrong",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_commit_wrong",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_arch_wrong",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_runtime_model_missing",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "other",
+    "type": "AttributeError"
+   }
+  },
+  {
+   "label": "manifest_digest_alg",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_digest_not_dict",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_digest_short",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_digest_long",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_digest_missing",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  },
+  {
+   "label": "manifest_digest_value_int",
+   "model_index": 1,
+   "calls": [
+    {
+     "root": "models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775",
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "requested_revision": "main",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775"
+    }
+   ],
+   "result": {
+    "ok": false,
+    "kind": "serving",
+    "code": "native_manifest_identity_mismatch"
+   }
+  }
+ ]
+}

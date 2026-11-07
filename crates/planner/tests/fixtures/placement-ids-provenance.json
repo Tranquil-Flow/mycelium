@@ -1,0 +1,15 @@
+{
+  "claim": "actual oracle outputs/exceptions for non-string and extra entries in legal_tracks[0].placement_ids",
+  "counts": {
+    "TypeError": 12,
+    "ValueError": 23,
+    "cases": 35
+  },
+  "generator_sha256": "11f462f2b30dd3f377a4674dc7e01509a5651ca0c6ade32089bd52b498d5d5e6",
+  "imported_sources": {
+    "planner_assignment.py": "8ed916013656c0f27e66017ad2d46dbc2980534928a6583494dfc0e386415c57"
+  },
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "output_sha256": "150e5fdc7af17d67b9edf62c1416ed7299ed1199da5f89a9efecb14397e5ff26",
+  "python": "3.14.8"
+}

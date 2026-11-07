@@ -1,0 +1,23 @@
+{
+  "cancellation_generation": 1,
+  "cleanup_owner_id": "placement-owner-fixture",
+  "command_id": "command-fixture",
+  "deployment_epoch": 16,
+  "deployment_id": "deployment-fixture",
+  "fatal_accepted": false,
+  "fatal_requested": false,
+  "incident_id": "incident-fixture",
+  "observed_at_monotonic_ms": 10500,
+  "path_attempt": 0,
+  "path_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "path_id": "path-fixture",
+  "protocol": "mycelium.scoped_runtime_incident.v1",
+  "publisher_generation": 2,
+  "qualification_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reason": "delivery_timeout",
+  "request_attempt": 1,
+  "request_id": "request-fixture",
+  "scope": "edge",
+  "subject_id": "edge-fixture",
+  "topology_generation": 7
+}

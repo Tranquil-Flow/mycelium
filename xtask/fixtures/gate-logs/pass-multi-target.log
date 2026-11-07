@@ -1,0 +1,439 @@
+    Finished `test` profile [unoptimized] target(s) in 0.55s
+     Running unittests src/lib.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/protocol-d2a56da66e581101)
+
+running 7 tests
+test handoff_crypto::tests::rfc8439_poly1305_vector ... ok
+test remote::tests::exact_remote_frame_round_trip ... ok
+test canonical::tests::python_float_repr_matches_cpython ... ok
+test canonical::tests::ascii_mode_escapes_non_ascii_like_python ... ok
+test handoff_crypto::tests::rfc5869_hkdf_case_one_first_block ... ok
+test handoff_crypto::tests::rfc8439_aead_vector ... ok
+test handoff_crypto::tests::rfc7748_x25519_vectors ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/adversarial.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/adversarial-0666b535fa5be337)
+
+running 3 tests
+test number_tokens_and_reserved_object_keys_are_not_conflated ... ok
+test float_rendering_matches_1024_external_python_bit_patterns ... ok
+test oracle_membership_adversarial_shape_corpus ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/android_onboarding_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/android_onboarding_contracts-e241d25d67fae301)
+
+running 1 test
+test onboarding_verifiers_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.85s
+
+     Running tests/artifact_refusals.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/artifact_refusals-84341197da3cd342)
+
+running 1 test
+test every_executed_oracle_grant_request_and_receipt_outcome_is_reproduced ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/assignment_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/assignment_contracts-8aeb6accec9260af)
+
+running 1 test
+test assignment_report_and_audit_match_byte_exact_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.55s
+
+     Running tests/authority_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/authority_contracts-dcbd6a0f477aaa7d)
+
+running 3 tests
+test seed_numeric_compatibility_uses_oracle_unicode_decimal_set ... ok
+test path_manifest_closed_shape_and_independent_graph_binding_corpus ... ok
+test seed_transition_dual_signature_pin_and_coercion_corpus ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+     Running tests/cancel_receipts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/cancel_receipts-5342c4c8fa304d61)
+
+running 1 test
+test signed_cancellation_receipt_matches_oracle_bytes_and_all_mutations ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.60s
+
+     Running tests/capability_report_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/capability_report_contracts-0a2757ee514c1315)
+
+running 1 test
+test capability_reports_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+     Running tests/capacity_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/capacity_contracts-6e06953b5e5539c4)
+
+running 3 tests
+test capacity_raw_ingress_refuses_noncanonical_and_oversized_bytes ... ok
+test capacity_dispatch_positive_bytes ... ok
+test capacity_positive_bytes_rederived_claims_and_negative_corpus ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.93s
+
+     Running tests/consent_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/consent_contracts-985339753fe79286)
+
+running 1 test
+test standing_caps_and_admission_match_pinned_predicate_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/continuation.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/continuation-0b3d0d27e70cd8f5)
+
+running 2 tests
+test registered_cancellation_liveness_and_internet_schema_corpus ... ok
+test managed_native_provisioning_and_progress_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/edge_parity.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/edge_parity-6f797615c3611010)
+
+running 4 tests
+test registered_signed_message_fixture_verifies ... ok
+test membership_verifier_failure_precedence_matches_python ... ok
+test identity_base64_and_empty_endpoint_match_python_verifier ... ok
+test grant_addresses_match_python_not_just_rust_socketaddr ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/evidence_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/evidence_contracts-64112396d914ab56)
+
+running 1 test
+test evidence_shapes_digests_freshness_and_reuse_match_pinned_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/gossip_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/gossip_contracts-223e88d3da2e9dc2)
+
+running 9 tests
+test link_state_validates_full_payload_with_origin_binding ... ok
+test signed_gossip_stale_record_text_matches_the_executed_oracle ... ok
+test signed_gossip_resigned_adversaries_and_exact_sealing ... ok
+test gossip_bundle_refusals_carry_the_oracle_per_field_text ... ok
+test gossip_bundle_rejects_forged_views_and_digests ... ok
+test gossip_derivation_refusals_carry_the_oracle_evidence_text ... ok
+test gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources has been running for over 60 seconds
+test signed_gossip_refusals_carry_the_oracle_text has been running for over 60 seconds
+test signed_gossip_verifies_independent_authority_time_and_complete_payload has been running for over 60 seconds
+test signed_gossip_refusals_carry_the_oracle_text ... ok
+test signed_gossip_verifies_independent_authority_time_and_complete_payload ... ok
+test gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 94.47s
+
+     Running tests/grants_transport.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/grants_transport-8b64c464c69a6b73)
+
+running 4 tests
+test remote_framing_has_exact_version_kind_id_and_big_endian_length ... ok
+test extreme_caller_clock_is_refused_not_overflowed ... ok
+test grants_refuse_expiry_key_signature_scope_and_shape ... ok
+test grant_request_receipt_match_python_bytes ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/graph_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/graph_contracts-6ed8a034692e6ca1)
+
+running 1 test
+test execution_graph_parser_and_semantics_match_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/historical_disposition.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/historical_disposition-517aca064da4a87f)
+
+running 1 test
+test historical_residency_is_retained_but_cannot_authorize_current_readiness ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/http_refusals.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/http_refusals-f90cbd3351736e04)
+
+running 2 tests
+test managed_control_origin_refusals_match_the_executed_handler ... ok
+test seed_refusals_match_the_executed_handler_on_every_route_and_exception_type ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/invite_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/invite_contracts-915a05d0022a96c7)
+
+running 2 tests
+test a_non_finite_now_is_refused_before_anything_else ... ok
+test invite_tokens_and_bundles_match_the_executed_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/live_status_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/live_status_contracts-2e375333e49665af)
+
+running 1 test
+test complete_live_projection_matches_pinned_bytes_and_refusals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+
+     Running tests/loaded_proof_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/loaded_proof_contracts-fb7b4f7df891366c)
+
+running 1 test
+test loader_authentication_matches_exact_bytes_and_independent_binding_refusals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.68s
+
+     Running tests/managed_receipts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/managed_receipts-9b62e064bbac4de0)
+
+running 1 test
+test signed_managed_receipts_match_oracle_and_refuse_full_mutation_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.12s
+
+     Running tests/member_models_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/member_models_contracts-80c1877ec998cbe5)
+
+running 1 test
+test member_models_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/observation_diagnostics.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/observation_diagnostics-40856fcc06e9199f)
+
+running 1 test
+test refusals_carry_the_oracle_code_remote_code_and_diagnostic_string ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/observatory_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/observatory_contracts-52b60dcaa841e455)
+
+running 1 test
+test observatory_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.56s
+
+     Running tests/operator_projection_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/operator_projection_contracts-6bed1549a1601e5a)
+
+running 1 test
+test source_projections_match_positive_bytes_and_negative_vectors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests/oracle_envelopes.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/oracle_envelopes-c66a70767cc20202)
+
+running 4 tests
+test managed_control_and_provisioning_bytes_and_refusals ... ok
+test membership_positive_bytes_and_96_oracle_refusals ... ok
+test all_contract_canonical_bytes_match_external_oracle ... ok
+test managed_verified_statement_obeys_oracle_frame_cap ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests/package_manifest_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/package_manifest_contracts-e3d141eeb8df7ebb)
+
+running 2 tests
+test non_ascii_decimal_digits_are_refused_where_the_oracle_accepts_them ... ok
+test package_manifests_match_the_executed_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests/peer_profile_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/peer_profile_contracts-00c707082ca16476)
+
+running 1 test
+test peer_profiles_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/performance_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/performance_contracts-ec2058999f2ca261)
+
+running 1 test
+test performance_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests/plan_binding_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/plan_binding_contracts-81634c9e41d39a75)
+
+running 1 test
+test plan_binding_matches_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/planner_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/planner_contracts-f6f83ef1b32f4d4e)
+
+running 5 tests
+test tranche_fixture_is_recompiled_byte_exact_by_the_real_bound_compiler ... ok
+test provenance_pins_exact_oracle_commit_inputs_outputs_and_counts ... ok
+test replan_report_fixture_is_reproduced_byte_exact_by_the_real_replanner ... ok
+test replan_simulation_oracle_corpus_positive_and_every_refusal_match ... ok
+test tranche_oracle_corpus_positive_and_every_refusal_match ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.07s
+
+     Running tests/planner_snapshot_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/planner_snapshot_contracts-d03928199cfd75fb)
+
+running 1 test
+test planner_snapshot_reconstructs_every_field_from_independent_gossip_evidence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 52.35s
+
+     Running tests/product_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/product_contracts-a98a4c1aed010f26)
+
+running 2 tests
+test explorer_projection_binds_source_history_and_region_evidence ... ok
+test product_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.78s
+
+     Running tests/progress_retirement.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/progress_retirement-025809ff0926fea1)
+
+running 5 tests
+test owner_cancellation_subject_requires_exact_claim_and_never_accepts_receipts ... ok
+test refusal_and_failed_persistence_cannot_retire_or_discard_pending_receipt ... ok
+test raw_progress_boundary_rejects_duplicate_keys_and_size_overflow ... ok
+test signed_progress_ack_and_retirement_match_external_positive_negative_vectors ... ok
+test forwarding_retirement_preserves_prefix_without_native_ack_or_terminal ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/projection_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/projection_contracts-99a0026384fb2445)
+
+running 2 tests
+test historical_records_are_immutable_deduplicated_bounded_sorted_and_filtered ... ok
+test projection_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/promotion_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/promotion_contracts-704ae28c0f712862)
+
+running 1 test
+test promotion_reconstructs_exact_positive_bytes_and_rejects_forged_claims ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.04s
+
+     Running tests/provenance.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/provenance-6fd3ecb854813185)
+
+running 1 test
+test fixture_seal_and_coverage_crosswalk_are_complete has been running for over 60 seconds
+test fixture_seal_and_coverage_crosswalk_are_complete ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 71.59s
+
+     Running tests/provisioning_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/provisioning_contracts-6b304dfd02c1ef18)
+
+running 2 tests
+test manual_routes_match_positive_bytes_and_full_mutation_corpus ... ok
+test preparation_authorization_matches_derived_bytes_and_refusals ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/public_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/public_contracts-f7452f9077605dfe)
+
+running 2 tests
+test bootstrap_matches_primary_schema_bytes_and_full_mutation_corpus ... ok
+test public_shapes_match_pinned_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.36s
+
+     Running tests/qwen_stage_manifest_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/qwen_stage_manifest_contracts-da7006aea7034eae)
+
+running 1 test
+test stage_manifests_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+
+     Running tests/recovery_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/recovery_contracts-3c00c496ae5ba75c)
+
+running 1 test
+test recovery_positive_bytes_and_negative_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.42s
+
+     Running tests/remaining_public_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/remaining_public_contracts-6bf1a04865565486)
+
+running 1 test
+test remaining_public_shapes_match_positive_bytes_and_all_negative_vectors has been running for over 60 seconds
+test remaining_public_shapes_match_positive_bytes_and_all_negative_vectors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 63.05s
+
+     Running tests/request_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/request_contracts-1e67fa613d6265c4)
+
+running 1 test
+test request_and_cancellation_event_wire_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/route_assignment_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/route_assignment_contracts-b92d5aec7e29999e)
+
+running 1 test
+test route_assignment_answers_match_the_executed_service ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.65s
+
+     Running tests/route_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/route_contracts-0fd06d2115164da4)
+
+running 1 test
+test route_parser_and_unqualified_record_match_exact_oracle_outputs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.24s
+
+     Running tests/seed_authority_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/seed_authority_contracts-3f9cd063ab2f4e19)
+
+running 1 test
+test product_pseudonym_salts_match_the_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/seed_coordinator_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/seed_coordinator_contracts-a457256ba3816f5c)
+
+running 2 tests
+test bounded_deadlines_match_the_executed_oracle ... ok
+test join_and_resume_decisions_match_the_executed_coordinator ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/seed_members_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/seed_members_contracts-c510ef4d39786fd9)
+
+running 2 tests
+test join_envelopes_with_a_malformed_key_digest_match_the_executed_coordinator ... ok
+test member_paths_match_the_executed_coordinator ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.78s
+
+     Running tests/seed_projection_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/seed_projection_contracts-00d2f36427f39c89)
+
+running 1 test
+test seed_backup_boundary_and_rotation_projection_match_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/token_authority.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/token_authority-8afa60fae1cc5bc0)
+
+running 6 tests
+test process_registry_refuses_replay_without_eviction_and_claim_is_once ... ok
+test receipt_failures_never_advance_and_terminal_cannot_reverse ... ok
+test verified_progress_retains_exact_sealable_receipt_identity ... ok
+test expiry_is_the_minimum_of_signed_process_and_membership_authority ... ok
+test verified_receipt_terminal_metadata_matches_each_oracle_variant ... ok
+test token_grants_and_receipts_are_byte_exact_and_match_oracle_refusals ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+
+     Running tests/wire_contracts.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/wire_contracts-2d8129e3074ccf4e)
+
+running 2 tests
+test binary_framing_refuses_truncation_caps_digest_and_unknown_protocol ... ok
+test all_router_messages_match_exact_frames_and_full_negative_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.15s
+
+     Running tests/wire_identity.rs (/Users/mycelium-dev/.hermes/cache/scratch/v02-l5-target/debug/deps/wire_identity-08108206db549e0c)
+
+running 4 tests
+test strict_ingress_rejects_nested_duplicates_even_escaped_keys ... ok
+test canonical_ingress_rejects_noncanonical_and_nonobject ... ok
+test oracle_signature_and_canonical_bytes_are_exact ... ok
+test inventory_has_all_87_unique_hash_pinned_fixtures ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

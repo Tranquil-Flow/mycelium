@@ -1,0 +1,3 @@
+key	reviewer	verdict	target	record_sha256
+mycelium_seed/coordinator.py:1310:20:assignment:request_expiry	L1b-r26-seed-inputs	source-unbounded	PySourceUnboundedR26SeedRequestExpiryL1310C20	6c257a14d0a7aac50a73ff2a9c264f8a86f455867ddb3ddb7c27e450290a2edb
+mycelium_seed/coordinator.py:1385:20:keyword:previous_deadline	L1b-r26-seed-inputs	source-unbounded	PySourceUnboundedR26SeedPreviousDeadlineL1385C20	4ab263f43d68326b433fd36b3903f235f31eb44bc25d0c6c2e1ee6b016b42219

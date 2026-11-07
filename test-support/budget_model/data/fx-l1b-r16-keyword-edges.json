@@ -1,0 +1,768 @@
+{
+  "id": "FX-L1b-r16-integer-keyword-edges",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "d8a3f7e42873b8a6edba590de163c59d556c6354793dac4de5a5e66f4651769f",
+  "scope": "Executed real bounded_int per exact pinned literal operand; opposite edge is fixture control only, not claimed source policy",
+  "rows": [
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:200:77:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "bytes",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:200:88:validator-keyword:maximum",
+      "operand": 1152921504606846976,
+      "direction": "upper",
+      "unit": "bytes",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:203:75:validator-keyword:minimum",
+      "operand": 0,
+      "direction": "lower",
+      "unit": "bytes",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:203:86:validator-keyword:maximum",
+      "operand": 1152921504606846976,
+      "direction": "upper",
+      "unit": "bytes",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1152921504606846976",
+          "accepted",
+          "1152921504606846976"
+        ],
+        [
+          "above",
+          "1152921504606846977",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:230:24:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:231:24:validator-keyword:maximum",
+      "operand": 1099511627776,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1099511627776",
+          "accepted",
+          "1099511627776"
+        ],
+        [
+          "above",
+          "1099511627777",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:234:76:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:234:87:validator-keyword:maximum",
+      "operand": 1073741824,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:237:78:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:237:89:validator-keyword:maximum",
+      "operand": 1073741824,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1073741824",
+          "accepted",
+          "1073741824"
+        ],
+        [
+          "above",
+          "1073741825",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:239:78:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:239:89:validator-keyword:maximum",
+      "operand": 1048576,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1048576",
+          "accepted",
+          "1048576"
+        ],
+        [
+          "above",
+          "1048577",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:244:80:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:244:91:validator-keyword:maximum",
+      "operand": 4294967296,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:258:81:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_codec.py:258:92:validator-keyword:maximum",
+      "operand": 4294967296,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "4294967296",
+          "accepted",
+          "4294967296"
+        ],
+        [
+          "above",
+          "4294967297",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_transport.py:213:60:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_transport.py:213:71:validator-keyword:maximum",
+      "operand": 1099511627776,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1099511627776",
+          "accepted",
+          "1099511627776"
+        ],
+        [
+          "above",
+          "1099511627777",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_transport.py:216:62:validator-keyword:minimum",
+      "operand": 1,
+      "direction": "lower",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "1"
+        ],
+        [
+          "ceiling",
+          "4611686018427387904",
+          "accepted",
+          "4611686018427387904"
+        ],
+        [
+          "above",
+          "4611686018427387905",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_platform_neutral/activation_transport.py:216:73:validator-keyword:maximum",
+      "operand": 1048576,
+      "direction": "upper",
+      "unit": "count",
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "0"
+        ],
+        [
+          "ceiling",
+          "1048576",
+          "accepted",
+          "1048576"
+        ],
+        [
+          "above",
+          "1048577",
+          "refused",
+          "r16_fixture"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "r16_fixture"
+        ]
+      ]
+    }
+  ]
+}

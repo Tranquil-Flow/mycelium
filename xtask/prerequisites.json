@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "tools": [
+    { "name": "cargo", "detect": { "kind": "path_executable", "program": "cargo" } },
+    { "name": "rustc", "detect": { "kind": "path_executable", "program": "rustc" } },
+    { "name": "rustdoc", "detect": { "kind": "path_executable", "program": "rustdoc" } },
+    { "name": "cargo-nextest", "detect": { "kind": "path_executable", "program": "cargo-nextest" } },
+    { "name": "lint-fixtures", "detect": { "kind": "file", "path": "xtask/fixtures/reject/f16_stop.rs" } },
+    { "name": "native-crate", "detect": { "kind": "file", "path": "crates/backend-mlx/Cargo.toml" } },
+    { "name": "journey-crate", "detect": { "kind": "file", "path": "test-support/journeys/Cargo.toml" } },
+    { "name": "native-input-manifest", "detect": { "kind": "env_file", "variable": "MYCELIUM_NATIVE_INPUT_MANIFEST" } },
+    { "name": "oracle-manifest", "detect": { "kind": "env_file", "variable": "MYCELIUM_ORACLE_MANIFEST" } }
+  ],
+  "groups": [
+    { "id": "xtask-unit", "kind": "unit", "mandatory": true, "needs": ["cargo", "rustc", "lint-fixtures"], "after": [], "command": ["cargo", "test", "--offline", "-p", "xtask"] },
+    { "id": "workspace-unit", "kind": "unit", "mandatory": true, "needs": ["cargo", "rustc", "cargo-nextest"], "after": ["xtask-unit"], "command": ["cargo", "nextest", "run", "--offline", "--workspace"] },
+    { "id": "workspace-doctest", "kind": "doctest", "mandatory": true, "needs": ["cargo", "rustdoc"], "after": ["xtask-unit"], "command": ["cargo", "test", "--offline", "--workspace", "--doc"] },
+    { "id": "lint-policy", "kind": "custom", "mandatory": true, "needs": ["cargo", "lint-fixtures"], "after": [], "command": ["cargo", "xtask", "lint"] },
+    { "id": "native-adapters", "kind": "native", "mandatory": true, "needs": ["native-input-manifest", "native-crate"], "after": ["workspace-unit"], "command": ["cargo", "test", "--offline", "-p", "backend-mlx"] },
+    { "id": "oracle-journeys", "kind": "journey", "mandatory": true, "needs": ["oracle-manifest", "journey-crate"], "after": ["workspace-unit"], "command": ["cargo", "run", "--offline", "-p", "journey-tests", "--", "--scenario", "real-defaults"] }
+  ]
+}

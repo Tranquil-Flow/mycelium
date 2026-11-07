@@ -1,0 +1,268 @@
+{
+  "R33_operational_breach": {
+    "cap": 131072,
+    "new_qualification_credit": 0,
+    "peak": 143121,
+    "waived": false
+  },
+  "caller_records": [
+    {
+      "calls": [
+        {
+          "callee": "_inventory",
+          "expression": "_inventory(\n            root_fd, expected_files, expected_directories\n        )",
+          "line": 1165
+        },
+        {
+          "callee": "_inventory",
+          "expression": "_inventory(\n            root_fd, expected_files, expected_directories\n        )",
+          "line": 1234
+        }
+      ],
+      "path": "mycelium_release_bundle/verifier.py",
+      "role": "shipped release verifier"
+    },
+    {
+      "calls": [
+        {
+          "callee": "verify_bundle",
+          "expression": "verify_bundle(\n        args.bundle_root,\n        expected_manifest_sha256=args.expected_manifest_sha256,\n    )",
+          "line": 30
+        }
+      ],
+      "path": "mycelium_release_bundle/cli.py",
+      "role": "shipped release verifier"
+    },
+    {
+      "calls": [
+        {
+          "callee": "verify_bundle",
+          "expression": "verify_bundle(\n        bundle_root, expected_manifest_sha256=sha256_bytes(files[manifests[0]])\n    )",
+          "line": 1384
+        }
+      ],
+      "path": "mycelium_a15_release_decision.py",
+      "role": "shipped release verifier"
+    },
+    {
+      "calls": [
+        {
+          "callee": "_core.verify_bundle",
+          "expression": "_core.verify_bundle(bundle, _LinuxPlatform(seams), installed=installed)",
+          "line": 291
+        }
+      ],
+      "path": "mycelium_a13_linux/installer.py",
+      "role": "unrelated installer homonym; excluded"
+    },
+    {
+      "calls": [
+        {
+          "callee": "_core.verify_bundle",
+          "expression": "_core.verify_bundle(bundle, _WindowsPlatform(seams), installed=installed)",
+          "line": 251
+        }
+      ],
+      "path": "mycelium_a13_windows/installer.py",
+      "role": "unrelated installer homonym; excluded"
+    },
+    {
+      "calls": [
+        {
+          "callee": "verify_bundle",
+          "expression": "verify_bundle(bundle_path, platform, installed=installed)",
+          "line": 326
+        },
+        {
+          "callee": "verify_bundle",
+          "expression": "verify_bundle(bundle_path, platform, installed=installed)",
+          "line": 332
+        }
+      ],
+      "path": "mycelium_a13_packaging/installer_core.py",
+      "role": "unrelated installer homonym; excluded"
+    }
+  ],
+  "canonical": "d8e7f8e94e794e5ff001420d4431785c12a7824d",
+  "ceiling": 131073,
+  "coverage": "Ordinary shipped JSON path only; inherited paired metadata cases reused as research facts, not qualified scope evidence. Fresh count-guard boundary required; path32/33 already covered. No full bundle/authenticated acceptance.",
+  "external_spec_controls": [
+    {
+      "field": "value",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "unit",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "id",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "source",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "purpose",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "type",
+      "id": "PyReleaseBundleVerifierMaxFileCountL24C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "value",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "unit",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "id",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "source",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "purpose",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "type",
+      "id": "PyReleaseBundleVerifierMaxPathComponentsL26C0",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "value",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "unit",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "id",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "source",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "purpose",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    },
+    {
+      "field": "type",
+      "id": "PyReleaseBundleVerifierInventoryShippedCeilingL529C4",
+      "result": "external specification mismatch; NOT Rust mutation execution"
+    }
+  ],
+  "formula": "(4096+1)+4096*(32-1)",
+  "manual_engine": "adjudication.rs:460-481; Count maps at119; derived sets disposition/relation and leaves value=None,budget empty. No sum operation added. Formula, specific ID/value/unit require exact source-specific tests, not generic row_of.",
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "reuse": {
+    "HANDOFF.md": {
+      "bytes": 7397,
+      "sha256": "fcf589c9f122709fc0681b3c3da359305eb52d5bd3cc61b3767099f20c6746bc"
+    },
+    "capture-a.json": {
+      "bytes": 7121,
+      "sha256": "8edd4f138769a936eaf4372ef5e01bcb21c46c581127da819511421f5d2b4ee6"
+    },
+    "capture-b.json": {
+      "bytes": 7121,
+      "sha256": "8edd4f138769a936eaf4372ef5e01bcb21c46c581127da819511421f5d2b4ee6"
+    },
+    "source-discovery.json": {
+      "bytes": 90755,
+      "sha256": "9b72cda2ad3e0154b6a5fb0c3e1b5b5435b2f9f8e701a35b56921b01f4353746"
+    },
+    "verification.json": {
+      "bytes": 1708,
+      "sha256": "d4b39d3340813b07af6d6e967e08261fff65c3194ce1d5f0cfa0d3b6146d90b6"
+    }
+  },
+  "root_occurrences": [
+    [
+      24,
+      0,
+      "MAX_FILE_COUNT",
+      "Store"
+    ],
+    [
+      26,
+      0,
+      "MAX_BUNDLE_PATH_COMPONENTS",
+      "Store"
+    ],
+    [
+      615,
+      29,
+      "MAX_BUNDLE_PATH_COMPONENTS",
+      "Load"
+    ],
+    [
+      676,
+      70,
+      "MAX_FILE_COUNT",
+      "Load"
+    ]
+  ],
+  "source_pins": {
+    "mycelium_a13_linux/installer.py": {
+      "bytes": 13746,
+      "sha256": "f4e3ab75012247f683633ed6988e1774d22cbdbc53938eadf74aa7f7a6471913"
+    },
+    "mycelium_a13_packaging/installer_core.py": {
+      "bytes": 23086,
+      "sha256": "424730558c96cb7898966ad473d65ca7485dd8eb083afd1c04f91e63f72cfcc4"
+    },
+    "mycelium_a13_windows/installer.py": {
+      "bytes": 13631,
+      "sha256": "a9e401540ad6641623e37a8b8291b40769149ca768fde2f8ea6737ad60c94a13"
+    },
+    "mycelium_a15_release_decision.py": {
+      "bytes": 118174,
+      "sha256": "4c37927c8f7bc000d5440bb2b334fcdd76efe04382b825e7bec67bac2c4d8697"
+    },
+    "mycelium_release_bundle/cli.py": {
+      "bytes": 1135,
+      "sha256": "eb08d80164271c9f7f42d519f9b9db1ebf95b77fe0b72f5ddd0fb7a287a6e856"
+    },
+    "mycelium_release_bundle/verifier.py": {
+      "bytes": 48177,
+      "sha256": "4104abdfe13188d4de18eae61e7188a156abf418b4c2cc2cb217afc31a3968ad"
+    }
+  },
+  "unexecuted_Rust_controls": [
+    "numeric target positive through row_of and all_reviewed",
+    "own-line/source/line digest wrong-pin refusal",
+    "same-unit wrong-ID must fail exact cohort even when its origin is also cited",
+    "value131072, wrong unit, wrong origin, Measurement and Blocked refusal",
+    "omit either root guard or manifest +1 from source proof",
+    "canonical registry provenance must match own census site",
+    "new discovery key omission/duplicate/wrong AST column",
+    "preserve all inherited byte prefixes and historical exact sets"
+  ]
+}

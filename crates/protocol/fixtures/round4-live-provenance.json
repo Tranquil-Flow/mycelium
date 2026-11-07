@@ -1,0 +1,15 @@
+{
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "cleanup_max_ms": 8000,
+  "sources": {
+    "mycelium_deadlines.py": "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0",
+    "mycelium_router/a10_runtime_batch.py": "e959dc5b4933cd683e33499415612168461e3eddb73c2b8b2be847ee96c29ef9",
+    "mycelium_router/a10_live_publication.py": "b6975495b0264ab4dab37f834afa74022b241019ef4aeba20825a0438d03486a",
+    "mycelium_live/route.py": "0ec515d6d29579eb318229fef59be5bb7a4350f0d2d7c0083d6e250d69235e13"
+  },
+  "generator_sha256": "24678e38d38d0c13a3a90eb0cd8fd5d4879f1a80267ba3e8ad0e2f62eceffca7",
+  "boundary": "Exact AST public_status/counters/helper projection over detached independently supplied graph, observations, lifecycle/liveness/swarm metric receipts; no process, network or physical route execution. Python runtime exceptions recorded as refusal, not stable protocol codes.",
+  "positive": 3,
+  "mutations": 3989
+}

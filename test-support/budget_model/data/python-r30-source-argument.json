@@ -1,0 +1,201 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "path": "mycelium_a13_macos/workflow.py",
+  "full_source_sha256": "78061c846354953010b0ac603aebc5d5f5c1192baafe48c97a3f3e4b51516b51",
+  "key": "mycelium_a13_macos/workflow.py:206:66:manual-bound:verified_challenge_token_limit.maximum",
+  "id": "PyManagedWorkflowVerifiedChallengeTokenLimitL206C66",
+  "line": 206,
+  "column": 66,
+  "scope": "ManagedServingWorkflow._challenge_event",
+  "symbol": "verified_challenge_token_limit.maximum",
+  "expression": "4096",
+  "kind": "manual-bound",
+  "source": "                    or type(limit) is not int or not 0 < limit <= 4096):",
+  "comparison": "0 < limit <= 4096",
+  "function_sha256": "a9a167d188a9aad166870eac54d823d62db7dd8096285b9b01417ee43931c7df",
+  "scope_claim": "Extracted original callback, real threading lock/event, controlled object state; no workflow launch, native/model, RPC, route authentication or API execution",
+  "cases": [
+    {
+      "case": "negative",
+      "input_type": "int",
+      "input_repr": "-1",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "zero",
+      "input_type": "int",
+      "input_repr": "0",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "one",
+      "input_type": "int",
+      "input_repr": "1",
+      "accepted": true,
+      "stored_limit": 1,
+      "count": 0
+    },
+    {
+      "case": "below",
+      "input_type": "int",
+      "input_repr": "4095",
+      "accepted": true,
+      "stored_limit": 4095,
+      "count": 0
+    },
+    {
+      "case": "maximum",
+      "input_type": "int",
+      "input_repr": "4096",
+      "accepted": true,
+      "stored_limit": 4096,
+      "count": 0
+    },
+    {
+      "case": "above",
+      "input_type": "int",
+      "input_repr": "4097",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "huge",
+      "input_type": "int",
+      "input_repr": "18446744073709551616",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "bool",
+      "input_type": "bool",
+      "input_repr": "True",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "float",
+      "input_type": "float",
+      "input_repr": "4096.0",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "string",
+      "input_type": "str",
+      "input_repr": "'4096'",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "none",
+      "input_type": "NoneType",
+      "input_repr": "None",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "full-max-then-next-refused",
+      "accepted": true,
+      "stored_limit": 4096,
+      "count": 4096
+    },
+    {
+      "case": "duplicate-index",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "gap-index",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "changed-limit",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "wrong-request",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "wrong-deployment",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "bool-index",
+      "accepted": false,
+      "stored_limit": 3,
+      "count": 1
+    },
+    {
+      "case": "stopped",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "wrong-state",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "missing-identity",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    },
+    {
+      "case": "malformed-request",
+      "accepted": false,
+      "stored_limit": 0,
+      "count": 0
+    }
+  ],
+  "case_count": 22,
+  "lines": {
+    "195": "    def _challenge_event(self, deployment_id, request_id, kind, index, limit):",
+    "196": "        # Only the supervisor's verified-route sink supplies token indices.",
+    "197": "        # Never call a user callback, do RPC, or retain token values under this lock.",
+    "198": "        import re",
+    "199": "        with self._lock:",
+    "200": "            if (self.stop_event.is_set() or self._state!='starting'",
+    "201": "                    or self._progress_identity is None",
+    "202": "                    or deployment_id!=self._progress_identity[1]",
+    "203": "                    or type(request_id) is not str",
+    "204": "                    or len(request_id)!=40",
+    "205": "                    or re.fullmatch(r'startup-[0-9a-f]{32}',request_id) is None",
+    "206": "                    or type(limit) is not int or not 0 < limit <= 4096):",
+    "207": "                return",
+    "208": "            if kind=='begin' and index == -1:",
+    "209": "                if self._challenge_request is None:",
+    "210": "                    self._challenge_request=request_id",
+    "211": "                    self._challenge_limit=limit",
+    "212": "                return",
+    "213": "            if (kind=='token' and request_id==self._challenge_request",
+    "214": "                    and limit==self._challenge_limit and type(index) is int",
+    "215": "                    and index==self._challenge_count and index<limit):",
+    "216": "                self._challenge_count+=1",
+    "242": "                'challenge_progress':({'verified_token_count':self._challenge_count}",
+    "332": "                **({'on_challenge_event':self._challenge_event}",
+    "333": "                   if self._progress_identity is not None else {}))"
+  }
+}

@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+tauri-shell = ["dep:tauri", "dep:tauri-build", "dep:objc2", "dep:objc2-foundation"]
+dev-shell = ["tauri-shell"]
+# Test-only packaged probe entry (`shell::run_packaged_with_probe`); never in a shipped bundle.
+qualification-probe = ["tauri-shell"]
+service-composition = ["dev-shell", "node-service/desktop-shell"]
+
+[dependencies]
+budgets = { path = "../budgets" }
+sha2 = "=0.10.9"
+ed25519-dalek = "=2.2.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+tauri = { version = "=2.12.0", optional = true, default-features = false, features = ["wry"] }
+
+objc2 = { version = "=0.6.4", optional = true }
+objc2-foundation = { version = "=0.3.2", optional = true, default-features = false, features = ["std", "NSObject", "NSString", "NSURL", "NSAppleEventManager", "NSAppleEventDescriptor"] }
+
+[build-dependencies]
+tauri-build = { version = "=2.7.0", optional = true, default-features = false }
+
+[dev-dependencies]
+api = { path = "../api" }
+node-service = { path = "../node-service" }
+router = { path = "../router" }
+
+[[bin]]
+name = "desktop-package"
+path = "src/bin/package.rs"
+
+[[bin]]
+name = "mycelium"
+path = "src/bin/mycelium.rs"
+required-features = ["tauri-shell"]
+
+[[bin]]
+name = "mycelium-desktop-dev"
+path = "src/bin/dev.rs"
+required-features = ["dev-shell"]

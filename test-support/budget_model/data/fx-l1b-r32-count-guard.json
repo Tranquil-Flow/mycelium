@@ -1,0 +1,5 @@
+{
+  "exit": 0,
+  "stdout": "{\"cases\":[{\"entries\":4096,\"result\":\"passed_file_count_guard_only\"},{\"entries\":4097,\"result\":\"invalid_file_inventory\"}],\"label\":\"metadata-only original-function Count guard; NOT complete body, bundle, signed or physical acceptance\",\"oracle\":\"f4e366e98a1f705dfaf182897044500d290dbd7f\",\"sha256\":\"4104abdfe13188d4de18eae61e7188a156abf418b4c2cc2cb217afc31a3968ad\"}\n",
+  "stderr": ""
+}

@@ -1,0 +1,64 @@
+{
+  "model": {
+    "anchor": null,
+    "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "shape": {
+      "attention_bias": true,
+      "head_dim": 64,
+      "hidden_size": 896,
+      "intermediate_size": 4864,
+      "label": "Qwen2.5-0.5B",
+      "non_weight_bytes": 11506302,
+      "num_attention_heads": 14,
+      "num_key_value_heads": 2,
+      "num_layers": 24,
+      "qk_norm": false,
+      "snapshot_bytes": 999604126,
+      "source_bytes_per_parameter": 2,
+      "stores_tied_lm_head": false,
+      "tie_word_embeddings": true,
+      "vocab_size": 151936
+    }
+  },
+  "policy": {
+    "memory_fraction_denominator": 2,
+    "memory_fraction_numerator": 1,
+    "resident_factor_denominator": 8,
+    "resident_factor_numerator": 5,
+    "runtime_overhead_bytes": 1073741824,
+    "speed_clamp_high": 2,
+    "speed_clamp_low_denominator": 2,
+    "speed_clamp_low_numerator": 1
+  },
+  "resources": {
+    "context_tokens": 4096,
+    "control_archive_bytes": 67108864,
+    "disk_headroom": [
+      11,
+      10
+    ],
+    "group_fixed_bytes": 1073741824,
+    "guard_headroom": [
+      23,
+      20
+    ],
+    "load_peak_factor": 2,
+    "memory_fraction": [
+      3,
+      4
+    ],
+    "resident_factors": {
+      "int8-weight-only": [
+        501,
+        1000
+      ],
+      "none": [
+        2,
+        1
+      ]
+    },
+    "slice_header_bytes": 4194304,
+    "staged_copy_factor": 2
+  }
+}

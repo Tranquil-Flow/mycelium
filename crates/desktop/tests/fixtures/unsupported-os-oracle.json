@@ -1,0 +1,421 @@
+[
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "14.5",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"14.5\"}, \"message\": \"This Mac runs macOS 14.5. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 14.5. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"14.5\"}, \"message\": \"This Mac runs macOS 14.5. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "15.6.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"15.6.0\"}, \"message\": \"This Mac runs macOS 15.6.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 15.6.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"15.6.0\"}, \"message\": \"This Mac runs macOS 15.6.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "15.6.1",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsafe_state_path\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  },
+  "preflight": {
+   "exit": 0,
+   "stderr": "",
+   "stdout_is_report": true,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "15.7",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"15.7\"}, \"message\": \"This Mac runs macOS 15.7. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 15.7. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"15.7\"}, \"message\": \"This Mac runs macOS 15.7. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "25.9.9",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"25.9.9\"}, \"message\": \"This Mac runs macOS 25.9.9. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 25.9.9. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"25.9.9\"}, \"message\": \"This Mac runs macOS 25.9.9. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "26.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsafe_state_path\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  },
+  "preflight": {
+   "exit": 0,
+   "stderr": "",
+   "stdout_is_report": true,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "26.5.1",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsafe_state_path\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  },
+  "preflight": {
+   "exit": 0,
+   "stderr": "",
+   "stdout_is_report": true,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "x86_64",
+  "os_version": "15.6.1",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"x86_64\", \"os_version\": \"15.6.1\"}, \"message\": \"This Mac has an Intel processor (macOS 15.6.1). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac has an Intel processor (macOS 15.6.1). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"x86_64\", \"os_version\": \"15.6.1\"}, \"message\": \"This Mac has an Intel processor (macOS 15.6.1). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "x86_64",
+  "os_version": "26.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"x86_64\", \"os_version\": \"26.0\"}, \"message\": \"This Mac has an Intel processor (macOS 26.0). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac has an Intel processor (macOS 26.0). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"x86_64\", \"os_version\": \"26.0\"}, \"message\": \"This Mac has an Intel processor (macOS 26.0). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"\"}, \"message\": \"This Mac runs macOS . Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS . Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"\"}, \"message\": \"This Mac runs macOS . Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "26",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"26\"}, \"message\": \"This Mac runs macOS 26. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 26. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"26\"}, \"message\": \"This Mac runs macOS 26. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "26.0.0.1",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"26.0.0.1\"}, \"message\": \"This Mac runs macOS 26.0.0.1. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 26.0.0.1. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"26.0.0.1\"}, \"message\": \"This Mac runs macOS 26.0.0.1. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "99999999999999999.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"99999999999999999.0\"}, \"message\": \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"99999999999999999.0\"}, \"message\": \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "1000.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"1000.0\"}, \"message\": \"This Mac runs macOS 1000.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 1000.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"1000.0\"}, \"message\": \"This Mac runs macOS 1000.0. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "FreeBSD",
+  "machine": "amd64",
+  "os_version": "14.0",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"FreeBSD\", \"machine\": \"amd64\", \"os_version\": \"14.0\"}, \"message\": \"This build of Mycelium A13 Demo runs on Apple Silicon Macs with macOS 26.0 or later.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This build of Mycelium A13 Demo runs on Apple Silicon Macs with macOS 26.0 or later.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"FreeBSD\", \"machine\": \"amd64\", \"os_version\": \"14.0\"}, \"message\": \"This build of Mycelium A13 Demo runs on Apple Silicon Macs with macOS 26.0 or later.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "1234567890123456",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"1234567890123456\"}, \"message\": \"This Mac runs macOS 1234567890123456. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 1234567890123456. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"1234567890123456\"}, \"message\": \"This Mac runs macOS 1234567890123456. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "12345678901234567",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"12345678901234567\"}, \"message\": \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"12345678901234567\"}, \"message\": \"This Mac runs macOS unknown. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "2é☃",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"2\\u00e9\\u2603\"}, \"message\": \"This Mac runs macOS 2\\u00e9\\u2603. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS 2\\u00e9\\u2603. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"2\\u00e9\\u2603\"}, \"message\": \"This Mac runs macOS 2\\u00e9\\u2603. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ },
+ {
+  "system": "Darwin",
+  "machine": "arm64",
+  "os_version": "🌧\u0001\"\\\t",
+  "launch": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"\\ud83c\\udf27\\u0001\\\"\\\\\\t\"}, \"message\": \"This Mac runs macOS \\ud83c\\udf27\\u0001\\\"\\\\\\t. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": [
+    [
+     "/usr/bin/osascript",
+     "-e",
+     "display alert \"Mycelium A13 Demo cannot run on this Mac\" message \"This Mac runs macOS \\ud83c\\udf27\\u0001\\\"\\\\\\t. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\" as critical buttons {\"OK\"} default button \"OK\""
+    ]
+   ]
+  },
+  "preflight": {
+   "exit": 2,
+   "stderr": "{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {\"system\": \"Darwin\", \"machine\": \"arm64\", \"os_version\": \"\\ud83c\\udf27\\u0001\\\"\\\\\\t\"}, \"message\": \"This Mac runs macOS \\ud83c\\udf27\\u0001\\\"\\\\\\t. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser.\"}\n",
+   "stdout_is_report": false,
+   "osascript_calls": []
+  }
+ }
+]

@@ -1,0 +1,536 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "probe_sha256": "46d8532dc4c1ed61b39a122c36e10c53e7871eafc375cde6bd54125a870e7b37",
+  "carrier": {
+    "key": "mycelium_live/a4_contracts.py:108:42:validator-keyword:minimum",
+    "partition": "A",
+    "class": "R2",
+    "family": "validator-lower-symbol",
+    "direction": "lower",
+    "shape": "symbol",
+    "callee": "_integer",
+    "expression": "minimum",
+    "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+    "file_sha256": "f56f96269e58d3a5e3905fc4ad0570b0668cf7450512f6bc95789189f06677b2",
+    "line_sha256": "089c479456d410d1e17d5b9e3a8478c9f959003332dcedad20d704b5e089764f",
+    "reason": "Pin callee rejection semantics, dimension, operand and source; lower is not upper; unchecked callers remain separate"
+  },
+  "rows": [
+    {
+      "key": "mycelium_live/a4_contracts.py:110:37:manual-bound:minimum_deployment_epoch",
+      "field": "deployment_epoch",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:111:36:manual-bound:minimum_request_attempt",
+      "field": "request_attempt",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:112:33:manual-bound:minimum_path_attempt",
+      "field": "path_attempt",
+      "minimum": 0,
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:113:40:manual-bound:minimum_topology_generation",
+      "field": "topology_generation",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:114:44:manual-bound:minimum_cancellation_generation",
+      "field": "cancellation_generation",
+      "minimum": 0,
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:115:41:manual-bound:minimum_publisher_generation",
+      "field": "publisher_generation",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:116:41:manual-bound:minimum_absolute_deadline_ms",
+      "field": "absolute_deadline_ms",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:117:40:manual-bound:minimum_cooperative_step_ms",
+      "field": "cooperative_step_ms",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:118:33:manual-bound:minimum_issued_at_ms",
+      "field": "issued_at_ms",
+      "minimum": 0,
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:119:42:manual-bound:minimum_maximum_request_bytes",
+      "field": "maximum_request_bytes",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:120:43:manual-bound:minimum_maximum_response_bytes",
+      "field": "maximum_response_bytes",
+      "minimum": 1,
+      "cases": [
+        [
+          "below",
+          "0",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "1",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    },
+    {
+      "key": "mycelium_live/a4_contracts.py:121:47:manual-bound:minimum_expected_terminal_revision",
+      "field": "expected_terminal_revision",
+      "minimum": 0,
+      "cases": [
+        [
+          "below",
+          "-1",
+          "refused",
+          "False"
+        ],
+        [
+          "floor",
+          "0",
+          "accepted",
+          "True"
+        ],
+        [
+          "ceiling",
+          "9223372036854775807",
+          "accepted",
+          "True"
+        ],
+        [
+          "above",
+          "9223372036854775808",
+          "refused",
+          "False"
+        ],
+        [
+          "boolean",
+          "True",
+          "refused",
+          "False"
+        ],
+        [
+          "none",
+          "None",
+          "refused",
+          "False"
+        ]
+      ]
+    }
+  ]
+}

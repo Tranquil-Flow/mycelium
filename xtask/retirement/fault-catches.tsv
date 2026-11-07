@@ -1,0 +1,2 @@
+fault	status	evidence	caught_by	reason	approver
+F-REL-14	caught	EV-20261029-0982	rs:xtask/tests/retention.rs::rollback_cleanup_refuses_before_deleting_even_unprotected_junk	Planted rollback exemption allows actual deletion of rollback plus junk; exact test fails on nonempty removed list. Restored control passes. See final-mutations/resume-mutation-R01.log and PASS gate FAULT-CAUGHT line.	integrator-provisional

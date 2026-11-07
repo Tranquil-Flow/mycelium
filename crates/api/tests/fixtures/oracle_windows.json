@@ -1,0 +1,2558 @@
+{
+ "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+ "python": "3.14.8",
+ "cases": [
+  {
+   "label": "open_ttl_30",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 30
+   },
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_900",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 900
+   },
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 900,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_29",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 29
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_901",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 901
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_0",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 0
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_-1",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": -1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_60",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 60,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_True",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": true
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_False",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": false
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_30.0",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 30.0
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_'30'",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": "30"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_None",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": null
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_[30]",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": [
+     30
+    ]
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_ttl_1000000000000000000000000000000",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 1000000000000000000000000000000
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_no_swarm",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {
+    "swarm": false
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_swarm_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_no_coordinator",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {
+    "coordinator": false
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_swarm_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_no_swarm_bad_ttl",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 5
+   },
+   "opts": {
+    "swarm": false
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_swarm_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_target",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {
+    "role": "target"
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "owner_role_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_closed",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {
+    "closed": true
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "application_closed"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_shape_empty",
+   "path": "/api/pair/window/open",
+   "body": {},
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_shape_extra",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60,
+    "x": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_relay_running",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {},
+   "relay": [
+    "running",
+    "https://r.example.com"
+   ],
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/pair/window/open",
+    "public_code": "action_not_completed",
+    "exception_type": "AttributeError",
+    "exception_module": "builtins"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 1
+  },
+  {
+   "label": "open_relay_running_no_origin",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {},
+   "relay": [
+    "running",
+    null
+   ],
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 60,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 0
+  },
+  {
+   "label": "open_relay_running_empty_origin",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {},
+   "relay": [
+    "running",
+    ""
+   ],
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 60,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 0
+  },
+  {
+   "label": "open_relay_stopped_origin",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 60
+   },
+   "opts": {},
+   "relay": [
+    "stopped",
+    "https://r.example.com"
+   ],
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "last_action_error": {
+    "protocol": "mycelium.a13.action_failure.v1",
+    "path": "/api/pair/window/open",
+    "public_code": "action_not_completed",
+    "exception_type": "AttributeError",
+    "exception_module": "builtins"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 1
+  },
+  {
+   "label": "open_pending_after_one",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 45,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_pending_cap_7",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a00",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a02",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a03",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a04",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a05",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a06",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a00",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a02",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a03",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a04",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a05",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a06",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 45,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_pending_cap_8",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a00",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a02",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a03",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a04",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a05",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a06",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a07",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_capacity"
+   },
+   "pending_after": [
+    {
+     "pending_id": "pending-000a00",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a02",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a03",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a04",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a05",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a06",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000a07",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_live_cap_7_plus_pending_1",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "live": [
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open"
+    ],
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_capacity"
+   },
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_live_cap_8",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "live": [
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open"
+    ]
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_capacity"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_live_7",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "live": [
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open"
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 45,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_live_counts_only_active",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "live": [
+     "open",
+     "claimed",
+     "approved",
+     "revoked",
+     "expired",
+     "locked",
+     "revoked",
+     "revoked",
+     "revoked",
+     "revoked",
+     "revoked",
+     "revoked"
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 45,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_live_cap_with_inactive",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 45
+   },
+   "opts": {
+    "live": [
+     "open",
+     "open",
+     "open",
+     "open",
+     "claimed",
+     "claimed",
+     "approved",
+     "approved"
+    ]
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_capacity"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_bad_ttl_beats_capacity",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 5
+   },
+   "opts": {
+    "live": [
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open",
+     "open"
+    ]
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "pairing_window_ttl_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "open_second_pending_id",
+   "path": "/api/pair/window/open",
+   "body": {
+    "ttl_seconds": 31
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a00",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "state": "waiting_for_relay",
+    "pending_id": "pending-000001",
+    "message": "Ready to share once the relay starts: start the public relay and this code becomes redeemable.",
+    "fix": {
+     "action": "start_relay"
+    }
+   },
+   "wire": "{\"state\":\"waiting_for_relay\",\"pending_id\":\"pending-000001\",\"message\":\"Ready to share once the relay starts: start the public relay and this code becomes redeemable.\",\"fix\":{\"action\":\"start_relay\"}}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a00",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    },
+    {
+     "pending_id": "pending-000001",
+     "ttl_seconds": 31,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_pending",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": "pending-000a01"
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a02",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "window_id": "pending-000a01",
+    "state": "revoked"
+   },
+   "wire": "{\"window_id\":\"pending-000a01\",\"state\":\"revoked\"}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a02",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_pending_second",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": "pending-000a02"
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     },
+     {
+      "pending_id": "pending-000a02",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "window_id": "pending-000a02",
+    "state": "revoked"
+   },
+   "wire": "{\"window_id\":\"pending-000a02\",\"state\":\"revoked\"}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_unknown_goes_to_store",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": "ABCD"
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "window_id": "ABCD",
+    "state": "revoked"
+   },
+   "wire": "{\"window_id\":\"ABCD\",\"state\":\"revoked\"}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [
+    [
+     "revoke",
+     "ABCD"
+    ]
+   ],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_non_string_id",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": 5
+   },
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "window_id": 5,
+    "state": "revoked"
+   },
+   "wire": "{\"window_id\":5,\"state\":\"revoked\"}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [
+    [
+     "revoke",
+     5
+    ]
+   ],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_null_id",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": null
+   },
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "window_id": null,
+    "state": "revoked"
+   },
+   "wire": "{\"window_id\":null,\"state\":\"revoked\"}",
+   "pending_after": [],
+   "windows_log": [
+    [
+     "revoke",
+     null
+    ]
+   ],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_target",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": "x"
+   },
+   "opts": {
+    "role": "target"
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "owner_role_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_shape",
+   "path": "/api/pair/window/revoke",
+   "body": {},
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "revoke_shape_extra",
+   "path": "/api/pair/window/revoke",
+   "body": {
+    "window_id": "x",
+    "y": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "list",
+   "path": "/api/pair/window/list",
+   "body": {},
+   "opts": {
+    "live": [
+     "open",
+     "claimed"
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "windows": [
+     {
+      "window_id": "W0",
+      "state": "open"
+     },
+     {
+      "window_id": "W1",
+      "state": "claimed"
+     }
+    ]
+   },
+   "wire": "{\"windows\":[{\"window_id\":\"W0\",\"state\":\"open\"},{\"window_id\":\"W1\",\"state\":\"claimed\"}]}",
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "list_empty",
+   "path": "/api/pair/window/list",
+   "body": {},
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "windows": []
+   },
+   "wire": "{\"windows\":[]}",
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "list_ignores_pending",
+   "path": "/api/pair/window/list",
+   "body": {},
+   "opts": {
+    "pending": [
+     {
+      "pending_id": "pending-000a01",
+      "ttl_seconds": 30,
+      "state": "waiting_for_relay",
+      "note": "ready to share once the relay starts"
+     }
+    ]
+   },
+   "relay": null,
+   "ok": {
+    "windows": []
+   },
+   "wire": "{\"windows\":[]}",
+   "pending_after": [
+    {
+     "pending_id": "pending-000a01",
+     "ttl_seconds": 30,
+     "state": "waiting_for_relay",
+     "note": "ready to share once the relay starts"
+    }
+   ],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "list_body",
+   "path": "/api/pair/window/list",
+   "body": {
+    "x": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "approve",
+   "path": "/api/pair/window/approve",
+   "body": {
+    "window_id": "ABCD",
+    "request_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "opts": {},
+   "relay": null,
+   "ok": {
+    "approved": "ABCD"
+   },
+   "wire": "{\"approved\":\"ABCD\"}",
+   "pending_after": [],
+   "windows_log": [
+    [
+     "approve",
+     "ABCD",
+     "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    ]
+   ],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "approve_shape",
+   "path": "/api/pair/window/approve",
+   "body": {
+    "window_id": "ABCD"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "invalid_request"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "approve_target",
+   "path": "/api/pair/window/approve",
+   "body": {
+    "window_id": "ABCD",
+    "request_digest": "x"
+   },
+   "opts": {
+    "role": "target"
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "owner_role_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_target",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {
+    "role": "target"
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_requires_fresh_owner"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_target_bad_body",
+   "path": "/api/network/start",
+   "body": {},
+   "opts": {
+    "role": "target"
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_requires_fresh_owner"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_closed",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {
+    "closed": true
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "application_closed"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_relay_running",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": [
+    "running"
+   ],
+   "err": {
+    "status": 400,
+    "code": "network_requires_fresh_owner"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 0
+  },
+  {
+   "label": "net_relay_starting",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": [
+    "starting"
+   ],
+   "err": {
+    "status": 400,
+    "code": "network_requires_fresh_owner"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 0
+  },
+  {
+   "label": "net_relay_stopped_then_start",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": [
+    "stopped"
+   ],
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": true,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_relay_stopped_bad_body",
+   "path": "/api/network/start",
+   "body": {},
+   "opts": {},
+   "relay": [
+    "stopped"
+   ],
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": true,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_running_beats_shape",
+   "path": "/api/network/start",
+   "body": {},
+   "opts": {},
+   "relay": [
+    "running"
+   ],
+   "err": {
+    "status": 400,
+    "code": "network_requires_fresh_owner"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": false,
+   "relay_cleared": false,
+   "bound": 0
+  },
+  {
+   "label": "net_cloudflare",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_cloudflare_explicit",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "cloudflare"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_provider_other",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "other"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_cloudflare_with_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "cloudflare",
+    "public_origin": "https://x.example.com"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ack_false",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": false,
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ack_str",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": "true",
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ack_missing",
+   "path": "/api/network/start",
+   "body": {
+    "max_seconds": 600
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_29",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 29
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_30",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 30
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_1800",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_1801",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 1801
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_float",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 60.0
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_bool",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": true
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_secs_str",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": "60"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_extra_key",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "junk": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_ok",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_ok_front",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "cloudflare_front": true
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_ok_options",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "auto_renew": false,
+    "long_lived": true,
+    "max_renewed_seconds": 3600
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_loopback_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://127.0.0.1:8443",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_localhost",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://localhost",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_http_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "http://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_upper_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://Relay.Example.com",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_origin_port",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com:8443",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_origin_int",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": 5,
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_port_low",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 80
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_proxy_port_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_port_str",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": "8443"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_proxy_port_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_port_bool",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": true
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_proxy_port_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_renew_bad",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "auto_renew": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_renewal_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_renew_beats_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://localhost",
+    "proxy_port": 8443,
+    "auto_renew": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_renewal_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_origin_beats_port",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://localhost",
+    "proxy_port": 80
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_origin_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_cap_bad",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "max_renewed_seconds": 0
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "relay_renewal_invalid"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_missing_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "proxy_port": 8443
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_missing_port",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com"
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_unknown_key",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443,
+    "junk": 1
+   },
+   "opts": {},
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_consent_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_contributor_unchanged_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {
+    "contributor": true,
+    "configured": {
+     "public_origin": "https://relay.example.com"
+    }
+   },
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_contributor_changed_origin",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {
+    "contributor": true,
+    "configured": {
+     "public_origin": "https://other.example.com"
+    }
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_stop_local_contributor_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_contributor_unconfigured",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {
+    "contributor": true,
+    "configured": null
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_stop_local_contributor_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_contributor_no_swarm",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://relay.example.com",
+    "proxy_port": 8443
+   },
+   "opts": {
+    "contributor": true,
+    "swarm": false,
+    "configured": {
+     "public_origin": "https://other.example.com"
+    }
+   },
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_ext_contributor_bad_origin_unchanged_check",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600,
+    "provider": "external",
+    "public_origin": "https://localhost",
+    "proxy_port": 8443
+   },
+   "opts": {
+    "contributor": true,
+    "configured": {
+     "public_origin": "https://relay.example.com"
+    }
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_stop_local_contributor_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_cloudflare_contributor",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {
+    "contributor": true,
+    "configured": {
+     "public_origin": "https://relay.example.com"
+    }
+   },
+   "relay": null,
+   "err": {
+    "status": 400,
+    "code": "network_stop_local_contributor_required"
+   },
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  },
+  {
+   "label": "net_cloudflare_contributor_no_swarm",
+   "path": "/api/network/start",
+   "body": {
+    "relay_acknowledged": true,
+    "max_seconds": 600
+   },
+   "opts": {
+    "contributor": true,
+    "swarm": false
+   },
+   "relay": null,
+   "err": {
+    "status": 409,
+    "code": "action_not_completed"
+   },
+   "reached_start": true,
+   "pending_after": [],
+   "windows_log": [],
+   "relay_closed": null,
+   "relay_cleared": true,
+   "bound": 0
+  }
+ ]
+}

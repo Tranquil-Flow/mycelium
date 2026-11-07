@@ -1,0 +1,190 @@
+{
+  "schema": "mycelium.foundation.oracle-evidence.v1",
+  "spdx_license_identifier": "AGPL-3.0-only",
+  "observed_at": "2026-10-27T22:13:35Z",
+  "rust_candidate_source": "14aa6a27f2e682dddc67cdd9936156274b59a356",
+  "accepted_source": {
+    "commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+    "git_tree": "42fdb677601e28577aed52633adfd6d9d0c41d75",
+    "readonly_checkout": "/Users/mycelium-dev/Projects/mycelium-v014"
+  },
+  "target": {
+    "path": "evidence/foundation-exit/oracle-target.json",
+    "path_base": "repository",
+    "size_bytes": 403,
+    "sha256": "5de9ac3ac80462d15c8034ee1d6a5d056f6f0ca3d9f552e03b09c037b014035c"
+  },
+  "certified_executable": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/l2-final-f4e366e98a1f705dfaf182897044500d290dbd7f/package/out/0.1.0-preview.2/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo",
+    "path_base": "absolute",
+    "size_bytes": 20815856,
+    "sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f"
+  },
+  "published_zip": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/mycelium-0.1.4-macos-arm64.zip",
+    "path_base": "absolute",
+    "size_bytes": 102696204,
+    "sha256": "fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025"
+  },
+  "ready": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/runday/pipeline/runs/f4e366e9-20261027T155204Z/READY.json",
+    "path_base": "absolute",
+    "size_bytes": 49579,
+    "sha256": "a2463eb988fe203b6834c085be63057e08386837c66f71483c10d6e2a1036515"
+  },
+  "release_receipts": [
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/certification.json",
+      "path_base": "absolute",
+      "size_bytes": 1627,
+      "sha256": "3d4f1a553ba305672a937fff2e73c33d812543ac0cb477390cb7fc51acf8dbfe"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/package-binding.json",
+      "path_base": "absolute",
+      "size_bytes": 1835,
+      "sha256": "5d53e727fe1823dd7137c66fb752c351a5207869d05daa20d5cc83ed9f82845f"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/tree-equality.json",
+      "path_base": "absolute",
+      "size_bytes": 448170,
+      "sha256": "1ce0301696a2816c2b6d86ce17a6ae71f13041e02845e9f444576c0ff17dbae2"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/13-artifact-proof.json",
+      "path_base": "absolute",
+      "size_bytes": 26535,
+      "sha256": "0deace31af3e5b15c64571894eeb666db8f9ba366fb0a9f326166e884005eb43"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/20-release-checksum-features.json",
+      "path_base": "absolute",
+      "size_bytes": 799,
+      "sha256": "7919cde690aae32bbaa2c14e265a412dc197fb052be4575d38f20689a845eb14"
+    },
+    {
+      "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/release/v0.1.4/A13-RECEIPT-v0.1.4.json",
+      "path_base": "absolute",
+      "size_bytes": 2533,
+      "sha256": "5ca95d0d5e0be005c3af9d25c98e50d52b0a3a2dc546c32857ad32331c20722c"
+    }
+  ],
+  "artifact_identity": {
+    "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/l2-final-f4e366e98a1f705dfaf182897044500d290dbd7f/package/out/0.1.0-preview.2/artifact-identity.json",
+    "path_base": "absolute",
+    "size_bytes": 6848,
+    "sha256": "96036f8c77b0740f8b9666c5eb187894b6bbff3da760826896f73d363ad4e266"
+  },
+  "journey_fixtures": [
+    {
+      "fixture": {
+        "path": "test-support/journeys/fixtures/python-v014.json",
+        "path_base": "repository",
+        "size_bytes": 7332,
+        "sha256": "7cf9117328db53f2c9e2e129a30ba3d070a20a425e26837643a8b4127eead114"
+      },
+      "captured_source_sha": "f5bfb70981569c79cb873afe8e0c5be20342db7e",
+      "captured_executable_sha256": "af681b346ef301c7b36bcdfe2f89b5e71053c349f02d2445cd98bafe5fa3e69c",
+      "capture_kind": "real_packaged_process_loopback_http",
+      "accepted_successor_replay": {
+        "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-evidence/baseline-released.json",
+        "path_base": "absolute",
+        "size_bytes": 18448,
+        "sha256": "5dc836c8ca4be8a5ac009b4f3ae762140ed71641875cdad7b2c50d9c9720b54b"
+      },
+      "observations": 20,
+      "launches": 5,
+      "result": "PASS",
+      "exclusions": [
+        {
+          "journey": "joined_member_600s_standing_grant_and_two_node_join",
+          "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+          "reason": "Production join-window transport requires public HTTPS relay; private constructor seam forbidden.",
+          "result": "NOT_RUN"
+        },
+        {
+          "journey": "cross_version_saved2_upgrade",
+          "obligation_id": "O:path:mycelium_a13_macos/standing_consent.py",
+          "reason": "Only one executable version authorized. Same-byte restart preserves 2 GB and rejects a silent change; not an installer or cross-version upgrade.",
+          "result": "NOT_RUN"
+        },
+        {
+          "journey": "published_stats_shape",
+          "obligation_id": "O:path:mycelium_a13_macos/swarm_stats.py",
+          "reason": "Stats POST belongs to external directory publication, not private /api/status listener. Publication forbidden.",
+          "result": "NOT_RUN"
+        },
+        {
+          "journey": "product_sse_serve_chat_cancel",
+          "obligation_id": "O:path:mycelium_a13_macos/chat.py",
+          "reason": "Requires serving/model acquisition; forbidden in this slice. SSE client has real loopback adapter tests, not product stream evidence.",
+          "result": "NOT_RUN"
+        },
+        {
+          "journey": "plan_stage_reservations_worker_deadlines_rollover",
+          "obligation_id": "O:path:mycelium_a13_macos/demo_chain.py",
+          "reason": "Requires joined members/model preparation. No F14/F15/F15b full regression or historical RED claim.",
+          "result": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "fixture": {
+        "path": "test-support/journeys/fixtures/python-v014-boundaries.json",
+        "path_base": "repository",
+        "size_bytes": 11078,
+        "sha256": "bb72392f3f664b7d86ad2ab9cc3e47c5f7a1d75fbeaa24ad94c5e7fb6cbe3947"
+      },
+      "captured_source_sha": "ef9ae61de0222c78d83c8133f8f709619394bf51",
+      "captured_executable_sha256": "bc06dc664353c5dd15b937afd8e5a5f464131c5248fd906a325a642c37e85467",
+      "capture_kind": "real_packaged_process_loopback_http",
+      "accepted_successor_replay": {
+        "path": "/Users/mycelium-dev/Documents/mycelium-core-program/runs/v2/v02/FOUNDATION-EXIT-evidence/boundaries-released.json",
+        "path_base": "absolute",
+        "size_bytes": 18809,
+        "sha256": "fa0d3f3ebe54e9d196542c554a96af6eff7b85024f50ccbee0006fb120133981"
+      },
+      "observations": 33,
+      "launches": 3,
+      "result": "PASS",
+      "exclusions": [
+        {
+          "journey": "two_instance_join_and_bound_600s_2GB_consent",
+          "reason": "Join windows wait for public HTTPS relay; external relay rejects loopback origins. Manual recipient-encrypted handoff cannot use owner's private loopback TLS CA through the production Web-PKI client. No public CLI/env trust or join transport seam; private constructor injection forbidden.",
+          "result": "BLOCKED"
+        },
+        {
+          "journey": "joined_member_leave_and_owner_restart_recovery_F3",
+          "reason": "Requires successful joined membership. Exercised leave is explicitly UNJOINED, including cleanup steps and restart persistence.",
+          "result": "BLOCKED"
+        },
+        {
+          "journey": "published_stats_shape",
+          "reason": "Private app endpoint is 404. Stats publication is external-directory POST, requiring separately authorized public origin/registration.",
+          "result": "BLOCKED"
+        },
+        {
+          "journey": "placement_reservation_worker_deadlines_F14_F15_F15b",
+          "reason": "No plan-only HTTP route. Compilation/proposals require prepared model source and distinct-host observations; public serving/status has null compilation/serving. No model acquisition, private injection or worker serving authorized.",
+          "result": "BLOCKED"
+        },
+        {
+          "journey": "serve_chat_cancel_product_SSE_F5_stall",
+          "reason": "No model-backed running route or compilation stall allowed. Idle status and leave/window cancellation are not active chat cancellation or F5 proof.",
+          "result": "BLOCKED"
+        },
+        {
+          "journey": "cross_version_saved2_upgrade",
+          "reason": "Only final executable is launch-authorized. Same-byte 2GB persistence and no-upgrade refusals are not installer/cross-version migration.",
+          "result": "BLOCKED"
+        }
+      ]
+    }
+  ],
+  "qualification": {
+    "content_identity": "VERIFIED_READ_ONLY",
+    "full_http_corpus": "BLOCKED: joined two-host HTTPS/model-backed journeys not executed",
+    "fixture_policy": "Original capture identities and bytes preserved; released successor replay is separate evidence. No oracle execution in round 2."
+  }
+}

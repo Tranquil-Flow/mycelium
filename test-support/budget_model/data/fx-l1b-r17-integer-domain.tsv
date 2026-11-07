@@ -1,0 +1,9 @@
+helper	input_domain	value	status	returned_integer	same_object
+bounded_int	builtin	-1	refused	-	-
+bounded_int	builtin	8	refused	-	-
+bounded_int	comparison-override	-1	accepted	-1	true
+bounded_int	comparison-override	8	accepted	8	true
+nullable_bounded_int	builtin	-1	refused	-	-
+nullable_bounded_int	builtin	8	refused	-	-
+nullable_bounded_int	comparison-override	-1	accepted	-1	true
+nullable_bounded_int	comparison-override	8	accepted	8	true

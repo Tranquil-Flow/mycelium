@@ -1,0 +1,26 @@
+case	outcome	value	raw	now
+ordinary	accepted	1060.0	1060.0	1000.0
+large-horizon	accepted	1e+100	1e+100	1000.0
+large-epoch	accepted	1000000000060.0	1000000000060.0	1000000000000.0
+negative-epoch	accepted	-999999999940.0	-999999999940.0	-1000000000000.0
+expiry-equals-now	accepted	1000.0	1000.0	1000.0
+expired	refused	seed_http_seed_time_invalid	999.0	1000.0
+skew-edge	accepted	1060.0	1060.0	1000.0
+skew-over	refused	seed_http_seed_time_invalid	1060.0	1000.0
+expiry-before-issued	accepted	1010.0	1010.0	1000.0
+signed-string	refused	seed_http_seed_time_invalid	'1060'	1000.0
+signed-bool	refused	seed_http_seed_time_invalid	True	1000.0
+signed-null	refused	seed_http_seed_time_invalid	None	1000.0
+signed-overflow	refused	int too large to convert to float	10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000	1000.0
+nonfinite-infinity	signer-or-wire-refused	invalid_signed_statement: noncanonical_json		1000.0
+nonfinite-nan	signer-or-wire-refused	invalid_signed_statement: noncanonical_json		1000.0
+bad-signature	refused	seed_http_seed_signature_invalid		1000.0
+wrong-key	refused	seed_http_seed_pin_mismatch		1000.0
+wrong-swarm	refused	seed_http_seed_pin_mismatch		1000.0
+receipt-large	accepted	1e+100	1e+100	1000.0
+receipt-replay	accepted	1060.0	1060.0	1000.0
+receipt-replay-again	accepted	1060.0	1060.0	1001.0
+receipt-replay-at-expiry	accepted	1060.0	1060.0	1060.0
+receipt-replay-after-expiry	refused	seed_http_seed_time_invalid	1060.0	1060.0000000000002
+real-coordinator-identity	accepted	1060.0	1060.0	1000.0
+real-coordinator-receipt	accepted	1060.0	1060.0	1000.0

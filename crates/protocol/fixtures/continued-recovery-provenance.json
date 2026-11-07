@@ -1,0 +1,13 @@
+{
+  "boundary": "Four closed recovery document validators, ASCII self-digests and recursive private-key rejection. No checkpoint store, authority, retries, recovery execution, resource release or physical qualification.",
+  "generator_sha256": "40bb04c3e5120a32289c6b8eaf29420d244f9f7ace7ed5b39e4d20703e094ab6",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_a6_recovery.py",
+      "sha256": "54e970d57103066027d47f64e0ab3892634a2262ec60a63a1710d67cfb85cce3"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

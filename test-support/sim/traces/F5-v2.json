@@ -1,0 +1,176 @@
+{
+  "schema_version": 2,
+  "build_id": "sha256:67eb23cca6807d0009eeed18571e588dfd2313b23c797aeedf8ad81f34850feb",
+  "cargo_lock_sha256": "fc4ad41d8a28a63f1ddb839015569d96c4565d1185cc6cf7f4043b91ce88b4a0",
+  "simulator_version": "mycelium-sim-v2",
+  "prng_version": "splitmix64-keyed-v1",
+  "seed": 17,
+  "config": {
+    "incident": "F5",
+    "mode": "Historical",
+    "rollovers": 2,
+    "close_multiplier": 1,
+    "owner_local_allowed": true,
+    "member_granted": true,
+    "authority_until_ms": 14400000
+  },
+  "profile_id": "section7-policy-model-v1-NOT-MEASURED",
+  "profile_snapshot": "section7-policy-model-v1-NOT-MEASURED",
+  "budget_snapshot": {
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "RolloverMargin": {
+      "value": "Duration(Span(120000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:268 @ f5bfb709\")"
+    },
+    "WorkerCleanupReserve": {
+      "value": "Duration(Span(10000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:35 @ f5bfb709\")"
+    },
+    "WorkerStartup": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Operational(Start)",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:36 @ f5bfb709\")"
+    }
+  },
+  "corrected_budget_snapshot": {
+    "OwnerPoll": {
+      "value": "Duration(Span(500))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:247 @ f5bfb709\")"
+    },
+    "RolloverMargin": {
+      "value": "Duration(Span(120000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/demo_chain.py:268 @ f5bfb709\")"
+    },
+    "WorkerCleanupReserve": {
+      "value": "Duration(Span(10000))",
+      "unit": "milliseconds",
+      "purpose": "Policy",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:35 @ f5bfb709\")"
+    },
+    "WorkerStartup": {
+      "value": "Duration(Span(30000))",
+      "unit": "milliseconds",
+      "purpose": "Operational(Start)",
+      "provenance": "Source(\"mycelium_a13_macos/worker.py:36 @ f5bfb709\")"
+    }
+  },
+  "corrected_outcome": {
+    "metrics": {
+      "compile_hold_ms": 40000,
+      "compile_status_responses": 1,
+      "max_status_wait_ms": 0,
+      "phases_completed": 2,
+      "publish_hold_ms": 150000,
+      "publish_status_responses": 1,
+      "reads_while_blocked": 2,
+      "status_budget_ms": 500,
+      "status_responses": 2
+    },
+    "transitions": {
+      "chat_success": 1,
+      "compile_enter": 1,
+      "phase_release": 2,
+      "publish_enter": 1,
+      "published_progress_read": 2,
+      "start_attempt": 1,
+      "status_deadline": 2,
+      "status_request": 2
+    },
+    "log": [
+      "0:start_attempt",
+      "0:compile_enter",
+      "500:status_request",
+      "500:published_progress_read",
+      "1000:status_deadline",
+      "40000:phase_release",
+      "40000:publish_enter",
+      "40500:status_request",
+      "40500:published_progress_read",
+      "41000:status_deadline",
+      "190000:phase_release",
+      "190000:chat_success"
+    ],
+    "starts": 1,
+    "served": 1,
+    "rollovers": 0,
+    "successful_chats": 1,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  },
+  "execution_pin": "[{\"incident\":\"F5\",\"mode\":\"Historical\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "corrected_execution_pin": "[{\"incident\":\"F5\",\"mode\":\"Corrected\",\"rollovers\":2,\"close_multiplier\":1,\"owner_local_allowed\":true,\"member_granted\":true,\"authority_until_ms\":14400000},[{\"at_ms\":0,\"task\":1,\"command\":\"Begin\"}],\"section7-policy-model-v1-NOT-MEASURED\",\"section7-policy-model-v1-NOT-MEASURED\"]",
+  "commands": [
+    {
+      "at_ms": 0,
+      "task": 1,
+      "command": "Begin"
+    }
+  ],
+  "expected_failure": [
+    "status_read_blocked_by_slow_work"
+  ],
+  "expected_outcome": {
+    "metrics": {
+      "blocked_status_reads": 2,
+      "compile_hold_ms": 40000,
+      "max_status_wait_ms": 149500,
+      "phases_completed": 2,
+      "publish_hold_ms": 150000,
+      "status_budget_ms": 500,
+      "status_responses": 2
+    },
+    "transitions": {
+      "chat_success": 1,
+      "compile_enter": 1,
+      "phase_release": 2,
+      "publish_enter": 1,
+      "start_attempt": 1,
+      "status_deadline": 2,
+      "status_request": 2
+    },
+    "log": [
+      "0:start_attempt",
+      "0:compile_enter",
+      "500:status_request",
+      "1000:status_deadline",
+      "40000:phase_release",
+      "40000:publish_enter",
+      "40500:status_request",
+      "41000:status_deadline",
+      "190000:phase_release",
+      "190000:chat_success"
+    ],
+    "starts": 1,
+    "served": 1,
+    "rollovers": 0,
+    "successful_chats": 1,
+    "interrupted_chats": 0,
+    "expiry_losses": 0,
+    "forbidden_replacements": 0,
+    "swallowed_errors": 0,
+    "diagnostics": [],
+    "cleanup_proofs": 0,
+    "workers": [],
+    "deadlines": []
+  }
+}

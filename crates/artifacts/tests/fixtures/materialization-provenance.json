@@ -1,0 +1,8 @@
+{
+  "claim": "Real disposable filesystem cache/materialization; synthetic payloads, no models or workers.",
+  "fixture_sha256": "e532de29b84e362729895101f38d6935fd7d29e7cca8489f8652b21e36808f83",
+  "generator_sha256": "4ed7fe906e77cde007425156d0872f9e768515d134e0fb233384da41e21bb2bd",
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "source": "mycelium_assignment_cache.py",
+  "source_sha256": "810e49be7a265dff7233ba82ac3ce939f1f308987d509490acaa60419b8e5aea"
+}

@@ -1,0 +1,53 @@
+{
+  "boundary": "Product snapshot/event, all entity branches, route explorer validation and pure source-bound projection. No service, public status publication, session/CSRF or measured topology.",
+  "generator_sha256": "51fdd195c3fd7c1263a23f6d731718253dbe295650ee5c169219a4d70176d845",
+  "helper_sha256": "738741e1632017360da0518ef82f6f4c7ecf48d287b3cea89b80e4f995b4f4a6",
+  "inputs": [
+    {
+      "path": "mycelium_deadlines.py",
+      "sha256": "87d8c49424e1ec9a7a73d287b90a1e6983defee9b723e3e32d8cad89e6265ce0"
+    },
+    {
+      "path": "mycelium_internet/__init__.py",
+      "sha256": "9ae8ad751a77a49dea9ff9a795c502e359df685e113fd62279d395457e8bfccb"
+    },
+    {
+      "path": "mycelium_internet/contracts.py",
+      "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc"
+    },
+    {
+      "path": "mycelium_product_spine/__init__.py",
+      "sha256": "e04d895724d1f3ff9a3c3226f7346fe8314c02e81b2a4c47727523b8e4ee32fc"
+    },
+    {
+      "path": "mycelium_product_spine/app.py",
+      "sha256": "4c67013636546293e92ae13f677f1cbc8688512967ed786bf69ef62d6497f559"
+    },
+    {
+      "path": "mycelium_product_spine/coarse_region.py",
+      "sha256": "4973bf515df1e93087f0aa2281d403ded6bd16f2d21afd4783487b269cd8b3f2"
+    },
+    {
+      "path": "mycelium_product_spine/contracts.py",
+      "sha256": "9db268274b837bd898fce61a00cbd668c7119cba9c48ad28106559f5da1be27f"
+    },
+    {
+      "path": "mycelium_product_spine/projector.py",
+      "sha256": "f8dba1be39396b599700ea5fe8ad0a5110d384c83f12faa9ea702fab5bac64f1"
+    },
+    {
+      "path": "mycelium_product_spine/route_explorer.py",
+      "sha256": "29f7e0cf42d311f2dc2bb47fd233c0e533187ad062ef63c9e1b7cdb597f0386f"
+    },
+    {
+      "path": "mycelium_product_spine/state.py",
+      "sha256": "d764926f81d246400b3e648011d61bd13fd80381cc09a50ce97bd011734c5add"
+    },
+    {
+      "path": "mycelium_product_spine/transport_history.py",
+      "sha256": "c3297c21ed62c7d76ede73cb314b49aa80b7a951dbba8ebd24cfed441b033183"
+    }
+  ],
+  "oracle_commit": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [Clang 21.0.0 (clang-2100.3.34.2)]"
+}

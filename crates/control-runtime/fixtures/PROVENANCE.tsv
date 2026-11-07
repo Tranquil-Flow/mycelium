@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+path	fixture_id	kind	probe	probe_sha256	oracle_sha	case_count	fixture_sha256
+tests/fixtures/standing-consent-v014.json	FX-L6-standing-consent-v014	spec	hand-authored synthetic grant shaped by v0.1.4 mycelium_a13_macos/standing_consent.py @ f4e366e9 (STANDING_CONSENT_PROTOCOL, _FIELDS; disclosure_digest recomputed equal to the oracle DISCLOSURE_DIGEST); not an executed oracle output; read by tests/import.rs	-	f4e366e98a1f705dfaf182897044500d290dbd7f	1	fab26e146785bfd61f649544f889568504880238fd49fd4375fa005f078ee774
+tests/fixtures/v014-mailbox.sql	FX-L6-v014-mailbox-ddl	spec	hand-ported DDL from v0.1.4 mycelium_a13_macos/managed_control.py:838-878 and mailbox_retention.py:47-65 @ f4e366e9 (not byte-equal to the source; synthetic rows, nothing executed); read by tests/mailbox.rs and tests/migration.rs	-	f4e366e98a1f705dfaf182897044500d290dbd7f	4	b3adcedf2efe1a590009f44b8cd06881878fe027dddce5a42e59e6c37bb51837

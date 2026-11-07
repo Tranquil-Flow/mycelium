@@ -1,0 +1,3786 @@
+{
+ "oracle_exe_sha256": "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f",
+ "cases": [
+  {
+   "label": "fresh_start_with_body",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {
+    "x": 1
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "invalid_request"
+   }
+  },
+  {
+   "label": "fresh_stop_with_body",
+   "method": "POST",
+   "path": "/api/local-contributor/stop",
+   "request": {
+    "x": 1
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "invalid_request"
+   }
+  },
+  {
+   "label": "fresh_start",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 409,
+   "kind": "answer",
+   "body": {
+    "error": "action_not_completed"
+   }
+  },
+  {
+   "label": "fresh_stop",
+   "method": "POST",
+   "path": "/api/local-contributor/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "stopped",
+    "identity_retained": true,
+    "route_ready": false
+   }
+  },
+  {
+   "label": "network_start",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "proxy_port": 50096
+   },
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "error_code": null,
+    "seed_bound": false,
+    "privacy": "Your own address (v02-local-contrib.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:50096 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 1800,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:50096"
+   }
+  },
+  {
+   "label": "pre_create_start",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 409,
+   "kind": "answer",
+   "body": {
+    "error": "action_not_completed"
+   }
+  },
+  {
+   "label": "create",
+   "method": "POST",
+   "path": "/api/create",
+   "request": {
+    "consent": {
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 4000000000,
+     "network": "unmetered_only",
+     "background": false,
+     "diagnostics": false,
+     "thermal": "stop_on_serious"
+    }
+   },
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "protocol": "mycelium.demo_membership_result.v1",
+    "membership_state": "current",
+    "membership_generation": 1,
+    "lifecycle_state": "RUNNING",
+    "route_ready": false
+   }
+  },
+  {
+   "label": "status_before",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 1,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING"
+    ],
+    "authority.members.generation": [
+     1
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "start",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "created": true,
+    "physical_hosts": 1,
+    "node_id": "@NODE1",
+    "membership_state": "current",
+    "route_ready": false
+   },
+   "files": [
+    [
+     "accepted.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "consent.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity",
+     "d",
+     "0o700"
+    ],
+    [
+     "membership.state.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity/node.key",
+     "f",
+     "0o600"
+    ]
+   ]
+  },
+  {
+   "label": "status_after_start",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     1,
+     1
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "start_again",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "local_contributor_already_running"
+   }
+  },
+  {
+   "label": "network_start_same_origin",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "proxy_port": 50096
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "network_requires_fresh_owner"
+   }
+  },
+  {
+   "label": "network_start_other_origin",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib-2.mycelium.now",
+    "proxy_port": 50111
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "network_requires_fresh_owner"
+   }
+  },
+  {
+   "label": "stop",
+   "method": "POST",
+   "path": "/api/local-contributor/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "stopped",
+    "identity_retained": true,
+    "route_ready": false
+   },
+   "files": [
+    [
+     "accepted.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "consent.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity",
+     "d",
+     "0o700"
+    ],
+    [
+     "membership.state.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity/node.key",
+     "f",
+     "0o600"
+    ]
+   ]
+  },
+  {
+   "label": "status_after_stop",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     1,
+     1
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "stop_again",
+   "method": "POST",
+   "path": "/api/local-contributor/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "stopped",
+    "identity_retained": true,
+    "route_ready": false
+   }
+  },
+  {
+   "label": "restart",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "created": true,
+    "physical_hosts": 1,
+    "node_id": "@NODE1",
+    "membership_state": "current",
+    "route_ready": false
+   },
+   "files": [
+    [
+     "accepted.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "consent.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity",
+     "d",
+     "0o700"
+    ],
+    [
+     "membership.state.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity/node.key",
+     "f",
+     "0o600"
+    ]
+   ]
+  },
+  {
+   "label": "status_after_restart",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     1,
+     2
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "owner_stop",
+   "method": "POST",
+   "path": "/api/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "stopped": true,
+    "identity_retained": true,
+    "evidence_retained": true
+   }
+  },
+  {
+   "label": "start_while_owner_stopped",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 409,
+   "kind": "answer",
+   "body": {
+    "error": "action_not_completed"
+   }
+  },
+  {
+   "label": "status_owner_stopped",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": false,
+    "authority.started": false,
+    "authority.swarm_created": true,
+    "authority.membership_state": "retained",
+    "authority.member_count": 0,
+    "authority.members.node_id": "<absent>",
+    "authority.members.lifecycle_state": "<absent>",
+    "authority.members.generation": "<absent>",
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "owner_start",
+   "method": "POST",
+   "path": "/api/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "label": "macOS A13 hackathon demo",
+    "role": "not_yet_serving",
+    "model_contract": {
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "source_representation": "bfloat16-safetensors",
+     "runtime_backend": "mlx",
+     "runtime_dtype": "float32",
+     "runtime_quantization": "int8-weight-only",
+     "decoding": "quantized_greedy_token_id",
+     "sampling_seed": 0
+    },
+    "run_model": {
+     "selected": "a9-route",
+     "source": "demo_default",
+     "locked": false,
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "demo_default": "a9-route",
+     "storage_ceiling_bytes": 32568709325,
+     "resources": {
+      "storage_consent_ceiling_bytes": 32568709325,
+      "pairing_quota_ceiling_bytes": 32568709325,
+      "selected": {
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "label": "Qwen2.5-0.5B",
+       "snapshot_bytes": 999604126,
+       "weight_source_bytes": 988065536,
+       "owner_storage_bytes": 1099564539,
+       "whole_model_member_disk_bytes": 1464801818,
+       "whole_model_member_rss_bytes": 2802849734
+      },
+      "models": [
+       {
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "resolved_commit": "a09a35458c702b33eeacc393d103063234e8bc28",
+        "label": "Qwen2.5-7B",
+        "snapshot_bytes": 15242807270,
+        "weight_source_bytes": 15231233024,
+        "owner_storage_bytes": 23052975062,
+        "whole_model_member_disk_bytes": 12427070003,
+        "whole_model_member_rss_bytes": 8477702554
+       },
+       {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+        "label": "Qwen2.5-0.5B",
+        "snapshot_bytes": 999604126,
+        "weight_source_bytes": 988065536,
+        "owner_storage_bytes": 1099564539,
+        "whole_model_member_disk_bytes": 1464801818,
+        "whole_model_member_rss_bytes": 2802849734
+       },
+       {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "label": "Qwen3-0.6B",
+        "snapshot_bytes": 1519209243,
+        "weight_source_bytes": 1503264768,
+        "owner_storage_bytes": 1671130168,
+        "whole_model_member_disk_bytes": 2074306151,
+        "whole_model_member_rss_bytes": 4406023148
+       },
+       {
+        "model_id": "Qwen/Qwen3-8B",
+        "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+        "label": "Qwen3-8B",
+        "snapshot_bytes": 16397461266,
+        "weight_source_bytes": 16381470720,
+        "owner_storage_bytes": 18037207393,
+        "whole_model_member_disk_bytes": 18098051277,
+        "whole_model_member_rss_bytes": 21500325294
+       },
+       {
+        "model_id": "Qwen/Qwen3-14B",
+        "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "label": "Qwen3-14B",
+        "snapshot_bytes": 29552613776,
+        "weight_source_bytes": 29536614400,
+        "owner_storage_bytes": 32507875154,
+        "whole_model_member_disk_bytes": 32568709325,
+        "whole_model_member_rss_bytes": 36813347745
+       }
+      ],
+      "device_memory_bytes": 51539607552,
+      "memory_cap_ceiling_bytes": 38654705664,
+      "memory_cap_options": [
+       25769803776,
+       32212254720,
+       38654705664
+      ]
+     },
+     "choices": [
+      {
+       "name": "a9-route",
+       "label": "Qwen2.5-0.5B-Instruct \u2014 tested starter (tested on two Macs; ~1 GB download if not cached)",
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "snapshot_bytes": 999604126,
+       "int8_weight_bytes": 500000000,
+       "owner_storage_bytes": 1099564539,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-0.6b",
+       "label": "Qwen3-0.6B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "snapshot_bytes": 1519209243,
+       "int8_weight_bytes": 750000000,
+       "owner_storage_bytes": 1671130168,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-8b",
+       "label": "Qwen3-8B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-8B",
+       "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+       "snapshot_bytes": 16397461266,
+       "int8_weight_bytes": 8200000000,
+       "owner_storage_bytes": 18037207393,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-14b",
+       "label": "Qwen3-14B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-14B",
+       "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+       "snapshot_bytes": 29552613776,
+       "int8_weight_bytes": 14800000000,
+       "owner_storage_bytes": 32507875154,
+       "fits_storage_ceiling": true
+      }
+     ]
+    },
+    "fast_mode": {
+     "enabled": false,
+     "source": "default",
+     "locked": false
+    },
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-local-contrib.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-local-contrib.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:50096 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 1800,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:50096"
+    },
+    "acquisition": {
+     "state": "idle",
+     "downloaded_bytes": 0,
+     "total_bytes": 0,
+     "error_code": null,
+     "model": {
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "source_representation": "bfloat16-safetensors",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "decoding": "quantized_greedy_token_id",
+      "sampling_seed": 0
+     }
+    },
+    "resource_observation": {
+     "power": "unknown",
+     "thermal": "unknown",
+     "network": "unknown"
+    },
+    "acquisition_policy_error": null,
+    "installation_role": "owner",
+    "resource_policy": {
+     "background": false,
+     "diagnostics": false,
+     "network": "unmetered_only",
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 4000000000,
+     "thermal": "stop_on_serious"
+    },
+    "running": true,
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": true,
+     "local_tls": "pinned_loopback",
+     "membership_state": "current",
+     "member_count": 2,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": 2,
+     "lease_state": "fresh",
+     "contribution_enabled": false,
+     "route_ready": false,
+     "members": [
+      {
+       "node_id": "judge-mac-342c6e90d0e25f1e",
+       "generation": 2,
+       "lifecycle_state": "RUNNING",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      },
+      {
+       "node_id": "@NODE1",
+       "generation": 3,
+       "lifecycle_state": "NEW",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      }
+     ]
+    },
+    "renewal_error": null,
+    "recovery_error": null,
+    "distribution": "unsigned development software; not notarized",
+    "leave": null,
+    "join_flow": {
+     "standing_disclosure": {
+      "text": "While this Mac is a member of the owner's swarm and this app is open, it will automatically: accept work the owner assigns to it; download and store only the model slice assigned to it; load that slice with MLX and compute it for requests routed through the swarm; and send the owner a capability report (chip, memory, free disk, MLX availability, power and thermal state) and a link measurement over the relay on join and before each run. Limits: at most the disk, memory, run time and command budget you choose below, only on the power and network policy you chose, and it stops on serious thermal pressure. Cooperative workers observe the activations they compute, so this is not confidential inference. You can withdraw this consent at any time from this app; automatic acceptance stops immediately.",
+      "digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19"
+     },
+     "pairing_windows": [],
+     "pending_windows": [],
+     "member_reports": {}
+    },
+    "adaptive_host": {
+     "enabled": false,
+     "game_mode": false,
+     "pause_sharing": false,
+     "adaptive_sharing": false,
+     "stopped": false,
+     "state": "off",
+     "line": "Adaptive sharing: off",
+     "reserve_bytes": 0
+    },
+    "adaptive_host_publication": null,
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "demo_target": null,
+    "chat": {
+     "available": false,
+     "busy": false,
+     "local_url": "http://127.0.0.1:50090/chat",
+     "share_url": "https://v02-local-contrib.mycelium.now/chat"
+    },
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "peer_liveness": null,
+    "test_seams_active": false,
+    "test_seams": {
+     "active": false,
+     "clock_offset_seconds": null
+    }
+   }
+  },
+  {
+   "label": "start_after_owner_start",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "local_contributor_already_running"
+   }
+  },
+  {
+   "label": "status_after_owner_start",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     2,
+     3
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "restart_status",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "NoneType"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": {
+     "line": "str",
+     "members_joined": "int",
+     "state": "str"
+    },
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "members_joined": "int",
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     3,
+     3
+    ],
+    "network.state": "private",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "restart_network_start",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "proxy_port": 50138
+   },
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "relay_process_running",
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "error_code": null,
+    "seed_bound": true,
+    "privacy": "Your own address (v02-local-contrib.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:50138 yourself.",
+    "relay_host_trust": "public_webpki",
+    "auto_renew": true,
+    "long_lived": false,
+    "renewals": 0,
+    "expires_in_seconds": 1800,
+    "renewal_cap_seconds": 86400,
+    "renewal_stopped": null,
+    "local_forward_target": "http://127.0.0.1:50138"
+   }
+  },
+  {
+   "label": "restart_owner_start",
+   "method": "POST",
+   "path": "/api/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "label": "macOS A13 hackathon demo",
+    "role": "not_yet_serving",
+    "model_contract": {
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "source_representation": "bfloat16-safetensors",
+     "runtime_backend": "mlx",
+     "runtime_dtype": "float32",
+     "runtime_quantization": "int8-weight-only",
+     "decoding": "quantized_greedy_token_id",
+     "sampling_seed": 0
+    },
+    "run_model": {
+     "selected": "a9-route",
+     "source": "demo_default",
+     "locked": false,
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "demo_default": "a9-route",
+     "storage_ceiling_bytes": 32568709325,
+     "resources": {
+      "storage_consent_ceiling_bytes": 32568709325,
+      "pairing_quota_ceiling_bytes": 32568709325,
+      "selected": {
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "label": "Qwen2.5-0.5B",
+       "snapshot_bytes": 999604126,
+       "weight_source_bytes": 988065536,
+       "owner_storage_bytes": 1099564539,
+       "whole_model_member_disk_bytes": 1464801818,
+       "whole_model_member_rss_bytes": 2802849734
+      },
+      "models": [
+       {
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "resolved_commit": "a09a35458c702b33eeacc393d103063234e8bc28",
+        "label": "Qwen2.5-7B",
+        "snapshot_bytes": 15242807270,
+        "weight_source_bytes": 15231233024,
+        "owner_storage_bytes": 23052975062,
+        "whole_model_member_disk_bytes": 12427070003,
+        "whole_model_member_rss_bytes": 8477702554
+       },
+       {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+        "label": "Qwen2.5-0.5B",
+        "snapshot_bytes": 999604126,
+        "weight_source_bytes": 988065536,
+        "owner_storage_bytes": 1099564539,
+        "whole_model_member_disk_bytes": 1464801818,
+        "whole_model_member_rss_bytes": 2802849734
+       },
+       {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "label": "Qwen3-0.6B",
+        "snapshot_bytes": 1519209243,
+        "weight_source_bytes": 1503264768,
+        "owner_storage_bytes": 1671130168,
+        "whole_model_member_disk_bytes": 2074306151,
+        "whole_model_member_rss_bytes": 4406023148
+       },
+       {
+        "model_id": "Qwen/Qwen3-8B",
+        "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+        "label": "Qwen3-8B",
+        "snapshot_bytes": 16397461266,
+        "weight_source_bytes": 16381470720,
+        "owner_storage_bytes": 18037207393,
+        "whole_model_member_disk_bytes": 18098051277,
+        "whole_model_member_rss_bytes": 21500325294
+       },
+       {
+        "model_id": "Qwen/Qwen3-14B",
+        "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "label": "Qwen3-14B",
+        "snapshot_bytes": 29552613776,
+        "weight_source_bytes": 29536614400,
+        "owner_storage_bytes": 32507875154,
+        "whole_model_member_disk_bytes": 32568709325,
+        "whole_model_member_rss_bytes": 36813347745
+       }
+      ],
+      "device_memory_bytes": 51539607552,
+      "memory_cap_ceiling_bytes": 38654705664,
+      "memory_cap_options": [
+       25769803776,
+       32212254720,
+       38654705664
+      ]
+     },
+     "choices": [
+      {
+       "name": "a9-route",
+       "label": "Qwen2.5-0.5B-Instruct \u2014 tested starter (tested on two Macs; ~1 GB download if not cached)",
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "snapshot_bytes": 999604126,
+       "int8_weight_bytes": 500000000,
+       "owner_storage_bytes": 1099564539,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-0.6b",
+       "label": "Qwen3-0.6B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "snapshot_bytes": 1519209243,
+       "int8_weight_bytes": 750000000,
+       "owner_storage_bytes": 1671130168,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-8b",
+       "label": "Qwen3-8B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-8B",
+       "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+       "snapshot_bytes": 16397461266,
+       "int8_weight_bytes": 8200000000,
+       "owner_storage_bytes": 18037207393,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-14b",
+       "label": "Qwen3-14B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-14B",
+       "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+       "snapshot_bytes": 29552613776,
+       "int8_weight_bytes": 14800000000,
+       "owner_storage_bytes": 32507875154,
+       "fits_storage_ceiling": true
+      }
+     ]
+    },
+    "fast_mode": {
+     "enabled": false,
+     "source": "default",
+     "locked": false
+    },
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-local-contrib.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-local-contrib.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:50138 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 1800,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:50138"
+    },
+    "acquisition": {
+     "downloaded_bytes": 0,
+     "error_code": null,
+     "model": {
+      "decoding": "quantized_greedy_token_id",
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "sampling_seed": 0,
+      "source_representation": "bfloat16-safetensors"
+     },
+     "state": "closed",
+     "total_bytes": 0
+    },
+    "resource_observation": {
+     "power": "unknown",
+     "thermal": "unknown",
+     "network": "unknown"
+    },
+    "acquisition_policy_error": null,
+    "installation_role": "owner",
+    "resource_policy": {
+     "background": false,
+     "diagnostics": false,
+     "network": "unmetered_only",
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 4000000000,
+     "thermal": "stop_on_serious"
+    },
+    "running": true,
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": true,
+     "local_tls": "pinned_loopback",
+     "membership_state": "current",
+     "member_count": 2,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": 3,
+     "lease_state": "fresh",
+     "contribution_enabled": false,
+     "route_ready": false,
+     "members": [
+      {
+       "node_id": "judge-mac-342c6e90d0e25f1e",
+       "generation": 3,
+       "lifecycle_state": "RUNNING",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      },
+      {
+       "node_id": "@NODE1",
+       "generation": 3,
+       "lifecycle_state": "NEW",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      }
+     ]
+    },
+    "renewal_error": null,
+    "recovery_error": null,
+    "distribution": "unsigned development software; not notarized",
+    "leave": null,
+    "join_flow": {
+     "standing_disclosure": {
+      "text": "While this Mac is a member of the owner's swarm and this app is open, it will automatically: accept work the owner assigns to it; download and store only the model slice assigned to it; load that slice with MLX and compute it for requests routed through the swarm; and send the owner a capability report (chip, memory, free disk, MLX availability, power and thermal state) and a link measurement over the relay on join and before each run. Limits: at most the disk, memory, run time and command budget you choose below, only on the power and network policy you chose, and it stops on serious thermal pressure. Cooperative workers observe the activations they compute, so this is not confidential inference. You can withdraw this consent at any time from this app; automatic acceptance stops immediately.",
+      "digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19"
+     },
+     "pairing_windows": [],
+     "pending_windows": [],
+     "member_reports": {}
+    },
+    "adaptive_host": {
+     "enabled": false,
+     "game_mode": false,
+     "pause_sharing": false,
+     "adaptive_sharing": false,
+     "stopped": false,
+     "state": "off",
+     "line": "Adaptive sharing: off",
+     "reserve_bytes": 0
+    },
+    "adaptive_host_publication": null,
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "demo_target": null,
+    "chat": {
+     "available": false,
+     "busy": false,
+     "local_url": "http://127.0.0.1:50135/chat",
+     "share_url": "https://v02-local-contrib.mycelium.now/chat"
+    },
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "peer_liveness": null,
+    "test_seams_active": false,
+    "test_seams": {
+     "active": false,
+     "clock_offset_seconds": null
+    }
+   }
+  },
+  {
+   "label": "restart_status_after_start",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     3,
+     3
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  },
+  {
+   "label": "restart_contributor_start",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "created": true,
+    "physical_hosts": 1,
+    "node_id": "@NODE1",
+    "membership_state": "current",
+    "route_ready": false
+   }
+  },
+  {
+   "label": "restart_network_other_origin_with_contributor",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib-2.mycelium.now",
+    "proxy_port": 50146
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "network_requires_fresh_owner"
+   }
+  },
+  {
+   "label": "restart_network_same_origin_with_contributor",
+   "method": "POST",
+   "path": "/api/network/start",
+   "request": {
+    "relay_acknowledged": true,
+    "max_seconds": 1800,
+    "provider": "external",
+    "public_origin": "https://v02-local-contrib.mycelium.now",
+    "proxy_port": 50148
+   },
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "network_requires_fresh_owner"
+   }
+  },
+  {
+   "label": "restart_contributor_stop",
+   "method": "POST",
+   "path": "/api/local-contributor/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "state": "stopped",
+    "identity_retained": true,
+    "route_ready": false
+   },
+   "files": [
+    [
+     "accepted.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "consent.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity",
+     "d",
+     "0o700"
+    ],
+    [
+     "membership.state.json",
+     "f",
+     "0o600"
+    ],
+    [
+     "identity/node.key",
+     "f",
+     "0o600"
+    ]
+   ]
+  },
+  {
+   "label": "restart_owner_stop",
+   "method": "POST",
+   "path": "/api/stop",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "stopped": true,
+    "identity_retained": true,
+    "evidence_retained": true
+   }
+  },
+  {
+   "label": "restart_owner_start_2",
+   "method": "POST",
+   "path": "/api/start",
+   "request": {},
+   "status": 200,
+   "kind": "answer",
+   "body": {
+    "label": "macOS A13 hackathon demo",
+    "role": "not_yet_serving",
+    "model_contract": {
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "source_representation": "bfloat16-safetensors",
+     "runtime_backend": "mlx",
+     "runtime_dtype": "float32",
+     "runtime_quantization": "int8-weight-only",
+     "decoding": "quantized_greedy_token_id",
+     "sampling_seed": 0
+    },
+    "run_model": {
+     "selected": "a9-route",
+     "source": "demo_default",
+     "locked": false,
+     "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+     "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+     "demo_default": "a9-route",
+     "storage_ceiling_bytes": 32568709325,
+     "resources": {
+      "storage_consent_ceiling_bytes": 32568709325,
+      "pairing_quota_ceiling_bytes": 32568709325,
+      "selected": {
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "label": "Qwen2.5-0.5B",
+       "snapshot_bytes": 999604126,
+       "weight_source_bytes": 988065536,
+       "owner_storage_bytes": 1099564539,
+       "whole_model_member_disk_bytes": 1464801818,
+       "whole_model_member_rss_bytes": 2802849734
+      },
+      "models": [
+       {
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "resolved_commit": "a09a35458c702b33eeacc393d103063234e8bc28",
+        "label": "Qwen2.5-7B",
+        "snapshot_bytes": 15242807270,
+        "weight_source_bytes": 15231233024,
+        "owner_storage_bytes": 23052975062,
+        "whole_model_member_disk_bytes": 12427070003,
+        "whole_model_member_rss_bytes": 8477702554
+       },
+       {
+        "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+        "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+        "label": "Qwen2.5-0.5B",
+        "snapshot_bytes": 999604126,
+        "weight_source_bytes": 988065536,
+        "owner_storage_bytes": 1099564539,
+        "whole_model_member_disk_bytes": 1464801818,
+        "whole_model_member_rss_bytes": 2802849734
+       },
+       {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "label": "Qwen3-0.6B",
+        "snapshot_bytes": 1519209243,
+        "weight_source_bytes": 1503264768,
+        "owner_storage_bytes": 1671130168,
+        "whole_model_member_disk_bytes": 2074306151,
+        "whole_model_member_rss_bytes": 4406023148
+       },
+       {
+        "model_id": "Qwen/Qwen3-8B",
+        "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+        "label": "Qwen3-8B",
+        "snapshot_bytes": 16397461266,
+        "weight_source_bytes": 16381470720,
+        "owner_storage_bytes": 18037207393,
+        "whole_model_member_disk_bytes": 18098051277,
+        "whole_model_member_rss_bytes": 21500325294
+       },
+       {
+        "model_id": "Qwen/Qwen3-14B",
+        "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+        "label": "Qwen3-14B",
+        "snapshot_bytes": 29552613776,
+        "weight_source_bytes": 29536614400,
+        "owner_storage_bytes": 32507875154,
+        "whole_model_member_disk_bytes": 32568709325,
+        "whole_model_member_rss_bytes": 36813347745
+       }
+      ],
+      "device_memory_bytes": 51539607552,
+      "memory_cap_ceiling_bytes": 38654705664,
+      "memory_cap_options": [
+       25769803776,
+       32212254720,
+       38654705664
+      ]
+     },
+     "choices": [
+      {
+       "name": "a9-route",
+       "label": "Qwen2.5-0.5B-Instruct \u2014 tested starter (tested on two Macs; ~1 GB download if not cached)",
+       "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+       "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+       "snapshot_bytes": 999604126,
+       "int8_weight_bytes": 500000000,
+       "owner_storage_bytes": 1099564539,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-0.6b",
+       "label": "Qwen3-0.6B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "snapshot_bytes": 1519209243,
+       "int8_weight_bytes": 750000000,
+       "owner_storage_bytes": 1671130168,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-8b",
+       "label": "Qwen3-8B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-8B",
+       "resolved_commit": "b968826d9c46dd6066d109eabc6255188de91218",
+       "snapshot_bytes": 16397461266,
+       "int8_weight_bytes": 8200000000,
+       "owner_storage_bytes": 18037207393,
+       "fits_storage_ceiling": true
+      },
+      {
+       "name": "qwen3-14b",
+       "label": "Qwen3-14B (not yet tested on two Macs)",
+       "model_id": "Qwen/Qwen3-14B",
+       "resolved_commit": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+       "snapshot_bytes": 29552613776,
+       "int8_weight_bytes": 14800000000,
+       "owner_storage_bytes": 32507875154,
+       "fits_storage_ceiling": true
+      }
+     ]
+    },
+    "fast_mode": {
+     "enabled": false,
+     "source": "default",
+     "locked": false
+    },
+    "network": {
+     "state": "relay_process_running",
+     "provider": "external",
+     "public_origin": "https://v02-local-contrib.mycelium.now",
+     "error_code": null,
+     "seed_bound": true,
+     "privacy": "Your own address (v02-local-contrib.mycelium.now) is served by the front you pointed at this Mac (for example a named Cloudflare tunnel or a reverse proxy). That front terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies in plaintext (they cross it); only inference between the Macs uses Iroh. Mycelium starts no tunnel for it: you must point this hostname at http://127.0.0.1:50138 yourself.",
+     "relay_host_trust": "public_webpki",
+     "auto_renew": true,
+     "long_lived": false,
+     "renewals": 0,
+     "expires_in_seconds": 1800,
+     "renewal_cap_seconds": 86400,
+     "renewal_stopped": null,
+     "local_forward_target": "http://127.0.0.1:50138"
+    },
+    "acquisition": {
+     "downloaded_bytes": 0,
+     "error_code": null,
+     "model": {
+      "decoding": "quantized_greedy_token_id",
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolved_commit": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "runtime_backend": "mlx",
+      "runtime_dtype": "float32",
+      "runtime_quantization": "int8-weight-only",
+      "sampling_seed": 0,
+      "source_representation": "bfloat16-safetensors"
+     },
+     "state": "closed",
+     "total_bytes": 0
+    },
+    "resource_observation": {
+     "power": "unknown",
+     "thermal": "unknown",
+     "network": "unknown"
+    },
+    "acquisition_policy_error": null,
+    "installation_role": "owner",
+    "resource_policy": {
+     "background": false,
+     "diagnostics": false,
+     "network": "unmetered_only",
+     "peer_visibility": true,
+     "power": "ac_only",
+     "storage_bytes": 4000000000,
+     "thermal": "stop_on_serious"
+    },
+    "running": true,
+    "authority": {
+     "protocol": "mycelium.demo_authority_status.v1",
+     "started": true,
+     "swarm_created": true,
+     "local_tls": "pinned_loopback",
+     "membership_state": "current",
+     "member_count": 2,
+     "capability_state": "not_reported",
+     "capability": null,
+     "membership_generation": 4,
+     "lease_state": "fresh",
+     "contribution_enabled": false,
+     "route_ready": false,
+     "members": [
+      {
+       "node_id": "judge-mac-342c6e90d0e25f1e",
+       "generation": 4,
+       "lifecycle_state": "RUNNING",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      },
+      {
+       "node_id": "@NODE1",
+       "generation": 5,
+       "lifecycle_state": "NEW",
+       "clock": {
+        "offset_seconds": null,
+        "exceeds_tolerance": false,
+        "tolerance_seconds": 30.0,
+        "samples": 0
+       }
+      }
+     ]
+    },
+    "renewal_error": null,
+    "recovery_error": null,
+    "distribution": "unsigned development software; not notarized",
+    "leave": null,
+    "join_flow": {
+     "standing_disclosure": {
+      "text": "While this Mac is a member of the owner's swarm and this app is open, it will automatically: accept work the owner assigns to it; download and store only the model slice assigned to it; load that slice with MLX and compute it for requests routed through the swarm; and send the owner a capability report (chip, memory, free disk, MLX availability, power and thermal state) and a link measurement over the relay on join and before each run. Limits: at most the disk, memory, run time and command budget you choose below, only on the power and network policy you chose, and it stops on serious thermal pressure. Cooperative workers observe the activations they compute, so this is not confidential inference. You can withdraw this consent at any time from this app; automatic acceptance stops immediately.",
+      "digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19"
+     },
+     "pairing_windows": [],
+     "pending_windows": [],
+     "member_reports": {}
+    },
+    "adaptive_host": {
+     "enabled": false,
+     "game_mode": false,
+     "pause_sharing": false,
+     "adaptive_sharing": false,
+     "stopped": false,
+     "state": "off",
+     "line": "Adaptive sharing: off",
+     "reserve_bytes": 0
+    },
+    "adaptive_host_publication": null,
+    "sharing": {
+     "state": "idle",
+     "line": "Not sharing yet"
+    },
+    "relay_wait": null,
+    "owner_run": {
+     "state": "idle",
+     "step": null,
+     "error_code": null,
+     "error_message": null,
+     "failed_step": null,
+     "steps": [
+      {
+       "name": "model",
+       "label": "Model ready on this Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "contributor",
+       "label": "This Mac joins the run",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "descriptors",
+       "label": "Joined Macs report in",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "observe",
+       "label": "Native hello on every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "compile",
+       "label": "Compile the route over the current members",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "slices",
+       "label": "Every Mac fetches only its own slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "publish",
+       "label": "Publish work to every Mac",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "targets",
+       "label": "Every Mac accepts and starts its slice",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "activate",
+       "label": "Activate and qualify the route",
+       "state": "pending",
+       "detail": null
+      },
+      {
+       "name": "serving",
+       "label": "Serving prompts",
+       "state": "pending",
+       "detail": null
+      }
+     ],
+     "participants": null,
+     "registry_origin": null,
+     "route_ready": false,
+     "run_id": null
+    },
+    "demo_target": null,
+    "chat": {
+     "available": false,
+     "busy": false,
+     "local_url": "http://127.0.0.1:50135/chat",
+     "share_url": "https://v02-local-contrib.mycelium.now/chat"
+    },
+    "swarm": {
+     "enabled": false,
+     "mode": null
+    },
+    "serving": {
+     "state": "not_yet_serving",
+     "route_ready": false,
+     "next_action": "Native route preparation and exact model execution approval required."
+    },
+    "peer_liveness": null,
+    "test_seams_active": false,
+    "test_seams": {
+     "active": false,
+     "clock_offset_seconds": null
+    }
+   }
+  },
+  {
+   "label": "restart_contributor_start_2",
+   "method": "POST",
+   "path": "/api/local-contributor/start",
+   "request": {},
+   "status": 400,
+   "kind": "answer",
+   "body": {
+    "error": "local_contributor_already_running"
+   }
+  },
+  {
+   "label": "restart_status_end",
+   "method": "GET",
+   "path": "/api/status",
+   "request": null,
+   "status": 200,
+   "kind": "status",
+   "tree": {
+    "acquisition": {
+     "downloaded_bytes": "int",
+     "error_code": "NoneType",
+     "model": {
+      "decoding": "str",
+      "model_id": "str",
+      "resolved_commit": "str",
+      "runtime_backend": "str",
+      "runtime_dtype": "str",
+      "runtime_quantization": "str",
+      "sampling_seed": "int",
+      "source_representation": "str"
+     },
+     "state": "str",
+     "total_bytes": "int"
+    },
+    "acquisition_policy_error": "NoneType",
+    "adaptive_host": {
+     "adaptive_sharing": "bool",
+     "enabled": "bool",
+     "game_mode": "bool",
+     "line": "str",
+     "pause_sharing": "bool",
+     "reserve_bytes": "int",
+     "state": "str",
+     "stopped": "bool"
+    },
+    "adaptive_host_publication": "NoneType",
+    "authority": {
+     "capability": "NoneType",
+     "capability_state": "str",
+     "contribution_enabled": "bool",
+     "lease_state": "str",
+     "local_tls": "str",
+     "member_count": "int",
+     "members": [
+      {
+       "clock": {
+        "exceeds_tolerance": "bool",
+        "offset_seconds": "NoneType",
+        "samples": "int",
+        "tolerance_seconds": "float"
+       },
+       "generation": "int",
+       "lifecycle_state": "str",
+       "node_id": "str"
+      }
+     ],
+     "membership_generation": "int",
+     "membership_state": "str",
+     "protocol": "str",
+     "route_ready": "bool",
+     "started": "bool",
+     "swarm_created": "bool"
+    },
+    "chat": {
+     "available": "bool",
+     "busy": "bool",
+     "local_url": "str",
+     "share_url": "str"
+    },
+    "demo_target": "NoneType",
+    "distribution": "str",
+    "fast_mode": {
+     "enabled": "bool",
+     "locked": "bool",
+     "source": "str"
+    },
+    "installation_role": "str",
+    "join_flow": {
+     "member_reports": {},
+     "pairing_windows": [],
+     "pending_windows": [],
+     "standing_disclosure": {
+      "digest": "str",
+      "text": "str"
+     }
+    },
+    "label": "str",
+    "leave": "NoneType",
+    "model_contract": {
+     "decoding": "str",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "runtime_backend": "str",
+     "runtime_dtype": "str",
+     "runtime_quantization": "str",
+     "sampling_seed": "int",
+     "source_representation": "str"
+    },
+    "network": {
+     "auto_renew": "bool",
+     "error_code": "NoneType",
+     "expires_in_seconds": "int",
+     "local_forward_target": "str",
+     "long_lived": "bool",
+     "privacy": "str",
+     "provider": "str",
+     "public_origin": "str",
+     "relay_host_trust": "str",
+     "renewal_cap_seconds": "int",
+     "renewal_stopped": "NoneType",
+     "renewals": "int",
+     "seed_bound": "bool",
+     "state": "str"
+    },
+    "owner_run": {
+     "error_code": "NoneType",
+     "error_message": "NoneType",
+     "failed_step": "NoneType",
+     "participants": "NoneType",
+     "registry_origin": "NoneType",
+     "route_ready": "bool",
+     "run_id": "NoneType",
+     "state": "str",
+     "step": "NoneType",
+     "steps": [
+      {
+       "detail": "NoneType",
+       "label": "str",
+       "name": "str",
+       "state": "str"
+      }
+     ]
+    },
+    "peer_liveness": "NoneType",
+    "recovery_error": "NoneType",
+    "relay_wait": "NoneType",
+    "renewal_error": "NoneType",
+    "resource_observation": {
+     "network": "str",
+     "power": "str",
+     "thermal": "str"
+    },
+    "resource_policy": {
+     "background": "bool",
+     "diagnostics": "bool",
+     "network": "str",
+     "peer_visibility": "bool",
+     "power": "str",
+     "storage_bytes": "int",
+     "thermal": "str"
+    },
+    "role": "str",
+    "run_model": {
+     "choices": [
+      {
+       "fits_storage_ceiling": "bool",
+       "int8_weight_bytes": "int",
+       "label": "str",
+       "model_id": "str",
+       "name": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int"
+      }
+     ],
+     "demo_default": "str",
+     "locked": "bool",
+     "model_id": "str",
+     "resolved_commit": "str",
+     "resources": {
+      "device_memory_bytes": "int",
+      "memory_cap_ceiling_bytes": "int",
+      "memory_cap_options": [
+       "int"
+      ],
+      "models": [
+       {
+        "label": "str",
+        "model_id": "str",
+        "owner_storage_bytes": "int",
+        "resolved_commit": "str",
+        "snapshot_bytes": "int",
+        "weight_source_bytes": "int",
+        "whole_model_member_disk_bytes": "int",
+        "whole_model_member_rss_bytes": "int"
+       }
+      ],
+      "pairing_quota_ceiling_bytes": "int",
+      "selected": {
+       "label": "str",
+       "model_id": "str",
+       "owner_storage_bytes": "int",
+       "resolved_commit": "str",
+       "snapshot_bytes": "int",
+       "weight_source_bytes": "int",
+       "whole_model_member_disk_bytes": "int",
+       "whole_model_member_rss_bytes": "int"
+      },
+      "storage_consent_ceiling_bytes": "int"
+     },
+     "selected": "str",
+     "source": "str",
+     "storage_ceiling_bytes": "int"
+    },
+    "running": "bool",
+    "serving": {
+     "next_action": "str",
+     "route_ready": "bool",
+     "state": "str"
+    },
+    "sharing": {
+     "line": "str",
+     "state": "str"
+    },
+    "status_snapshot": {
+     "age_seconds": "float",
+     "refresh_failed": "bool"
+    },
+    "swarm": {
+     "enabled": "bool",
+     "mode": "NoneType"
+    },
+    "test_seams": {
+     "active": "bool",
+     "clock_offset_seconds": "NoneType"
+    },
+    "test_seams_active": "bool"
+   },
+   "pick": {
+    "running": true,
+    "authority.started": true,
+    "authority.swarm_created": true,
+    "authority.membership_state": "current",
+    "authority.member_count": 2,
+    "authority.members.node_id": [
+     "judge-mac-342c6e90d0e25f1e",
+     "@NODE1"
+    ],
+    "authority.members.lifecycle_state": [
+     "RUNNING",
+     "NEW"
+    ],
+    "authority.members.generation": [
+     4,
+     5
+    ],
+    "network.state": "relay_process_running",
+    "owner_run.state": "idle"
+   }
+  }
+ ],
+ "quit1": 0,
+ "quit2": 0
+}

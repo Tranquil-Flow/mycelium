@@ -1,0 +1,1020 @@
+{
+  "cases": {
+    "ceiling-exception-continues-monitor": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached",
+        "monitor"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [
+          {
+            "code": "owner_ceiling_check_failed",
+            "count": 1,
+            "exception_class": "RuntimeError"
+          }
+        ],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": true,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "serving",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "ceiling_error": true,
+        "status": true
+      },
+      "stop": false
+    },
+    "ceiling-poll": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": "execution_ceiling_reached",
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": "serving",
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "failing",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "failed"
+          }
+        ]
+      },
+      "spec": {
+        "ceiling": "execution_ceiling_reached",
+        "status": false
+      },
+      "stop": true
+    },
+    "ceiling-status": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": "execution_ceiling_reached",
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": "serving",
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "failing",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "failed"
+          }
+        ]
+      },
+      "spec": {
+        "ceiling": "execution_ceiling_reached",
+        "status": true
+      },
+      "stop": true
+    },
+    "healthy-poll": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": true,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "serving",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "status": false
+      },
+      "stop": false
+    },
+    "healthy-status": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached",
+        "monitor"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": true,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "serving",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "status": true
+      },
+      "stop": false
+    },
+    "monitor-exception": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached",
+        "monitor"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [
+          {
+            "code": "owner_run_monitor_failed",
+            "count": 1,
+            "exception_class": "RuntimeError"
+          }
+        ],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": "owner_run_monitor_failed",
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": "serving",
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "failing",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "failed"
+          }
+        ]
+      },
+      "spec": {
+        "monitor_error": true,
+        "status": true
+      },
+      "stop": true
+    },
+    "monitor-refusal": {
+      "calls": [
+        "rollover_due",
+        "ceiling_reached",
+        "monitor"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": "member_restarted",
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": "serving",
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "idle"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "failing",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "failed"
+          }
+        ]
+      },
+      "spec": {
+        "monitor": "member_restarted",
+        "status": true
+      },
+      "stop": true
+    },
+    "rollover-poll": {
+      "calls": [
+        "rollover_due"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "switching"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "stopping",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "due": true,
+        "status": false
+      },
+      "stop": true
+    },
+    "rollover-precedes-both-failing-callbacks": {
+      "calls": [
+        "rollover_due"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "switching"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "stopping",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "ceiling_error": true,
+        "due": true,
+        "monitor_error": true,
+        "status": true
+      },
+      "stop": true
+    },
+    "rollover-status": {
+      "calls": [
+        "rollover_due"
+      ],
+      "snapshot": {
+        "build_seconds": null,
+        "cleanup_errors": [],
+        "cleanup_unproven": null,
+        "compilation_cache_hit": null,
+        "deployment_id": "dep-1",
+        "error_code": null,
+        "error_fix": null,
+        "error_message": null,
+        "failed_step": null,
+        "participants": null,
+        "protocol": "mycelium.a13_owner_run.v1",
+        "reason": "start",
+        "registry_origin": null,
+        "rollover": {
+          "completed": 0,
+          "consecutive_failures": 0,
+          "last_error": null,
+          "retry_at": null,
+          "state": "switching"
+        },
+        "route_ready": false,
+        "run_id": "run-1",
+        "started_at": 0.0,
+        "state": "stopping",
+        "step": "serving",
+        "steps": [
+          {
+            "detail": null,
+            "label": "Model ready on this Mac",
+            "name": "model",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "This Mac joins the run",
+            "name": "contributor",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Joined Macs report in",
+            "name": "descriptors",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Native hello on every Mac",
+            "name": "observe",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Compile the route over the current members",
+            "name": "compile",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac fetches only its own slice",
+            "name": "slices",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Publish work to every Mac",
+            "name": "publish",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Every Mac accepts and starts its slice",
+            "name": "targets",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Activate and qualify the route",
+            "name": "activate",
+            "state": "done"
+          },
+          {
+            "detail": null,
+            "label": "Serving prompts",
+            "name": "serving",
+            "state": "done"
+          }
+        ]
+      },
+      "spec": {
+        "due": true,
+        "status": true
+      },
+      "stop": true
+    }
+  },
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "scope": "source status/poll callback order; manually entered serving context, no native serving",
+  "source_sha256": "4b85f9fdb307879007b4deb19c78e142e7d6c19c10e4d3210fc9a93b057fe5fd"
+}

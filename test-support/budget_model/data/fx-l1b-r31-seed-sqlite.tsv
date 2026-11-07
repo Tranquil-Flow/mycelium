@@ -1,0 +1,12 @@
+case	input_type	input_repr	save	stored_repr	sqlite_type	load	decoded_repr	error	code
+negative_large	float	-1e+100	accepted	-1e+100	real	accepted	-1e+100	-	-
+positive_large	float	1e+100	accepted	1e+100	real	accepted	1e+100	-	-
+fraction	float	0.125	accepted	0.125	real	accepted	0.125	-	-
+zero	float	0.0	accepted	0.0	real	accepted	0.0	-	-
+bool_true	bool	True	accepted	1.0	real	accepted	1.0	-	-
+numeric_text	str	'1e100'	accepted	1e+100	real	accepted	1e+100	-	-
+text	str	'bad'	accepted	'bad'	text	-	-	SeedStateError	seed_state_corrupt
+positive_inf	float	inf	accepted	inf	real	-	-	SeedStateError	seed_state_corrupt
+negative_inf	float	-inf	accepted	-inf	real	-	-	SeedStateError	seed_state_corrupt
+nan	float	nan	-	-	-	-	-	SeedStateError	seed_state_unavailable
+direct_mapping_bool	-	-	-	-	-	-	-	SeedStateError	seed_state_corrupt

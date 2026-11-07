@@ -1,0 +1,147 @@
+   Compiling obligations v0.2.0-dev ($WORKTREE/test-support/obligations)
+   Compiling journey-tests v0.2.0-dev ($WORKTREE/test-support/journeys)
+   Compiling budgets v0.2.0-dev ($WORKTREE/crates/budgets)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.96s
+     Running unittests src/lib.rs (target/debug/deps/budgets-4f90d2f4c5123ad7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/coherence.rs (target/debug/deps/coherence-bd4c69bb614561de)
+
+running 3 tests
+test renewal_red_and_green ... ok
+test f16_old_stop_rejected_observed_close_fits_corrected_cap_only ... ok
+test f16_full_restart_cannot_fit_and_remains_blocked ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/journey_tests-e74811ecea86f99b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/journey_tests-ca4551537c0d52f2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/containment.rs (target/debug/deps/containment-f71ec04ae6371641)
+
+running 2 tests
+test audit_never_follows_links_and_rejects_model_payloads ... ok
+test sandbox_enforcement_has_real_positive_and_negative_controls ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running tests/contracts.rs (target/debug/deps/contracts-39efb062fb85a96f)
+
+running 4 tests
+test loopback_only_never_resolve_hosts_or_accept_url_credentials ... ok
+test comparator_kills_changed_status_defaults_missing_and_extra_observations ... ok
+test wire_projection_is_scalar_allowlist_not_recursive_redaction ... ok
+test sse_order_multiline_comments_crlf_and_incomplete_terminal ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/golden.rs (target/debug/deps/golden-c300f177c3ef0ced)
+
+running 3 tests
+test cli_comparator_matches_real_fixture_without_starting_an_app ... ok
+test comparator_kills_every_captured_field_mutation_and_always_refuse ... ok
+test captured_corpus_is_complete_unique_and_every_tag_exists_in_l0 ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/http_adapter.rs (target/debug/deps/http_adapter-a0dee373ed66a3e3)
+
+running 4 tests
+test actual_tcp_chunked_sse_preserves_terminal_order ... ok
+test truncated_and_ambiguous_responses_fail_not_success ... ok
+test session_cookie_is_consumed_and_origin_sent_without_redirect_following ... ok
+test one_total_deadline_rejects_stalled_response ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/process_safety.rs (target/debug/deps/process_safety-28de5bbd712e220f)
+
+running 2 tests
+test isolation_profile_never_grants_general_network_or_writes ... ok
+test target_identity_fails_closed_before_spawn ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/quiescence.rs (target/debug/deps/quiescence-25d0fdc32d4cc717)
+
+running 1 test
+test recovered_closed_acquisition_is_inert_but_active_or_bytes_are_forbidden ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/obligations-a26b8715e3a197d1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/baseline.rs (target/debug/deps/baseline-28186c0f694a7bf2)
+
+running 7 tests
+test contract_crosswalk_preserves_all_original_fixture_and_owner_pins ... ok
+test supported_cells_separate_registered_models_from_reachable_schemas ... ok
+test incident_inventory_is_not_a_red_or_release_claim ... ok
+test removing_a_real_shipped_path_is_rejected ... ok
+test complete_provisional_inventory_is_consistent ... ok
+test every_baseline_path_is_a_real_obligation_not_a_family_wildcard ... ok
+test a6_is_reconciled_as_changed_source_not_mislabelled_as_shipped_closure ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/validation.rs (target/debug/deps/validation-11b7b03664e6fff9)
+
+running 16 tests
+test rejects_missing_test_group_crosswalk ... ok
+test rejects_retirement_without_reason ... ok
+test positive_control ... ok
+test rejects_duplicate_path_with_distinct_id ... ok
+test rejects_missing_f15b_without_confusing_f15 ... ok
+test accepts_reviewed_retirement_with_replacement ... ok
+test rejects_duplicate_id ... ok
+test rejects_dangling_obligation ... ok
+test rejects_dangling_module ... ok
+test rejects_empty_distinguishing_observation ... ok
+test rejects_missing_contract_crosswalk ... ok
+test rejects_retirement_without_replacement ... ok
+test rejects_source_revision_mismatch ... ok
+test rejects_unmapped_supplied_path ... ok
+test rejects_unreviewed_retirement ... ok
+test rejects_every_missing_escape ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests budgets
+
+running 2 tests
+test crates/budgets/src/lib.rs - (line 12) - compile fail ... ok
+test crates/budgets/src/lib.rs - (line 7) - compile fail ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests journey_tests
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests obligations
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+real 9.07
+user 6.24
+sys 2.14

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+budgets = { path = "../budgets" }
+control = { path = "../control" }
+control-runtime = { path = "../control-runtime" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+rustix = { version = "=1.1.4", features = ["fs", "process"] }
+
+[dev-dependencies]
+sim = { path = "../../test-support/sim" }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+
+[lints]
+workspace = true
