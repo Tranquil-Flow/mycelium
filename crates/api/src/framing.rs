@@ -1,19 +1,66 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! When has an HTTP/1.x reply arrived in full? `http.client` (the oracle's transport for the pairing
-//! window and the seed) returns as soon as the framing says so: `Content-Length` bytes, the final
-//! chunk, or no body at all (1xx, 204, 304). It never waits for the peer to hang up, so a relay edge
-//! that keeps the connection open after `Connection: close` costs v0.1.4 nothing. The Rust clients read
-//! until the peer closes OR this says the reply is complete; anything this cannot frame (no length, a
-//! malformed head, an invalid length) stays on the read-to-EOF path with its existing error mapping.
+//! Bounded HTTP/1.x completion detection shared by directory, pairing and seed clients.
+//! Unframed/malformed replies retain the legacy read-to-EOF path. Checked callers
+//! can refuse hostile arithmetic and excessive interim responses immediately.
 
-/// `true` only when `reply` holds a whole response by its own framing.
+/// Maximum consecutive 100 Continue heads before a final response.
+pub const INTERIM_RESPONSE_LIMIT: usize = 32;
+
+/// Compatibility probe for clients with their own decoding/error mapping.
 #[must_use]
 pub fn response_complete(reply: &[u8]) -> bool {
+    match response_complete_checked(reply) {
+        Ok(complete) => complete,
+        Err(code) => {
+            eprintln!("{code}");
+            false
+        }
+    }
+}
+
+/// Find the final head without recursion. As in http.client, only 100 is skipped;
+/// other 1xx statuses are bodyless final replies (including protocol switching).
+pub fn final_response(mut reply: &[u8]) -> Result<Option<&[u8]>, &'static str> {
+    let mut interim = 0;
+    loop {
+        let Some(split) = reply.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return Ok(None);
+        };
+        let Ok(head) = std::str::from_utf8(&reply[..split]) else {
+            return Ok(None);
+        };
+        let Some(status) = head
+            .lines()
+            .next()
+            .and_then(|l| l.split(' ').nth(1))
+            .and_then(|s| s.parse::<u16>().ok())
+        else {
+            return Ok(None);
+        };
+        if status != 100 {
+            return Ok(Some(reply));
+        }
+        if head.split("\r\n").skip(1).any(|line| !line.contains(':')) {
+            return Ok(None);
+        }
+        interim += 1;
+        if interim > INTERIM_RESPONSE_LIMIT {
+            return Err("http_interim_response_limit");
+        }
+        reply = &reply[split + 4..];
+    }
+}
+
+/// Complete, incomplete, or a specific framing refusal (never an arithmetic panic).
+pub fn response_complete_checked(reply: &[u8]) -> Result<bool, &'static str> {
+    let Some(reply) = final_response(reply)? else {
+        return Ok(false);
+    };
     let Some(split) = reply.windows(4).position(|w| w == b"\r\n\r\n") else {
-        return false;
+        return Ok(false);
     };
     let Ok(head) = std::str::from_utf8(&reply[..split]) else {
-        return false;
+        return Ok(false);
     };
     let body = &reply[split + 4..];
     let mut lines = head.split("\r\n");
@@ -22,12 +69,12 @@ pub fn response_complete(reply: &[u8]) -> bool {
         .and_then(|l| l.split(' ').nth(1))
         .and_then(|s| s.parse::<u16>().ok())
     else {
-        return false;
+        return Ok(false);
     };
     let (mut chunked, mut length, mut length_lines) = (false, None, 0usize);
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
-            return false;
+            return Ok(false);
         };
         match name.trim().to_ascii_lowercase().as_str() {
             "transfer-encoding" => chunked |= value.trim().eq_ignore_ascii_case("chunked"),
@@ -38,50 +85,73 @@ pub fn response_complete(reply: &[u8]) -> bool {
             _ => {}
         }
     }
-    // `http.client` skips "100 Continue" interim responses and reads the real one after them.
-    if status == 100 {
-        return response_complete(body);
-    }
     if status == 204 || status == 304 || (100..200).contains(&status) {
-        return true;
+        return Ok(true);
     }
     if chunked {
         return chunks_complete(body);
     }
-    // Two Content-Length lines, or one that is not a plain count: leave it to the caller's own rules.
-    match (length_lines, length) {
+    Ok(match (length_lines, length) {
         (1, Some(length)) => body.len() >= length,
         _ => false,
-    }
+    })
 }
 
-/// The chunk sequence ends with a zero-size chunk, optional trailers and the closing blank line.
-fn chunks_complete(mut rest: &[u8]) -> bool {
+fn chunks_complete(mut rest: &[u8]) -> Result<bool, &'static str> {
     loop {
         let Some(line_end) = rest.windows(2).position(|w| w == b"\r\n") else {
-            return false;
+            return Ok(false);
         };
         let Some(size) = std::str::from_utf8(&rest[..line_end])
             .ok()
             .and_then(|l| l.split(';').next())
             .and_then(|l| usize::from_str_radix(l.trim(), 16).ok())
         else {
-            return false;
+            return Ok(false);
         };
         rest = &rest[line_end + 2..];
         if size == 0 {
-            return rest.starts_with(b"\r\n") || rest.windows(4).any(|w| w == b"\r\n\r\n");
+            return Ok(rest.starts_with(b"\r\n") || rest.windows(4).any(|w| w == b"\r\n\r\n"));
         }
-        if rest.len() < size + 2 {
-            return false;
+        let framed_size = size.checked_add(2).ok_or("http_chunk_size_overflow")?;
+        if rest.len() < framed_size {
+            return Ok(false);
         }
-        rest = &rest[size + 2..];
+        rest = &rest[framed_size..];
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::response_complete as complete;
+
+    #[test]
+    fn checked_framing_refuses_arithmetic_and_interim_limits() {
+        use super::{INTERIM_RESPONSE_LIMIT, response_complete_checked};
+        let prefix = b"HTTP/1.1 100 Continue\r\n\r\n";
+        let mut at_limit = prefix.repeat(INTERIM_RESPONSE_LIMIT);
+        assert_eq!(response_complete_checked(&at_limit), Ok(false));
+        at_limit.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+        assert_eq!(response_complete_checked(&at_limit), Ok(true));
+        assert_eq!(
+            response_complete_checked(&prefix.repeat(INTERIM_RESPONSE_LIMIT + 1)),
+            Err("http_interim_response_limit"),
+        );
+        for size in [usize::MAX, usize::MAX - 1] {
+            let reply =
+                format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{size:x}\r\nx");
+            assert_eq!(
+                response_complete_checked(reply.as_bytes()),
+                Err("http_chunk_size_overflow")
+            );
+            assert!(!complete(reply.as_bytes()));
+        }
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\nx",
+            usize::MAX - 2
+        );
+        assert_eq!(response_complete_checked(reply.as_bytes()), Ok(false));
+    }
 
     #[test]
     fn content_length_replies() {

@@ -58,6 +58,51 @@ fn publisher_announces_app_release_without_changing_signed_schema_or_following_r
     assert_eq!(response.unwrap_err().code, "swarm_directory_http_302");
 }
 
+fn scripted_reply(reply: Vec<u8>) -> Result<serde_json::Value, api::swarm::publisher::Error> {
+    use std::io::{Read, Write};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket.set_read_timeout(Some(budget())).unwrap();
+        let mut request = [0; 4096];
+        assert!(socket.read(&mut request).unwrap() > 0);
+        socket.write_all(&reply).unwrap();
+    });
+    let result = DirectoryClient::new(&origin)
+        .unwrap()
+        .call("GET", "/records", b"");
+    server.join().unwrap();
+    result
+}
+
+fn budget() -> Duration {
+    Duration::from_millis(
+        BudgetId::PyMyceliumA13MacosSwarmPublishDirectoryclientInitTimeoutL54
+            .span(Entries::ZERO)
+            .unwrap()
+            .millis(),
+    )
+}
+
+#[test]
+fn hostile_chunk_size_is_a_transport_refusal_not_an_overflow_panic() {
+    let result = scripted_reply(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nx".to_vec(),
+    );
+    assert_eq!(result.unwrap_err().code, "http_chunk_size_overflow");
+}
+
+#[test]
+fn interim_response_chain_is_bounded() {
+    let mut reply = b"HTTP/1.1 100 Continue\r\n\r\n".repeat(1024);
+    reply.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}");
+    assert_eq!(
+        scripted_reply(reply).unwrap_err().code,
+        "http_interim_response_limit"
+    );
+}
+
 #[test]
 fn directory_origins_and_request_paths_are_closed_before_connecting() {
     for origin in [
