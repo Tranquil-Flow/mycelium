@@ -4,6 +4,7 @@ pub mod core;
 pub mod docs;
 pub mod json;
 pub mod limits;
+pub mod publisher;
 pub mod service;
 pub mod store;
 pub mod wire;
