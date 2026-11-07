@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Private compiler inputs and whole-source metadata assignment output.
-//! Neither inputs nor metadata assignments are an operator plan or native proof.
+//! Private compiler inputs, metadata assignments and verified stage-shard bytes.
+//! None of these artifacts is an operator plan, loaded-stage or native proof.
 //! The owning artifact retains their identities and never converts to BuildOutput.
 use crate::{preferences::private_state, serving_source::Prepared};
 use owner_run::chain::PortError;
@@ -184,37 +184,8 @@ impl InputArtifact {
         current_members: &BTreeMap<String, Value>,
         now: f64,
     ) -> Result<Value> {
-        self.validate()?;
         self.validate_members(current_members, now)?;
-        let manifest = crate::local_manifest::compile_local_model_manifest(
-            &crate::local_manifest::LocalModelSource {
-                root: self.source.source_root.clone(),
-                model_id: self.request.model_id.clone(),
-                requested_revision: self.source.manifest["requested_revision"]
-                    .as_str()
-                    .ok_or(Error("compiler_model_changed"))?
-                    .into(),
-                resolved_commit: self.request.resolved_commit.clone(),
-                tokenizer_assets: Ok(Vec::new()),
-            },
-        )
-        .map_err(|_| Error("compiler_model_changed"))?;
-        if manifest != Value::Object(self.source.manifest.clone()) {
-            return Err(Error("compiler_model_changed"));
-        }
-        let mut files = BTreeMap::new();
-        for row in manifest["files"]
-            .as_array()
-            .ok_or(Error("compiler_model_changed"))?
-        {
-            let name = row["path"]
-                .as_str()
-                .ok_or(Error("compiler_source_path_invalid"))?;
-            files.insert(
-                name.into(),
-                open_source_file(&self.source.source_root, name)?,
-            );
-        }
+        let (manifest, files) = self.source_files()?;
         let mut roots = Map::new();
         let mut runtimes = Map::new();
         for node in self.topology()["nodes"]
@@ -259,6 +230,145 @@ impl InputArtifact {
             "observations_digest":planner::digest(self.observations(), true).map_err(|e| Error(e.code))?,
             "members_digest":planner::digest(self.membership(), true).map_err(|e| Error(e.code))?,
             "route":output.route,"assignments":output.assignments}))
+    }
+    fn source_files(&self) -> Result<(Value, BTreeMap<String, fs::File>)> {
+        self.validate()?;
+        let manifest = crate::local_manifest::compile_local_model_manifest(
+            &crate::local_manifest::LocalModelSource {
+                root: self.source.source_root.clone(),
+                model_id: self.request.model_id.clone(),
+                requested_revision: self.source.manifest["requested_revision"]
+                    .as_str()
+                    .ok_or(Error("compiler_model_changed"))?
+                    .into(),
+                resolved_commit: self.request.resolved_commit.clone(),
+                tokenizer_assets: Ok(Vec::new()),
+            },
+        )
+        .map_err(|_| Error("compiler_model_changed"))?;
+        if manifest != Value::Object(self.source.manifest.clone()) {
+            return Err(Error("compiler_model_changed"));
+        }
+        let mut files = BTreeMap::new();
+        for row in manifest["files"]
+            .as_array()
+            .ok_or(Error("compiler_model_changed"))?
+        {
+            let name = row["path"]
+                .as_str()
+                .ok_or(Error("compiler_source_path_invalid"))?;
+            files.insert(
+                name.into(),
+                open_source_file(&self.source.source_root, name)?,
+            );
+        }
+        Ok((manifest, files))
+    }
+
+    /// Real source-byte sharding only; no stage load, quantization or native proof.
+    /// Requires an explicitly stage-sharded request (whole-source requests do not
+    /// silently duplicate a model). Partial failures leave unadmitted bytes.
+    pub fn produce_stage_shards(
+        &mut self,
+        current: &BTreeMap<String, Value>,
+        now: f64,
+    ) -> Result<()> {
+        self.validate_members(current, now)?;
+        let (manifest, files) = self.source_files()?;
+        let name = "source-shards.private.json";
+        if self.documents.contains_key(name) {
+            return Err(Error("compiler_already_started"));
+        }
+        match fs::symlink_metadata(self.root.join(name)) {
+            Ok(_) => Err(Error("compiler_outputs_changed")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(Error("compiler_directory_invalid")),
+        }?;
+        let produced = planner::source_plan::producer::emit_stage_shards(
+            &self.request,
+            &self.request,
+            planner::source_plan::PreparedSource {
+                manifest: &manifest,
+                manifest_digest: &self.source.manifest_digest,
+                files: &files,
+            },
+            &self.root.join("stage-shards"),
+        )
+        .map_err(|e| Error(e.code))?;
+        let document = json!({"protocol":"mycelium.source_stage_shards.v1",
+            "state":"bytes_only","route_ready":false,
+            "run_id":self.documents["compile-start.private.json"]["run_id"],
+            "deployment_id":self.request.deployment_id,
+            "compilation_cache_key":self.request.compilation_cache_key,
+            "manifest_digest":self.source.manifest_digest,
+            "observations_digest":planner::digest(self.observations(),true).map_err(|e|Error(e.code))?,
+            "members_digest":planner::digest(self.membership(),true).map_err(|e|Error(e.code))?,
+            "node_files":produced.node_files,"node_files_digest":produced.node_files_digest,
+            "slice_plan":produced.slices.plan,"node_slice_plans":produced.slices.node_plans});
+        private_state::store(
+            &self.root.join(name),
+            &document,
+            private_state::private_json_limit().map_err(state)?,
+        )
+        .map_err(state)?;
+        self.documents.insert(name.into(), document);
+        self.validate_stage_shards(current, now)
+    }
+
+    /// Reopen emitted bytes, rehash the prepared source, and independently
+    /// recompile slice recipes against retained pins and current membership.
+    pub fn validate_stage_shards(&self, current: &BTreeMap<String, Value>, now: f64) -> Result<()> {
+        self.validate_members(current, now)?;
+        let (manifest, source_files) = self.source_files()?;
+        let document = self
+            .documents
+            .get("source-shards.private.json")
+            .ok_or(Error("compiler_outputs_changed"))?;
+        let node_files: BTreeMap<String, Vec<Value>> =
+            serde_json::from_value(document["node_files"].clone())
+                .map_err(|_| Error("compiler_outputs_changed"))?;
+        let mut files = BTreeMap::new();
+        for rows in node_files.values() {
+            for row in rows {
+                let name = row["path"]
+                    .as_str()
+                    .and_then(|s| s.strip_prefix("deployment/"))
+                    .filter(|s| !s.contains('/'))
+                    .ok_or(Error("compiler_outputs_changed"))?;
+                files.insert(
+                    name.into(),
+                    open_source_file(&self.root, &format!("stage-shards/{name}"))?,
+                );
+            }
+        }
+        let slices = planner::source_plan::compile_slices(
+            &self.request,
+            &self.request,
+            planner::source_plan::PreparedSource {
+                manifest: &manifest,
+                manifest_digest: &self.source.manifest_digest,
+                files: &source_files,
+            },
+            planner::source_plan::EmittedShards {
+                files: &files,
+                node_files: &node_files,
+                node_files_digest: document["node_files_digest"]
+                    .as_str()
+                    .ok_or(Error("compiler_outputs_changed"))?,
+                max_segment_bytes:
+                    budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxSegmentBytesL63
+                        .bytes()
+                        .map_err(|_| Error("budget_unavailable"))?
+                        .get(),
+            },
+        )
+        .map_err(|e| Error(e.code))?;
+        if slices.plan != document["slice_plan"]
+            || json!(slices.node_plans) != document["node_slice_plans"]
+        {
+            return Err(Error("compiler_outputs_changed"));
+        }
+        Ok(())
     }
     /// Cheap post-worker identity/lease check; not a consent or resource grant.
     pub fn validate_members(&self, current: &BTreeMap<String, Value>, now: f64) -> Result<()> {
