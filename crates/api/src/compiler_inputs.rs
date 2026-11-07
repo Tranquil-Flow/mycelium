@@ -265,6 +265,79 @@ impl InputArtifact {
         Ok((manifest, files))
     }
 
+    /// Durable coordinator-local reservation. Dropping it does NOT release the
+    /// charge: interrupted writes and even reservation-before-crash remain owed.
+    pub fn reserve_stage_output(&self, bytes: u64) -> Result<ShardReservation> {
+        self.validate()?;
+        let runs = self
+            .root
+            .parent()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let host = runs
+            .parent()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let (_lock, mut ledger) = storage_ledger(runs)?;
+        let cap = crate::preferences::resource_policy::read(host)
+            .map_err(|_| Error("compiler_storage_consent_required"))?
+            .and_then(|p| p["storage_bytes"].as_u64())
+            .filter(|n| *n > 0)
+            .ok_or(Error("compiler_storage_consent_required"))?;
+        let cap = match crate::preferences::standing_consent::load(host)
+            .map_err(|_| Error("compiler_storage_consent_required"))?
+        {
+            Some(grant) => {
+                if grant["state"] != "granted" {
+                    return Err(Error("compiler_storage_consent_required"));
+                }
+                cap.min(
+                    grant["caps"]["storage_bytes"]
+                        .as_u64()
+                        .ok_or(Error("compiler_storage_consent_required"))?,
+                )
+            }
+            None => cap, // Owner preparation is bounded by its explicit resource policy.
+        };
+        let entries = ledger["entries"]
+            .as_object_mut()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let retained = storage_inventory(runs, entries)?;
+        let run = self
+            .root
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let total = retained
+            .checked_add(bytes)
+            .ok_or(Error("compiler_storage_quota_exceeded"))?;
+        if bytes == 0 || entries.len() >= MAX_RETAINED_SHARD_RUNS || total > cap {
+            return Err(Error("compiler_storage_quota_exceeded"));
+        }
+        if entries.contains_key(run) {
+            return Err(Error("compiler_storage_run_reserved"));
+        }
+        let reserve =
+            budgets::BudgetId::PyFinalMyceliumLiveLocalPreparerArtifactDiskReserveBytesL50C0
+                .bytes()
+                .map_err(|_| Error("budget_unavailable"))?
+                .get();
+        let free = crate::acquisition::disk_free_bytes(runs)
+            .map_err(|_| Error("compiler_storage_probe_failed"))?;
+        // Conservatively reserve all outstanding charges against currently free
+        // space too. Existing partials are never mistaken for released promises.
+        if total.checked_add(reserve).is_none_or(|need| need > free) {
+            return Err(Error("compiler_storage_headroom_exceeded"));
+        }
+        let row = json!({"bytes":bytes,"run_dev":self.directory_identity.0,
+            "run_ino":self.directory_identity.1,"phase":"cleanup_required"});
+        entries.insert(run.into(), row.clone());
+        store_storage_ledger(runs, &ledger)?;
+        Ok(ShardReservation {
+            runs: runs.into(),
+            run: run.into(),
+            row,
+        })
+    }
+
     /// Real source-byte sharding only; no stage load, quantization or native proof.
     /// Requires an explicitly stage-sharded request (whole-source requests do not
     /// silently duplicate a model). Partial failures leave unadmitted bytes.
@@ -284,6 +357,7 @@ impl InputArtifact {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err(Error("compiler_directory_invalid")),
         }?;
+        let mut reservation = None;
         let produced = planner::source_plan::producer::emit_stage_shards(
             &self.request,
             &self.request,
@@ -293,8 +367,18 @@ impl InputArtifact {
                 files: &files,
             },
             &self.root.join("stage-shards"),
+            &mut |bytes| {
+                reservation = Some(
+                    self.reserve_stage_output(bytes)
+                        .map_err(|e| planner::Error::new(e.0))?,
+                );
+                Ok(())
+            },
         )
         .map_err(|e| Error(e.code))?;
+        reservation
+            .ok_or(Error("compiler_storage_reservation_missing"))?
+            .complete()?;
         let document = json!({"protocol":"mycelium.source_stage_shards.v1",
             "state":"bytes_only","route_ready":false,
             "run_id":self.documents["compile-start.private.json"]["run_id"],
@@ -430,6 +514,169 @@ impl InputArtifact {
         }
         Ok(())
     }
+}
+
+// Bounded retained output slots. Full ledgers refuse; no automatic deletion,
+// adoption, refund-on-Drop, or deletion of files based on a public pathname.
+const MAX_RETAINED_SHARD_RUNS: usize = 8;
+const STORAGE_LEDGER: &str = "compiler-storage.private.json";
+const STORAGE_LOCK: &str = "compiler-storage.lock";
+
+#[derive(Debug)]
+pub struct ShardReservation {
+    runs: PathBuf,
+    run: String,
+    row: Value,
+}
+impl ShardReservation {
+    pub fn complete(self) -> Result<()> {
+        let (_lock, mut ledger) = storage_ledger(&self.runs)?;
+        let entries = ledger["entries"]
+            .as_object_mut()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        storage_inventory(&self.runs, entries)?;
+        if entries.get(&self.run) != Some(&self.row) {
+            return Err(Error("compiler_storage_reservation_changed"));
+        }
+        let actual = shard_output_bytes(&self.runs.join(&self.run).join("stage-shards"))?;
+        if Some(actual) != self.row["bytes"].as_u64() {
+            return Err(Error("compiler_storage_output_size_changed"));
+        }
+        entries
+            .get_mut(&self.run)
+            .ok_or(Error("compiler_storage_reservation_changed"))?["phase"] = json!("retained");
+        store_storage_ledger(&self.runs, &ledger)
+    }
+}
+fn shard_output_bytes(path: &Path) -> Result<u64> {
+    let directory =
+        fs::symlink_metadata(path).map_err(|_| Error("compiler_storage_output_changed"))?;
+    if !directory.is_dir()
+        || directory.mode() & 0o7777 != 0o700
+        || directory.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(Error("compiler_storage_output_changed"));
+    }
+    let mut total = 0u64;
+    let mut count = 0;
+    for entry in fs::read_dir(path).map_err(|_| Error("compiler_storage_inventory_failed"))? {
+        let entry = entry.map_err(|_| Error("compiler_storage_inventory_failed"))?;
+        count += 1;
+        let meta = fs::symlink_metadata(entry.path())
+            .map_err(|_| Error("compiler_storage_inventory_failed"))?;
+        if count > MAX_HOSTS
+            || !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.mode() & 0o7777 != 0o600
+        {
+            return Err(Error("compiler_storage_output_changed"));
+        }
+        total = total
+            .checked_add(meta.len())
+            .ok_or(Error("compiler_storage_output_changed"))?;
+    }
+    Ok(total)
+}
+fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
+    let bad = Error("compiler_storage_ledger_invalid");
+    if entries.len() > MAX_RETAINED_SHARD_RUNS {
+        return Err(bad);
+    }
+    let mut total = 0u64;
+    for (run, row) in entries {
+        if !segment(run) || !matches!(row["phase"].as_str(), Some("retained" | "cleanup_required"))
+        {
+            return Err(bad);
+        }
+        let bytes = row["bytes"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(bad.clone())?;
+        let meta = fs::symlink_metadata(runs.join(run)).map_err(|_| bad.clone())?;
+        if !meta.is_dir()
+            || Some(meta.dev()) != row["run_dev"].as_u64()
+            || Some(meta.ino()) != row["run_ino"].as_u64()
+        {
+            return Err(Error("compiler_storage_owner_changed"));
+        }
+        total = total.checked_add(bytes).ok_or(bad.clone())?;
+    }
+    // Legacy B2 partials have no reservation: refuse rather than silently adopt
+    // or fail to account for them. Bound traversal even for metadata-only runs.
+    for (index, entry) in fs::read_dir(runs).map_err(|_| bad.clone())?.enumerate() {
+        if index >= 4096 {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+        let entry = entry.map_err(|_| bad.clone())?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or(bad.clone())?;
+        if matches!(name, STORAGE_LEDGER | STORAGE_LOCK) {
+            continue;
+        }
+        let meta = fs::symlink_metadata(entry.path()).map_err(|_| bad.clone())?;
+        if !meta.is_dir() {
+            return Err(Error("compiler_storage_owner_changed"));
+        }
+        let output = entry.path().join("stage-shards");
+        match fs::symlink_metadata(&output) {
+            Ok(_) => {
+                let row = entries
+                    .get(name)
+                    .ok_or(Error("compiler_storage_untracked_output"))?;
+                if shard_output_bytes(&output)? > row["bytes"].as_u64().ok_or(bad.clone())? {
+                    return Err(Error("compiler_storage_output_size_changed"));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return Err(Error("compiler_storage_inventory_failed")),
+        }
+    }
+    Ok(total)
+}
+fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    directory(runs)?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(runs.join(STORAGE_LOCK))
+        .map_err(|_| Error("compiler_storage_lock_failed"))?;
+    let meta = lock
+        .metadata()
+        .map_err(|_| Error("compiler_storage_lock_failed"))?;
+    if !meta.is_file()
+        || meta.nlink() != 1
+        || meta.mode() & 0o7777 != 0o600
+        || meta.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(Error("compiler_storage_lock_failed"));
+    }
+    lock.try_lock()
+        .map_err(|_| Error("compiler_storage_busy"))?;
+    let ledger = private_state::load(
+        &runs.join(STORAGE_LEDGER),
+        private_state::private_json_limit().map_err(state)?,
+    )
+    .map_err(state)?
+    .map(Value::Object)
+    .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
+    if ledger["protocol"] != "mycelium.compiler_storage.v1" || !ledger["entries"].is_object() {
+        return Err(Error("compiler_storage_ledger_invalid"));
+    }
+    Ok((lock, ledger))
+}
+fn store_storage_ledger(runs: &Path, ledger: &Value) -> Result<()> {
+    private_state::store(
+        &runs.join(STORAGE_LEDGER),
+        ledger,
+        private_state::private_json_limit().map_err(state)?,
+    )
+    .map_err(state)
 }
 
 /// Whole-source producer currently accepts regular snapshot files only. HF blob

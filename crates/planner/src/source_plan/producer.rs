@@ -197,6 +197,7 @@ pub fn emit_stage_shards(
     current_request: &BuildRequest,
     source: PreparedSource<'_>,
     output: &std::path::Path,
+    reserve: &mut dyn FnMut(u64) -> Result<()>,
 ) -> Result<ProducedShards> {
     use sha2::{Digest, Sha256};
     use std::{
@@ -307,6 +308,21 @@ pub fn emit_stage_shards(
     {
         return Err(io());
     }
+    // Headers and selected payloads determine the exact complete output size.
+    // The host must durably charge this BEFORE the first output mutation; a
+    // failed/interrupted write retains the reservation, never an implicit refund.
+    let exact = selected
+        .iter()
+        .zip(&headers)
+        .try_fold(0u64, |total, (names, header)| {
+            let bytes = names
+                .iter()
+                .try_fold(crate::add(8, header.len() as u64)?, |n, name| {
+                    crate::add(n, tensors[name].tensor.length)
+                })?;
+            crate::add(total, bytes)
+        })?;
+    reserve(exact)?;
     fs::DirBuilder::new()
         .mode(0o700)
         .create(output)

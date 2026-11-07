@@ -53,6 +53,8 @@ impl Fixture {
                 files: &self.source,
             },
             output,
+            // This bounded byte-layout fixture has no production storage host.
+            &mut |_| Ok(()),
         )
     }
 }
