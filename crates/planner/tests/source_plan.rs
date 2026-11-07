@@ -364,6 +364,90 @@ impl Fixture {
     }
 }
 
+// The pinned Qwen3 snapshot physically stores a redundant tied lm_head tensor.
+// The runtime selects the embedding; only a byte-identical declared alias may
+// be omitted from stage ownership. These are controlled layout bytes, not MLX.
+fn redundant_head_fixture(name: &str, corrupt: bool) -> Fixture {
+    let mut f = Fixture::new(rows().remove(1));
+    let (path, raw) = f.row["source_files"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name.ends_with(".safetensors"))
+        .map(|(name, value)| (name.clone(), decode(value.as_str().unwrap())))
+        .find(|(_, raw)| tensor_payloads(raw).contains_key("model.embed_tokens.weight"))
+        .unwrap();
+    let length = u64::from_le_bytes(raw[..8].try_into().unwrap()) as usize;
+    let mut header: Value = serde_json::from_slice(&raw[8..8 + length]).unwrap();
+    let mut payload = raw[8 + length..].to_vec();
+    let mut duplicate = tensor_payloads(&raw)["model.embed_tokens.weight"].2.clone();
+    if corrupt {
+        duplicate[0] ^= 1;
+    }
+    let start = payload.len();
+    payload.extend(duplicate);
+    header[name] = header["model.embed_tokens.weight"].clone();
+    header[name]["data_offsets"] = json!([start, payload.len()]);
+    let encoded = serde_json::to_vec(&header).unwrap();
+    let mut rewritten = (encoded.len() as u64).to_le_bytes().to_vec();
+    rewritten.extend(encoded);
+    rewritten.extend(payload);
+    fs::write(f.root.join("source_files").join(&path), &rewritten).unwrap();
+    let record = f.row["manifest"]["files"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["path"] == path)
+        .unwrap();
+    record["size_bytes"] = json!(rewritten.len());
+    record["content_digest"]["value"] = json!(sha(&rewritten).strip_prefix("sha256:").unwrap());
+    f.repin_manifest();
+    f
+}
+
+#[test]
+fn declared_identical_tied_head_is_not_an_unassigned_tensor() {
+    let mut f = redundant_head_fixture("lm_head.weight", false);
+    f.request.stage_sharded = false;
+    let assignments = f
+        .assignments(&f.request)
+        .expect("declared duplicate tied head");
+    for assignment in assignments.assignments {
+        assert!(
+            !assignment["expected_tensor_keys"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("lm_head.weight"))
+        );
+    }
+    f.request.stage_sharded = true;
+    let shards = f.emit_shards(&f.request, &f.root.join("produced")).unwrap();
+    assert_eq!(shards.files.len(), f.request.node_ids.len());
+}
+
+#[test]
+fn redundant_tied_head_must_match_bytes_and_unknown_tensors_still_refuse() {
+    for (name, corrupt, expected) in [
+        (
+            "lm_head.weight",
+            true,
+            "source_plan_redundant_tensor_mismatch",
+        ),
+        ("foreign.weight", false, "source_plan_assignment_mismatch"),
+    ] {
+        let mut f = redundant_head_fixture(name, corrupt);
+        f.request.stage_sharded = false;
+        assert_eq!(f.assignments(&f.request).unwrap_err().code, expected);
+        f.request.stage_sharded = true;
+        let output = f.root.join("produced");
+        assert_eq!(
+            f.emit_shards(&f.request, &output).unwrap_err().code,
+            expected
+        );
+        assert!(!output.exists());
+    }
+}
+
 /// Real bounded source bytes from the existing oracle fixture; no native proof.
 #[test]
 fn source_bytes_produce_revalidatable_metadata_assignments() {

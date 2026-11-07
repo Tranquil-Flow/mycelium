@@ -77,9 +77,10 @@ pub fn compile_source_assignments(
         owned.extend(names);
         route.push(json!({"node_id":node,"range":{"start_layer":start,"end_layer_exclusive":end,"layer_count":end-start}}));
     }
-    if cursor != layers || owned != tensors.keys().cloned().collect() {
+    if cursor != layers {
         return Err(bad());
     }
+    verify_coverage(&source, &tensors, &owned)?;
     let route = json!({
         "protocol":"mycelium.manual_provisioning_route.v1", "ok":true,
         "claim_boundary":"metadata only; not a loaded route",
@@ -119,6 +120,62 @@ pub fn compile_source_assignments(
     // Rehash after construction. This detects drift, not an immutable snapshot.
     source_index(&source)?;
     Ok(AssignmentDocuments { route, assignments })
+}
+
+/// Account for the physical duplicate present in pinned tied-embedding sources.
+/// This is not permission to ignore arbitrary unassigned tensors: require the
+/// explicit component alias AND identical dtype, shape and every payload byte.
+fn verify_coverage(
+    source: &PreparedSource<'_>,
+    tensors: &BTreeMap<String, SourceTensor>,
+    owned: &BTreeSet<String>,
+) -> Result<()> {
+    let all: BTreeSet<_> = tensors.keys().cloned().collect();
+    if *owned == all {
+        return Ok(());
+    }
+    let bad = || Error::new("source_plan_assignment_mismatch");
+    let extra: Vec<_> = all.difference(owned).map(String::as_str).collect();
+    if !owned.is_subset(&all)
+        || extra != ["lm_head.weight"]
+        || source.manifest["component_aliases"]["lm_head"] != "input_embedding"
+        || source.manifest["component_tensor_keys"]["lm_head"]
+            != json!(["model.embed_tokens.weight"])
+        || source.manifest["component_tensor_keys"]["input_embedding"]
+            != json!(["model.embed_tokens.weight"])
+    {
+        return Err(bad());
+    }
+    let head = tensors.get("lm_head.weight").ok_or_else(bad)?;
+    let embedding = tensors.get("model.embed_tokens.weight").ok_or_else(bad)?;
+    let mismatch = || Error::new("source_plan_redundant_tensor_mismatch");
+    if head.tensor.length != embedding.tensor.length
+        || head.tensor.record["dtype"] != embedding.tensor.record["dtype"]
+        || head.tensor.record["shape"] != embedding.tensor.record["shape"]
+    {
+        return Err(mismatch());
+    }
+    let cap = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxSegmentBytesL63
+        .bytes()
+        .map_err(|_| bad())?
+        .get();
+    let head_file = source.files.get(&head.path).ok_or_else(bad)?;
+    let embedding_file = source.files.get(&embedding.path).ok_or_else(bad)?;
+    let mut offset = 0;
+    while offset < head.tensor.length {
+        let length = cap.min(head.tensor.length - offset);
+        if bytes::read(head_file, crate::add(head.offset, offset)?, length)?
+            != bytes::read(
+                embedding_file,
+                crate::add(embedding.offset, offset)?,
+                length,
+            )?
+        {
+            return Err(mismatch());
+        }
+        offset = crate::add(offset, length)?;
+    }
+    Ok(())
 }
 
 /// Real shard bytes and transfer pins, but no loaded-stage or execution proof.
@@ -210,9 +267,10 @@ pub fn emit_stage_shards(
         selected.push(names);
         cursor = end as u64;
     }
-    if cursor != layers || all != tensors.keys().cloned().collect() {
+    if cursor != layers {
         return Err(bad());
     }
+    verify_coverage(&source, &tensors, &all)?;
     let maximum = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxHeaderBytesL67
         .bytes()
         .map_err(|_| bad())?
