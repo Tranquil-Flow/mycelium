@@ -51,12 +51,105 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: &|| Ok(()),
             },
             output,
             // This bounded byte-layout fixture has no production storage host.
             &mut |_| Ok(()),
         )
     }
+}
+
+#[test]
+fn cancellation_after_reservation_prevents_shard_writes() {
+    let f = Fixture::new(rows().remove(0));
+    let output = f.root.join("cancelled-output");
+    let stopped = std::cell::Cell::new(false);
+    let result = producer::emit_stage_shards(
+        &f.request,
+        &f.request,
+        PreparedSource {
+            manifest: &f.row["manifest"],
+            manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
+            files: &f.source,
+            checkpoint: &|| {
+                if stopped.get() {
+                    Err(planner::Error::new("compiler_stopped"))
+                } else {
+                    Ok(())
+                }
+            },
+        },
+        &output,
+        &mut |_| {
+            stopped.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "compiler_stopped");
+    assert!(!output.exists());
+}
+
+#[test]
+fn cancellation_interrupts_revalidation_and_partial_output() {
+    use std::cell::Cell;
+    let f = Fixture::new(rows().remove(0));
+    let calls = Cell::new(0);
+    f.build_checked(&f.request, &|| {
+        calls.set(calls.get() + 1);
+        Ok(())
+    })
+    .unwrap();
+    let total = calls.get();
+    assert!(total > 3);
+    for stop in [1, total / 2, total] {
+        calls.set(0);
+        let result = f.build_checked(&f.request, &|| {
+            calls.set(calls.get() + 1);
+            if calls.get() == stop {
+                Err(planner::Error::new("compiler_stopped"))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result.unwrap_err().code, "compiler_stopped");
+        assert_eq!(calls.get(), stop);
+    }
+    let armed = Cell::new(false);
+    calls.set(0);
+    let output = f.root.join("partial-cancelled-output");
+    let mut exact = 0;
+    let result = producer::emit_stage_shards(
+        &f.request,
+        &f.request,
+        PreparedSource {
+            manifest: &f.row["manifest"],
+            manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
+            files: &f.source,
+            checkpoint: &|| {
+                if armed.get() {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == 5 {
+                        return Err(planner::Error::new("compiler_stopped"));
+                    }
+                }
+                Ok(())
+            },
+        },
+        &output,
+        &mut |bytes| {
+            exact = bytes;
+            armed.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "compiler_stopped");
+    let written: u64 = fs::read_dir(output)
+        .unwrap()
+        .map(|e| e.unwrap().metadata().unwrap().len())
+        .sum();
+    assert!(written > 0 && written < exact);
+    assert_eq!(calls.get(), 5);
 }
 
 // Independent safetensors decoder: compare names, dtypes, shapes and every
@@ -151,6 +244,7 @@ fn real_source_bytes_emit_stage_shards_and_revalidated_slice_recipes() {
                     manifest: &f.row["manifest"],
                     manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
                     files: &f.source,
+                    checkpoint: &|| Ok(()),
                 },
                 EmittedShards {
                     files: &produced.files,
@@ -300,6 +394,13 @@ impl Fixture {
         self.repin_transfers();
     }
     fn build(&self, current: &BuildRequest) -> planner::Result<SliceDocuments> {
+        self.build_checked(current, &|| Ok(()))
+    }
+    fn build_checked(
+        &self,
+        current: &BuildRequest,
+        check: &dyn Fn() -> planner::Result<()>,
+    ) -> planner::Result<SliceDocuments> {
         compile_slices(
             &self.request,
             current,
@@ -307,6 +408,7 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: check,
             },
             EmittedShards {
                 files: &self.shards,
@@ -358,6 +460,7 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: &|| Ok(()),
             },
             0,
             &json!(roots),

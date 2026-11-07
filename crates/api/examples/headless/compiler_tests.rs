@@ -317,6 +317,7 @@ fn interrupted_shard_write_keeps_exact_reservation_and_blocks_new_bytes() {
             manifest: &manifest,
             manifest_digest: &f.source.manifest_digest,
             files: &files,
+            checkpoint: &|| Ok(()),
         },
         &output,
         &mut |bytes| {
@@ -390,6 +391,46 @@ fn shard_storage_requires_consent_and_refuses_untracked_outputs_or_busy_ledger()
     assert_eq!(
         artifact.reserve_stage_output(1).unwrap_err().0,
         "compiler_storage_untracked_output"
+    );
+    assert!(artifact.root().join("stage-shards").exists());
+}
+
+#[test]
+fn compiler_cancellation_reaches_manifest_hash_and_artifact_revalidation() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let checks = std::cell::Cell::new(0);
+    let source = api::local_manifest::LocalModelSource {
+        root: f.source.source_root.clone(),
+        model_id: f.request.model_id.clone(),
+        requested_revision: f.source.manifest["requested_revision"]
+            .as_str()
+            .unwrap()
+            .into(),
+        resolved_commit: f.request.resolved_commit.clone(),
+        tokenizer_assets: Ok(Vec::new()),
+    };
+    let result = api::local_manifest::compile_local_model_manifest_checked(&source, &|| {
+        checks.set(checks.get() + 1);
+        if checks.get() == 3 {
+            Err(api::local_manifest::CompileError("compiler_stopped".into()))
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(result.unwrap_err().0, "compiler_stopped");
+    assert_eq!(checks.get(), 3);
+    let mut artifact = f.emit_run("cancel-revalidation");
+    artifact.produce_stage_shards(&f.members, 0.0).unwrap();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    artifact.bind_cancellation(cancel.clone()).unwrap();
+    cancel.store(true, Ordering::SeqCst);
+    assert_eq!(
+        artifact
+            .validate_stage_shards(&f.members, 0.0)
+            .unwrap_err()
+            .0,
+        "compiler_stopped"
     );
     assert!(artifact.root().join("stage-shards").exists());
 }

@@ -458,6 +458,7 @@ impl CompilePort for Compiler {
                     &prepared.inputs.keys,
                     &prepared.inputs.context_members,
                 )?;
+                artifact.bind_cancellation(cancel.clone())?;
                 if request.stage_sharded {
                     artifact.produce_stage_shards(&check()?, now())?;
                     artifact.validate_stage_shards(&check()?, now())?;

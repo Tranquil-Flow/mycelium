@@ -117,8 +117,30 @@ pub struct InputArtifact {
     documents: BTreeMap<String, Value>,
     source: Prepared,
     request: BuildRequest,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl InputArtifact {
+    pub fn bind_cancellation(
+        &mut self,
+        token: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<()> {
+        if self.cancel.is_some() {
+            return Err(Error("compiler_already_started"));
+        }
+        self.cancel = Some(token);
+        self.checkpoint()
+    }
+    fn checkpoint(&self) -> Result<()> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            Err(Error("compiler_stopped"))
+        } else {
+            Ok(())
+        }
+    }
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -214,6 +236,7 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             self.documents["compile-start.private.json"]["epoch"]
                 .as_u64()
@@ -233,7 +256,7 @@ impl InputArtifact {
     }
     fn source_files(&self) -> Result<(Value, BTreeMap<String, fs::File>)> {
         self.validate()?;
-        let manifest = crate::local_manifest::compile_local_model_manifest(
+        let manifest = crate::local_manifest::compile_local_model_manifest_checked(
             &crate::local_manifest::LocalModelSource {
                 root: self.source.source_root.clone(),
                 model_id: self.request.model_id.clone(),
@@ -244,8 +267,18 @@ impl InputArtifact {
                 resolved_commit: self.request.resolved_commit.clone(),
                 tokenizer_assets: Ok(Vec::new()),
             },
+            &|| {
+                self.checkpoint()
+                    .map_err(|e| crate::local_manifest::CompileError(e.0.into()))
+            },
         )
-        .map_err(|_| Error("compiler_model_changed"))?;
+        .map_err(|e| {
+            if e.0 == "compiler_stopped" {
+                Error("compiler_stopped")
+            } else {
+                Error("compiler_model_changed")
+            }
+        })?;
         if manifest != Value::Object(self.source.manifest.clone()) {
             return Err(Error("compiler_model_changed"));
         }
@@ -365,6 +398,7 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             &self.root.join("stage-shards"),
             &mut |bytes| {
@@ -432,6 +466,7 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &source_files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             planner::source_plan::EmittedShards {
                 files: &files,
@@ -491,6 +526,7 @@ impl InputArtifact {
     /// Detect a replacement or tampered file before the next producer consumes
     /// it. Never reopen by public digest alone or reconstitute successful state.
     pub fn validate(&self) -> Result<()> {
+        self.checkpoint()?;
         let metadata =
             fs::symlink_metadata(&self.root).map_err(|_| Error("compiler_inputs_changed"))?;
         if !metadata.is_dir() || (metadata.dev(), metadata.ino()) != self.directory_identity {
@@ -809,6 +845,7 @@ pub fn emit(
         documents,
         source: source.clone(),
         request: request.clone(),
+        cancel: None,
     };
     artifact.validate()?;
     Ok(artifact)

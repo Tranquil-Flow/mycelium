@@ -164,13 +164,17 @@ fn verify_coverage(
     let mut offset = 0;
     while offset < head.tensor.length {
         let length = cap.min(head.tensor.length - offset);
-        if bytes::read(head_file, crate::add(head.offset, offset)?, length)?
-            != bytes::read(
-                embedding_file,
-                crate::add(embedding.offset, offset)?,
-                length,
-            )?
-        {
+        if bytes::read(
+            head_file,
+            crate::add(head.offset, offset)?,
+            length,
+            source.checkpoint,
+        )? != bytes::read(
+            embedding_file,
+            crate::add(embedding.offset, offset)?,
+            length,
+            source.checkpoint,
+        )? {
             return Err(mismatch());
         }
         offset = crate::add(offset, length)?;
@@ -323,6 +327,7 @@ pub fn emit_stage_shards(
             crate::add(total, bytes)
         })?;
     reserve(exact)?;
+    (source.checkpoint)()?;
     fs::DirBuilder::new()
         .mode(0o700)
         .create(output)
@@ -351,17 +356,28 @@ pub fn emit_stage_shards(
             let mut done = 0;
             while done < t.tensor.length {
                 let length = chunk.min(t.tensor.length - done);
-                let data =
-                    bytes::read(&source.files[&t.path], crate::add(t.offset, done)?, length)?;
+                let data = bytes::read(
+                    &source.files[&t.path],
+                    crate::add(t.offset, done)?,
+                    length,
+                    source.checkpoint,
+                )?;
                 file.write_all(&data).map_err(|_| io())?;
                 hash.update(&data);
                 done += length;
             }
             size = crate::add(size, t.tensor.length)?;
         }
+        (source.checkpoint)()?;
         file.sync_all().map_err(|_| io())?;
         let digest = format!("sha256:{:x}", hash.finalize());
-        bytes::verify(&file, size, &digest, "stage_shard_output_changed")?;
+        bytes::verify(
+            &file,
+            size,
+            &digest,
+            "stage_shard_output_changed",
+            source.checkpoint,
+        )?;
         node_files.insert(node.clone(),vec![json!({"path":format!("deployment/{name}"),"size_bytes":size,"content_digest":digest})]);
         files.insert(name, file);
     }
@@ -373,6 +389,7 @@ pub fn emit_stage_shards(
             row["size_bytes"].as_u64().ok_or_else(bad)?,
             row["content_digest"].as_str().ok_or_else(bad)?,
             "slice_source_manifest_invalid",
+            source.checkpoint,
         )?;
     }
     let node_files_digest = crate::digest(&json!(node_files), true)?;
