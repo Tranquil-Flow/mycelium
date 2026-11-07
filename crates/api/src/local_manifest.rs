@@ -401,11 +401,12 @@ fn read_safetensors_header(path: &Path) -> R<Vec<String>> {
     names.sort();
     Ok(names)
 }
-fn sha256_file(path: &Path) -> R<String> {
+fn sha256_file(path: &Path, check: &dyn Fn() -> R<()>) -> R<String> {
     let mut file = open_no_follow(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1 << 20];
     loop {
+        check()?;
         match file.read(&mut buffer) {
             Ok(0) => break,
             Ok(n) => hasher.update(&buffer[..n]),
@@ -1094,6 +1095,15 @@ fn non_runtime_gpt2_tensor(name: &str) -> bool {
 
 /// `compile_local_model_manifest(model_source)`.
 pub fn compile_local_model_manifest(source: &LocalModelSource) -> R<Value> {
+    compile_local_model_manifest_checked(source, &|| Ok(()))
+}
+
+/// Compiler-only cooperative check; ordinary preparation retains its old API.
+pub fn compile_local_model_manifest_checked(
+    source: &LocalModelSource,
+    check: &dyn Fn() -> R<()>,
+) -> R<Value> {
+    check()?;
     let root = validate_source(source)?;
     let config_relative = safe_relative(Some("config.json"), "config")?;
     let Value::Object(config) = read_source_json(&root, &config_relative)? else {
@@ -1126,7 +1136,7 @@ pub fn compile_local_model_manifest(source: &LocalModelSource) -> R<Value> {
             filename.clone(),
             FileMeta {
                 size_bytes: metadata.size(),
-                sha256: sha256_file(&path)?,
+                sha256: sha256_file(&path, check)?,
             },
         );
     }

@@ -5,7 +5,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{fs::File, os::unix::fs::FileExt};
 
-pub(super) fn read(file: &File, offset: u64, length: u64) -> Result<Vec<u8>> {
+pub(super) fn read(
+    file: &File,
+    offset: u64,
+    length: u64,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Vec<u8>> {
+    check()?;
     let bad = || Error::new("slice_source_truncated");
     let end = offset.checked_add(length).ok_or_else(bad)?;
     if file.metadata().map_err(|_| bad())?.len() < end {
@@ -16,6 +22,7 @@ pub(super) fn read(file: &File, offset: u64, length: u64) -> Result<Vec<u8>> {
     bytes.try_reserve_exact(n).map_err(|_| bad())?;
     bytes.resize(n, 0);
     file.read_exact_at(&mut bytes, offset).map_err(|_| bad())?;
+    check()?;
     Ok(bytes)
 }
 pub(super) fn sha(bytes: &[u8]) -> String {
@@ -23,7 +30,13 @@ pub(super) fn sha(bytes: &[u8]) -> String {
 }
 /// No unbounded read_to_end and no reopened pathname. Size is an independently
 /// pinned manifest/transfer size, checked before and after the stream.
-pub(super) fn verify(file: &File, size: u64, digest: &str, code: &'static str) -> Result<()> {
+pub(super) fn verify(
+    file: &File,
+    size: u64,
+    digest: &str,
+    code: &'static str,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<()> {
     let bad = || Error::new(code);
     let meta = file.metadata().map_err(|_| bad())?;
     if !meta.is_file() || meta.len() != size || size == 0 {
@@ -35,7 +48,7 @@ pub(super) fn verify(file: &File, size: u64, digest: &str, code: &'static str) -
     const HASH_CHUNK: u64 = 1 << 20;
     while offset < size {
         let n = HASH_CHUNK.min(size - offset);
-        hash.update(read(file, offset, n).map_err(|_| bad())?);
+        hash.update(read(file, offset, n, check).map_err(|e| preserve_stop(e, code))?);
         offset += n;
     }
     if format!("sha256:{:x}", hash.finalize()) != digest
@@ -44,6 +57,13 @@ pub(super) fn verify(file: &File, size: u64, digest: &str, code: &'static str) -
         return Err(bad());
     }
     Ok(())
+}
+fn preserve_stop(error: Error, code: &'static str) -> Error {
+    if error.code == "compiler_stopped" {
+        error
+    } else {
+        Error::new(code)
+    }
 }
 #[derive(Clone)]
 pub(super) struct Tensor {
@@ -56,9 +76,9 @@ pub(super) struct Header {
     pub tensors: Vec<Tensor>,
     pub bytes: Vec<u8>,
 }
-pub(super) fn header(file: &File) -> Result<Header> {
+pub(super) fn header(file: &File, check: &dyn Fn() -> Result<()>) -> Result<Header> {
     let bad = || Error::new("slice_safetensors_invalid");
-    let raw = read(file, 0, 8).map_err(|_| bad())?;
+    let raw = read(file, 0, 8, check).map_err(|e| preserve_stop(e, "slice_safetensors_invalid"))?;
     let len = u64::from_le_bytes(raw.try_into().map_err(|_| bad())?);
     let maximum = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxHeaderBytesL67
         .bytes()
@@ -67,7 +87,8 @@ pub(super) fn header(file: &File) -> Result<Header> {
     if len < 2 || len > maximum {
         return Err(bad());
     }
-    let bytes = read(file, 0, add(8, len)?).map_err(|_| bad())?;
+    let bytes = read(file, 0, add(8, len)?, check)
+        .map_err(|e| preserve_stop(e, "slice_safetensors_invalid"))?;
     let value: Value = serde_json::from_slice(&bytes[8..]).map_err(|_| bad())?;
     let mut tensors = Vec::new();
     for (name, record) in value.as_object().ok_or_else(bad)? {

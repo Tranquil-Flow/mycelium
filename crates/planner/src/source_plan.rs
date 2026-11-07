@@ -30,6 +30,7 @@ pub struct PreparedSource<'a> {
     pub manifest: &'a Value,
     pub manifest_digest: &'a str,
     pub files: &'a BTreeMap<String, File>,
+    pub checkpoint: &'a dyn Fn() -> Result<()>,
 }
 /// Actual emitted shards and independently pinned operator node transfer rows.
 /// `node_files` has the shape returned by v0.1.4 `node_weight_files`.
@@ -140,8 +141,14 @@ pub fn compile_slices(
             let file = shards.files.get(parts[1]).ok_or_else(bad)?;
             let size = row["size_bytes"].as_u64().ok_or_else(bad)?;
             let digest = row["content_digest"].as_str().ok_or_else(bad)?;
-            bytes::verify(file, size, digest, "slice_plan_file_digest_mismatch")?;
-            let header = bytes::header(file)?;
+            bytes::verify(
+                file,
+                size,
+                digest,
+                "slice_plan_file_digest_mismatch",
+                source.checkpoint,
+            )?;
+            let header = bytes::header(file, source.checkpoint)?;
             for tensor in &header.tensors {
                 if !owned.insert(tensor.name.clone()) {
                     return Err(assignment_bad());
@@ -153,6 +160,7 @@ pub fn compile_slices(
                 source.files,
                 &tensors,
                 shards.max_segment_bytes,
+                source.checkpoint,
             )?;
             for s in &segments {
                 if let Some(path) = s["source_path"].as_str() {
@@ -162,7 +170,13 @@ pub fn compile_slices(
                 }
             }
             // Rehash after range reads: never silently publish changed source bytes.
-            bytes::verify(file, size, digest, "slice_plan_file_digest_mismatch")?;
+            bytes::verify(
+                file,
+                size,
+                digest,
+                "slice_plan_file_digest_mismatch",
+                source.checkpoint,
+            )?;
             files.push(
                 json!({"path":path,"size_bytes":size,"content_digest":digest,"segments":segments}),
             );
@@ -196,6 +210,7 @@ pub fn compile_slices(
                 .as_str()
                 .ok_or_else(|| Error::new("slice_source_manifest_invalid"))?,
             "slice_source_manifest_invalid",
+            source.checkpoint,
         )?;
     }
     let source_files: Vec<_> = used.iter().map(|p| sources[p].clone()).collect();
@@ -307,8 +322,9 @@ fn source_index(source: &PreparedSource<'_>) -> Result<SourceIndex> {
             row["size_bytes"].as_u64().ok_or_else(bad)?,
             row["content_digest"].as_str().ok_or_else(bad)?,
             "slice_source_manifest_invalid",
+            source.checkpoint,
         )?;
-        let h = bytes::header(file)?;
+        let h = bytes::header(file, source.checkpoint)?;
         for tensor in h.tensors {
             let offset = crate::add(h.bytes.len() as u64, tensor.start)?;
             if tensors
@@ -366,6 +382,7 @@ fn file_segments(
     source_files: &BTreeMap<String, File>,
     tensors: &BTreeMap<String, SourceTensor>,
     segment_bytes: u64,
+    check: &dyn Fn() -> Result<()>,
 ) -> Result<Vec<Value>> {
     let data_start = header.bytes.len() as u64;
     let mut segments = vec![
@@ -404,8 +421,8 @@ fn file_segments(
             let size = segment_bytes.min(r.length - done);
             let offset = crate::add(r.offset, done)?;
             let source_offset = crate::add(r.source_offset, done)?;
-            let data = bytes::read(file, offset, size)?;
-            if bytes::read(&source_files[&r.path], source_offset, size)? != data {
+            let data = bytes::read(file, offset, size, check)?;
+            if bytes::read(&source_files[&r.path], source_offset, size, check)? != data {
                 return Err(Error::new("slice_source_tensor_mismatch"));
             }
             segments.push(json!({"offset":offset,"length":size,"sha256":bytes::sha(&data),"source_path":r.path,"source_offset":source_offset}));

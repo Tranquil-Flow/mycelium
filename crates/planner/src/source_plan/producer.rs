@@ -77,9 +77,10 @@ pub fn compile_source_assignments(
         owned.extend(names);
         route.push(json!({"node_id":node,"range":{"start_layer":start,"end_layer_exclusive":end,"layer_count":end-start}}));
     }
-    if cursor != layers || owned != tensors.keys().cloned().collect() {
+    if cursor != layers {
         return Err(bad());
     }
+    verify_coverage(&source, &tensors, &owned)?;
     let route = json!({
         "protocol":"mycelium.manual_provisioning_route.v1", "ok":true,
         "claim_boundary":"metadata only; not a loaded route",
@@ -121,6 +122,66 @@ pub fn compile_source_assignments(
     Ok(AssignmentDocuments { route, assignments })
 }
 
+/// Account for the physical duplicate present in pinned tied-embedding sources.
+/// This is not permission to ignore arbitrary unassigned tensors: require the
+/// explicit component alias AND identical dtype, shape and every payload byte.
+fn verify_coverage(
+    source: &PreparedSource<'_>,
+    tensors: &BTreeMap<String, SourceTensor>,
+    owned: &BTreeSet<String>,
+) -> Result<()> {
+    let all: BTreeSet<_> = tensors.keys().cloned().collect();
+    if *owned == all {
+        return Ok(());
+    }
+    let bad = || Error::new("source_plan_assignment_mismatch");
+    let extra: Vec<_> = all.difference(owned).map(String::as_str).collect();
+    if !owned.is_subset(&all)
+        || extra != ["lm_head.weight"]
+        || source.manifest["component_aliases"]["lm_head"] != "input_embedding"
+        || source.manifest["component_tensor_keys"]["lm_head"]
+            != json!(["model.embed_tokens.weight"])
+        || source.manifest["component_tensor_keys"]["input_embedding"]
+            != json!(["model.embed_tokens.weight"])
+    {
+        return Err(bad());
+    }
+    let head = tensors.get("lm_head.weight").ok_or_else(bad)?;
+    let embedding = tensors.get("model.embed_tokens.weight").ok_or_else(bad)?;
+    let mismatch = || Error::new("source_plan_redundant_tensor_mismatch");
+    if head.tensor.length != embedding.tensor.length
+        || head.tensor.record["dtype"] != embedding.tensor.record["dtype"]
+        || head.tensor.record["shape"] != embedding.tensor.record["shape"]
+    {
+        return Err(mismatch());
+    }
+    let cap = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxSegmentBytesL63
+        .bytes()
+        .map_err(|_| bad())?
+        .get();
+    let head_file = source.files.get(&head.path).ok_or_else(bad)?;
+    let embedding_file = source.files.get(&embedding.path).ok_or_else(bad)?;
+    let mut offset = 0;
+    while offset < head.tensor.length {
+        let length = cap.min(head.tensor.length - offset);
+        if bytes::read(
+            head_file,
+            crate::add(head.offset, offset)?,
+            length,
+            source.checkpoint,
+        )? != bytes::read(
+            embedding_file,
+            crate::add(embedding.offset, offset)?,
+            length,
+            source.checkpoint,
+        )? {
+            return Err(mismatch());
+        }
+        offset = crate::add(offset, length)?;
+    }
+    Ok(())
+}
+
 /// Real shard bytes and transfer pins, but no loaded-stage or execution proof.
 #[derive(Debug)]
 pub struct ProducedShards {
@@ -140,6 +201,7 @@ pub fn emit_stage_shards(
     current_request: &BuildRequest,
     source: PreparedSource<'_>,
     output: &std::path::Path,
+    reserve: &mut dyn FnMut(u64) -> Result<()>,
 ) -> Result<ProducedShards> {
     use sha2::{Digest, Sha256};
     use std::{
@@ -210,9 +272,10 @@ pub fn emit_stage_shards(
         selected.push(names);
         cursor = end as u64;
     }
-    if cursor != layers || all != tensors.keys().cloned().collect() {
+    if cursor != layers {
         return Err(bad());
     }
+    verify_coverage(&source, &tensors, &all)?;
     let maximum = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxHeaderBytesL67
         .bytes()
         .map_err(|_| bad())?
@@ -249,6 +312,22 @@ pub fn emit_stage_shards(
     {
         return Err(io());
     }
+    // Headers and selected payloads determine the exact complete output size.
+    // The host must durably charge this BEFORE the first output mutation; a
+    // failed/interrupted write retains the reservation, never an implicit refund.
+    let exact = selected
+        .iter()
+        .zip(&headers)
+        .try_fold(0u64, |total, (names, header)| {
+            let bytes = names
+                .iter()
+                .try_fold(crate::add(8, header.len() as u64)?, |n, name| {
+                    crate::add(n, tensors[name].tensor.length)
+                })?;
+            crate::add(total, bytes)
+        })?;
+    reserve(exact)?;
+    (source.checkpoint)()?;
     fs::DirBuilder::new()
         .mode(0o700)
         .create(output)
@@ -277,17 +356,28 @@ pub fn emit_stage_shards(
             let mut done = 0;
             while done < t.tensor.length {
                 let length = chunk.min(t.tensor.length - done);
-                let data =
-                    bytes::read(&source.files[&t.path], crate::add(t.offset, done)?, length)?;
+                let data = bytes::read(
+                    &source.files[&t.path],
+                    crate::add(t.offset, done)?,
+                    length,
+                    source.checkpoint,
+                )?;
                 file.write_all(&data).map_err(|_| io())?;
                 hash.update(&data);
                 done += length;
             }
             size = crate::add(size, t.tensor.length)?;
         }
+        (source.checkpoint)()?;
         file.sync_all().map_err(|_| io())?;
         let digest = format!("sha256:{:x}", hash.finalize());
-        bytes::verify(&file, size, &digest, "stage_shard_output_changed")?;
+        bytes::verify(
+            &file,
+            size,
+            &digest,
+            "stage_shard_output_changed",
+            source.checkpoint,
+        )?;
         node_files.insert(node.clone(),vec![json!({"path":format!("deployment/{name}"),"size_bytes":size,"content_digest":digest})]);
         files.insert(name, file);
     }
@@ -299,6 +389,7 @@ pub fn emit_stage_shards(
             row["size_bytes"].as_u64().ok_or_else(bad)?,
             row["content_digest"].as_str().ok_or_else(bad)?,
             "slice_source_manifest_invalid",
+            source.checkpoint,
         )?;
     }
     let node_files_digest = crate::digest(&json!(node_files), true)?;
