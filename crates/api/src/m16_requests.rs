@@ -246,8 +246,8 @@ impl M16Requests {
                 continue;
             }
             if phase == Phase::Cleanup {
-                let cancelled = s.entries[&id].outcome == "cancelled";
-                match s.executor.cleanup(&id, cancelled) {
+                let must_stop = s.entries[&id].outcome != "completed";
+                match s.executor.cleanup(&id, must_stop) {
                     Err(e) => {
                         s.entries
                             .get_mut(&id)

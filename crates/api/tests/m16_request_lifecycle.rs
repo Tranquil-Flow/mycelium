@@ -125,12 +125,19 @@ struct Control {
     cleanup_calls: usize,
     clean: bool,
     refuse: bool,
+    fail_start: bool,
+    cleanup_cancels: Vec<bool>,
 }
 struct Controlled(Arc<Mutex<Control>>);
 impl Executor for Controlled {
     fn start(&mut self, d: &Dispatch) -> Result<(), PublicError> {
-        self.0.lock().unwrap().dispatched.push(d.clone());
-        Ok(())
+        let mut c = self.0.lock().unwrap();
+        c.dispatched.push(d.clone());
+        if c.fail_start {
+            Err(PublicError::new(503, "controlled_start_failed"))
+        } else {
+            Ok(())
+        }
     }
     fn poll(&mut self, _: &str) -> Result<Execution, PublicError> {
         let mut c = self.0.lock().unwrap();
@@ -144,9 +151,10 @@ impl Executor for Controlled {
             Execution::Completed
         })
     }
-    fn cleanup(&mut self, _: &str, _: bool) -> Result<bool, PublicError> {
+    fn cleanup(&mut self, _: &str, cancel: bool) -> Result<bool, PublicError> {
         let mut c = self.0.lock().unwrap();
         c.cleanup_calls += 1;
+        c.cleanup_cancels.push(cancel);
         if c.refuse {
             Err(PublicError::new(503, "controlled_cleanup_refused"))
         } else {
@@ -333,6 +341,31 @@ fn qualification_revocation_before_dispatch_and_before_completion_fails_closed()
             Some("failed")
         );
         assert_eq!(c.lock().unwrap().dispatched.len(), usize::from(dispatched));
+        assert_eq!(s.placement_status().unwrap(), baseline);
+    }
+}
+
+#[test]
+fn start_failure_and_active_revocation_stop_partial_work_before_releasing() {
+    for start_failure in [true, false] {
+        let (s, c, h) = fixture();
+        let baseline = s.placement_status().unwrap();
+        c.lock().unwrap().fail_start = start_failure;
+        let a = s.submit(document()).unwrap();
+        s.tick().unwrap();
+        if !start_failure {
+            h.ready.store(false, Ordering::SeqCst);
+            s.tick().unwrap();
+        }
+        assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+        assert!(!s.reservations(&a.request_id).unwrap().is_empty());
+        c.lock().unwrap().clean = true;
+        s.tick().unwrap();
+        assert_eq!(c.lock().unwrap().cleanup_cancels, vec![true]);
+        assert_eq!(
+            s.terminal(&a.request_id).unwrap().as_deref(),
+            Some("failed")
+        );
         assert_eq!(s.placement_status().unwrap(), baseline);
     }
 }
