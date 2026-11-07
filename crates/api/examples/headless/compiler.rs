@@ -458,8 +458,13 @@ impl CompilePort for Compiler {
                     &prepared.inputs.keys,
                     &prepared.inputs.context_members,
                 )?;
-                artifact.produce_assignments(&check()?, now())?;
-                artifact.validate_assignments(&check()?, now())?;
+                if request.stage_sharded {
+                    artifact.produce_stage_shards(&check()?, now())?;
+                    artifact.validate_stage_shards(&check()?, now())?;
+                } else {
+                    artifact.produce_assignments(&check()?, now())?;
+                    artifact.validate_assignments(&check()?, now())?;
+                }
                 artifact.validate_members(&check()?, now())?;
                 Ok(artifact)
             });
@@ -476,8 +481,8 @@ impl CompilePort for Compiler {
             match worker.join() {
                 Ok(Ok(artifact)) => {
                     self.artifact = Some(artifact);
-                    // Metadata assignments exist; actual loaded-stage proofs,
-                    // challenge tokens and an operator plan still do not.
+                    // Metadata or stage-shard bytes exist; actual loaded-stage
+                    // proofs, challenge tokens and an operator plan still do not.
                     self.failure = Some(failed("native_challenge_producer_unavailable"));
                 }
                 Ok(Err(error)) => self.failure = Some(error),

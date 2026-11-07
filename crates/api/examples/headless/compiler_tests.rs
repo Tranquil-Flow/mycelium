@@ -255,6 +255,88 @@ fn actual_compile_port_without_admitted_observation_never_becomes_ready() {
     assert_eq!(status(&core).to_value()["route_ready"], false);
 }
 
+#[test]
+fn stage_shard_artifact_reopens_real_bytes_and_rejects_tampering() {
+    for mutation in ["payload", "document", "symlink", "source", "member"] {
+        let mut f = Fixture::new();
+        f.request.stage_sharded = true;
+        let mut artifact = f.emit();
+        let mut stale = f.members.clone();
+        stale.get_mut("node-0").unwrap()["generation"] = json!(2);
+        assert_eq!(
+            artifact.produce_stage_shards(&stale, 0.0).unwrap_err().0,
+            "compiler_member_changed"
+        );
+        assert!(!artifact.root().join("stage-shards").exists());
+        artifact.produce_stage_shards(&f.members, 0.0).unwrap();
+        artifact.validate_stage_shards(&f.members, 0.0).unwrap();
+        assert_eq!(
+            artifact
+                .produce_stage_shards(&f.members, 0.0)
+                .unwrap_err()
+                .0,
+            "compiler_already_started"
+        );
+        let document_path = artifact.root().join("source-shards.private.json");
+        let mut document: Value =
+            serde_json::from_slice(&fs::read(&document_path).unwrap()).unwrap();
+        assert_eq!(document["state"], "bytes_only");
+        assert_eq!(document["route_ready"], false);
+        assert!(
+            api::compiled_handoff::CompiledHandoff::open(artifact.root(), &BTreeMap::new())
+                .is_err(),
+            "source/shard output must not satisfy a compiled handoff"
+        );
+        let shard = artifact
+            .root()
+            .join("stage-shards/model-stage-001-of-003.safetensors");
+        let expected = match mutation {
+            "payload" => {
+                let mut bytes = fs::read(&shard).unwrap();
+                *bytes.last_mut().unwrap() ^= 1;
+                fs::write(&shard, bytes).unwrap();
+                "slice_plan_file_digest_mismatch"
+            }
+            "document" => {
+                document["route_ready"] = json!(true);
+                api::preferences::private_state::store(
+                    &document_path,
+                    &document,
+                    api::preferences::private_state::private_json_limit().unwrap(),
+                )
+                .unwrap();
+                "compiler_inputs_changed"
+            }
+            "symlink" => {
+                let foreign = f.root.join("replacement.safetensors");
+                fs::rename(&shard, &foreign).unwrap();
+                std::os::unix::fs::symlink(&foreign, &shard).unwrap();
+                "compiler_source_path_invalid"
+            }
+            "source" => {
+                let source = f.source.source_root.join("model.safetensors");
+                let mut bytes = fs::read(&source).unwrap();
+                *bytes.last_mut().unwrap() ^= 1;
+                fs::write(source, bytes).unwrap();
+                "compiler_model_changed"
+            }
+            "member" => "compiler_member_changed",
+            _ => unreachable!(),
+        };
+        let current = if mutation == "member" {
+            &stale
+        } else {
+            &f.members
+        };
+        assert_eq!(
+            artifact.validate_stage_shards(current, 0.0).unwrap_err().0,
+            expected,
+            "{mutation}"
+        );
+        assert!(!artifact.root().join("compiled/operator-plan.json").exists());
+    }
+}
+
 /// Controlled hello responses exercise the real observation validator. They are
 /// not physical-host or native-load evidence; signatures below are real.
 struct ControlledHellos {
@@ -311,8 +393,18 @@ impl runtime::observe::HelloSessions for ControlledHellos {
 
 #[test]
 fn admitted_observations_drive_actual_compiler_worker_to_native_challenge_refusal() {
+    worker_boundary(false);
+}
+
+#[test]
+fn stage_sharded_worker_retains_real_bytes_but_refuses_native_challenge() {
+    worker_boundary(true);
+}
+
+fn worker_boundary(stage_sharded: bool) {
     use api::installation_descriptor::{self, Member, Paths, Source};
-    let f = Fixture::new();
+    let mut f = Fixture::new();
+    f.request.stage_sharded = stage_sharded;
     let core = Arc::new(Mutex::new(load_core(f.root.join("host")).unwrap()));
     let mut host = HeadlessHost {
         core: core.clone(),
@@ -469,14 +561,46 @@ fn admitted_observations_drive_actual_compiler_worker_to_native_challenge_refusa
         }
     }
     let output = f.root.join("host/chain-runs").join(run);
-    let document: Value =
-        serde_json::from_slice(&fs::read(output.join("source-assignments.private.json")).unwrap())
-            .unwrap();
-    assert_eq!(document["state"], "metadata_only");
+    let name = if stage_sharded {
+        "source-shards.private.json"
+    } else {
+        "source-assignments.private.json"
+    };
+    let document: Value = serde_json::from_slice(&fs::read(output.join(name)).unwrap()).unwrap();
+    assert_eq!(
+        document["state"],
+        if stage_sharded {
+            "bytes_only"
+        } else {
+            "metadata_only"
+        }
+    );
     assert_eq!(document["route_ready"], false);
-    for assignment in document["assignments"].as_array().unwrap() {
-        planner::compile::validate_assignment(assignment).unwrap();
-        assert_eq!(assignment["manifest_digest"], f.source.manifest_digest);
+    if stage_sharded {
+        assert_eq!(
+            document["node_files"].as_object().unwrap().len(),
+            f.request.node_ids.len()
+        );
+        for rows in document["node_files"].as_object().unwrap().values() {
+            for row in rows.as_array().unwrap() {
+                let path = row["path"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("deployment/")
+                    .unwrap();
+                let bytes = fs::read(output.join("stage-shards").join(path)).unwrap();
+                assert_eq!(row["size_bytes"], bytes.len());
+                assert_eq!(
+                    row["content_digest"],
+                    protocol::artifact_grant::range_digest(&bytes)
+                );
+            }
+        }
+    } else {
+        for assignment in document["assignments"].as_array().unwrap() {
+            planner::compile::validate_assignment(assignment).unwrap();
+            assert_eq!(assignment["manifest_digest"], f.source.manifest_digest);
+        }
     }
     assert_eq!(
         document["members_digest"],
