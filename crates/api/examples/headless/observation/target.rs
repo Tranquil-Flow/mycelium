@@ -115,6 +115,9 @@ impl Worker {
         let cancelled = self.fence.cancel();
         let notified = self.wake.notify();
         let stopped = self.process.cancel().map_err(OwnerError);
+        // A failure returned by this join has already attempted cleanup. Retry
+        // it only on the next explicit close, never twice in one invocation.
+        let retrying = self.join.is_none();
         let joined = match self.join.take() {
             Some(join) => match join
                 .join()
@@ -129,11 +132,15 @@ impl Worker {
             },
             None => Ok(()),
         };
-        let retried = match self.failure.as_mut() {
-            Some(failure) => failure.retry().map_err(OwnerError),
-            None => Ok(()),
+        let retried = if retrying {
+            match self.failure.as_mut() {
+                Some(failure) => failure.retry().map_err(OwnerError),
+                None => Ok(()),
+            }
+        } else {
+            Ok(())
         };
-        if retried.is_ok() {
+        if retrying && retried.is_ok() {
             self.failure.take();
         }
         cancelled
@@ -153,10 +160,34 @@ impl Drop for Worker {
 pub(crate) fn close(core: &Shared) -> OResult<()> {
     // Move owners out only while doing blocking cleanup, and put a refused
     // owner back intact. A later Stop can retry the exact incarnation.
-    let (worker, failure) = {
+    let (worker, failure, root) = {
         let mut c = locked(core)?;
-        (c.bootstrap.take(), c.bootstrap_failure.take())
+        (
+            c.bootstrap.take(),
+            c.bootstrap_failure.take(),
+            c.root.clone(),
+        )
     };
+    if worker.is_none() && failure.is_none() {
+        // Restart (or another closer temporarily owning the handle) is not
+        // cleanup proof. Never reconstruct process authority from a saved PID.
+        let root = root.join("local-contributor/native-bootstrap");
+        let state = private_state::load(
+            &root.join("state.json"),
+            private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
+        )
+        .map_err(|e| OwnerError(e.0))?;
+        let stage_absent = match fs::symlink_metadata(root.join("stage")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => return Err(OwnerError("bootstrap_stage_unavailable")),
+            Ok(_) => false,
+        };
+        if !stage_absent
+            || state.is_some_and(|record| record.get("phase") != Some(&json!("closed")))
+        {
+            return Err(OwnerError("control_restart_requires_reconciliation"));
+        }
+    }
     let mut result = Ok(());
     if let Some(mut worker) = worker
         && let Err(error) = worker.close()
@@ -234,6 +265,20 @@ impl Host {
     }
     fn ack(&self, root: &Path, removed: bool) -> OResult<()> {
         self.current(!removed)?;
+        if removed {
+            // This target belongs to the same local owner. A contributor Stop
+            // can precede the run driver's teardown request; authorize cleanup
+            // for its exact offer before sending the real signed target ACK.
+            // Without this ordering the mailbox correctly refuses offer_unavailable.
+            let seed = self.pinned.pin()?;
+            let managed = locked(&seed.managed)?
+                .as_ref()
+                .cloned()
+                .ok_or(OwnerError("managed_owner_unavailable"))?;
+            locked(&managed.mailbox)?
+                .request_stage_cleanup(&self.offer, || self.wall_seconds())
+                .map_err(owner_error)?;
+        }
         let now = self.wall_seconds();
         let ttl = BudgetId::PyQuantityMyceliumA13MacosManagedOffersL371C28
             .span(Entries::ZERO)

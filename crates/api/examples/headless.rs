@@ -480,13 +480,12 @@ fn renew_contributor(core: &Shared) {
 }
 
 /// `app._stop_local_contributor()`: the membership stays retained, the live session ends.
-fn stop_local_contributor(core: &Shared) {
-    if let Err(e) = observation::target::close(core) {
-        eprintln!("local target cleanup: {}", e.0);
-    }
-    if let Ok(mut c) = core.lock() {
-        c.contributor = None;
-    }
+fn stop_local_contributor(core: &Shared) -> Result<(), PublicError> {
+    // target::close puts refused cleanup owners back. Retain their contributor
+    // too: reporting stopped or permitting a replacement would erase the debt.
+    observation::target::close(core).map_err(|e| PublicError::new(409, e.0))?;
+    core.lock().map_err(|_| failure())?.contributor = None;
+    Ok(())
 }
 
 // ---- the run exchange (demo_app.ensure_exchange, app.py:1245-1250)
@@ -1124,22 +1123,39 @@ struct HeadlessHost {
     /// `DemoApp.owner_run` and its driver; absent in the throwaway hosts that only read the core.
     runs: Option<Arc<Mutex<DemoRuns>>>,
 }
-/// The leave steps of a host with no model, relay or downloads: the fence and the left flag.
+/// Joined membership departure is implemented here. Its compute worker is not
+/// the owner's local contributor: until a joined-worker cleanup port is mounted,
+/// preserve an explicit refusal rather than converting membership into proof.
 struct HeadlessLeave {
     core: Shared,
 }
 impl LeaveWorker for HeadlessLeave {
     fn step(&mut self, name: &str) -> Result<(), Option<String>> {
-        let mut core = match self.core.lock() {
-            Ok(core) => core,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        match name {
+            "unload" | "cancel_work" => {
+                return Err(Some("member_compute_cleanup_unavailable".into()));
+            }
+            "publish_withdrawal" => {
+                return Err(Some("member_withdrawal_publication_unavailable".into()));
+            }
+            _ => {}
+        }
+        let mut core = self
+            .core
+            .lock()
+            .map_err(|_| Some("member_leave_state_unavailable".into()))?;
         match name {
             "fence" => core.fenced = true,
             "disconnect" => core.left = true,
             _ => {}
         }
         Ok(())
+    }
+    fn inflight(&mut self) -> Result<i64, api::leave::Unobservable> {
+        Err(api::leave::Unobservable)
+    }
+    fn compute_cleanup(&mut self) -> Option<Result<(), String>> {
+        Some(Err("member_compute_cleanup_unavailable".into()))
     }
     fn now_seconds(&self) -> f64 {
         SystemClock::default().wall()
@@ -1386,8 +1402,8 @@ impl Host for HeadlessHost {
     fn local_contributor_start(&mut self) -> Result<Json, PublicError> {
         start_local_contributor(&self.core)
     }
-    fn local_contributor_stop(&mut self) {
-        stop_local_contributor(&self.core);
+    fn local_contributor_stop(&mut self) -> Result<(), PublicError> {
+        stop_local_contributor(&self.core)
     }
     fn local_contributor_retained(&self) -> bool {
         self.with(|c| contributor_dir(&c.root).exists())
@@ -2435,14 +2451,16 @@ fn resume_interrupted_leave(core: &Shared) {
                     .map(|_| ())
                     .map_err(|e| Some(e.0.to_owned()));
             }
-            if let Ok(mut c) = self.0.lock() {
-                match name {
-                    "fence" => c.fenced = true,
-                    "disconnect" => c.left = true,
-                    _ => {}
-                }
+            HeadlessLeave {
+                core: self.0.clone(),
             }
-            Ok(())
+            .step(name)
+        }
+        fn compute_cleanup(&mut self) -> Option<Result<(), String>> {
+            HeadlessLeave {
+                core: self.0.clone(),
+            }
+            .compute_cleanup()
         }
         fn mark(&mut self, fence: bool, left: bool) {
             if let Ok(mut c) = self.0.lock() {
@@ -2457,11 +2475,13 @@ fn resume_interrupted_leave(core: &Shared) {
     };
     if target {
         let leave = MemberLeave::new(&root, Limits::default());
-        drop(resume_leave(
+        if let Err(error) = resume_leave(
             &leave,
             &mut Resume(core, root.clone()),
             &mut SystemClock::default(),
-        ));
+        ) {
+            eprintln!("member_leave_resume_failed: {error:?}");
+        }
     }
 }
 
