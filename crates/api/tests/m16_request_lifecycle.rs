@@ -6,6 +6,7 @@ use api::{
     requests::Service,
     schema::PublicError,
 };
+use budgets::{BudgetId, Entries};
 use protocol::execution_graph;
 use runtime::{
     m16_coordinator::{SharedClock, SharedIdSource},
@@ -22,6 +23,9 @@ use std::{
     },
 };
 
+fn latency(id: BudgetId) -> PyReal {
+    PyReal::from_json(&json!(id.span(Entries::new(0)).unwrap().millis())).unwrap()
+}
 struct Clock;
 impl LeaseClock for Clock {
     fn now(&self) -> f64 {
@@ -101,8 +105,12 @@ impl Host for Authority {
                 expected_new_tokens: PyReal::int(1),
                 qos_class: "interactive".into(),
                 admitted_at: PyReal::Float(0.0),
-                target_ttft_ms: PyReal::int(1000),
-                target_tpot_ms: PyReal::int(100),
+                target_ttft_ms: latency(
+                    BudgetId::PyFinalMyceliumRequestGatewayBackendTargetTtftMsL234C12,
+                ),
+                target_tpot_ms: latency(
+                    BudgetId::PyFinalMyceliumRequestGatewayBackendTargetTpotMsL235C12,
+                ),
                 target_tokens_per_second: PyReal::int(1),
                 sampling_seed: PyReal::int(0),
                 generation_config_digest: digest("generation"),
@@ -171,7 +179,10 @@ impl Executor for Controlled {
 fn fixture() -> (M16Requests, Arc<Mutex<Control>>, Arc<Authority>) {
     fixture_with(inputs(), 16)
 }
-fn fixture_with(i: FactoryInputs, max_sessions: usize) -> (M16Requests, Arc<Mutex<Control>>, Arc<Authority>) {
+fn fixture_with(
+    i: FactoryInputs,
+    max_sessions: usize,
+) -> (M16Requests, Arc<Mutex<Control>>, Arc<Authority>) {
     let control = Arc::new(Mutex::new(Control::default()));
     let host = Arc::new(Authority {
         ready: AtomicBool::new(true),
@@ -425,7 +436,8 @@ fn repeated_http_delete_stays_cancelling_until_cleanup_is_proven() {
         for _ in 0..2 {
             let response = http(s.clone(), "DELETE", &path, Some(&a.session_token), "");
             assert!(response.starts_with("HTTP/1.1 202"), "{response}");
-            let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let body: Value =
+                serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
             assert_eq!(body["status"], "cancelling");
             if refused {
                 assert_eq!(s.tick().unwrap_err().code, "controlled_cleanup_refused");
@@ -442,7 +454,10 @@ fn repeated_http_delete_stays_cancelling_until_cleanup_is_proven() {
         control.clean = true;
     }
     s.tick().unwrap();
-    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("cancelled"));
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("cancelled")
+    );
     assert_eq!(s.placement_status().unwrap(), baseline);
     let response = http(s, "DELETE", &path, Some(&a.session_token), "");
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
@@ -457,19 +472,35 @@ fn rejected_submissions_exhaust_a_lifetime_attempt_budget_without_growing_incide
     let baseline = s.placement_status().unwrap();
     let a = s.submit(document()).unwrap();
     for _ in 1..limit {
-        assert_eq!(s.submit(document()).err().unwrap().code, "resource_unavailable");
+        assert_eq!(
+            s.submit(document()).err().unwrap().code,
+            "resource_unavailable"
+        );
     }
     let incidents = s.incidents().unwrap();
     assert_eq!(incidents.len(), limit - 1);
     let held = s.placement_status().unwrap();
-    let refusals: Vec<_> = (0..32).map(|_| s.submit(document()).err().unwrap().code).collect();
-    assert_eq!(s.incidents().unwrap(), incidents, "rejected submissions must not grow retained coordinator history");
-    assert!(refusals.iter().all(|code| *code == "m16_admission_attempt_budget_exhausted"));
+    let refusals: Vec<_> = (0..32)
+        .map(|_| s.submit(document()).err().unwrap().code)
+        .collect();
+    assert_eq!(
+        s.incidents().unwrap(),
+        incidents,
+        "rejected submissions must not grow retained coordinator history"
+    );
+    assert!(
+        refusals
+            .iter()
+            .all(|code| *code == "m16_admission_attempt_budget_exhausted")
+    );
     assert_eq!(s.placement_status().unwrap(), held);
     s.cancel(&a.request_id, Some(&a.session_token)).unwrap();
     assert_eq!(s.placement_status().unwrap(), baseline);
     let settled_incidents = s.incidents().unwrap();
-    assert_eq!(s.submit(document()).err().unwrap().code, "m16_admission_attempt_budget_exhausted");
+    assert_eq!(
+        s.submit(document()).err().unwrap().code,
+        "m16_admission_attempt_budget_exhausted"
+    );
     assert_eq!(s.incidents().unwrap(), settled_incidents);
     assert!(c.lock().unwrap().dispatched.is_empty());
 }
@@ -492,21 +523,77 @@ fn one_cleanup_refusal_does_not_starve_another_cancelled_owner() {
     {
         let mut control = c.lock().unwrap();
         control.clean = true;
-        control.owner_refusals.insert(a.request_id.clone(), "owner_a_cleanup_refused");
+        control
+            .owner_refusals
+            .insert(a.request_id.clone(), "owner_a_cleanup_refused");
     }
     assert_eq!(s.tick().unwrap_err().code, "owner_a_cleanup_refused");
-    assert_eq!(s.terminal(&b.request_id).unwrap().as_deref(), Some("cancelled"));
+    assert_eq!(
+        s.terminal(&b.request_id).unwrap().as_deref(),
+        Some("cancelled")
+    );
     assert!(s.reservations(&b.request_id).unwrap().is_empty());
     assert_eq!(s.cleanup_debt(&b.request_id).unwrap(), None);
     assert_eq!(s.terminal(&a.request_id).unwrap(), None);
     assert!(!s.reservations(&a.request_id).unwrap().is_empty());
-    assert_eq!(s.cleanup_debt(&a.request_id).unwrap(), Some("owner_a_cleanup_refused"));
-    assert_eq!(c.lock().unwrap().cleanup_requests, vec![a.request_id.clone(), b.request_id.clone()]);
+    assert_eq!(
+        s.cleanup_debt(&a.request_id).unwrap(),
+        Some("owner_a_cleanup_refused")
+    );
+    assert_eq!(
+        c.lock().unwrap().cleanup_requests,
+        vec![a.request_id.clone(), b.request_id.clone()]
+    );
     assert_eq!(c.lock().unwrap().cleanup_cancels, vec![true, true]);
     c.lock().unwrap().owner_refusals.clear();
     s.tick().unwrap();
     assert_eq!(s.placement_status().unwrap(), baseline);
-    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("cancelled"));
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("cancelled")
+    );
+}
+
+#[test]
+fn multiple_cleanup_refusals_are_all_retained_and_reported() {
+    let mut i = inputs();
+    i.max_concurrent_requests = 2;
+    let (s, c, _) = fixture_with(i, 16);
+    let mut doc = document();
+    doc["max_new_tokens"] = json!(1);
+    let a = s.submit(doc.clone()).unwrap();
+    let b = s.submit(doc).unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    for (id, token, code) in [
+        (&a.request_id, &a.session_token, "owner_a_cleanup_refused"),
+        (&b.request_id, &b.session_token, "owner_b_cleanup_refused"),
+    ] {
+        s.cancel(id, Some(token)).unwrap();
+        c.lock().unwrap().owner_refusals.insert(id.clone(), code);
+    }
+    let refusal = s.tick().unwrap_err();
+    assert_eq!(
+        s.cleanup_debt(&a.request_id).unwrap(),
+        Some("owner_a_cleanup_refused")
+    );
+    assert_eq!(
+        s.cleanup_debt(&b.request_id).unwrap(),
+        Some("owner_b_cleanup_refused")
+    );
+    assert_eq!(refusal.code, "m16_multiple_progress_refusals");
+    assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+    assert_eq!(s.terminal(&b.request_id).unwrap(), None);
+    assert!(!s.reservations(&a.request_id).unwrap().is_empty());
+    assert!(!s.reservations(&b.request_id).unwrap().is_empty());
+    {
+        let mut control = c.lock().unwrap();
+        control.clean = true;
+        control.owner_refusals.clear();
+    }
+    s.tick().unwrap();
+    assert_eq!(s.cleanup_debt(&a.request_id).unwrap(), None);
+    assert_eq!(s.cleanup_debt(&b.request_id).unwrap(), None);
 }
 
 #[derive(Default)]
@@ -540,16 +627,79 @@ fn publication_clock_fault_retries_only_unfinished_work() {
     s.tick().unwrap();
     assert_eq!(c.lock().unwrap().cleanup_calls, 1);
     assert_eq!(s.cleanup_debt(&a.request_id).unwrap(), None);
-    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("completed"));
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("completed")
+    );
     assert_eq!(s.placement_status().unwrap(), baseline);
-    let mut stream = s.subscribe(&a.request_id, None, Some(&a.session_token)).unwrap();
+    let mut stream = s
+        .subscribe(&a.request_id, None, Some(&a.session_token))
+        .unwrap();
     let mut terminals = 0;
     while let Some(event) = stream.next().unwrap() {
-        if event["type"] == "completed" { terminals += 1; }
+        if event["type"] == "completed" {
+            terminals += 1;
+        }
         stream.ack(event["sequence"].as_u64().unwrap()).unwrap();
     }
     assert_eq!(terminals, 1);
     stream.close().unwrap();
+}
+
+#[test]
+fn queued_cancellation_publication_fault_preserves_the_settled_outcome() {
+    let clock = Arc::new(ScriptClock::default());
+    let mut i = inputs();
+    i.clock = clock.clone();
+    let (s, c, _) = fixture_with(i, 16);
+    let baseline = s.placement_status().unwrap();
+    let a = s.submit(document()).unwrap();
+    // Queued cancel timestamps settlement and its incident before publication.
+    *clock.0.lock().unwrap() = VecDeque::from([0.0, 0.0, f64::NAN]);
+    assert_eq!(
+        s.cancel(&a.request_id, Some(&a.session_token))
+            .unwrap_err()
+            .code,
+        "m16_clock_invalid"
+    );
+    assert!(clock.0.lock().unwrap().is_empty());
+    assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    let incidents = s.incidents().unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("cancelled")
+    );
+    assert_eq!(s.incidents().unwrap(), incidents);
+    assert_eq!(c.lock().unwrap().cleanup_calls, 0);
+    assert!(c.lock().unwrap().dispatched.is_empty());
+    assert!(!s.cancel(&a.request_id, Some(&a.session_token)).unwrap());
+}
+
+#[test]
+fn cancellation_during_publication_retry_cannot_rewrite_settlement() {
+    let clock = Arc::new(ScriptClock::default());
+    let mut i = inputs();
+    i.clock = clock.clone();
+    let (s, c, _) = fixture_with(i, 16);
+    let a = s.submit(document()).unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    c.lock().unwrap().clean = true;
+    *clock.0.lock().unwrap() = VecDeque::from([0.0, f64::NAN]);
+    assert_eq!(s.tick().unwrap_err().code, "m16_clock_invalid");
+    assert!(s.cancel(&a.request_id, Some(&a.session_token)).unwrap());
+    assert!(s.cancel(&a.request_id, Some(&a.session_token)).unwrap());
+    s.tick().unwrap();
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("completed")
+    );
+    assert_eq!(c.lock().unwrap().cleanup_calls, 1);
+    assert_eq!(c.lock().unwrap().cleanup_cancels, vec![false]);
 }
 
 #[test]

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Factory composition with controlled observations; no physical qualification claim.
+use budgets::{BudgetId, Entries};
 use protocol::execution_graph;
 use runtime::{
     m16_factory::{DeviceFacts, FactoryInputs, build_live_m16_runtime},
@@ -14,6 +15,9 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+fn latency(id: BudgetId) -> PyReal {
+    PyReal::from_json(&json!(id.span(Entries::new(0)).unwrap().millis())).unwrap()
+}
 struct Clock;
 impl LeaseClock for Clock {
     fn now(&self) -> f64 {
@@ -73,8 +77,8 @@ fn request(id: &str) -> RequestContext {
         expected_new_tokens: PyReal::int(1),
         qos_class: "interactive".into(),
         admitted_at: PyReal::Float(0.0),
-        target_ttft_ms: PyReal::int(1000),
-        target_tpot_ms: PyReal::int(100),
+        target_ttft_ms: latency(BudgetId::PyFinalMyceliumRequestGatewayBackendTargetTtftMsL234C12),
+        target_tpot_ms: latency(BudgetId::PyFinalMyceliumRequestGatewayBackendTargetTpotMsL235C12),
         target_tokens_per_second: PyReal::int(1),
         sampling_seed: PyReal::int(0),
         generation_config_digest: "controlled-generation".into(),
