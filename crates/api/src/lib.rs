@@ -26,6 +26,7 @@ pub mod join_link;
 pub mod leave;
 pub mod local_agent;
 pub mod local_manifest;
+pub mod m16_requests;
 pub mod managed_carrier;
 pub mod member;
 pub mod model_catalog;
