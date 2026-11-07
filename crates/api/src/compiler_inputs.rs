@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The model-free output boundary of `chain_compile.start_compile` (f4e366e9).
-//! These are real private compiler INPUT files, never an operator plan or
-//! evidence of native execution. The owning artifact retains their identities.
+//! Private compiler inputs and whole-source metadata assignment output.
+//! Neither inputs nor metadata assignments are an operator plan or native proof.
+//! The owning artifact retains their identities and never converts to BuildOutput.
 use crate::{preferences::private_state, serving_source::Prepared};
 use owner_run::chain::PortError;
 use planner::chain_compile::{BuildRequest, MAX_HOSTS, MIN_HOSTS};
@@ -140,6 +140,160 @@ impl InputArtifact {
     pub fn membership(&self) -> &Value {
         &self.documents["members.private.json"]
     }
+    /// Emit source-bound metadata assignments only. This does not authorize an
+    /// offer, claim a loaded stage, or produce an operator plan / BuildOutput.
+    pub fn produce_assignments(
+        &mut self,
+        current_members: &BTreeMap<String, Value>,
+        now: f64,
+    ) -> Result<()> {
+        let document = self.assignment_document(current_members, now)?;
+        let name = "source-assignments.private.json";
+        if self.documents.contains_key(name) {
+            return Err(Error("compiler_already_started"));
+        }
+        match fs::symlink_metadata(self.root.join(name)) {
+            Ok(_) => Err(Error("compiler_outputs_changed")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(Error("compiler_directory_invalid")),
+        }?;
+        private_state::store(
+            &self.root.join(name),
+            &document,
+            private_state::private_json_limit().map_err(state)?,
+        )
+        .map_err(state)?;
+        self.documents.insert(name.into(), document);
+        self.validate()
+    }
+    /// Reopen the emitted document and source, recompute all metadata, and bind
+    /// it to freshly read members. The caller must repeat this after async work.
+    pub fn validate_assignments(
+        &self,
+        current_members: &BTreeMap<String, Value>,
+        now: f64,
+    ) -> Result<()> {
+        let expected = self.assignment_document(current_members, now)?;
+        if self.documents.get("source-assignments.private.json") != Some(&expected) {
+            return Err(Error("compiler_outputs_changed"));
+        }
+        Ok(())
+    }
+    fn assignment_document(
+        &self,
+        current_members: &BTreeMap<String, Value>,
+        now: f64,
+    ) -> Result<Value> {
+        self.validate()?;
+        self.validate_members(current_members, now)?;
+        let manifest = crate::local_manifest::compile_local_model_manifest(
+            &crate::local_manifest::LocalModelSource {
+                root: self.source.source_root.clone(),
+                model_id: self.request.model_id.clone(),
+                requested_revision: self.source.manifest["requested_revision"]
+                    .as_str()
+                    .ok_or(Error("compiler_model_changed"))?
+                    .into(),
+                resolved_commit: self.request.resolved_commit.clone(),
+                tokenizer_assets: Ok(Vec::new()),
+            },
+        )
+        .map_err(|_| Error("compiler_model_changed"))?;
+        if manifest != Value::Object(self.source.manifest.clone()) {
+            return Err(Error("compiler_model_changed"));
+        }
+        let mut files = BTreeMap::new();
+        for row in manifest["files"]
+            .as_array()
+            .ok_or(Error("compiler_model_changed"))?
+        {
+            let name = row["path"]
+                .as_str()
+                .ok_or(Error("compiler_source_path_invalid"))?;
+            files.insert(
+                name.into(),
+                open_source_file(&self.source.source_root, name)?,
+            );
+        }
+        let mut roots = Map::new();
+        let mut runtimes = Map::new();
+        for node in self.topology()["nodes"]
+            .as_array()
+            .ok_or(Error("compiler_topology_invalid"))?
+        {
+            let id = node["node_id"]
+                .as_str()
+                .ok_or(Error("compiler_topology_invalid"))?;
+            let root = node["staging_root"]
+                .as_str()
+                .ok_or(Error("compiler_topology_invalid"))?;
+            roots.insert(id.into(), json!(format!("{root}/deployment")));
+            runtimes.insert(
+                id.into(),
+                json!({"backend":node["runtime_backend"],
+                "dtype":"float32","quantization":"int8-weight-only"}),
+            );
+        }
+        // The host rechecks exact current members separately; a cloned request
+        // is not presented as fresh planner/resource/consent admission.
+        let output = planner::source_plan::producer::compile_source_assignments(
+            &self.request,
+            &self.request,
+            planner::source_plan::PreparedSource {
+                manifest: &manifest,
+                manifest_digest: &self.source.manifest_digest,
+                files: &files,
+            },
+            self.documents["compile-start.private.json"]["epoch"]
+                .as_u64()
+                .ok_or(Error("compiler_inputs_changed"))?,
+            &Value::Object(roots),
+            &Value::Object(runtimes),
+        )
+        .map_err(|e| Error(e.code))?;
+        Ok(json!({"protocol":"mycelium.source_assignments.v1",
+            "state":"metadata_only", "route_ready":false,
+            "run_id":self.documents["compile-start.private.json"]["run_id"],
+            "deployment_id":self.request.deployment_id,
+            "compilation_cache_key":self.request.compilation_cache_key,
+            "observations_digest":planner::digest(self.observations(), true).map_err(|e| Error(e.code))?,
+            "members_digest":planner::digest(self.membership(), true).map_err(|e| Error(e.code))?,
+            "route":output.route,"assignments":output.assignments}))
+    }
+    /// Cheap post-worker identity/lease check; not a consent or resource grant.
+    pub fn validate_members(&self, current: &BTreeMap<String, Value>, now: f64) -> Result<()> {
+        let bad = Error("compiler_member_changed");
+        let members = self.membership()["members"].as_array().ok_or(bad.clone())?;
+        if !now.is_finite()
+            || members.len() != self.request.node_ids.len()
+            || current.keys().collect::<Vec<_>>()
+                != self.request.node_ids.iter().collect::<Vec<_>>()
+        {
+            return Err(bad);
+        }
+        let mut seen = BTreeSet::new();
+        for prior in members {
+            let id = prior["node_id"].as_str().ok_or(bad.clone())?;
+            let member = current.get(id).ok_or(bad.clone())?;
+            if !seen.insert(id)
+                || member["node_id"] != id
+                || member["lease_expires_at"]
+                    .as_f64()
+                    .is_none_or(|end| !end.is_finite() || now >= end)
+                || [
+                    "generation",
+                    "incarnation",
+                    "verification_key_digest",
+                    "endpoint_id",
+                ]
+                .iter()
+                .any(|key| prior[*key].is_null() || prior[*key] != member[*key])
+            {
+                return Err(bad);
+            }
+        }
+        Ok(())
+    }
     /// Detect a replacement or tampered file before the next producer consumes
     /// it. Never reopen by public digest alone or reconstitute successful state.
     pub fn validate(&self) -> Result<()> {
@@ -150,13 +304,61 @@ impl InputArtifact {
         }
         let max = private_state::private_json_limit().map_err(state)?;
         for (name, expected) in &self.documents {
-            let actual = private_state::load(&self.root.join(name), max).map_err(state)?;
-            if actual.map(Value::Object).as_ref() != Some(expected) {
+            let actual = private_state::load(&self.root.join(name), max)
+                .map_err(state)?
+                .map(Value::Object)
+                .ok_or(Error("compiler_inputs_changed"))?;
+            // The private writer canonicalizes numeric spellings (e.g. a real
+            // Qwen RMS epsilon 1e-6 becomes 1e-06). Compare that same wire form,
+            // not serde's arbitrary-precision number spelling.
+            let canonical = |value: &Value| {
+                protocol::canonical::to_bytes(value).map_err(|_| Error("compiler_inputs_changed"))
+            };
+            if canonical(&actual)? != canonical(expected)? {
                 return Err(Error("compiler_inputs_changed"));
             }
         }
         Ok(())
     }
+}
+
+/// Whole-source producer currently accepts regular snapshot files only. HF blob
+/// symlinks remain explicitly refused here; manifest compilation accepting one
+/// is not permission to follow an arbitrary link while reopening it.
+fn open_source_file(root: &Path, name: &str) -> Result<fs::File> {
+    use std::{os::unix::fs::OpenOptionsExt, path::Component};
+    let bad = Error("compiler_source_path_invalid");
+    if fs::canonicalize(root).map_err(|_| bad.clone())? != root {
+        return Err(bad);
+    }
+    let suffix = Path::new(name);
+    if name.is_empty()
+        || suffix
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(bad);
+    }
+    let mut path = root.to_owned();
+    for part in suffix.components() {
+        path.push(part);
+        if fs::symlink_metadata(&path)
+            .map_err(|_| bad.clone())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(bad);
+        }
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| bad.clone())?;
+    if !file.metadata().map_err(|_| bad.clone())?.is_file() {
+        return Err(bad);
+    }
+    Ok(file)
 }
 
 /// Emits the source-bound prefix of the actual builder's input files. All

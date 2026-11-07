@@ -22,6 +22,7 @@ use std::{
     fs::File,
 };
 mod bytes;
+pub mod producer;
 
 /// Already-open files from the prepared source. Keys are manifest-relative paths.
 /// Handles, not names, are read, and content/size are revalidated here.
