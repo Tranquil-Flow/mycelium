@@ -132,7 +132,10 @@ impl DirectoryPort for DirectoryClient {
         let mut response = Vec::new();
         let mut buf = [0u8; 8192];
         loop {
-            stream.timeout(deadline)?;
+            // Keep the already-installed finite socket timeout. On macOS, changing
+            // SO_*TIMEO after an early HTTP refusal can return EINVAL even though
+            // the complete response is buffered; do not lose its specific code.
+            remaining(deadline)?;
             let n = stream.read(&mut buf).map_err(|_| unreachable())?;
             if n == 0 {
                 break;

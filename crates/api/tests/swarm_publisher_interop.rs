@@ -134,7 +134,7 @@ fn lifecycle(python: bool) {
     );
     assert_eq!(rows(&*client)[0]["status"], "warming");
     let changed = OwnerState::Serving {
-        model: "Qwen/Qwen3-4B".into(),
+        model: "Qwen/Qwen3-8B".into(),
         members: 4,
         entry_origin: "https://new-entry.example.org".into(),
     };
@@ -143,7 +143,7 @@ fn lifecycle(python: bool) {
     p.set_listing(Some(opts)).unwrap();
     p.reconcile(now, &changed).unwrap();
     let updated = rows(&*client).remove(0);
-    assert_eq!(updated["record"]["model"], "Qwen/Qwen3-4B");
+    assert_eq!(updated["record"]["model"], "Qwen/Qwen3-8B");
     assert_eq!(
         updated["record"]["entry"]["origin"],
         "https://new-entry.example.org"

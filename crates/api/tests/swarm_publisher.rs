@@ -104,13 +104,13 @@ fn opt_in_publish_renew_material_update_and_withdraw() {
     p.reconcile(NOW + interval(), &serving()).unwrap();
     assert!(a.calls.load(Ordering::SeqCst) > before);
     let changed = OwnerState::Serving {
-        model: "Qwen/Qwen3-4B".into(),
+        model: "Qwen/Qwen3-8B".into(),
         members: 3,
         entry_origin: "https://entry.example.org".into(),
     };
     p.reconcile(NOW + interval(), &changed).unwrap();
     let current = swarms(&a).remove(0);
-    assert_eq!(current["record"]["model"], "Qwen/Qwen3-4B");
+    assert_eq!(current["record"]["model"], "Qwen/Qwen3-8B");
     assert_eq!(current["members"], 3);
     let mut options = listing();
     options.access_mode = "invite".into();
