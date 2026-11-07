@@ -614,7 +614,7 @@ fn shard_output_bytes(path: &Path) -> Result<u64> {
     }
     Ok(total)
 }
-fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
+fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
     let bad = Error("compiler_storage_ledger_invalid");
     if entries.len() > MAX_RETAINED_SHARD_RUNS {
         return Err(bad);
@@ -631,6 +631,8 @@ fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
             .ok_or(bad.clone())?;
         let meta = fs::symlink_metadata(runs.join(run)).map_err(|_| bad.clone())?;
         if !meta.is_dir()
+            || meta.mode() & 0o7777 != 0o700
+            || meta.uid() != rustix::process::getuid().as_raw()
             || Some(meta.dev()) != row["run_dev"].as_u64()
             || Some(meta.ino()) != row["run_ino"].as_u64()
         {
@@ -638,6 +640,11 @@ fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
         }
         total = total.checked_add(bytes).ok_or(bad.clone())?;
     }
+    Ok(total)
+}
+fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
+    let total = storage_rows(runs, entries)?;
+    let bad = Error("compiler_storage_ledger_invalid");
     // Legacy B2 partials have no reservation: refuse rather than silently adopt
     // or fail to account for them. Bound traversal even for metadata-only runs.
     for (index, entry) in fs::read_dir(runs).map_err(|_| bad.clone())?.enumerate() {
@@ -704,7 +711,88 @@ fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     if ledger["protocol"] != "mycelium.compiler_storage.v1" || !ledger["entries"].is_object() {
         return Err(Error("compiler_storage_ledger_invalid"));
     }
+    reconcile_storage_temporaries(runs, ledger["entries"].as_object().unwrap())?;
     Ok((lock, ledger))
+}
+
+/// Discard only a complete private ledger replacement bound to this run owner.
+/// The committed ledger remains authoritative: before reserve's rename no byte
+/// producer has permission to write; before complete's rename its full charge is
+/// already committed. Recovery never adopts outputs or refunds old charges.
+fn reconcile_storage_temporaries(runs: &Path, committed: &Map<String, Value>) -> Result<()> {
+    let bad = Error("compiler_storage_owner_changed");
+    storage_rows(runs, committed)?;
+    let mut stale = Vec::new();
+    for (index, entry) in fs::read_dir(runs).map_err(|_| bad.clone())?.enumerate() {
+        if index >= 4096 {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+        let entry = entry.map_err(|_| bad.clone())?;
+        let name = entry.file_name();
+        let Some(nonce) = name.to_str().and_then(|name| {
+            name.strip_prefix(".compiler-storage.private.json.")?
+                .strip_suffix(".tmp")
+        }) else {
+            continue;
+        };
+        if nonce.len() != 32
+            || !nonce
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(bad);
+        }
+        let path = entry.path();
+        let meta = fs::symlink_metadata(&path).map_err(|_| bad.clone())?;
+        // load uses O_NOFOLLOW and checks private mode, uid, single link, bounded
+        // canonical bytes and opened inode identity. A pathname prefix is NOT ownership.
+        let candidate =
+            private_state::load(&path, private_state::private_json_limit().map_err(state)?)
+                .map_err(|_| bad.clone())?
+                .ok_or(bad.clone())?;
+        let rows = candidate
+            .get("entries")
+            .and_then(Value::as_object)
+            .ok_or(bad.clone())?;
+        if candidate.get("protocol").and_then(Value::as_str) != Some("mycelium.compiler_storage.v1")
+            || rows.is_empty()
+            || rows.len() > committed.len() + 1
+            || committed.iter().any(|(run, row)| {
+                rows.get(run).is_none_or(|next| {
+                    ["bytes", "run_dev", "run_ino"]
+                        .iter()
+                        .any(|key| next[*key] != row[*key])
+                })
+            })
+        {
+            return Err(bad);
+        }
+        storage_rows(runs, rows).map_err(|_| bad.clone())?;
+        stale.push((path, meta));
+        if stale.len() > MAX_RETAINED_SHARD_RUNS {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+    }
+    // Validate the complete bounded set before unlinking any of it, then recheck
+    // each identity. Never follow a symlink or delete an unrelated replacement.
+    for (path, prior) in &stale {
+        let meta = fs::symlink_metadata(path).map_err(|_| bad.clone())?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.mode() & 0o7777 != 0o600
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || (meta.dev(), meta.ino(), meta.len()) != (prior.dev(), prior.ino(), prior.len())
+        {
+            return Err(bad);
+        }
+        fs::remove_file(path).map_err(|_| Error("compiler_storage_recovery_failed"))?;
+    }
+    if !stale.is_empty() {
+        fs::File::open(runs)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| Error("compiler_storage_recovery_failed"))?;
+    }
+    Ok(())
 }
 fn store_storage_ledger(runs: &Path, ledger: &Value) -> Result<()> {
     private_state::store(
@@ -858,6 +946,10 @@ fn store_documents(root: &Path, documents: &BTreeMap<String, Value>) -> Result<(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "compiler_storage_tests.rs"]
+mod storage_tests;
 
 #[cfg(test)]
 mod tests {
