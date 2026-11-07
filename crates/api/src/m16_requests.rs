@@ -381,6 +381,10 @@ impl M16Requests {
             .filter(|e| e.phase == Phase::Cleanup)
             .map(|e| e.cleanup_refusal.unwrap_or("cleanup_pending")))
     }
+    /// Retained coordinator incidents; observation only, never drives its lifecycle.
+    pub fn incidents(&self) -> Result<Vec<runtime::m16_coordinator::Incident>, PublicError> {
+        Ok(self.shared.lock()?.runtime.coordinator.incidents())
+    }
     pub fn reservations(&self, id: &str) -> Result<Vec<Reservation>, PublicError> {
         Ok(self
             .shared

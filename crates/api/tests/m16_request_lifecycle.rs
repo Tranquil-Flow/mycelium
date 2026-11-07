@@ -15,7 +15,7 @@ use runtime::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -127,6 +127,8 @@ struct Control {
     refuse: bool,
     fail_start: bool,
     cleanup_cancels: Vec<bool>,
+    cleanup_requests: Vec<String>,
+    owner_refusals: BTreeMap<String, &'static str>,
 }
 struct Controlled(Arc<Mutex<Control>>);
 impl Executor for Controlled {
@@ -151,10 +153,14 @@ impl Executor for Controlled {
             Execution::Completed
         })
     }
-    fn cleanup(&mut self, _: &str, cancel: bool) -> Result<bool, PublicError> {
+    fn cleanup(&mut self, id: &str, cancel: bool) -> Result<bool, PublicError> {
         let mut c = self.0.lock().unwrap();
         c.cleanup_calls += 1;
         c.cleanup_cancels.push(cancel);
+        c.cleanup_requests.push(id.to_owned());
+        if let Some(code) = c.owner_refusals.get(id) {
+            return Err(PublicError::new(503, code));
+        }
         if c.refuse {
             Err(PublicError::new(503, "controlled_cleanup_refused"))
         } else {
@@ -163,16 +169,19 @@ impl Executor for Controlled {
     }
 }
 fn fixture() -> (M16Requests, Arc<Mutex<Control>>, Arc<Authority>) {
+    fixture_with(inputs(), 16)
+}
+fn fixture_with(i: FactoryInputs, max_sessions: usize) -> (M16Requests, Arc<Mutex<Control>>, Arc<Authority>) {
     let control = Arc::new(Mutex::new(Control::default()));
     let host = Arc::new(Authority {
         ready: AtomicBool::new(true),
         ids: Ids::default(),
     });
     let service = M16Requests::new(
-        build_live_m16_runtime(inputs()).unwrap(),
+        build_live_m16_runtime(i).unwrap(),
         host.clone(),
         Box::new(Controlled(control.clone())),
-        Config::new(16, 16, 0.0).unwrap(),
+        Config::new(16, max_sessions, 0.0).unwrap(),
     )
     .unwrap();
     (service, control, host)
@@ -404,6 +413,145 @@ fn http(s: M16Requests, method: &str, path: &str, owner: Option<&str>, body: &st
     job.join().unwrap();
     response
 }
+#[test]
+fn repeated_http_delete_stays_cancelling_until_cleanup_is_proven() {
+    let (s, c, _) = fixture();
+    let baseline = s.placement_status().unwrap();
+    let a = s.submit(document()).unwrap();
+    s.tick().unwrap();
+    let path = format!("/v1/inference/{}", a.request_id);
+    for refused in [false, true] {
+        c.lock().unwrap().refuse = refused;
+        for _ in 0..2 {
+            let response = http(s.clone(), "DELETE", &path, Some(&a.session_token), "");
+            assert!(response.starts_with("HTTP/1.1 202"), "{response}");
+            let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert_eq!(body["status"], "cancelling");
+            if refused {
+                assert_eq!(s.tick().unwrap_err().code, "controlled_cleanup_refused");
+            } else {
+                s.tick().unwrap();
+            }
+            assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+            assert!(!s.reservations(&a.request_id).unwrap().is_empty());
+        }
+    }
+    {
+        let mut control = c.lock().unwrap();
+        control.refuse = false;
+        control.clean = true;
+    }
+    s.tick().unwrap();
+    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("cancelled"));
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    let response = http(s, "DELETE", &path, Some(&a.session_token), "");
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["status"], "terminal");
+}
+
+#[test]
+fn rejected_submissions_exhaust_a_lifetime_attempt_budget_without_growing_incidents() {
+    let limit = 4;
+    let (s, c, _) = fixture_with(inputs(), limit);
+    let baseline = s.placement_status().unwrap();
+    let a = s.submit(document()).unwrap();
+    for _ in 1..limit {
+        assert_eq!(s.submit(document()).err().unwrap().code, "resource_unavailable");
+    }
+    let incidents = s.incidents().unwrap();
+    assert_eq!(incidents.len(), limit - 1);
+    let held = s.placement_status().unwrap();
+    let refusals: Vec<_> = (0..32).map(|_| s.submit(document()).err().unwrap().code).collect();
+    assert_eq!(s.incidents().unwrap(), incidents, "rejected submissions must not grow retained coordinator history");
+    assert!(refusals.iter().all(|code| *code == "m16_admission_attempt_budget_exhausted"));
+    assert_eq!(s.placement_status().unwrap(), held);
+    s.cancel(&a.request_id, Some(&a.session_token)).unwrap();
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    let settled_incidents = s.incidents().unwrap();
+    assert_eq!(s.submit(document()).err().unwrap().code, "m16_admission_attempt_budget_exhausted");
+    assert_eq!(s.incidents().unwrap(), settled_incidents);
+    assert!(c.lock().unwrap().dispatched.is_empty());
+}
+
+#[test]
+fn one_cleanup_refusal_does_not_starve_another_cancelled_owner() {
+    let mut i = inputs();
+    i.max_concurrent_requests = 2;
+    let (s, c, _) = fixture_with(i, 16);
+    let baseline = s.placement_status().unwrap();
+    let mut doc = document();
+    doc["max_new_tokens"] = json!(1);
+    let a = s.submit(doc.clone()).unwrap();
+    let b = s.submit(doc).unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    assert_eq!(c.lock().unwrap().dispatched.len(), 2);
+    s.cancel(&a.request_id, Some(&a.session_token)).unwrap();
+    s.cancel(&b.request_id, Some(&b.session_token)).unwrap();
+    {
+        let mut control = c.lock().unwrap();
+        control.clean = true;
+        control.owner_refusals.insert(a.request_id.clone(), "owner_a_cleanup_refused");
+    }
+    assert_eq!(s.tick().unwrap_err().code, "owner_a_cleanup_refused");
+    assert_eq!(s.terminal(&b.request_id).unwrap().as_deref(), Some("cancelled"));
+    assert!(s.reservations(&b.request_id).unwrap().is_empty());
+    assert_eq!(s.cleanup_debt(&b.request_id).unwrap(), None);
+    assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+    assert!(!s.reservations(&a.request_id).unwrap().is_empty());
+    assert_eq!(s.cleanup_debt(&a.request_id).unwrap(), Some("owner_a_cleanup_refused"));
+    assert_eq!(c.lock().unwrap().cleanup_requests, vec![a.request_id.clone(), b.request_id.clone()]);
+    assert_eq!(c.lock().unwrap().cleanup_cancels, vec![true, true]);
+    c.lock().unwrap().owner_refusals.clear();
+    s.tick().unwrap();
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("cancelled"));
+}
+
+#[derive(Default)]
+struct ScriptClock(Mutex<VecDeque<f64>>);
+impl LeaseClock for ScriptClock {
+    fn now(&self) -> f64 {
+        self.0.lock().unwrap().pop_front().unwrap_or(0.0)
+    }
+}
+#[test]
+fn publication_clock_fault_retries_only_unfinished_work() {
+    let clock = Arc::new(ScriptClock::default());
+    let mut i = inputs();
+    i.clock = clock.clone();
+    let (s, c, _) = fixture_with(i, 16);
+    let baseline = s.placement_status().unwrap();
+    let a = s.submit(document()).unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    s.tick().unwrap();
+    c.lock().unwrap().clean = true;
+    // complete() reads the finite timestamp, then terminal publication reads NaN.
+    *clock.0.lock().unwrap() = VecDeque::from([0.0, f64::NAN]);
+    assert_eq!(s.tick().unwrap_err().code, "m16_clock_invalid");
+    assert!(clock.0.lock().unwrap().is_empty());
+    assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    assert!(s.reservations(&a.request_id).unwrap().is_empty());
+    assert_eq!(c.lock().unwrap().cleanup_calls, 1);
+    s.tick().unwrap();
+    s.tick().unwrap();
+    assert_eq!(c.lock().unwrap().cleanup_calls, 1);
+    assert_eq!(s.cleanup_debt(&a.request_id).unwrap(), None);
+    assert_eq!(s.terminal(&a.request_id).unwrap().as_deref(), Some("completed"));
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    let mut stream = s.subscribe(&a.request_id, None, Some(&a.session_token)).unwrap();
+    let mut terminals = 0;
+    while let Some(event) = stream.next().unwrap() {
+        if event["type"] == "completed" { terminals += 1; }
+        stream.ack(event["sequence"].as_u64().unwrap()).unwrap();
+    }
+    assert_eq!(terminals, 1);
+    stream.close().unwrap();
+}
+
 #[test]
 fn loopback_http_admission_stream_and_cancel_use_the_production_adapter() {
     let (s, c, _) = fixture();
