@@ -28,6 +28,7 @@ pub mod iroh_receive;
 pub mod iroh_wire;
 pub mod m16_capacity;
 pub mod m16_coordinator;
+pub mod m16_factory;
 pub mod m16_hop_scheduler;
 pub mod m16_ledger;
 pub mod m16_path_builder;
