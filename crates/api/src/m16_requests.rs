@@ -7,7 +7,8 @@
 //! Cleanup failure retains the executor, dispatch slot and ledger reservations for retry.
 //! This is NOT a signed worker/MLX implementation or installed-host registration.
 //!
-//! History and total admissions are bounded by the supplied registry config. This owner does
+//! History and ALL coordinator admission attempts (including rejections) are bounded by
+//! the supplied registry max_sessions. Exhaustion refuses until runtime rotation. This owner does
 //! not evict sessions: the existing coordinator retains request identities for its lifetime.
 //! Rotate the whole runtime only after all requests have settled. Dropping a live owner is
 //! not cleanup proof; the host must cancel, pump and inspect debt before dropping it.
@@ -68,6 +69,8 @@ enum Phase {
     Queued,
     Active,
     Cleanup,
+    CleanupProven,
+    PublicationPending,
     Terminal,
 }
 struct Entry {
@@ -75,7 +78,7 @@ struct Entry {
     phase: Phase,
     outcome: &'static str,
     failure: Option<&'static str>,
-    cleanup_refusal: Option<&'static str>,
+    progress_refusal: Option<&'static str>,
     next_token: u64,
     max_tokens: u64,
 }
@@ -84,6 +87,7 @@ struct State {
     registry: Registry,
     entries: BTreeMap<String, Entry>,
     executor: Box<dyn Executor>,
+    admission_attempts: usize,
 }
 struct Shared {
     state: Mutex<State>,
@@ -177,7 +181,91 @@ impl Shared {
             .append_terminal(id, e.outcome, payload, now)
             .map_err(registry)?;
         s.registry.mark_worker_done(id).map_err(registry)?;
-        s.entries.get_mut(id).ok_or(error("unknown_request"))?.phase = Phase::Terminal;
+        let e = s.entries.get_mut(id).ok_or(error("unknown_request"))?;
+        e.phase = Phase::Terminal;
+        e.progress_refusal = None;
+        Ok(())
+    }
+    /// Advance each owner independently; retained phase markers fence irreversible steps.
+    fn advance(&self, s: &mut State, id: &str) -> Result<(), PublicError> {
+        if s.entries[id].phase == Phase::Terminal {
+            return Ok(());
+        }
+        if s.entries[id].phase == Phase::Cleanup {
+            let must_stop = s.entries[id].outcome != "completed";
+            if !s.executor.cleanup(id, must_stop)? {
+                return Ok(());
+            }
+            let entry = s.entries.get_mut(id).ok_or(error("unknown_request"))?;
+            entry.phase = Phase::CleanupProven;
+            entry.progress_refusal = None;
+        }
+        if s.entries[id].phase == Phase::CleanupProven {
+            if s.entries[id].outcome == "completed"
+                && let Err(e) = self.current(&s.entries[id].qualification)
+            {
+                let entry = s.entries.get_mut(id).ok_or(error("unknown_request"))?;
+                entry.outcome = "failed";
+                entry.failure = Some(e.code);
+            }
+            s.runtime
+                .coordinator
+                .complete(id, s.entries[id].outcome)
+                .map_err(coordinator)?;
+            let entry = s.entries.get_mut(id).ok_or(error("unknown_request"))?;
+            entry.phase = Phase::PublicationPending;
+            entry.progress_refusal = None;
+        }
+        if s.entries[id].phase == Phase::PublicationPending {
+            return self.publish(s, id);
+        }
+        let phase = s.entries[id].phase;
+        if let Err(e) = self.current(&s.entries[id].qualification) {
+            if phase == Phase::Queued {
+                self.discard_queued(s, id, "failed", Some(e.code))?;
+            } else {
+                self.begin_cleanup(s, id, "failed", Some(e.code))?;
+            }
+            return Ok(());
+        }
+        if phase == Phase::Queued {
+            return Ok(());
+        }
+        // Reserve completion and terminal slots; never poll a token that cannot be kept.
+        s.registry
+            .trim_acknowledged(id, self.config.max_buffered_events - 3)
+            .map_err(registry)?;
+        if s.registry.buffered_event_count(id).map_err(registry)?
+            >= self.config.max_buffered_events - 2
+        {
+            return Ok(());
+        }
+        match s.executor.poll(id) {
+            Ok(Execution::Pending) => {}
+            Ok(Execution::Token { token_id, text }) => {
+                let e = &s.entries[id];
+                if e.next_token >= e.max_tokens {
+                    self.begin_cleanup(s, id, "failed", Some("token_limit_exceeded"))?;
+                    return Ok(());
+                }
+                if let Err(e) = self.current(&s.entries[id].qualification) {
+                    self.begin_cleanup(s, id, "failed", Some(e.code))?;
+                    return Ok(());
+                }
+                let payload = json!({"token_id":token_id,"text":text,"token_index":e.next_token});
+                s.runtime
+                    .coordinator
+                    .mark_phase(id, "decode")
+                    .map_err(coordinator)?;
+                self.append(s, id, "token", payload)?;
+                s.entries
+                    .get_mut(id)
+                    .ok_or(error("unknown_request"))?
+                    .next_token += 1;
+            }
+            Ok(Execution::Completed) => self.begin_cleanup(s, id, "completed", None)?,
+            Err(e) => self.begin_cleanup(s, id, "failed", Some(e.code))?,
+        }
         Ok(())
     }
     fn discard_queued(
@@ -193,6 +281,7 @@ impl Shared {
         let e = s.entries.get_mut(id).ok_or(error("unknown_request"))?;
         e.outcome = outcome;
         e.failure = failure;
+        e.phase = Phase::PublicationPending;
         self.publish(s, id)
     }
 }
@@ -222,6 +311,7 @@ impl M16Requests {
                     registry: Registry::new(config),
                     entries: BTreeMap::new(),
                     executor,
+                    admission_attempts: 0,
                 }),
                 changed: Condvar::new(),
                 host,
@@ -240,89 +330,14 @@ impl M16Requests {
         let sh = &self.shared;
         let mut s = sh.lock()?;
         let ids: Vec<String> = s.entries.keys().cloned().collect();
+        let mut refusals = Vec::new();
         for id in ids {
-            let phase = s.entries[&id].phase;
-            if phase == Phase::Terminal {
-                continue;
-            }
-            if phase == Phase::Cleanup {
-                let must_stop = s.entries[&id].outcome != "completed";
-                match s.executor.cleanup(&id, must_stop) {
-                    Err(e) => {
-                        s.entries
-                            .get_mut(&id)
-                            .ok_or(error("unknown_request"))?
-                            .cleanup_refusal = Some(e.code);
-                        return Err(e);
-                    }
-                    Ok(false) => continue,
-                    Ok(true) => {}
-                }
-                if s.entries[&id].outcome == "completed"
-                    && let Err(e) = sh.current(&s.entries[&id].qualification)
-                {
-                    let entry = s.entries.get_mut(&id).ok_or(error("unknown_request"))?;
-                    entry.outcome = "failed";
-                    entry.failure = Some(e.code);
-                }
-                let outcome = s.entries[&id].outcome;
-                s.runtime
-                    .coordinator
-                    .complete(&id, outcome)
-                    .map_err(coordinator)?;
+            if let Err(e) = sh.advance(&mut s, &id) {
                 s.entries
                     .get_mut(&id)
                     .ok_or(error("unknown_request"))?
-                    .cleanup_refusal = None;
-                sh.publish(&mut s, &id)?;
-                continue;
-            }
-            if let Err(e) = sh.current(&s.entries[&id].qualification) {
-                if phase == Phase::Queued {
-                    sh.discard_queued(&mut s, &id, "failed", Some(e.code))?;
-                } else {
-                    sh.begin_cleanup(&mut s, &id, "failed", Some(e.code))?;
-                }
-                continue;
-            }
-            if phase == Phase::Queued {
-                continue;
-            }
-            // Reserve completion and terminal slots; never poll a token that cannot be kept.
-            s.registry
-                .trim_acknowledged(&id, sh.config.max_buffered_events - 3)
-                .map_err(registry)?;
-            if s.registry.buffered_event_count(&id).map_err(registry)?
-                >= sh.config.max_buffered_events - 2
-            {
-                continue;
-            }
-            match s.executor.poll(&id) {
-                Ok(Execution::Pending) => {}
-                Ok(Execution::Token { token_id, text }) => {
-                    let e = &s.entries[&id];
-                    if e.next_token >= e.max_tokens {
-                        sh.begin_cleanup(&mut s, &id, "failed", Some("token_limit_exceeded"))?;
-                        continue;
-                    }
-                    if let Err(e) = sh.current(&s.entries[&id].qualification) {
-                        sh.begin_cleanup(&mut s, &id, "failed", Some(e.code))?;
-                        continue;
-                    }
-                    let payload =
-                        json!({"token_id":token_id,"text":text,"token_index":e.next_token});
-                    s.runtime
-                        .coordinator
-                        .mark_phase(&id, "decode")
-                        .map_err(coordinator)?;
-                    sh.append(&mut s, &id, "token", payload)?;
-                    s.entries
-                        .get_mut(&id)
-                        .ok_or(error("unknown_request"))?
-                        .next_token += 1;
-                }
-                Ok(Execution::Completed) => sh.begin_cleanup(&mut s, &id, "completed", None)?,
-                Err(e) => sh.begin_cleanup(&mut s, &id, "failed", Some(e.code))?,
+                    .progress_refusal = Some(e.code);
+                refusals.push(e);
             }
         }
         if let Some(id) = s.runtime.coordinator.next_dispatch().map_err(coordinator)? {
@@ -365,9 +380,36 @@ impl M16Requests {
             let e = s.entries.get_mut(&id).ok_or(error("unknown_request"))?;
             e.outcome = "failed";
             e.failure = Some("reservation_expired");
+            e.phase = Phase::PublicationPending;
             sh.publish(&mut s, &id)?;
         }
-        Ok(())
+        match refusals.len() {
+            0 => Ok(()),
+            1 => Err(refusals.remove(0)),
+            _ => Err(error("m16_multiple_progress_refusals")),
+        }
+    }
+    /// All retained per-owner refusal codes, including settlement/publication failures.
+    /// A tick still advances other owners before returning a refusal (aggregate if multiple).
+    pub fn progress_refusals(&self) -> Result<BTreeMap<String, &'static str>, PublicError> {
+        Ok(self
+            .shared
+            .lock()?
+            .entries
+            .iter()
+            .filter_map(|(id, e)| e.progress_refusal.map(|code| (id.clone(), code)))
+            .collect())
+    }
+    /// Outstanding work is distinct from executor cleanup debt after cleanup is proven.
+    pub fn pending_work(&self, id: &str) -> Result<Option<&'static str>, PublicError> {
+        let s = self.shared.lock()?;
+        let e = s.entries.get(id).ok_or(error("unknown_request"))?;
+        Ok(match e.phase {
+            Phase::Cleanup => Some("cleanup_pending"),
+            Phase::CleanupProven => Some("coordinator_settlement_pending"),
+            Phase::PublicationPending => Some("terminal_publication_pending"),
+            _ => None,
+        })
     }
     pub fn terminal(&self, id: &str) -> Result<Option<String>, PublicError> {
         Ok(self.shared.lock()?.registry.terminal(id).map(str::to_owned))
@@ -379,7 +421,11 @@ impl M16Requests {
             .entries
             .get(id)
             .filter(|e| e.phase == Phase::Cleanup)
-            .map(|e| e.cleanup_refusal.unwrap_or("cleanup_pending")))
+            .map(|e| e.progress_refusal.unwrap_or("cleanup_pending")))
+    }
+    /// Retained coordinator incidents; observation only, never drives its lifecycle.
+    pub fn incidents(&self) -> Result<Vec<runtime::m16_coordinator::Incident>, PublicError> {
+        Ok(self.shared.lock()?.runtime.coordinator.incidents())
     }
     pub fn reservations(&self, id: &str) -> Result<Vec<Reservation>, PublicError> {
         Ok(self
@@ -443,6 +489,9 @@ impl Service for M16Requests {
         if s.entries.len() >= sh.config.max_sessions {
             return Err(error("gateway_capacity_exhausted"));
         }
+        if s.admission_attempts >= sh.config.max_sessions {
+            return Err(error("m16_admission_attempt_budget_exhausted"));
+        }
         let p = sh.host.prepare(&document)?;
         if !registry::valid_request_id(&p.context.request_id) {
             return Err(error("invalid_request_id"));
@@ -465,6 +514,8 @@ impl Service for M16Requests {
         let profile = document["workload_profile_id"]
             .as_str()
             .ok_or(error("invalid_workload_profile_id"))?;
+        // Consume before calling: even a rejected path can retain ledger/history records.
+        s.admission_attempts += 1;
         s.runtime
             .coordinator
             .admit(&p.context, profile, &p.excluded_placements)
@@ -490,7 +541,7 @@ impl Service for M16Requests {
                 phase: Phase::Queued,
                 outcome: "completed",
                 failure: None,
-                cleanup_refusal: None,
+                progress_refusal: None,
                 next_token: 0,
                 max_tokens: document["max_new_tokens"]
                     .as_u64()
@@ -506,18 +557,22 @@ impl Service for M16Requests {
     fn cancel(&self, id: &str, token: Option<&str>) -> Result<bool, PublicError> {
         let sh = &self.shared;
         let mut s = sh.lock()?;
-        if !s.registry.cancel(id, token).map_err(registry)? {
+        // Registry false also means already cancelling, NOT necessarily terminal.
+        s.registry.cancel(id, token).map_err(registry)?;
+        if s.registry.terminal(id).is_some() {
             return Ok(false);
         }
         match s.entries.get(id).ok_or(error("unknown_request"))?.phase {
             Phase::Queued => sh.discard_queued(&mut s, id, "cancelled", None)?,
             Phase::Active => sh.begin_cleanup(&mut s, id, "cancelled", None)?,
-            Phase::Cleanup => {
+            Phase::Cleanup | Phase::CleanupProven => {
                 s.entries
                     .get_mut(id)
                     .ok_or(error("unknown_request"))?
                     .outcome = "cancelled";
             }
+            // Settlement fixed the outcome; cancellation cannot rewrite pending publication.
+            Phase::PublicationPending => {}
             Phase::Terminal => return Ok(false),
         }
         sh.changed.notify_all();
