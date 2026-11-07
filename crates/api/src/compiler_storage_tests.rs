@@ -153,6 +153,88 @@ fn temporaries(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn headroom_counts_unwritten_promises_not_materialized_shards_twice() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let mut written = f.emit_run("written");
+    written.produce_stage_shards(&f.members, 0.0).unwrap();
+    let ledger_path = f.root.join("chain-runs").join(STORAGE_LEDGER);
+    let ledger: Value = serde_json::from_slice(&fs::read(&ledger_path).unwrap()).unwrap();
+    let charge = ledger["entries"]["written"]["bytes"].as_u64().unwrap();
+    let allocated: u64 = fs::read_dir(written.root().join("stage-shards"))
+        .unwrap()
+        .map(|e| {
+            let meta = e.unwrap().metadata().unwrap();
+            meta.len().min(meta.blocks() * 512)
+        })
+        .sum();
+    assert!(allocated > 0);
+    let reserve = budgets::BudgetId::PyFinalMyceliumLiveLocalPreparerArtifactDiskReserveBytesL50C0
+        .bytes()
+        .unwrap()
+        .get();
+    let next = f.emit_run("next");
+    STORAGE_FREE_BYTES.with(|free| free.set(Some(reserve + charge - allocated + 300)));
+    let result = next.reserve_stage_output(300);
+    STORAGE_FREE_BYTES.with(|free| free.set(None));
+    drop(result.expect("already allocated shard bytes must not reserve free space twice"));
+    let third = f.emit_run("third");
+    STORAGE_FREE_BYTES.with(|free| free.set(Some(reserve + charge - allocated + 300)));
+    let result = third.reserve_stage_output(1);
+    STORAGE_FREE_BYTES.with(|free| free.set(None));
+    assert_eq!(
+        result.unwrap_err().0,
+        "compiler_storage_headroom_exceeded",
+        "the unmaterialized next reservation still consumes headroom"
+    );
+    storage_policy(&f.root, 100_000_000);
+    assert_eq!(
+        third
+            .reserve_stage_output(100_000_000 - charge - 300 + 1)
+            .unwrap_err()
+            .0,
+        "compiler_storage_quota_exceeded",
+        "materialized shards remain fully charged to consent"
+    );
+}
+
+#[test]
+fn headroom_keeps_sparse_and_partial_output_promises() {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    let f = Fixture::new();
+    let partial = f.emit_run("partial");
+    let promised = 8 * 1024 * 1024;
+    drop(partial.reserve_stage_output(promised).unwrap());
+    let output = partial.root().join("stage-shards");
+    directory(&output).unwrap();
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(output.join("partial.safetensors"))
+        .unwrap();
+    file.write_all(&[1; 4096]).unwrap();
+    file.set_len(promised / 2).unwrap();
+    file.sync_all().unwrap();
+    let meta = file.metadata().unwrap();
+    let allocated = meta.len().min(meta.blocks() * 512);
+    assert!(allocated > 0 && allocated < promised);
+    let reserve = budgets::BudgetId::PyFinalMyceliumLiveLocalPreparerArtifactDiskReserveBytesL50C0
+        .bytes()
+        .unwrap()
+        .get();
+    let next = f.emit_run("next");
+    STORAGE_FREE_BYTES.with(|free| free.set(Some(reserve + promised - allocated + 299)));
+    let refused = next.reserve_stage_output(300);
+    STORAGE_FREE_BYTES.with(|free| free.set(None));
+    assert_eq!(refused.unwrap_err().0, "compiler_storage_headroom_exceeded");
+    STORAGE_FREE_BYTES.with(|free| free.set(Some(reserve + promised - allocated + 300)));
+    let accepted = next.reserve_stage_output(300);
+    STORAGE_FREE_BYTES.with(|free| free.set(None));
+    drop(accepted.unwrap());
+}
+
+#[test]
 fn ledger_first_reservation_crash_allows_fresh_constructor_retry() {
     let f = Fixture::new();
     let first = f.emit_run("first");

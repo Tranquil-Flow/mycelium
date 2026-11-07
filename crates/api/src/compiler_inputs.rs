@@ -333,7 +333,7 @@ impl InputArtifact {
         let entries = ledger["entries"]
             .as_object_mut()
             .ok_or(Error("compiler_storage_ledger_invalid"))?;
-        let retained = storage_inventory(runs, entries)?;
+        let (retained, materialized) = storage_inventory(runs, entries)?;
         let run = self
             .root
             .file_name()
@@ -353,11 +353,15 @@ impl InputArtifact {
                 .bytes()
                 .map_err(|_| Error("budget_unavailable"))?
                 .get();
-        let free = crate::acquisition::disk_free_bytes(runs)
-            .map_err(|_| Error("compiler_storage_probe_failed"))?;
-        // Conservatively reserve all outstanding charges against currently free
-        // space too. Existing partials are never mistaken for released promises.
-        if total.checked_add(reserve).is_none_or(|need| need > free) {
+        let free = storage_free_bytes(runs)?;
+        // Inventory precedes statvfs: production writers only append to new,
+        // exclusively created files, so the sampled allocation is already absent
+        // from free space. Retain unwritten promises, including concurrent writers.
+        if total
+            .checked_sub(materialized)
+            .and_then(|need| need.checked_add(reserve))
+            .is_none_or(|need| need > free)
+        {
             return Err(Error("compiler_storage_headroom_exceeded"));
         }
         let row = json!({"bytes":bytes,"run_dev":self.directory_identity.0,
@@ -558,6 +562,18 @@ const MAX_RETAINED_SHARD_RUNS: usize = 8;
 const STORAGE_LEDGER: &str = "compiler-storage.private.json";
 const STORAGE_LOCK: &str = "compiler-storage.lock";
 
+#[cfg(test)]
+std::thread_local! {
+    static STORAGE_FREE_BYTES: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+fn storage_free_bytes(runs: &Path) -> Result<u64> {
+    #[cfg(test)]
+    if let Some(bytes) = STORAGE_FREE_BYTES.with(|free| free.get()) {
+        return Ok(bytes);
+    }
+    crate::acquisition::disk_free_bytes(runs).map_err(|_| Error("compiler_storage_probe_failed"))
+}
+
 #[derive(Debug)]
 pub struct ShardReservation {
     runs: PathBuf,
@@ -585,6 +601,9 @@ impl ShardReservation {
     }
 }
 fn shard_output_bytes(path: &Path) -> Result<u64> {
+    shard_output_usage(path).map(|(bytes, _)| bytes)
+}
+fn shard_output_usage(path: &Path) -> Result<(u64, u64)> {
     let directory =
         fs::symlink_metadata(path).map_err(|_| Error("compiler_storage_output_changed"))?;
     if !directory.is_dir()
@@ -594,6 +613,7 @@ fn shard_output_bytes(path: &Path) -> Result<u64> {
         return Err(Error("compiler_storage_output_changed"));
     }
     let mut total = 0u64;
+    let mut materialized = 0u64;
     let mut count = 0;
     for entry in fs::read_dir(path).map_err(|_| Error("compiler_storage_inventory_failed"))? {
         let entry = entry.map_err(|_| Error("compiler_storage_inventory_failed"))?;
@@ -611,8 +631,17 @@ fn shard_output_bytes(path: &Path) -> Result<u64> {
         total = total
             .checked_add(meta.len())
             .ok_or(Error("compiler_storage_output_changed"))?;
+        // Sparse/unallocated extents are promises, not consumed disk. Blocks are
+        // POSIX 512-byte units; never credit allocation beyond the byte charge.
+        let allocated = meta
+            .blocks()
+            .checked_mul(512)
+            .ok_or(Error("compiler_storage_output_changed"))?;
+        materialized = materialized
+            .checked_add(meta.len().min(allocated))
+            .ok_or(Error("compiler_storage_output_changed"))?;
     }
-    Ok(total)
+    Ok((total, materialized))
 }
 fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
     let bad = Error("compiler_storage_ledger_invalid");
@@ -642,8 +671,9 @@ fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
     }
     Ok(total)
 }
-fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
+fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<(u64, u64)> {
     let total = storage_rows(runs, entries)?;
+    let mut materialized = 0u64;
     let bad = Error("compiler_storage_ledger_invalid");
     // Legacy B2 partials have no reservation: refuse rather than silently adopt
     // or fail to account for them. Bound traversal even for metadata-only runs.
@@ -667,15 +697,19 @@ fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
                 let row = entries
                     .get(name)
                     .ok_or(Error("compiler_storage_untracked_output"))?;
-                if shard_output_bytes(&output)? > row["bytes"].as_u64().ok_or(bad.clone())? {
+                let (bytes, allocated) = shard_output_usage(&output)?;
+                if bytes > row["bytes"].as_u64().ok_or(bad.clone())? {
                     return Err(Error("compiler_storage_output_size_changed"));
                 }
+                materialized = materialized.checked_add(allocated).ok_or(bad.clone())?;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            // An unwritten reservation is still fully charged; there is no
+            // materialized output to credit against free space for this run.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(_) => return Err(Error("compiler_storage_inventory_failed")),
         }
     }
-    Ok(total)
+    Ok((total, materialized))
 }
 fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     use std::os::unix::fs::OpenOptionsExt;
