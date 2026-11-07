@@ -37,6 +37,184 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+impl Fixture {
+    fn emit_shards(
+        &self,
+        current: &BuildRequest,
+        output: &std::path::Path,
+    ) -> planner::Result<producer::ProducedShards> {
+        producer::emit_stage_shards(
+            &self.request,
+            current,
+            PreparedSource {
+                manifest: &self.row["manifest"],
+                manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
+                files: &self.source,
+            },
+            output,
+        )
+    }
+}
+
+// Independent safetensors decoder: compare names, dtypes, shapes and every
+// payload byte, not only digests produced by the writer under test.
+fn tensor_payloads(raw: &[u8]) -> BTreeMap<String, (Value, Value, Vec<u8>)> {
+    let n = u64::from_le_bytes(raw[..8].try_into().unwrap()) as usize;
+    let header: Value = serde_json::from_slice(&raw[8..8 + n]).unwrap();
+    header
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name.as_str() != "__metadata__")
+        .map(|(name, t)| {
+            let start = t["data_offsets"][0].as_u64().unwrap() as usize;
+            let end = t["data_offsets"][1].as_u64().unwrap() as usize;
+            (
+                name.clone(),
+                (
+                    t["dtype"].clone(),
+                    t["shape"].clone(),
+                    raw[8 + n + start..8 + n + end].to_vec(),
+                ),
+            )
+        })
+        .collect()
+}
+#[test]
+fn real_source_bytes_emit_stage_shards_and_revalidated_slice_recipes() {
+    use std::os::unix::fs::{FileExt, PermissionsExt};
+    for row in rows() {
+        let f = Fixture::new(row);
+        let output = f.root.join("produced");
+        let produced = f.emit_shards(&f.request, &output).unwrap();
+        assert_eq!(produced.files.len(), f.request.node_ids.len());
+        assert_eq!(
+            fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let source: BTreeMap<_, _> = f.row["source_files"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(name, _)| name.ends_with(".safetensors"))
+            .flat_map(|(_, bytes)| tensor_payloads(&decode(bytes.as_str().unwrap())))
+            .collect();
+        for (node, files) in &produced.node_files {
+            let path = files[0]["path"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("deployment/")
+                .unwrap();
+            let raw = fs::read(output.join(path)).unwrap();
+            assert_eq!(files[0]["content_digest"], sha(&raw));
+            assert_eq!(files[0]["size_bytes"], raw.len());
+            assert_eq!(
+                fs::metadata(output.join(path))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            let expected: BTreeMap<_, _> = f.node_files[node]
+                .iter()
+                .flat_map(|row| {
+                    let path = row["path"]
+                        .as_str()
+                        .unwrap()
+                        .strip_prefix("deployment/")
+                        .unwrap();
+                    tensor_payloads(&decode(f.row["shard_files"][path].as_str().unwrap()))
+                })
+                .collect();
+            let actual = tensor_payloads(&raw);
+            assert_eq!(
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>()
+            );
+            for (name, tensor) in actual {
+                assert_eq!(tensor, source[&name], "{node}/{name}");
+            }
+        }
+        assert!(
+            f.emit_shards(&f.request, &output).is_err(),
+            "must never overwrite"
+        );
+        let revalidate = || {
+            compile_slices(
+                &f.request,
+                &f.request,
+                PreparedSource {
+                    manifest: &f.row["manifest"],
+                    manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
+                    files: &f.source,
+                },
+                EmittedShards {
+                    files: &produced.files,
+                    node_files: &produced.node_files,
+                    node_files_digest: &produced.node_files_digest,
+                    max_segment_bytes: f.row["segment_bytes"].as_u64().unwrap(),
+                },
+            )
+        };
+        let docs = revalidate().unwrap();
+        assert_eq!(docs.node_plans.len(), f.request.node_ids.len());
+        let first = produced.files.values().next().unwrap();
+        first
+            .write_all_at(&[0xff], first.metadata().unwrap().len() - 1)
+            .unwrap();
+        assert_eq!(
+            revalidate().unwrap_err().code,
+            "slice_plan_file_digest_mismatch"
+        );
+    }
+}
+#[test]
+fn stage_shard_writer_refuses_stale_binding_and_changed_source_before_writes() {
+    let f = Fixture::new(rows().remove(0));
+    let output = f.root.join("produced");
+    let mut changed = f.request.clone();
+    changed.compilation_cache_key.push_str("-changed");
+    assert_eq!(
+        f.emit_shards(&changed, &output).unwrap_err().code,
+        "source_plan_binding_changed"
+    );
+    assert!(!output.exists());
+    let path = f.root.join("source_files/model.safetensors");
+    let mut bytes = fs::read(&path).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    fs::write(path, bytes).unwrap();
+    assert_eq!(
+        f.emit_shards(&f.request, &output).unwrap_err().code,
+        "slice_source_manifest_invalid"
+    );
+    assert!(!output.exists());
+}
+
+#[test]
+fn stage_shard_writer_refuses_invalid_ranges_and_foreign_output_without_mutation() {
+    let mut f = Fixture::new(rows().remove(0));
+    let output = f.root.join("produced");
+    let foreign = f.root.join("foreign");
+    fs::create_dir(&foreign).unwrap();
+    fs::write(foreign.join("sentinel"), b"untouched").unwrap();
+    std::os::unix::fs::symlink(&foreign, &output).unwrap();
+    assert_eq!(
+        f.emit_shards(&f.request, &output).unwrap_err().code,
+        "stage_shard_output_invalid"
+    );
+    assert_eq!(fs::read(foreign.join("sentinel")).unwrap(), b"untouched");
+    assert_eq!(fs::read_dir(&foreign).unwrap().count(), 1);
+    fs::remove_file(&output).unwrap();
+    f.request.managed_layer_ranges[0][0] = 1;
+    assert_eq!(
+        f.emit_shards(&f.request, &output).unwrap_err().code,
+        "source_plan_assignment_mismatch"
+    );
+    assert!(!output.exists());
+}
+
 struct Fixture {
     root: PathBuf,
     row: Value,
