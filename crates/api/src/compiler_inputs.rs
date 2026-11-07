@@ -153,10 +153,10 @@ impl InputArtifact {
             return Err(Error("compiler_already_started"));
         }
         match fs::symlink_metadata(self.root.join(name)) {
-            Ok(_) => return Err(Error("compiler_outputs_changed")),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            Err(_) => return Err(Error("compiler_directory_invalid")),
-        }
+            Ok(_) => Err(Error("compiler_outputs_changed")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(Error("compiler_directory_invalid")),
+        }?;
         private_state::store(
             &self.root.join(name),
             &document,
