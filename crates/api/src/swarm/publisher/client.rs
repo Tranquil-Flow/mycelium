@@ -110,8 +110,8 @@ impl DirectoryPort for DirectoryClient {
         let tcp = connected.ok_or_else(unreachable)?;
         let authority = self.origin.split_once("://").ok_or_else(unreachable)?.1;
         let head = format!(
-            "{method} /swarms/api/v1{path} HTTP/1.1\r\nHost: {authority}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nUser-Agent: {}\r\nContent-Type: application/json\r\nX-Mycelium-Swarms: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            crate::join_client::USER_AGENT,
+            "{method} /swarms/api/v1{path} HTTP/1.1\r\nHost: {authority}\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nUser-Agent: Mycelium/{}\r\nContent-Type: application/json\r\nX-Mycelium-Swarms: 1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            env!("CARGO_PKG_VERSION"),
             body.len()
         );
         let mut request = head.into_bytes();
