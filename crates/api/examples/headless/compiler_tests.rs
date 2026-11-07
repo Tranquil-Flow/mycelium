@@ -254,3 +254,241 @@ fn actual_compile_port_without_admitted_observation_never_becomes_ready() {
     assert!(matches!(compiler.poll_build(), BuildPoll::Done(Err(_))));
     assert_eq!(status(&core).to_value()["route_ready"], false);
 }
+
+/// Controlled hello responses exercise the real observation validator. They are
+/// not physical-host or native-load evidence; signatures below are real.
+struct ControlledHellos {
+    run: String,
+    deployment: String,
+    nodes: Vec<String>,
+}
+struct ControlledHello(Value);
+impl runtime::observe::HelloSession for ControlledHello {
+    fn send_hello(&mut self, command: &str) -> Result<Value, Option<String>> {
+        let mut response = self.0.clone();
+        response["command_id"] = json!(command);
+        Ok(response)
+    }
+    fn close(&mut self) -> Result<(), runtime::observe::CloseFailed> {
+        Ok(())
+    }
+    fn cleanup_error(&self) -> bool {
+        false
+    }
+    fn stop_response_ok(&self) -> Option<bool> {
+        None
+    }
+}
+impl runtime::observe::HelloSessions for ControlledHellos {
+    fn run_id(&self) -> &str {
+        &self.run
+    }
+    fn deployment_id(&self) -> &str {
+        &self.deployment
+    }
+    fn bound_nodes(&self) -> std::collections::BTreeSet<String> {
+        self.nodes.iter().cloned().collect()
+    }
+    fn binding_current(&mut self, node: &str) -> bool {
+        self.nodes.iter().any(|n| n == node)
+    }
+    fn open(
+        &mut self,
+        node: &str,
+        _: f64,
+    ) -> Result<Box<dyn runtime::observe::HelloSession + '_>, Option<String>> {
+        let index = self.nodes.iter().position(|n| n == node).unwrap();
+        Ok(Box::new(ControlledHello(json!({
+            "protocol":runtime::observe::CONTROL_COMMAND_PROTOCOL,"node_id":node,
+            "command_id":"pending","ok":true,"route_ready":false,
+            "result":{"protocol":runtime::observe::CONTROL_COMMAND_PROTOCOL,
+                "node_id":node,"run_id":self.run,"deployment_id":self.deployment,
+                "route_ready":false,"state":"NEW",
+                "host_id":format!("host-{index:032x}"),"boot_id":format!("boot-{index:032x}")}
+        }))))
+    }
+}
+
+#[test]
+fn admitted_observations_drive_actual_compiler_worker_to_native_challenge_refusal() {
+    use api::installation_descriptor::{self, Member, Paths, Source};
+    let f = Fixture::new();
+    let core = Arc::new(Mutex::new(load_core(f.root.join("host")).unwrap()));
+    let mut host = HeadlessHost {
+        core: core.clone(),
+        runs: None,
+    };
+    host.create_owner_json(
+        json!({"storage_bytes":4_000_000_000u64})
+            .as_object()
+            .unwrap(),
+    )
+    .unwrap();
+    let seed = core.lock().unwrap().seed.clone().unwrap();
+    let run = "a13-b2-qwen-20261029T100000Z";
+    let deployment = &f.request.deployment_id;
+    let ttl = BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis() as f64 / 1000.0;
+    let mut facts = BTreeMap::new();
+    let mut members = BTreeMap::new();
+    let mut keys = Vec::new();
+    for (i, node) in f.request.node_ids.iter().enumerate() {
+        let signer =
+            Identity::from_secret(&format!("endpoint-{node}"), &[i as u8 + 70; 32]).unwrap();
+        let nonce = format!("b2-invite-{i}");
+        let bundle = seed.coordinator.mint_invite(&nonce, ttl as u64).unwrap();
+        let at = now();
+        let message = json!({"protocol":"mycelium.membership.join_request.v1",
+            "message_id":format!("b2-join-{i}"),"swarm_id":seed.coordinator.swarm_id(),
+            "sender_node_id":node,"sender_endpoint_id":signer.endpoint_id(),
+            "recipient_node_id":seed.coordinator.seed_node_id(),"generation":0,
+            "incarnation":format!("b2-inc-{i}"),"invite_nonce":nonce,
+            "issued_at":at,"expires_at":at+ttl,"peer_class":"mac_mlx_iroh",
+            "software_version":"0.2.0","endpoint_addr":{"id":signer.endpoint_id(),"addrs":["iroh-relay://relay.invalid/controlled"]},
+            "runtime_capability":{"activation_protocol":"mycelium.router_wire.v1","runtime_backend":"mlx","transport":"iroh"}});
+        let envelope =
+            protocol::membership::sign(&signer, &message, seed::coordinator::limits().unwrap())
+                .unwrap();
+        seed.coordinator
+            .accept_join_value(&bundle["token"], &envelope)
+            .unwrap();
+        let current = seed.coordinator.member(node).unwrap();
+        let binding = Member {
+            node_id: node.clone(),
+            endpoint_id: signer.endpoint_id().into(),
+            verification_key_digest: signer.verification_key_digest(),
+            generation: current["generation"].as_u64().unwrap(),
+            incarnation: current["incarnation"].as_str().unwrap().into(),
+        };
+        let card = installation_descriptor::installation_descriptor(
+            &signer,
+            &binding,
+            seed.coordinator.swarm_id(),
+            run,
+            deployment,
+            true,
+            &Source::Whole {
+                source_root: f.source.source_root.display().to_string(),
+                manifest_digest: f.source.manifest_digest.clone(),
+            },
+            &Paths {
+                state_root: f.root.display().to_string(),
+                endpoint_secret_file: f.root.join("key").display().to_string(),
+                python_executable: "/controlled/host".into(),
+                sidecar_binary: "/controlled/sidecar".into(),
+            },
+            at,
+        )
+        .unwrap();
+        facts.insert(
+            node.clone(),
+            installation_descriptor::verify_installation_descriptor(
+                &card,
+                &current,
+                seed.coordinator.swarm_id(),
+                run,
+                deployment,
+                at,
+            )
+            .unwrap(),
+        );
+        keys.push(signer.public_key_record());
+        members.insert(node.clone(), current);
+    }
+    let mut hellos = ControlledHellos {
+        run: run.into(),
+        deployment: deployment.clone(),
+        nodes: f.request.node_ids.clone(),
+    };
+    let observations = runtime::observe::collect_hello_observations(
+        &mut hellos,
+        run,
+        deployment,
+        &f.request.node_ids,
+        &mut || 1793268000.0,
+        &mut || "1234567890abcdef".into(),
+    )
+    .unwrap();
+    let inputs = CompileInputs {
+        facts,
+        observation_hosts: Some(
+            observations
+                .observations
+                .iter()
+                .map(|o| o.host_id.clone())
+                .collect(),
+        ),
+        local: None,
+        joined_reports: json!({}),
+        now: now(),
+        owner_ready: true,
+        already_started: false,
+        resource_denied: false,
+        model: ModelContract {
+            model_id: f.request.model_id.clone(),
+            resolved_commit: f.request.resolved_commit.clone(),
+            source_representation: "bfloat16-safetensors".into(),
+            runtime_dtype: "float32".into(),
+            runtime_quantization: "int8-weight-only".into(),
+        },
+        manifest_digest: f.source.manifest_digest.clone(),
+        manifest: Value::Object(f.source.manifest.clone()),
+        source_bytes: Some(f.source.source_bytes),
+        context_members: members.values().cloned().collect(),
+        current_members: members.clone(),
+        keys: json!({"gossip":[seed.coordinator.signer().public_key_record()],"load_proof":keys}),
+        epoch: 0,
+    };
+    let observation = Observation(Arc::new(Mutex::new(observation::adapter(Arc::downgrade(
+        &core,
+    )))));
+    let mut compiler = Compiler::new(Arc::downgrade(&core), observation);
+    // Enter the same retained-input boundary as acquire, without changing Core
+    // or Compiler fields. Acquisition/consent and physical hello are not claimed.
+    compiler
+        .retain_prepared_source(f.source.clone(), &inputs, &observations)
+        .unwrap();
+    compiler.start_build(&f.request);
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(
+            BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis(),
+        );
+    loop {
+        match compiler.poll_build() {
+            BuildPoll::Pending => {
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+            BuildPoll::Done(Err(error)) => {
+                assert_eq!(
+                    error.code_or("missing"),
+                    "native_challenge_producer_unavailable"
+                );
+                break;
+            }
+            BuildPoll::Done(Ok(_)) => panic!("metadata must not become BuildOutput"),
+        }
+    }
+    let output = f.root.join("host/chain-runs").join(run);
+    let document: Value =
+        serde_json::from_slice(&fs::read(output.join("source-assignments.private.json")).unwrap())
+            .unwrap();
+    assert_eq!(document["state"], "metadata_only");
+    assert_eq!(document["route_ready"], false);
+    for assignment in document["assignments"].as_array().unwrap() {
+        planner::compile::validate_assignment(assignment).unwrap();
+        assert_eq!(assignment["manifest_digest"], f.source.manifest_digest);
+    }
+    assert_eq!(
+        document["members_digest"],
+        planner::digest(
+            &json!({"members":members.values().cloned().collect::<Vec<_>>()}),
+            true
+        )
+        .unwrap()
+    );
+    assert!(!output.join("compile-complete.private.json").exists());
+    assert!(!output.join("compiled/operator-plan.json").exists());
+    assert_eq!(status(&core).to_value()["route_ready"], false);
+    compiler.teardown().unwrap();
+    seed.close();
+}
