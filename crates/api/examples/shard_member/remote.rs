@@ -7,7 +7,11 @@
 //! app (enrolled) key. `status` and `result` answer immediately, even while a
 //! long operation (receive/prepare/serve) runs on the main loop.
 use super::control::{Dispatcher, Origin};
-use api::{managed_carrier::HostClock, member_control};
+use api::{
+    managed_carrier::HostClock,
+    member_control,
+    process_identity::{Incarnation, Liveness},
+};
 use budgets::{BudgetId as B, Entries, MonoInstant};
 use protocol::identity::Identity;
 use runtime::{
@@ -16,9 +20,10 @@ use runtime::{
 };
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     sync::{
-        Arc, Mutex,
+        Arc, LockResult, Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -48,7 +53,50 @@ fn until(clock: &HostClock, id: B) -> Result<MonoInstant> {
         .map_err(|_| "deadline_invalid".into())
 }
 /// Live (non-blocking) view of member state for `status`.
-pub type Status = Arc<Mutex<Value>>;
+pub type Status = Arc<Live>;
+/// The status view plus the exact worker incarnations THIS member started.
+pub struct Live {
+    view: Mutex<Value>,
+    workers: Mutex<BTreeMap<u32, Incarnation>>,
+}
+impl Live {
+    pub fn new(view: Value) -> Status {
+        Arc::new(Self {
+            view: Mutex::new(view),
+            workers: Mutex::new(BTreeMap::new()),
+        })
+    }
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, Value>> {
+        self.view.lock()
+    }
+    /// Bind `pid` to its incarnation. Call only while this member still owns
+    /// the unreaped worker child, so the pid cannot name another process yet.
+    pub fn record_worker(&self, pid: Option<u32>) {
+        let Some(pid) = pid else { return };
+        match Incarnation::of(pid) {
+            Ok(Some(now)) => {
+                if let Ok(mut workers) = self.workers.lock() {
+                    workers.insert(pid, now);
+                }
+            }
+            // A worker that already exited is gone; nothing to bind.
+            Ok(None) => {}
+            Err(e) => eprintln!("member_worker_identity_unavailable: {e}"),
+        }
+    }
+    /// `true`/`false` only for a worker incarnation this member started;
+    /// `null` for any other pid (not ours: no claim) or an unanswerable query.
+    fn liveness(&self, pid: u64) -> Value {
+        let recorded = u32::try_from(pid)
+            .ok()
+            .and_then(|p| self.workers.lock().ok()?.get(&p).copied());
+        match recorded.map(|i| i.liveness()) {
+            Some(Liveness::Alive) => json!(true),
+            Some(Liveness::Gone) => json!(false),
+            Some(Liveness::Unknown) | None => Value::Null,
+        }
+    }
+}
 pub fn start(
     owner: iroh::EndpointId,
     lan: Option<(IpAddr, LanPolicy)>,
@@ -206,16 +254,14 @@ fn handle(dispatcher: &Dispatcher, status: &Status, request: Value) -> Value {
             .lock()
             .map(|s| {
                 let mut s = s.clone();
-                // Exact-pid liveness on THIS host (signal 0), even mid-operation:
+                // Exact-incarnation liveness on THIS host, even mid-operation:
                 // the owned worker, plus up to 8 pids the owner asks about (e.g.
-                // workers named in this member's signed proofs).
-                let alive = |p: u64| {
-                    i32::try_from(p)
-                        .ok()
-                        .and_then(rustix::process::Pid::from_raw)
-                        .map(|p| rustix::process::test_kill_process(p).is_ok())
-                };
-                s["worker_alive"] = json!(s["worker_pid"].as_u64().and_then(alive));
+                // workers named in this member's signed proofs). Bound to the
+                // pid + start time + owner this member recorded for its own
+                // workers, so a reused pid never reads alive and another user's
+                // process never reads as our worker's death.
+                let alive = |p: u64| status.liveness(p);
+                s["worker_alive"] = s["worker_pid"].as_u64().map_or(Value::Null, alive);
                 let probes: serde_json::Map<String, Value> = request["probe_pids"]
                     .as_array()
                     .map(|a| {
@@ -226,7 +272,7 @@ fn handle(dispatcher: &Dispatcher, status: &Status, request: Value) -> Value {
                     })
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|p| (p.to_string(), json!(alive(p))))
+                    .map(|p| (p.to_string(), alive(p)))
                     .collect();
                 s["probe_alive"] = Value::Object(probes);
                 s["active_operation_id"] = json!(dispatcher.active_id());
