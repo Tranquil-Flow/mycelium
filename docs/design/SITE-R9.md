@@ -1,9 +1,14 @@
 # R9 site visual layer
 
 This port uses the approved `mycelium-now-prototype-r9.html` renderer, separated
-from its sample-data UI. Production copy and application behavior come from
+from its sample-data UI. Application behavior starts from deployed
 `86758539b6acb5acb2a33771d70e096b1a8c6574`, not from prototype SOURCE blocks.
-No protocol, heartbeat, grant, API, directory state or inference change is intended.
+The owner's later direction supersedes the original copy freeze: device-neutral
+language, explicit current platform requirements, plain privacy disclosures and a
+clearly future-facing vision. `SITE-COPY-R9.md` in the program workspace records
+all old → new strings and their claim boundaries. Privacy/footer API strings
+change; no protocol shape, heartbeat, grant, directory state or inference behavior
+change is intended.
 
 ## Asset boundaries
 
@@ -20,8 +25,13 @@ No protocol, heartbeat, grant, API, directory state or inference change is inten
   include the additional reserved line, keeping the complete hold explanation visible.
 - `design.js`: owns palette/media changes, renderer disposal and swarm print paints.
   It does not fetch, route, publish, sign or send prompts.
-- `mycelium-geometry.js`: deterministic aperiodic walks, guarded bridges and
-  swarm-only gills. Prints seed on the stable swarm ID, not an owner's browser key.
+- `mycelium-geometry.js`: deterministic aperiodic walks and guarded bridges.
+- `spore-print.js`: swarm-only radial gill/lamellula deposits and minority pore
+  prints, seeded only by the public swarm ID. Natural pigment and backing paper
+  do not change with hue or theme. Small prints are supersampled, then cached at
+  their final DPR size with an 8 MiB / 128-raster LRU limit. Evicted backings are
+  zero-sized. Eight freely licensed local photo studies inform the morphology;
+  none of those photos is included in the repository or served site.
 - `mycelium-hero.js`: seeded segment graph, multi-hop Dijkstra arrival bands,
   LRU-bounded full-DPR rasters, fractional live tips, visibility/reduced-motion
   lifecycle. The owner delta appends a separately seeded explorer cohort without

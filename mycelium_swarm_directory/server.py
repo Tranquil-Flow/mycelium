@@ -43,14 +43,15 @@ ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/swarms/mycelium-geometry.js': ('mycelium-geometry.js', 'text/javascript; charset=utf-8'),
           '/swarms/mycelium-hero.js': ('mycelium-hero.js', 'text/javascript; charset=utf-8'),
           '/swarms/mycelium-field.js': ('mycelium-field.js', 'text/javascript; charset=utf-8'),
+          '/swarms/spore-print.js': ('spore-print.js', 'text/javascript; charset=utf-8'),
           '/swarms': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),
           '/swarms/swarms.css': ('swarms.css', 'text/css; charset=utf-8'),
           '/swarms/site.css': ('site.css', 'text/css; charset=utf-8')}
-DEMO_LABEL = ('Demo. Hosted on one volunteer Mac through a tunnel: it may sleep. No accounts, no email, '
-              'no tracking by this site. Keys live only in this browser. Traffic passes through Cloudflare, which can '
-              'see your IP address, timing and prompts.')
+DEMO_LABEL = ('Swarms are run by people and may be unavailable. No accounts, no email or tracking by this site. '
+              'Your key stays in this browser. Cloudflare carries site traffic and can see your IP address and timing; '
+              'for entries it hosts, it can also see prompts and replies.')
 _IP = re.compile(r'[0-9A-Fa-f:.]{2,45}\Z')
 _CHUNK = re.compile(rb'[0-9A-Fa-f]{1,8}\r\n')
 

@@ -61,6 +61,7 @@ _DIRECTORY_ASSET_PATHS = frozenset(
         "/swarms/mycelium-geometry.js",
         "/swarms/mycelium-hero.js",
         "/swarms/mycelium-field.js",
+        "/swarms/spore-print.js",
         _hosted.DIRECTORY_MOUNT_PREFIX,
         _hosted.DIRECTORY_MOUNT_PREFIX + "/",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",

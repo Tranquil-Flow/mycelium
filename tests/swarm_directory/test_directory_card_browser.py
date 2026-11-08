@@ -85,7 +85,7 @@ def test_a_card_shows_model_members_status_and_how_fresh_that_status_is(world):
             fresh = card(page, 'Berlin coworking')
             expect(fresh.locator('.status')).to_have_text('serving')
             expect(fresh.locator('[data-card-model]')).to_have_text('Qwen/Qwen3-0.6B')
-            expect(fresh.locator('[data-card-members]')).to_have_text('2 Macs')
+            expect(fresh.locator('[data-card-members]')).to_have_text('2 devices')
             expect(fresh.locator('[data-card-owner]')).to_have_text(world['owners'][FRESH])
             expect(fresh.locator('[data-card-fresh]')).to_contain_text('updated')
             expect(fresh.locator('[data-card-fresh]')).to_contain_text('s ago')
@@ -118,9 +118,9 @@ def test_every_card_links_the_same_short_notice(world):
             links = page.locator('.swarm a.notice-link')
             assert links.count() == 3
             assert {links.nth(i).get_attribute('href') for i in range(3)} == {'#notice'}
-            expect(page.locator('#privacy-notice')).to_contain_text('volunteer Macs')
-            expect(page.locator('#privacy-notice')).to_contain_text('relay')
-            expect(page.locator('#privacy-notice')).to_contain_text('not stored')
+            expect(page.locator('#privacy-notice')).to_contain_text('participating devices')
+            expect(page.locator('#privacy-notice')).to_contain_text('entry service')
+            expect(page.locator('#privacy-notice')).to_contain_text('do not store prompts or replies')
             expect(page.locator('#privacy-notice')).to_contain_text('quota')
             links.first.click()
             assert page.url.endswith('#notice')

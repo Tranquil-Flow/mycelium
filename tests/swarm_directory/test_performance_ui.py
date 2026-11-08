@@ -36,7 +36,7 @@ def test_reported_stats_and_missing_hops_have_honest_labels():
     assert out['speed'] == '12.5 tok/s'
     assert out['ttft'] == '1.20 s'
     assert out['hop'] == 'Not measured'
-    for copy in ('p50', 'p90', 'Samples', 'self-reported', 'Mac 1', '0–23', 'fast', '24 h', '2', 'not measured'):
+    for copy in ('p50', 'p90', 'Samples', 'self-reported', 'Device 1', '0–23', 'fast', '24 h', '2', 'not measured'):
         assert copy in out['detail']
 
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Visual layer only: no directory API, keys, grants, prompts or route writes. */
-import { setup, printAt } from "./mycelium-geometry.js";
+import { drawSpore } from "./spore-print.js";
 import { createHero } from "./mycelium-hero.js";
 import { createField } from "./mycelium-field.js";
 
@@ -22,24 +22,14 @@ function paintPrints() {
     const rect = canvas.getBoundingClientRect();
     const key = [
       canvas.dataset.print,
-      state.glow,
-      state.theme,
       rect.width,
       rect.height,
       devicePixelRatio,
     ].join("|");
     if (!rect.width || !rect.height || canvas.dataset.painted === key) continue;
-    const { x, w, h, off } = setup(canvas);
-    printAt(
-      x,
-      { id: canvas.dataset.print, owner: "" },
-      w / 2,
-      h / 2,
-      Math.min(w, h) * 0.32,
-      getComputedStyle(stage),
-      state.theme === "light",
-    );
-    canvas.getContext("2d").drawImage(off, 0, 0);
+    drawSpore(canvas, canvas.dataset.print, {
+      size: Math.min(rect.width, rect.height),
+    });
     canvas.dataset.painted = key;
   }
 }

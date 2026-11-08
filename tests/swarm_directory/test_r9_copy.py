@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Text-node bytes of the deployed 86758539 HTML, excluding new hue controls."""
+"""Owner-directed R9 text-node bytes, excluding the independent hue controls."""
 import hashlib
 from html.parser import HTMLParser
 from pathlib import Path
@@ -20,9 +20,9 @@ class Copy(HTMLParser):
     def handle_charref(self, name):
         if not self.skip: self.parts.append('&#'+name+';')
 
-def test_deployed_copy_is_byte_identical_except_new_hue_controls():
+def test_owner_directed_copy_is_pinned_except_hue_controls():
     web=Path(__file__).resolve().parents[2]/'mycelium_swarm_directory/web'
-    expected={'apex.html': 'a8a4d0a31850c5d57fd0473cc703fb2b80a5df84905301db28c30fdd132300b5', 'index.html': '3445154e71fa74d9ad7390dd4c858d7ea7e8bd49d94b7e766ddbd4d7ffe062c7'}
+    expected={'apex.html': 'e9841530bbf782cd8d88a7109f1cb89ae5c0f3aad5337a0cdd455025d572a4c0', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
     for name, digest in expected.items():
         parser=Copy(); parser.feed((web/name).read_text())
         assert hashlib.sha256(''.join(parser.parts).encode()).hexdigest() == digest, name

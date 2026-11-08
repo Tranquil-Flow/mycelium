@@ -189,12 +189,12 @@ def test_apex_demo_route_copy_tracks_only_the_serving_demo(local, monkeypatch, w
         time.sleep(.7)  # real server thread; first paint/CSS is not held
         return original()
     monkeypatch.setattr(d, 'list_swarms', delayed)
-    neutral = 'Demo offline. Download the Mac app on two Apple silicon Macs to run your own swarm.'
+    neutral = 'Demo offline. Download the app and connect at least two devices to run your own swarm.'
     notes = {
-        'unknown': 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.',
-        'one-mac': 'The listing reports one Mac; a swarm needs at least two Apple silicon Macs.',
-        'two-mac': 'The demo route runs across 2 Macs.',
-        'max-macs': 'The demo route runs across 64 Macs.',
+        'unknown': 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving devices.',
+        'one-mac': 'The listing reports one device; a swarm needs at least two devices.',
+        'two-mac': 'The demo route runs across 2 devices.',
+        'max-macs': 'The demo route runs across 64 devices.',
     }
     with sync_playwright() as p:
         browser = p.chromium.launch()

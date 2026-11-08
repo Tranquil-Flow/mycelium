@@ -95,7 +95,7 @@ def test_source_offer_visible_and_keyboard_accessible_on_hash_routes(directory, 
             for route in ('browse', 'chat', 'contributing', 'owned', 'new', 'notice', 'swarm/missing'):
                 page.evaluate('(route) => { location.hash = route; }', route)
                 if route == 'contributing':
-                    download = page.get_by_role('link', name='Download Mycelium for Mac 0.1.4', exact=True)
+                    download = page.get_by_role('link', name='Download Mycelium 0.1.4', exact=True)
                     expect(download).to_be_visible()
                     expect(download).to_have_attribute('href', DOWNLOAD['url'])
                     expect(download).to_have_attribute('rel', 'noopener')

@@ -22,10 +22,10 @@ from . import docs, stats_docs
 from .ratelimit import WindowLimiter
 from .wire import Verifier, WireError, fingerprint, parse_json_object
 
-PRIVACY_NOTE = ('Your prompt is seen by this swarm\'s nodes (the Macs that run it). It is not end-to-end '
-                'encrypted from them. The directory never sees prompts and keeps no logs or analytics. '
-                'Cloudflare terminates TLS for this site and for swarm entries on trycloudflare.com and can see '
-                'your IP address, timing and plaintext prompts. '
+PRIVACY_NOTE = ('The swarm\'s devices can read your prompts and replies. Messages are not end-to-end '
+                'encrypted from them. Do not send secrets. The directory never sees prompts and keeps no logs or analytics. '
+                'Cloudflare terminates TLS for this site and entries it hosts, including trycloudflare.com. It can see '
+                'IP addresses, timing and plaintext traffic at those endpoints. '
                 'Swarm apps may publish numeric performance summaries: first-token and request durations, decode '
                 'speed, stage compute and hop latency when measured, layers, mode, uptime, request totals, sample '
                 'counts and windows. These self-reported statistics contain no prompts, outputs, IPs, hostnames '

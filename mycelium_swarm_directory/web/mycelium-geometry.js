@@ -27,73 +27,6 @@ function setup(c) {
   x.scale(d, d);
   return { x, w, h, off, d };
 }
-// Seeded identity geometry for swarm cards only; never used by the backdrop.
-function printAt(x, s, cx, cy, r, css, light) {
-  const R = rng(s.id + "|" + s.owner),
-    phase = R() * 6.28,
-    lobes = 2 + Math.floor(R() * 6),
-    hole = 0.08 + R() * 0.14,
-    n = 180,
-    ellipse = 0.72 + R() * 0.26,
-    rotation = R() * 6.28;
-  const mid = css.getPropertyValue("--strand").trim(),
-    core = css.getPropertyValue("--core").trim();
-  x.save();
-  x.translate(cx, cy);
-  x.rotate(rotation);
-  x.scale(1, ellipse);
-  if (!light) {
-    const g = x.createRadialGradient(0, 0, 1, 0, 0, r * 1.5);
-    g.addColorStop(0, core + "22");
-    g.addColorStop(0.5, mid + "13");
-    g.addColorStop(1, mid + "00");
-    x.fillStyle = g;
-    x.fillRect(-r * 1.5, -r * 1.5, r * 3, r * 3);
-  }
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2,
-      edge =
-        r *
-        (0.8 + 0.14 * Math.sin(a * lobes + phase) + 0.035 * Math.sin(a * 17)),
-      start = r * hole;
-    const grad = x.createLinearGradient(
-      Math.cos(a) * start,
-      Math.sin(a) * start,
-      Math.cos(a) * edge,
-      Math.sin(a) * edge,
-    );
-    grad.addColorStop(0, core);
-    grad.addColorStop(0.35, css.getPropertyValue("--glow").trim());
-    grad.addColorStop(1, mid);
-    x.strokeStyle = grad;
-    x.lineWidth = 0.25 + R() * 0.3;
-    x.globalAlpha = 0.4 + R() * 0.5;
-    x.beginPath();
-    for (let j = 0; j <= 16; j++) {
-      let t = j / 16,
-        rr = start + (edge - start) * t,
-        aa = a + 0.04 * Math.sin(t * 4 + phase) * (1 - t);
-      if (!j) x.moveTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
-      else x.lineTo(Math.cos(aa) * rr, Math.sin(aa) * rr);
-    }
-    x.stroke();
-    // Selected gills continue outwards as hyphae, not an enclosing icon outline.
-    if (i % 6 === 0) {
-      x.globalAlpha = light ? 0.34 : 0.45;
-      x.strokeStyle = mid;
-      x.beginPath();
-      x.moveTo(Math.cos(a) * edge, Math.sin(a) * edge);
-      x.quadraticCurveTo(
-        Math.cos(a + 0.04) * r * 1.32,
-        Math.sin(a + 0.04) * r * 1.32,
-        Math.cos(a + 0.1) * r * 1.7,
-        Math.sin(a + 0.1) * r * 1.7,
-      );
-      x.stroke();
-    }
-  }
-  x.restore();
-}
 function rootWalk(p, angle, len, R) {
   const n = Math.max(2, Math.ceil(len / 3.5)),
     step = len / n,
@@ -239,4 +172,4 @@ function measurePaths(paths) {
     ]),
   );
 }
-export { rng, setup, printAt, rootWalk, wander, bridgeRoot, measurePaths };
+export { rng, setup, rootWalk, wander, bridgeRoot, measurePaths };

@@ -40,7 +40,7 @@ def test_glow_preference_motion_and_reserved_layout(local, width, height, theme)
 
 def test_named_visual_assets_are_served_but_unknown_asset_is_not(local):
     import urllib.request, urllib.error
-    for name in ('design.css','theme.js','design.js','mycelium-geometry.js','mycelium-hero.js','mycelium-field.js'):
+    for name in ('design.css','theme.js','design.js','mycelium-geometry.js','mycelium-hero.js','mycelium-field.js','spore-print.js'):
         with urllib.request.urlopen(local['directory'].origin+'/swarms/'+name) as r:
             assert r.status == 200
             assert 'unsafe-inline' not in r.headers.get('Content-Security-Policy','')

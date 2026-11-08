@@ -26,13 +26,13 @@
     if (demo.length === 1) {
       demoChat.href = demoURL;
       demoChat.textContent = 'Try the demo chat';
-      document.getElementById('demo-route').textContent = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving Macs.';
+      document.getElementById('demo-route').textContent = 'The demo is volunteer-hosted and may be unavailable. Check its listing for current serving devices.';
     }
     if (demo.length === 1 && Number.isSafeInteger(demo[0].members) && demo[0].members > 0 && demo[0].members <= 64) {
       const count = demo[0].members;
       document.getElementById('demo-route').textContent = (count === 1
-        ? 'The listing reports one Mac; a swarm needs at least two Apple silicon Macs.'
-        : `The demo route runs across ${count} Macs.`) + ' Reported by its listing; availability may change.';
+        ? 'The listing reports one device; a swarm needs at least two devices.'
+        : `The demo route runs across ${count} devices.`) + ' Reported by its listing; availability may change.';
     }
     label.textContent = 'Directory snapshot just loaded. Refresh for a new snapshot.';
   } catch (_) {
