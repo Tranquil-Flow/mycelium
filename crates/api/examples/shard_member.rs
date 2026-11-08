@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Local-only joined member byte receiver. Private stdin/stdout operator channel;
-//! no serving/route-ready claim. The process owns pairing, QUIC and B3 custody.
+//! Joined member process: pairing, B3 custody, native stage compute and route
+//! serving. Operator commands arrive over private stdin and, when started with
+//! `--owner-control <owner control endpoint id>`, over the signed remote control
+//! channel (`remote.rs`). The carrier is LocalOnly loopback unless `--lan <ip>`
+//! explicitly selects the direct-LAN mode (allow-list: private ranges plus any
+//! `--lan-allow <ip>`). No route_ready claim.
 use api::{
     app_host,
     joined_shard::native::NativeShard,
@@ -11,7 +15,10 @@ use api::{
 };
 use budgets::{BudgetId as B, Entries};
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
-use runtime::{iroh_host::LoopbackHost, sidecar_artifact::serve_limits};
+use runtime::{
+    iroh_host::{LanPolicy, LoopbackHost},
+    sidecar_artifact::serve_limits,
+};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use transport::{Channel, Clock};
@@ -22,6 +29,8 @@ use membership::Membership;
 mod control;
 #[path = "shard_member/leave.rs"]
 mod leave;
+#[path = "shard_member/remote.rs"]
+mod remote;
 #[path = "shard_member/serve.rs"]
 mod serve;
 type Result<T> = std::result::Result<T, String>;
@@ -31,15 +40,54 @@ fn main() {
         std::process::exit(1);
     }
 }
-fn run() -> Result<()> {
+struct Args {
+    root: PathBuf,
+    lan: Option<std::net::IpAddr>,
+    allow: Vec<std::net::IpAddr>,
+    owner_control: Option<iroh::EndpointId>,
+}
+fn args() -> Result<Args> {
     let mut args = std::env::args().skip(1);
+    let usage =
+        "usage: --state-root PATH [--lan IP] [--lan-allow IP]... [--owner-control ENDPOINT_ID]";
     if args.next().as_deref() != Some("--state-root") {
-        return Err("usage: --state-root PATH".into());
+        return Err(usage.into());
     }
-    let root = PathBuf::from(args.next().ok_or("state_root_required")?);
-    if args.next().is_some() {
-        return Err("unexpected_argument".into());
+    let mut parsed = Args {
+        root: PathBuf::from(args.next().ok_or("state_root_required")?),
+        lan: None,
+        allow: Vec::new(),
+        owner_control: None,
+    };
+    while let Some(flag) = args.next() {
+        let value = args.next().ok_or(usage)?;
+        match flag.as_str() {
+            "--lan" => parsed.lan = Some(value.parse().map_err(|_| "lan_ip_invalid")?),
+            "--lan-allow" => parsed
+                .allow
+                .push(value.parse().map_err(|_| "lan_allow_invalid")?),
+            "--owner-control" => {
+                parsed.owner_control = Some(value.parse().map_err(|_| "owner_control_invalid")?)
+            }
+            _ => return Err(usage.into()),
+        }
     }
+    if parsed.lan.is_none() && !parsed.allow.is_empty() {
+        return Err("lan_allow_requires_lan".into());
+    }
+    Ok(parsed)
+}
+fn run() -> Result<()> {
+    let Args {
+        root,
+        lan,
+        allow,
+        owner_control,
+    } = args()?;
+    let policy = match lan {
+        Some(_) => Some(LanPolicy::with_explicit(allow).map_err(|_| "lan_allow_invalid")?),
+        None => None,
+    };
     // Public host admission normalizes trusted ancestors and refuses root links.
     let authority =
         app_host::Authority::<app_host::Unmanaged>::load(root).map_err(str::to_owned)?;
@@ -62,7 +110,24 @@ fn run() -> Result<()> {
             )
             .map_err(|_| "deadline_invalid".to_owned())
     };
-    let mut host = LoopbackHost::bind(&rt, &clock, deadline()?).map_err(|e| format!("{e:?}"))?;
+    let mut host = match (lan, &policy) {
+        (Some(ip), Some(policy)) => LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            deadline()?,
+            iroh::SecretKey::generate(),
+            &[Channel::Router],
+            ip,
+            policy.clone(),
+        ),
+        _ => LoopbackHost::bind(&rt, &clock, deadline()?),
+    }
+    .map_err(|e| format!("{e:?}"))?;
+    // Accepted carrier peers for seed/source dials: loopback, or the LAN allow-list.
+    let reachable = |ip: std::net::IpAddr| match &policy {
+        Some(policy) => policy.allows(ip),
+        None => ip.is_loopback(),
+    };
     let addr = host.address().map_err(|e| format!("{e:?}"))?;
     let carrier = Identity::from_secret(&addr.id.to_string(), &signer.secret_bytes())
         .map_err(|_| "identity_failed")?;
@@ -72,7 +137,36 @@ fn run() -> Result<()> {
     // Digest of the last signed resident proof THIS process produced.
     let mut proof_digest: Option<String> = None;
     let mut left = false;
-    let input = control::Input::start()?;
+    let input = control::Input::start(owner_control.is_some())?;
+    let status: remote::Status = std::sync::Arc::new(std::sync::Mutex::new(
+        json!({"joined":false,"left":false,"worker_pid":null,"route_ready":false}),
+    ));
+    let control_channel = match owner_control {
+        Some(owner) => {
+            let channel = remote::start(
+                owner,
+                lan.zip(policy.clone()),
+                input.dispatcher.clone(),
+                Identity::from_secret(signer.endpoint_id(), &signer.secret_bytes())
+                    .map_err(|_| "identity_failed")?,
+                status.clone(),
+            )?;
+            // Public pins only (no secret): what the owner operator needs to dial.
+            let notice = json!({"member_control":{"endpoint_id":channel.endpoint.to_string(),
+                "addrs":channel.addrs,"carrier_endpoint_id":addr.id.to_string(),
+                "carrier_addrs":addr.ip_addrs().collect::<Vec<_>>(),"pid":std::process::id()}});
+            api::preferences::private_state::store(
+                &root.join("member-control.json"),
+                &notice,
+                api::preferences::private_state::private_json_limit()
+                    .map_err(|e| e.0.to_owned())?,
+            )
+            .map_err(|e| e.0.to_owned())?;
+            eprintln!("{notice}");
+            Some(channel)
+        }
+        None => None,
+    };
     while let Ok(operation) = input.requests.recv() {
         let operation = operation?;
         let request = &operation.request;
@@ -88,8 +182,29 @@ fn run() -> Result<()> {
             {
                 Err("member_left".into())
             }
-            "carrier_address" => Ok(json!({"endpoint_id":addr.id.to_string(),
-                "socket":addr.ip_addrs().next().ok_or("carrier_address_missing")?})),
+            "carrier_address" => {
+                let sockets: Vec<std::net::SocketAddr> = addr.ip_addrs().copied().collect();
+                // Once joined, the enrolled key signs where this carrier listens.
+                let advert = match session.as_ref() {
+                    Some(member) => {
+                        let held = member.session.lock().map_err(|_| "session_poisoned")?;
+                        Some(
+                            joined_shard::carrier::advertise(
+                                held.as_ref().ok_or("not_joined")?,
+                                &signer,
+                                &carrier,
+                                &sockets,
+                                app_host::now(),
+                            )
+                            .map_err(|e| e.0.to_owned())?,
+                        )
+                    }
+                    None => None,
+                };
+                Ok(json!({"endpoint_id":addr.id.to_string(),
+                    "socket":sockets.first().ok_or("carrier_address_missing")?,
+                    "sockets":sockets,"advert":advert}))
+            }
             "serve" => {
                 let member = session.as_ref().ok_or("not_joined")?;
                 serve::serve(
@@ -142,8 +257,13 @@ fn run() -> Result<()> {
                 let socket: std::net::SocketAddr =
                     serde_json::from_value(request["seed_address"].clone())
                         .map_err(|_| "seed_address_invalid")?;
-                if !socket.ip().is_loopback() {
-                    return Err("seed_address_not_loopback".into());
+                if !reachable(socket.ip()) {
+                    return Err(if policy.is_some() {
+                        "seed_address_refused"
+                    } else {
+                        "seed_address_not_loopback"
+                    }
+                    .into());
                 }
                 let options = SeedOptions {
                     ca_pem: Some(
@@ -241,10 +361,10 @@ fn run() -> Result<()> {
                     .ok_or("source_id_missing")?
                     .parse()
                     .map_err(|_| "source_id_invalid")?;
-                let socket: std::net::SocketAddr =
+                let socket: Option<std::net::SocketAddr> =
                     serde_json::from_value(request["source_socket"].clone())
                         .map_err(|_| "source_socket_invalid")?;
-                if !socket.ip().is_loopback() {
+                if policy.is_none() && socket.is_none_or(|s| !s.ip().is_loopback()) {
                     return Err("source_not_loopback".into());
                 }
                 // Retain custody BEFORE any fallible carrier work; failures keep debt.
@@ -265,9 +385,30 @@ fn run() -> Result<()> {
                     .map_err(|e| e.0.to_owned())?,
                 );
                 let receive = shard.as_mut().unwrap();
+                // LAN: dial the source ONLY at the seed-signed grant hints of the
+                // admitted offer; an operator-supplied address must be one of them.
+                let dial: Vec<std::net::SocketAddr> = match &policy {
+                    Some(policy) => {
+                        let signed = joined_shard::carrier::signed_source_addrs(
+                            offer,
+                            &source.to_string(),
+                            policy,
+                        );
+                        if signed.is_empty() {
+                            return Err("source_address_unsigned".into());
+                        }
+                        if socket.is_some_and(|s| !signed.contains(&s)) {
+                            return Err("source_address_unexpected".into());
+                        }
+                        signed
+                    }
+                    None => socket.into_iter().collect(),
+                };
                 let connection = host
                     .connect_channel(
-                        &iroh::EndpointAddr::new(source).with_ip_addr(socket),
+                        &dial
+                            .iter()
+                            .fold(iroh::EndpointAddr::new(source), |a, s| a.with_ip_addr(*s)),
                         Channel::ArtifactChunk,
                         &clock,
                         end.earliest(deadline()?).map_err(|_| "deadline_invalid")?,
@@ -370,7 +511,8 @@ fn run() -> Result<()> {
                     // A refused custody hand-over keeps the received shard owned (F4).
                     match NativeShard::try_new(shard.take().ok_or("shard_required")?) {
                         Ok(compute) => native = Some(compute),
-                        Err((error, received)) => {
+                        Err(refused) => {
+                            let (error, received) = *refused;
                             shard = Some(received);
                             return Err(error.0.to_owned());
                         }
@@ -455,11 +597,29 @@ fn run() -> Result<()> {
             Ok(value) => json!({"ok":true,"result":value}),
             Err(code) => json!({"ok":false,"code":code}),
         };
-        input.finished()?;
-        control::reply(&out)?;
+        if let Ok(mut s) = status.lock() {
+            s["joined"] = json!(session.is_some());
+            s["left"] = json!(left);
+            s["worker_pid"] = json!(native.as_ref().and_then(NativeShard::worker_pid));
+            s["native_owned"] = json!(native.is_some());
+            s["shard_owned"] = json!(shard.is_some());
+            s["last_operation"] =
+                json!({"command":command,"operation_id":operation.id,"ok":out["ok"]});
+            // A finished serve's teardown evidence (member-signed with the reply).
+            if command == "serve" {
+                s["last_serve"] = out.clone();
+            }
+            if command == "leave" {
+                s["last_leave"] = out.clone();
+            }
+        }
+        input.complete(&operation, out)?;
         if command == "close" {
             break;
         }
+    }
+    if let Some(channel) = control_channel {
+        channel.stop()?;
     }
     input.join()?;
     host.close(&clock, deadline()?)

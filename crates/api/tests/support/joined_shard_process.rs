@@ -20,16 +20,52 @@ fn allowance() -> Duration {
     Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis())
 }
 pub(super) struct Node {
-    pub(super) child: Child,
-    replies: mpsc::Receiver<Value>,
+    /// `None` = a member an operator started on another host (attached).
+    pub(super) child: Option<Child>,
+    pid: u32,
+    pub(super) replies: mpsc::Receiver<Value>,
     reader: Option<std::thread::JoinHandle<()>>,
+    remote: Option<super::member_remote::Link>,
+    /// The member's control endpoint when driven over the signed channel.
+    pub(super) control: Option<iroh::EndpointAddr>,
     done: bool,
     last_op: u64,
 }
 impl Node {
+    /// Spawn the real member executable. With `B8_MEMBER_CONTROL=remote` it is
+    /// driven ONLY over the signed remote control channel (stdin closed).
     pub(super) fn start(root: &std::path::Path) -> Self {
         let exe = std::env::var_os("B7_MEMBER_BINARY")
             .expect("build api --example shard_member and set B7_MEMBER_BINARY");
+        if super::member_remote::remote_mode() {
+            let child = Command::new(exe)
+                .arg("--state-root")
+                .arg(root)
+                .args(super::member_remote::member_args())
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap();
+            let notice = root.join("member-control.json");
+            let end = Instant::now() + allowance();
+            while !notice.exists() {
+                assert!(
+                    Instant::now() < end,
+                    "member control endpoint not published"
+                );
+                std::thread::yield_now();
+            }
+            let info: Value = serde_json::from_slice(&std::fs::read(&notice).unwrap()).unwrap();
+            let c = &info["member_control"];
+            let addr = c["addrs"].as_array().unwrap().iter().fold(
+                iroh::EndpointAddr::new(c["endpoint_id"].as_str().unwrap().parse().unwrap()),
+                |a, s| a.with_ip_addr(s.as_str().unwrap().parse().unwrap()),
+            );
+            assert_eq!(c["pid"], child.id());
+            let pid = child.id();
+            return Self::remote(Some(child), pid, addr);
+        }
         let mut child = Command::new(exe)
             .arg("--state-root")
             .arg(root)
@@ -48,21 +84,54 @@ impl Node {
                 }
             }
         });
+        let pid = child.id();
         Self {
-            child,
+            child: Some(child),
+            pid,
             replies,
             reader: Some(reader),
+            remote: None,
+            control: None,
             done: false,
             last_op: 0,
         }
     }
-    /// Long operations get the next strictly increasing operation_id unless the
-    /// caller supplied one (the member refuses an id-less long operation).
+    /// A member started by an operator elsewhere (`B8_REMOTE_MEMBER`).
+    pub(super) fn attach(addr: iroh::EndpointAddr, pid: u32) -> Self {
+        Self::remote(None, pid, addr)
+    }
+    fn remote(child: Option<Child>, pid: u32, addr: iroh::EndpointAddr) -> Self {
+        let (link, replies) = super::member_remote::Link::start(addr.clone());
+        Self {
+            child,
+            pid,
+            replies,
+            reader: None,
+            remote: Some(link),
+            control: Some(addr),
+            done: false,
+            last_op: 0,
+        }
+    }
+    /// The next operation id this driver will use (strictly increasing).
+    pub(super) fn next_op(&self) -> u64 {
+        self.last_op + 1
+    }
+    pub(super) fn pid(&self) -> u32 {
+        self.pid
+    }
+    pub(super) fn local(&self) -> bool {
+        self.child.is_some()
+    }
+    /// Long operations (and every remote operation) get the next strictly
+    /// increasing operation_id unless the caller supplied one.
     pub(super) fn send(&mut self, mut v: Value) {
         if let Some(id) = v["operation_id"].as_u64() {
             self.last_op = self.last_op.max(id);
-        } else if ["receive", "prepare_native", "native_step", "serve"]
-            .contains(&v["command"].as_str().unwrap_or_default())
+        } else if v["command"] != "cancel_operation"
+            && (self.remote.is_some()
+                || ["receive", "prepare_native", "native_step", "serve"]
+                    .contains(&v["command"].as_str().unwrap_or_default()))
         {
             self.last_op += 1;
             v["operation_id"] = json!(self.last_op);
@@ -70,7 +139,11 @@ impl Node {
         self.send_raw(v);
     }
     pub(super) fn send_raw(&mut self, v: Value) {
-        let input = self.child.stdin.as_mut().unwrap();
+        if let Some(link) = &self.remote {
+            link.send(v);
+            return;
+        }
+        let input = self.child.as_mut().unwrap().stdin.as_mut().unwrap();
         writeln!(input, "{v}").unwrap();
         input.flush().unwrap();
     }
@@ -91,34 +164,170 @@ impl Node {
         self.send(v);
         self.result()
     }
+    /// Wait for the exact spawned process to exit (death phase).
+    pub(super) fn wait_exit(&mut self) -> std::process::ExitStatus {
+        let status = self.child.as_mut().expect("local member").wait().unwrap();
+        self.done = true;
+        status
+    }
     pub(super) fn close(&mut self) {
         self.call(json!({"command":"close"}));
-        self.child.stdin.take();
-        let end = Instant::now() + allowance();
-        loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
-                assert!(status.success());
-                break;
+        self.remote.take();
+        if let Some(child) = self.child.as_mut() {
+            child.stdin.take();
+            let end = Instant::now() + allowance();
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(status.success());
+                    break;
+                }
+                assert!(Instant::now() < end, "node reap deadline");
+                std::thread::yield_now();
             }
-            assert!(Instant::now() < end, "node reap deadline");
-            std::thread::yield_now();
         }
         self.done = true;
-        self.reader.take().unwrap().join().unwrap();
+        if let Some(r) = self.reader.take() {
+            r.join().unwrap();
+        }
     }
 }
 impl Drop for Node {
     fn drop(&mut self) {
-        if !self.done {
-            if self.child.try_wait().unwrap().is_none() {
-                self.child.kill().unwrap();
+        self.remote.take();
+        if !self.done
+            && let Some(child) = self.child.as_mut()
+        {
+            if child.try_wait().unwrap().is_none() {
+                child.kill().unwrap();
             }
-            self.child.wait().unwrap();
+            child.wait().unwrap();
         }
         if let Some(r) = self.reader.take() {
             r.join().unwrap();
         }
     }
+}
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn member_control_channel_is_pinned_signed_and_replay_safe() {
+    use super::member_remote::{Link, owner_secret, raw, status, with_owner};
+    let root = std::env::temp_dir().join(format!("b8-control-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    // Exact owned child, killed and reaped on any failure path.
+    struct Reap(Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if self.0.try_wait().unwrap().is_none() {
+                self.0.kill().unwrap();
+            }
+            self.0.wait().unwrap();
+        }
+    }
+    let mut child = Reap(
+        Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
+            .arg("--state-root")
+            .arg(&root)
+            .args(super::member_remote::member_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let notice = root.join("member-control.json");
+    let end = Instant::now() + allowance();
+    while !notice.exists() {
+        assert!(
+            Instant::now() < end,
+            "member control endpoint not published"
+        );
+        std::thread::yield_now();
+    }
+    let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+    let c = &info["member_control"];
+    let addr = c["addrs"].as_array().unwrap().iter().fold(
+        iroh::EndpointAddr::new(c["endpoint_id"].as_str().unwrap().parse().unwrap()),
+        |a, s| a.with_ip_addr(s.as_str().unwrap().parse().unwrap()),
+    );
+    // Signed status, verified owner-side (pin + command digest).
+    let began = Instant::now();
+    let s = status(&addr, None).unwrap();
+    let status_ms = began.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(s["ok"], true, "{s}");
+    assert_eq!(s["result"]["pid"], child.0.id());
+    assert_eq!(s["result"]["joined"], false);
+    // An unpinned owner key: the member closes the connection, no reply.
+    let stranger = iroh::SecretKey::generate();
+    let refused = with_owner(&stranger, |owner, client, until| {
+        api::member_control::Remote {
+            addr: addr.clone(),
+            enrolled: None,
+        }
+        .call(
+            owner,
+            client,
+            json!({"command":"status"}),
+            until(),
+            app_host::now(),
+        )
+        .err()
+        .map(|e| e.code)
+    });
+    assert!(refused.is_some(), "unpinned owner must get no reply");
+    // Replay and misbinding over the pinned transport.
+    let (replayed, misbound) = with_owner(owner_secret(), |owner, client, until| {
+        let command = owner
+            .command(&addr.id, json!({"command":"status"}), app_host::now())
+            .unwrap();
+        let bytes = serde_json::to_vec(&command).unwrap();
+        let first = raw(client, &addr, &bytes, until()).unwrap();
+        assert_eq!(first["message"]["reply"]["ok"], true, "{first}");
+        let again = raw(client, &addr, &bytes, until()).unwrap();
+        let other = iroh::SecretKey::generate().public();
+        let wrong = owner
+            .command(&other, json!({"command":"status"}), app_host::now())
+            .unwrap();
+        let wrong = raw(client, &addr, &serde_json::to_vec(&wrong).unwrap(), until()).unwrap();
+        (
+            again["message"]["reply"].clone(),
+            wrong["message"]["reply"].clone(),
+        )
+    });
+    assert_eq!(replayed["code"], "member_control_replayed", "{replayed}");
+    assert_eq!(
+        misbound["code"], "member_control_wrong_member",
+        "{misbound}"
+    );
+    // Remote operations require an id; the signed `pair_request` result is
+    // retrieved by id; remote `close` ends the member though stdin stays open.
+    let (link, replies) = Link::start(addr.clone());
+    link.send(json!({"command":"pair_request"}));
+    let refusal = replies.recv_timeout(allowance()).unwrap();
+    assert_eq!(
+        refusal["code"], "operator_operation_id_required",
+        "{refusal}"
+    );
+    link.send(json!({"command":"pair_request","operation_id":7}));
+    let paired = replies.recv_timeout(allowance()).unwrap();
+    assert_eq!(paired["ok"], true, "{paired}");
+    assert!(!paired["result"].is_null(), "{paired}");
+    link.send(json!({"command":"close","operation_id":8}));
+    assert_eq!(replies.recv_timeout(allowance()).unwrap()["ok"], true);
+    drop(link);
+    let end = Instant::now() + allowance();
+    let exit = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < end, "member did not close");
+        std::thread::yield_now();
+    };
+    assert!(exit.success(), "{exit:?}");
+    eprintln!(
+        "B8 control: status {status_ms:.1} ms; unpinned={refused:?}; replay and misbinding refused"
+    );
+    fs::remove_dir_all(&root).unwrap();
 }
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
@@ -293,13 +502,14 @@ fn process_transfer(stall: bool) {
     // F6: a long operation without an operation_id cannot be cancelled: refused.
     node.send_raw(json!({"command":"receive","offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
     assert_eq!(node.refusal(), "operator_operation_id_required");
-    node.send(json!({"command":"receive","operation_id":1,"offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
+    let op = node.next_op();
+    node.send(json!({"command":"receive","operation_id":op,"offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
     if stall {
         stalled_rx.recv_timeout(allowance()).unwrap();
-        let wrong = node.call(json!({"command":"cancel_operation","operation_id":2}));
+        let wrong = node.call(json!({"command":"cancel_operation","operation_id":op + 1}));
         assert_eq!(wrong["cancel_requested"], false);
         let began = Instant::now();
-        node.send(json!({"command":"cancel_operation","operation_id":1}));
+        node.send(json!({"command":"cancel_operation","operation_id":op}));
         // Acknowledgment and operation result may race; inspect both identities.
         let replies: Vec<_> = (0..2)
             .map(|_| node.replies.recv_timeout(allowance()).unwrap())
@@ -326,9 +536,10 @@ fn process_transfer(stall: bool) {
             1,
             "cancel is not refund"
         );
-        node.send(json!({"command":"pair_request","operation_id":1}));
+        node.send(json!({"command":"pair_request","operation_id":op}));
         assert_eq!(node.refusal(), "operator_operation_id_invalid");
-        node.call(json!({"command":"discard","operation_id":2}));
+        let next = node.next_op();
+        node.call(json!({"command":"discard","operation_id":next}));
         let ledger: Value = serde_json::from_slice(
             &fs::read(member_root.join("chain-runs/compiler-storage.private.json")).unwrap(),
         )
@@ -341,8 +552,8 @@ fn process_transfer(stall: bool) {
         return;
     }
     let result = node.result();
-    assert_eq!(result["pid"], node.child.id());
-    assert_ne!(node.child.id(), std::process::id());
+    assert_eq!(result["pid"], node.pid());
+    assert_ne!(node.pid(), std::process::id());
     assert_eq!(result["node_id"], member["node_id"]);
     assert_eq!(result["generation"], member["generation"]);
     assert_eq!(result["route_ready"], false);

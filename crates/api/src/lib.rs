@@ -31,6 +31,7 @@ pub mod m16_requests;
 pub mod m16_route;
 pub mod managed_carrier;
 pub mod member;
+pub mod member_control;
 pub mod model_catalog;
 pub mod native_compiler;
 pub mod native_session;

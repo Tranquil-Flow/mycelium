@@ -175,11 +175,11 @@ pub struct NativeShard {
 }
 impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
-        Self::try_new(received).map_err(|(error, _)| error)
+        Self::try_new(received).map_err(|refused| refused.0)
     }
     /// As `new`, but a refusal hands the received custody back to the caller,
     /// so its byte debt stays owned and can still be retired.
-    pub fn try_new(received: JoinedShard) -> std::result::Result<Self, (Error, JoinedShard)> {
+    pub fn try_new(received: JoinedShard) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
         let caps = (|| {
             let consent = standing_consent::load(&received.root)
                 .map_err(|_| fail("joined_shard_consent_required"))?
@@ -196,7 +196,7 @@ impl NativeShard {
         })();
         let (consent, seconds, remaining) = match caps {
             Ok(caps) => caps,
-            Err(error) => return Err((error, received)),
+            Err(error) => return Err(Box::new((error, received))),
         };
         Ok(Self {
             received,

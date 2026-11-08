@@ -225,7 +225,7 @@ fn open_epoch(
         .unwrap(),
     );
     let message = host.message().clone();
-    let peers = (0..2)
+    let peers: Vec<StagePeer> = (0..2)
         .map(|i| StagePeer {
             node_id: fx.ids[i].clone(),
             endpoint: addrs[i]["endpoint_id"].as_str().unwrap().parse().unwrap(),
@@ -249,13 +249,40 @@ fn open_epoch(
             currentness(&fx.ids[i])
         );
     }
-    let (executor, handle) = RouteExecutor::connect(
-        message.clone(),
-        secret.clone(),
-        peers,
-        currentness,
-        codec_dyn,
-    )
+    let (executor, handle) = match super::member_remote::lan() {
+        // Direct LAN: dial only the member-signed, owner-verified advertisements.
+        Some((interface, policy)) => {
+            let carriers = (0..2)
+                .map(|i| {
+                    api::joined_shard::carrier::verify(
+                        &fx.seed.coordinator,
+                        &fx.offers[i],
+                        &addrs[i]["advert"],
+                        &policy,
+                        app_host::now(),
+                    )
+                    .unwrap()
+                })
+                .collect();
+            drop(peers);
+            RouteExecutor::connect_lan(
+                message.clone(),
+                secret.clone(),
+                carriers,
+                interface,
+                policy,
+                currentness,
+                codec_dyn,
+            )
+        }
+        None => RouteExecutor::connect(
+            message.clone(),
+            secret.clone(),
+            peers,
+            currentness,
+            codec_dyn,
+        ),
+    }
     .unwrap();
     host.attach(handle.clone()).unwrap();
     let runtime = m16_route::runtime(
@@ -444,6 +471,29 @@ fn token_ids(all: &[(Value, Instant)]) -> Vec<u64> {
         .map(|(e, _)| e["token_id"].as_u64().unwrap())
         .collect()
 }
+/// Worker absence per stage: exact local pid for local members; the member's
+/// signed status (`worker_alive:false`) for a member on another host.
+fn wait_gone(fx: &Fixture, pids: &[i32]) -> f64 {
+    let began = Instant::now();
+    for (i, pid) in pids.iter().enumerate() {
+        if fx.nodes[i].local() {
+            wait_workers_gone(&[*pid]);
+        } else {
+            wait_remote_worker_gone(fx, i);
+        }
+    }
+    ms(began)
+}
+fn wait_remote_worker_gone(fx: &Fixture, i: usize) {
+    let end = Instant::now() + span(B::RouterClose);
+    let control = fx.nodes[i].control.clone().unwrap();
+    while super::member_remote::status(&control, None)
+        .map(|s| s["result"]["worker_alive"] != false)
+        .unwrap_or(true)
+    {
+        assert!(Instant::now() < end, "remote worker still reported alive");
+    }
+}
 fn wait_workers_gone(pids: &[i32]) -> f64 {
     let began = Instant::now();
     let end = began + span(B::RouterClose);
@@ -521,7 +571,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_workers_gone(&e.worker_pids);
+    let gone = wait_gone(&fx, &e.worker_pids);
     let text: String = all
         .iter()
         .filter(|(e, _)| e["type"] == "token")
@@ -587,7 +637,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_workers_gone(&e.worker_pids);
+    let gone = wait_gone(&fx, &e.worker_pids);
     let o = e.handle.state.lock().unwrap();
     assert!(
         o.stages.iter().all(|s| s.acknowledged_ms.is_some()),
@@ -604,13 +654,20 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     assert_epoch_retired(&e, "after stop");
     evidence["stop"]["pump_refusals"] = json!(e.close());
 
-    // (f) Carrier stall: freeze the final-stage member process mid-stream.
+    // (f) Carrier stall: freeze a LOCAL member process mid-stream (the final
+    // stage when both are local; on two Macs, the member on the owner's Mac).
+    let k = if fx.nodes[1].local() { 1 } else { 0 };
+    let survivor = 1 - k;
+    assert!(
+        fx.nodes[k].local(),
+        "fault phases need one member on this host"
+    );
     let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
     let e = open_epoch(&mut fx, 3, &proofs, &secret, &codec, &addrs);
     let r = submit(&e);
     let mut all = Vec::new();
     collect(&e, &r, 3, &mut all);
-    let member_pid = fx.nodes[1].child.id();
+    let member_pid = fx.nodes[k].pid();
     signal("-STOP", member_pid);
     let stalled = Instant::now();
     let mut seen = e.handle.wait(usize::MAX, Duration::ZERO);
@@ -631,7 +688,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_workers_gone(&e.worker_pids);
+    let gone = wait_gone(&fx, &e.worker_pids);
     let o = e.handle.state.lock().unwrap();
     eprintln!(
         "B7e stall failure={code} after {failed_ms:.1} ms; terminal={t} settled {settled_ms:.1} ms"
@@ -645,7 +702,9 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     assert_epoch_retired(&e, "after stall");
     evidence["stall"]["pump_refusals"] = json!(e.close());
 
-    // (f) Member death mid-stream: SIGKILL the exact final-stage member process.
+    // (f) Member death mid-stream: SIGKILL the exact local member process. The
+    // owner first observes the loss over the signed control channel (liveness),
+    // then settles the stage with exact-process evidence from this host.
     let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
     let e = open_epoch(&mut fx, 4, &proofs, &secret, &codec, &addrs);
     let baseline = e.service.placement_status().unwrap();
@@ -654,19 +713,27 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     collect(&e, &r, 3, &mut all);
     let killed = Instant::now();
     signal("-KILL", member_pid);
-    let status = fx.nodes[1].child.wait().unwrap();
+    let status = fx.nodes[k].wait_exit();
     let reaped_ms = ms(killed);
-    let dead_worker = e.worker_pids[1];
+    let unreachable = fx.nodes[k]
+        .control
+        .clone()
+        .map(|c| super::member_remote::status(&c, None).err());
+    let dead_worker = e.worker_pids[k];
     let worker_gone = wait_workers_gone(&[dead_worker]);
-    m16_route::record_stage_exit(&e.handle, 1, json!({"process_exited":true,"worker_absent":true,
+    m16_route::record_stage_exit(&e.handle, k, json!({"process_exited":true,"worker_absent":true,
         "member_pid":member_pid,"exit_signal":std::os::unix::process::ExitStatusExt::signal(&status),
         "worker_pid":dead_worker,"observed_by":"owner_test_driver"})).unwrap();
     collect(&e, &r, usize::MAX, &mut all);
     r.reader.join().unwrap();
     let t = terminal(&all).unwrap().clone();
     let settled_ms = ms(killed);
-    let survivor = fx.nodes[0].result_with(allowance());
-    wait_workers_gone(&e.worker_pids);
+    let survivor_report = fx.nodes[survivor].result_with(allowance());
+    if fx.nodes[survivor].local() {
+        wait_workers_gone(&[e.worker_pids[survivor]]);
+    } else {
+        wait_remote_worker_gone(&fx, survivor);
+    }
     let o = e.handle.state.lock().unwrap();
     eprintln!(
         "B7e death terminal={t} after {settled_ms:.1} ms; failure={:?} at {:?}",
@@ -681,20 +748,24 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     evidence["death"] = json!({"member_reaped_ms":reaped_ms,"dead_worker_gone_ms":worker_gone,
         "failure":o.failure,"terminal":t,"terminal_after_kill_ms":settled_ms,
         "stages":o.stages.iter().map(|s| json!({"ack_ms":s.acknowledged_ms,"failure":s.failure,"death":s.death_evidence})).collect::<Vec<_>>(),
-        "survivor_report":survivor,"dead_member_root_retains_custody_debt":true});
+        "survivor_report":survivor_report,"dead_member_root_retains_custody_debt":true,
+        "control_channel_after_kill":unreachable});
     drop(o);
 
     // (f) Member leave through the product leave state machine, with a live worker.
-    let proofs = prepare(&mut fx, &challenges, &[0], capacity);
+    let proofs = prepare(&mut fx, &challenges, &[survivor], capacity);
     let leave_pid = proofs[0].proof()["message"]["proof"]["worker_pid"]
         .as_i64()
         .unwrap() as i32;
     // N3: the death already retired this epoch; the withdrawal then revokes it.
     assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
     let began = Instant::now();
-    let left = fx.nodes[0].call(json!({"command":"leave","mode":"smooth"}));
+    let left = fx.nodes[survivor].call(json!({"command":"leave","mode":"smooth"}));
     let leave_ms = ms(began);
-    let withdrawn = e.host.withdraw(&fx.offers[0], &left["withdrawal"]).unwrap();
+    let withdrawn = e
+        .host
+        .withdraw(&fx.offers[survivor], &left["withdrawal"])
+        .unwrap();
     let not_ready_ms = ms(began);
     assert_eq!(
         e.host.qualification().err().unwrap().code,
@@ -715,37 +786,58 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         (409, Some("readiness_revoked")),
         "{refused}"
     );
-    assert!(!alive(leave_pid), "leave reaped the worker");
-    assert!(!fx.paths[0].exists(), "received shard retired");
-    let ledger: Value = serde_json::from_slice(
-        &fs::read(fx.member_roots[0].join("chain-runs/compiler-storage.private.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(ledger["entries"], json!({}), "refunded");
+    if fx.nodes[survivor].local() {
+        assert!(!alive(leave_pid), "leave reaped the worker");
+        assert!(!fx.paths[survivor].exists(), "received shard retired");
+        let ledger: Value = serde_json::from_slice(
+            &fs::read(fx.member_roots[survivor].join("chain-runs/compiler-storage.private.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ledger["entries"], json!({}), "refunded");
+    } else {
+        // Remote member: its signed leave reply is the evidence.
+        assert_eq!(left["refunded"], true, "{left}");
+        wait_remote_worker_gone(&fx, survivor);
+    }
     assert_eq!(left["record"]["state"], "left");
     assert_eq!(
         left["record"]["compute_cleanup"],
         json!({"state":"proven","code":null})
     );
-    let nonce2 = challenges.issue(&fx.ids[0], assigned(&fx, 0)).unwrap();
-    fx.nodes[0].send(json!({"command":"prepare_native","range":[0,14],"tokens":1,"nonce":nonce2,"forbidden_source":fx.source}));
-    assert_eq!(fx.nodes[0].refusal(), "member_left");
-    fx.nodes[0].close();
-    // Durable reopen after exit: product leave record and ledger are what remain.
-    let reopened = api::leave::MemberLeave::new(&fx.member_roots[0], api::leave::Limits::default())
-        .status()
-        .unwrap()
+    let nonce2 = challenges
+        .issue(&fx.ids[survivor], assigned(&fx, survivor))
         .unwrap();
-    assert_eq!(reopened["state"], "left");
-    assert!(!api::leave::cleanup_pending(&reopened));
-    let consent = standing_consent::load(&fx.member_roots[0]).unwrap();
+    fx.nodes[survivor].send(json!({"command":"prepare_native","range":fx.ranges[survivor],"tokens":1,"nonce":nonce2,"forbidden_source":fx.source}));
+    assert_eq!(fx.nodes[survivor].refusal(), "member_left");
+    let survivor_local = fx.nodes[survivor].local();
+    fx.nodes[survivor].close();
+    // Durable reopen after exit: product leave record and ledger are what remain.
+    let (reopened, consent) = if survivor_local {
+        let reopened =
+            api::leave::MemberLeave::new(&fx.member_roots[survivor], api::leave::Limits::default())
+                .status()
+                .unwrap()
+                .unwrap();
+        assert_eq!(reopened["state"], "left");
+        assert!(!api::leave::cleanup_pending(&reopened));
+        let consent = standing_consent::load(&fx.member_roots[survivor]).unwrap();
+        (
+            json!(reopened),
+            json!(consent.as_ref().map(|c| c["state"].clone())),
+        )
+    } else {
+        (
+            json!({"remote_member":"durable record checked on its own host"}),
+            Value::Null,
+        )
+    };
     eprintln!(
-        "B7e leave {leave_ms:.1} ms; route not-ready {not_ready_ms:.1} ms; consent={:?}",
-        consent.as_ref().map(|c| c["state"].clone())
+        "B7e leave {leave_ms:.1} ms; route not-ready {not_ready_ms:.1} ms; consent={consent}"
     );
     evidence["leave"] = json!({"leave_ms":leave_ms,"route_not_ready_ms":not_ready_ms,"reply":left,
         "withdrawal_verified":withdrawn,"submit_after_leave":{"status":status,"body":refused},
-        "reopened":reopened,"consent_state":consent.map(|c| c["state"].clone()),"worker_pid":leave_pid});
+        "reopened":reopened,"consent_state":consent,"worker_pid":leave_pid});
     evidence["death"]["pump_refusals"] = json!(e.close());
     codec.close();
     let began = fx.began;

@@ -13,6 +13,8 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
+#[path = "support/member_remote.rs"]
+mod member_remote;
 #[path = "support/joined_native_process.rs"]
 mod native_process;
 #[path = "support/joined_shard_process.rs"]
