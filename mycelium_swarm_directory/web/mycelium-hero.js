@@ -1771,7 +1771,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       if (disposed) return;
       g.field = await run(extendFieldGraph({
         vs: g.vs, ss: g.ss, paths: [], vertex: g.vertex, edge: g.edge, nodes: g.nodes, w: L.W, h: L.Hh, top: L.top, budget,
-        seedOk: (v) => v.birth > 0 && v.birth < START_AGE - 10 && v.owner >= 0 && g.paths[v.owner]?.unit < 0,
+        // Field hyphae continue from hero strands, never from fringe hairs or knot fibres.
+        seedOk: (v) => v.birth > 0 && v.birth < START_AGE - 10 && v.owner >= 0 && g.paths[v.owner]?.unit < 0 && !/hair/.test(g.paths[v.owner].kind),
       }));
       scene.timings.field = performance.now() - begun;
       if (disposed) return;
