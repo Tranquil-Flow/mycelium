@@ -6,6 +6,9 @@ use super::*;
 mod native_tamper_tests;
 use api::compiler_inputs::{self, InputArtifact};
 use native_tamper_tests::native_handoff_tamper_refusals;
+#[path = "native_shard_tamper_tests.rs"]
+mod native_shard_tamper_tests;
+use native_shard_tamper_tests::native_shard_tamper_refusals;
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -589,6 +592,14 @@ fn stage_sharded_worker_retains_real_bytes_but_refuses_native_challenge() {
 #[test]
 #[ignore = "requires local Qwen3-0.6B + Metal"]
 fn local_qwen3_two_stage_compiler_produces_native_handoff() {
+    local_qwen3_native_fixture(false);
+}
+#[test]
+#[ignore = "requires local Qwen3-0.6B + Metal and whole-source evidence"]
+fn local_qwen3_stage_shards_produce_native_handoff() {
+    local_qwen3_native_fixture(true);
+}
+fn local_qwen3_native_fixture(stage_sharded: bool) {
     let mut f = Fixture::new();
     let snapshot = PathBuf::from(std::env::var("HOME").unwrap()).join(
         ".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca",
@@ -631,9 +642,7 @@ fn local_qwen3_two_stage_compiler_produces_native_handoff() {
         {"node_id":"node-0","start":0,"end":14},
         {"node_id":"node-1","start":14,"end":28}
     ]});
-    // Whole-source two-stage loading is supported by the existing native
-    // backend; byte-shard loading is a separate currently unsupported boundary.
-    f.request.stage_sharded = false;
+    f.request.stage_sharded = stage_sharded;
     worker_fixture(f, true);
 }
 
@@ -875,7 +884,60 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             "one physical Mac, not controlled hello IDs"
         );
         assert_eq!(handoff.plan()["route_ready"], false);
+        let checkpoint: Value = serde_json::from_slice(
+            &fs::read(output.join("compiled/local-challenge-checkpoint.json")).unwrap(),
+        )
+        .unwrap();
+        let weights: Vec<_> = checkpoint["proofs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["weights"].clone())
+            .collect();
+        for proof in checkpoint["proofs"].as_array().unwrap() {
+            eprintln!(
+                "B6 resident pid={} rows={} digest={}",
+                proof["worker_pid"],
+                proof["weights"].as_object().unwrap().len(),
+                proof["weights_digest"]
+            );
+        }
+        if let Ok(evidence) = std::env::var("MYCELIUM_B6_EVIDENCE_ROOT") {
+            let evidence = PathBuf::from(evidence);
+            fs::create_dir_all(&evidence).unwrap();
+            let baseline = evidence.join("whole-weights.json");
+            if stage_sharded {
+                let whole: Value = serde_json::from_slice(
+                    &fs::read(baseline).expect("whole-source run evidence required"),
+                )
+                .unwrap();
+                assert_eq!(
+                    json!(weights),
+                    whole,
+                    "every resident row must equal actual whole-source run"
+                );
+                eprintln!("B6 all resident rows equal whole-source run");
+            } else {
+                fs::write(&baseline, serde_json::to_vec(&weights).unwrap()).unwrap();
+            }
+            let mode = if stage_sharded { "shards" } else { "whole" };
+            fs::write(
+                evidence.join(format!("{mode}-checkpoint.json")),
+                serde_json::to_vec(&checkpoint).unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                evidence.join(format!("{mode}-plan.json")),
+                serde_json::to_vec(handoff.plan()).unwrap(),
+            )
+            .unwrap();
+        } else if stage_sharded {
+            panic!("MYCELIUM_B6_EVIDENCE_ROOT required for whole-source cross-check");
+        }
         native_handoff_tamper_refusals(&output, &pins, seed.coordinator.signer(), &handoff);
+        if stage_sharded {
+            native_shard_tamper_refusals(&output, handoff.plan(), &f.source.source_root);
+        }
         return;
     }
     assert_eq!(

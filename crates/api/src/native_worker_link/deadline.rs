@@ -84,7 +84,7 @@ impl Link {
     /// A terminal exchange: on error discard the link, since a partial frame
     /// must never be retried. The same deadline covers serialization, send,
     /// all frame parts, JSON decoding, and the final completion check.
-    pub(crate) fn request_until(
+    pub fn request_until(
         &mut self,
         head: &Value,
         payload: &[u8],
