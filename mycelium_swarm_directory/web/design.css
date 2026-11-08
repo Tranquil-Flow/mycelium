@@ -538,7 +538,18 @@ button {
   }
 }
 
-/* STAGING ONLY: background style toggle (never rendered in production). */
+/* STAGING ONLY: background style toggle (never rendered in production).
+   The header grows to fit it instead of overflowing; it is server-injected, so
+   the height is final at first layout (no shift). */
 .style-switch {
   margin-inline-start: 6px;
+}
+@media (max-width: 1180px) {
+  .top .wrap:has(.style-switch),
+  .apex .top .wrap:has(.style-switch) {
+    flex-wrap: wrap;
+    height: auto;
+    padding-block: 8px;
+    row-gap: 6px;
+  }
 }

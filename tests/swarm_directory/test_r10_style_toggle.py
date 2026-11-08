@@ -163,3 +163,23 @@ def test_staging_toggle_respects_reduced_motion_for_both_styles(local, style):  
         assert canvas_digest(page) == first
         assert not errors, errors
         browser.close()
+
+
+def test_staging_header_fits_the_toggle_at_every_width(local):  # noqa: F811
+    local['directory'].staging_samples = True
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        for width in (390, 768, 1024, 1280):
+            context = browser.new_context(viewport={'width': width, 'height': 900})
+            context.add_init_script(CLS)
+            page = context.new_page()
+            for path in ('/', '/swarms/'):
+                page.goto(local['directory'].origin + path)
+                page.wait_for_timeout(800)
+                fit = page.evaluate("""(()=>{const h=document.querySelector('.top').getBoundingClientRect();
+                  return [...document.querySelectorAll('.top .wrap > *, .top nav > *')].every(e=>{const r=e.getBoundingClientRect();
+                  return r.bottom<=h.bottom+0.5&&r.right<=innerWidth+0.5}) && document.documentElement.scrollWidth<=innerWidth})()""")
+                assert fit, (width, path)
+                assert sum(page.evaluate('window.__cls')) == 0, (width, path)
+            context.close()
+        browser.close()
