@@ -230,7 +230,7 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
     let mut member_roots = [root.0.join("member0"), root.0.join("member1")];
     // Physical two-Mac run: member 1 was started by an operator on the other Mac.
     let second = match std::env::var("B8_REMOTE_MEMBER") {
-        Ok(remote) => Node::attach(super::member_remote::parse_remote(&remote), 0),
+        Ok(remote) => Node::attach(super::member_remote::parse_remote(&remote)),
         Err(_) => Node::start(&member_roots[1]),
     };
     let mut nodes = [Node::start(&member_roots[0]), second];

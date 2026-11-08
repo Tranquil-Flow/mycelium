@@ -96,8 +96,18 @@ impl Node {
             last_op: 0,
         }
     }
-    /// A member started by an operator elsewhere (`B8_REMOTE_MEMBER`).
-    pub(super) fn attach(addr: iroh::EndpointAddr, pid: u32) -> Self {
+    /// A member started by an operator on another Mac (`B8_REMOTE_MEMBER`):
+    /// its pid comes from its own signed status over the pinned channel.
+    pub(super) fn attach(addr: iroh::EndpointAddr) -> Self {
+        let status = super::member_remote::status(&addr, None)
+            .unwrap_or_else(|code| panic!("remote member unreachable: {code}"));
+        assert_eq!(status["ok"], true, "{status}");
+        assert_eq!(
+            status["result"]["joined"], false,
+            "attach a fresh member root"
+        );
+        let pid = status["result"]["pid"].as_u64().unwrap() as u32;
+        eprintln!("B8 attached remote member pid {pid} at {addr:?}");
         Self::remote(None, pid, addr)
     }
     fn remote(child: Option<Child>, pid: u32, addr: iroh::EndpointAddr) -> Self {
@@ -206,6 +216,17 @@ impl Drop for Node {
             r.join().unwrap();
         }
     }
+}
+/// Two-Mac runbook helper: prints the PUBLIC owner control pin for the
+/// `B8_OWNER_CONTROL_KEY` file (the secret never leaves the owner Mac).
+#[test]
+#[ignore = "runbook helper: needs B8_OWNER_CONTROL_KEY"]
+fn print_owner_control_pin() {
+    assert!(std::env::var_os("B8_OWNER_CONTROL_KEY").is_some());
+    println!(
+        "B8_OWNER_CONTROL_PIN={}",
+        super::member_remote::owner_secret().public()
+    );
 }
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
