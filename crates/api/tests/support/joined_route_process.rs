@@ -155,43 +155,51 @@ fn signal(sig: &str, pid: u32) {
             .success()
     );
 }
-fn prepare(fx: &mut Fixture, which: &[usize], nonce: &str, tokens: usize) -> Vec<Value> {
+fn assigned(fx: &Fixture, i: usize) -> [u64; 2] {
+    [fx.ranges[i][0] as u64, fx.ranges[i][1] as u64]
+}
+/// Owner-issued single-use challenge per member; the verified proof consumes it.
+fn prepare(
+    fx: &mut Fixture,
+    challenges: &native::Challenges,
+    which: &[usize],
+    tokens: usize,
+) -> Vec<native::Admitted> {
     for &i in which {
         admit_native_load(&fx.resource_gate, &format!("node={i}"));
     }
     let began = Instant::now();
     for &i in which {
+        let nonce = challenges.issue(&fx.ids[i], assigned(fx, i)).unwrap();
         fx.nodes[i].send(
             json!({"command":"prepare_native","range":fx.ranges[i],"tokens":tokens,
             "nonce":nonce,"forbidden_source":fx.source}),
         );
     }
-    let proofs = which
+    let admitted = which
         .iter()
         .map(|&i| {
             let signed = fx.nodes[i].result_with(allowance());
-            native::verify_resident(&fx.seed.coordinator, &fx.offers[i], nonce, &signed).unwrap();
-            signed
+            challenges
+                .admit(&fx.seed.coordinator, &fx.offers[i], &signed)
+                .unwrap()
         })
         .collect();
     eprintln!("B7e prepared {which:?} in {:.1} ms", ms(began));
-    proofs
+    admitted
 }
 #[allow(clippy::too_many_arguments)]
 fn open_epoch(
     fx: &mut Fixture,
     epoch: u64,
-    proofs: &[Value],
-    nonce: &str,
+    proofs: &[native::Admitted],
     secret: &iroh::SecretKey,
     codec: &Arc<HelperCodec>,
     addrs: &[Value],
 ) -> Epoch {
     let model = json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
         "manifest_digest":fx.manifest_digest});
-    let stages: Vec<_> = (0..2)
-        .map(|i| (fx.offers[i].clone(), proofs[i].clone(), nonce.to_owned()))
-        .collect();
+    let stages = proofs.to_vec();
     let envelope = route::issue(
         &fx.seed.coordinator,
         &model,
@@ -249,6 +257,7 @@ fn open_epoch(
         codec_dyn,
     )
     .unwrap();
+    host.attach(handle.clone()).unwrap();
     let runtime = m16_route::runtime(
         &message,
         Arc::new(Wall),
@@ -321,7 +330,11 @@ fn open_epoch(
     }
     let worker_pids = proofs
         .iter()
-        .map(|p| p["message"]["proof"]["worker_pid"].as_i64().unwrap() as i32)
+        .map(|p| {
+            p.proof()["message"]["proof"]["worker_pid"]
+                .as_i64()
+                .unwrap() as i32
+        })
         .collect();
     Epoch {
         service,
@@ -362,6 +375,20 @@ fn submit(e: &Epoch) -> Running {
         events,
         reader,
     }
+}
+/// N3: a spent or retired single-use epoch admits no further request.
+fn assert_epoch_retired(e: &Epoch, phase: &str) {
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":1,
+        "workload_profile_id":"interactive","qos_class":"interactive",
+        "qualification":route::qualification(e.host.message()).unwrap()});
+    let auth = format!("Authorization: Bearer {}\r\n", e.bearer);
+    let (status, refused) = http(e.addr, "POST", "/v1/inference", &auth, &doc.to_string());
+    assert_eq!(
+        (status, refused["error"].as_str()),
+        (409, Some("route_dropped")),
+        "{phase}: {refused}"
+    );
+    eprintln!("B8 {phase}: epoch retired, resubmit -> 409 route_dropped");
 }
 /// Collect events until `tokens` token events or a terminal; returns all so far.
 fn collect(e: &Epoch, r: &Running, tokens: usize, all: &mut Vec<(Value, Instant)>) {
@@ -457,9 +484,9 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let secret = iroh::SecretKey::generate();
 
     // (e) Reference chat through POST -> M16 -> carrier -> SSE.
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
-    let proofs = prepare(&mut fx, &[0, 1], &nonce, capacity);
-    let e = open_epoch(&mut fx, 1, &proofs, &nonce, &secret, &codec, &addrs);
+    let challenges = native::Challenges::new();
+    let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
+    let e = open_epoch(&mut fx, 1, &proofs, &secret, &codec, &addrs);
     let baseline = e.service.placement_status().unwrap();
     let r = submit(&e);
     let mut all = Vec::new();
@@ -515,12 +542,12 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "carrier_token_ms":o.token_times_ms,"teardown":o.stages.iter().map(|s| json!({"ack_ms":s.acknowledged_ms,"failure":s.failure})).collect::<Vec<_>>(),
         "member_reports":reports,"workers_gone_ms":gone,"events":all.iter().map(|(e,_)|e["type"].clone()).collect::<Vec<_>>()});
     drop(o);
+    assert_epoch_retired(&e, "after completed chat");
     evidence["chat"]["pump_refusals"] = json!(e.close());
 
     // (f) Public Stop mid-stream.
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
-    let proofs = prepare(&mut fx, &[0, 1], &nonce, capacity);
-    let e = open_epoch(&mut fx, 2, &proofs, &nonce, &secret, &codec, &addrs);
+    let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
+    let e = open_epoch(&mut fx, 2, &proofs, &secret, &codec, &addrs);
     let r = submit(&e);
     let mut all = Vec::new();
     collect(&e, &r, 4, &mut all);
@@ -573,12 +600,13 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "both_workers_acknowledged_ms":both_ack_ms,"per_stage_ack_ms_from_teardown":o.stages.iter().map(|s| s.acknowledged_ms).collect::<Vec<_>>(),
         "terminal_after_stop_ms":terminal_ms,"member_reports":reports,"workers_gone_ms":gone});
     drop(o);
+    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
+    assert_epoch_retired(&e, "after stop");
     evidence["stop"]["pump_refusals"] = json!(e.close());
 
     // (f) Carrier stall: freeze the final-stage member process mid-stream.
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
-    let proofs = prepare(&mut fx, &[0, 1], &nonce, capacity);
-    let e = open_epoch(&mut fx, 3, &proofs, &nonce, &secret, &codec, &addrs);
+    let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
+    let e = open_epoch(&mut fx, 3, &proofs, &secret, &codec, &addrs);
     let r = submit(&e);
     let mut all = Vec::new();
     collect(&e, &r, 3, &mut all);
@@ -613,12 +641,13 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "terminal_after_stall_ms":settled_ms,"stages":o.stages.iter().map(|s| json!({"ack_ms":s.acknowledged_ms,"failure":s.failure})).collect::<Vec<_>>(),
         "member_reports":reports,"workers_gone_ms":gone});
     drop(o);
+    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
+    assert_epoch_retired(&e, "after stall");
     evidence["stall"]["pump_refusals"] = json!(e.close());
 
     // (f) Member death mid-stream: SIGKILL the exact final-stage member process.
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
-    let proofs = prepare(&mut fx, &[0, 1], &nonce, capacity);
-    let e = open_epoch(&mut fx, 4, &proofs, &nonce, &secret, &codec, &addrs);
+    let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
+    let e = open_epoch(&mut fx, 4, &proofs, &secret, &codec, &addrs);
     let baseline = e.service.placement_status().unwrap();
     let r = submit(&e);
     let mut all = Vec::new();
@@ -656,12 +685,12 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     drop(o);
 
     // (f) Member leave through the product leave state machine, with a live worker.
-    let nonce2 = app_host::hex(&app_host::random(16).unwrap());
-    let proofs = prepare(&mut fx, &[0], &nonce2, capacity);
-    let leave_pid = proofs[0]["message"]["proof"]["worker_pid"]
+    let proofs = prepare(&mut fx, &challenges, &[0], capacity);
+    let leave_pid = proofs[0].proof()["message"]["proof"]["worker_pid"]
         .as_i64()
         .unwrap() as i32;
-    assert!(e.host.qualification().is_ok());
+    // N3: the death already retired this epoch; the withdrawal then revokes it.
+    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
     let began = Instant::now();
     let left = fx.nodes[0].call(json!({"command":"leave","mode":"smooth"}));
     let leave_ms = ms(began);
@@ -698,6 +727,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         left["record"]["compute_cleanup"],
         json!({"state":"proven","code":null})
     );
+    let nonce2 = challenges.issue(&fx.ids[0], assigned(&fx, 0)).unwrap();
     fx.nodes[0].send(json!({"command":"prepare_native","range":[0,14],"tokens":1,"nonce":nonce2,"forbidden_source":fx.source}));
     assert_eq!(fx.nodes[0].refusal(), "member_left");
     fx.nodes[0].close();

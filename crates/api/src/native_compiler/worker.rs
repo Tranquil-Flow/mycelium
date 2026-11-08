@@ -74,12 +74,74 @@ impl Worker {
             .stdout(Stdio::from(OwnedFd::from(server)))
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
+        // Release the parent's copy of the child's socket end now: a child that
+        // dies during prepare must surface as EOF, not wait out the deadline.
+        drop(command);
         let mut worker = Self::from_child(child, client, cancel)?;
         let (reply, body) = worker.request_until(prepare, &[], deadline)?;
         if reply != json!({"ok":true}) || !body.is_empty() {
             return Err(Error("native_prepare_reply_invalid"));
         }
         Ok(worker)
+    }
+    /// Serving-worker start: the operation's flag governs ONLY the prepare
+    /// exchange (the worker keeps its own flag for later close-class commands),
+    /// and a failed start kills and reaps the exact child before returning. A
+    /// returned error therefore proves no child remains, unless the code is
+    /// `native_cleanup_unproven` (kill/reap itself failed).
+    pub(crate) fn start_scoped_until(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+        deadline: Instant,
+    ) -> Result<Self> {
+        config.verify()?;
+        if Instant::now() >= deadline {
+            return Err(Error("native_worker_deadline"));
+        }
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Error("compiler_stopped"));
+        }
+        let (client, server) = UnixStream::pair().map_err(|_| Error("native_socket_failed"))?;
+        let home = std::env::var_os("HOME").ok_or(Error("native_shard_path_invalid"))?;
+        let profile = super::shard_sandbox::profile(
+            Path::new(text(prepare, "checkpoint")?),
+            source,
+            &PathBuf::from(home).join(".cache/huggingface"),
+        )
+        .map_err(Error)?;
+        let child = Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile])
+            .arg(&config.binary)
+            .arg("native-worker")
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(OwnedFd::from(server)))
+            .spawn()
+            .map_err(|_| Error("native_worker_start_failed"))?;
+        let mut worker = Self::from_child(child, client, Arc::new(AtomicBool::new(false)))
+            .map_err(|e| match e.0 {
+                "native_worker_kill_failed" | "native_worker_reap_failed" => {
+                    Error("native_cleanup_unproven")
+                }
+                _ => e,
+            })?;
+        let started = worker
+            .request_controlled(prepare, &[], deadline, cancel)
+            .and_then(|(reply, body)| {
+                if reply != json!({"ok":true}) || !body.is_empty() {
+                    Err(Error("native_prepare_reply_invalid"))
+                } else {
+                    Ok(())
+                }
+            });
+        match started {
+            Ok(()) => Ok(worker),
+            Err(error) => match worker.kill_and_reap() {
+                Ok(_) => Err(error),
+                Err(_) => Err(Error("native_cleanup_unproven")),
+            },
+        }
     }
     fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {
         let link = match Link::new(client, duration(BudgetId::MemberChosenWall)?) {

@@ -410,7 +410,19 @@ fn qualify_received(
     resource_gate: std::ffi::OsString,
     began: Instant,
 ) {
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
+    // Owner-issued, single-use, per-member challenges (never shared by stages).
+    let challenges = native::Challenges::new();
+    let ids: Vec<String> = offers
+        .iter()
+        .map(|o| {
+            o["message"]["member"]["node_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    let assigned = |i: usize| [ranges[i][0] as u64, ranges[i][1] as u64];
+    let mut nonces = Vec::new();
     let reference: Value =
         serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
     let prompt: Vec<u32> =
@@ -420,10 +432,30 @@ fn qualify_received(
         // Source emission/transport can take minutes; refresh admission here,
         // immediately before EACH native load, not only at harness launch.
         admit_native_load(&resource_gate, &format!("node={i}"));
+        let nonce = challenges.issue(&ids[i], assigned(i)).unwrap();
+        nonces.push(nonce.clone());
         node.send(json!({"command":"prepare_native","range":ranges[i],"tokens":prompt.len()+64,"nonce":nonce,"forbidden_source":source}));
         let signed = node.result_with(allowance());
-        let proof =
-            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &signed).unwrap();
+        // Wrong assigned range is refused before the nonce is consumed.
+        assert_eq!(
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, [0, 28], &signed)
+                .unwrap_err()
+                .0,
+            "joined_native_range_unassigned"
+        );
+        let proof = challenges
+            .admit(&seed.coordinator, &offers[i], &signed)
+            .unwrap()
+            .proof()["message"]["proof"]
+            .clone();
+        assert_eq!(
+            challenges
+                .admit(&seed.coordinator, &offers[i], &signed)
+                .unwrap_err()
+                .0,
+            "joined_native_nonce_unknown",
+            "a consumed nonce is single-use"
+        );
         assert_ne!(proof["worker_pid"], node.child.id());
         assert_eq!(signed["message"]["member_pid"], node.child.id());
         eprintln!(
@@ -441,15 +473,22 @@ fn qualify_received(
         wrong["verification_key"] = stranger.public_key_record();
         wrong["signature"] = stranger.sign(&wrong["message"]).unwrap();
         assert!(
-            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &wrong).is_err(),
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, assigned(i), &wrong)
+                .is_err(),
             "wrong identity proof"
         );
         let mut wrong_nonce = nonce.clone();
         wrong_nonce.replace_range(..1, if nonce.starts_with('0') { "1" } else { "0" });
         assert_eq!(
-            native::verify_resident(&seed.coordinator, &offers[i], &wrong_nonce, &signed)
-                .unwrap_err()
-                .0,
+            native::verify_resident(
+                &seed.coordinator,
+                &offers[i],
+                &wrong_nonce,
+                assigned(i),
+                &signed
+            )
+            .unwrap_err()
+            .0,
             "native_proof_binding_mismatch"
         );
         node.send(json!({"command":"discard"}));
@@ -492,9 +531,15 @@ fn qualify_received(
                 .unwrap()
     );
     assert_eq!(
-        native::verify_resident(&seed.coordinator, &offers[0], &nonce, &proofs[0])
-            .unwrap_err()
-            .0,
+        native::verify_resident(
+            &seed.coordinator,
+            &offers[0],
+            &nonces[0],
+            assigned(0),
+            &proofs[0]
+        )
+        .unwrap_err()
+        .0,
         "joined_shard_member_changed"
     );
     nodes[0].send(json!({"command":"native_step","tokens":[1],"payload":""}));

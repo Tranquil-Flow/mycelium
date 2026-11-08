@@ -341,15 +341,20 @@ fn run() -> Result<()> {
                     offset += length;
                 }
                 link.finish();
-                let snapshot = session
-                    .session
-                    .lock()
-                    .map_err(|_| "session_poisoned")?
-                    .as_ref()
-                    .ok_or("not_joined")?
-                    .clone();
+                // Each bounded verification read admits against the CURRENT
+                // renewed session, never a pre-verify snapshot (F5).
+                let live =
+                    || -> std::result::Result<api::member::Session, api::compiler_inputs::Error> {
+                        session
+                            .session
+                            .lock()
+                            .map_err(|_| api::compiler_inputs::Error("session_poisoned"))?
+                            .as_ref()
+                            .ok_or(api::compiler_inputs::Error("not_joined"))
+                            .cloned()
+                    };
                 receive
-                    .verify_checked(&snapshot, &signer, &carrier, &app_host::now, &|| {
+                    .verify_live(&live, &signer, &carrier, &app_host::now, &|| {
                         operation.check().map_err(|_| {
                             api::compiler_inputs::Error("member_operation_interrupted")
                         })?;
@@ -362,10 +367,14 @@ fn run() -> Result<()> {
             }
             "prepare_native" => {
                 if native.is_none() {
-                    native = Some(
-                        NativeShard::new(shard.take().ok_or("shard_required")?)
-                            .map_err(|e| e.0.to_owned())?,
-                    );
+                    // A refused custody hand-over keeps the received shard owned (F4).
+                    match NativeShard::try_new(shard.take().ok_or("shard_required")?) {
+                        Ok(compute) => native = Some(compute),
+                        Err((error, received)) => {
+                            shard = Some(received);
+                            return Err(error.0.to_owned());
+                        }
+                    }
                 }
                 let member = session.as_ref().ok_or("not_joined")?;
                 let range = serde_json::from_value(request["range"].clone())
@@ -423,6 +432,12 @@ fn run() -> Result<()> {
                 .close()
                 .map_err(|e| e.0.to_owned()),
             "discard" => {
+                if native.is_none() && shard.is_none() {
+                    // Nothing owned: never report a discard that did not happen (F4).
+                    return Ok(
+                        json!({"inert_bytes_discarded":false,"nothing_owned":true,"route_ready":false}),
+                    );
+                }
                 if let Some(compute) = native.as_mut() {
                     compute.discard().map_err(|e| e.0.to_owned())?;
                 }

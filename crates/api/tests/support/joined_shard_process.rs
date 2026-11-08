@@ -24,6 +24,7 @@ pub(super) struct Node {
     replies: mpsc::Receiver<Value>,
     reader: Option<std::thread::JoinHandle<()>>,
     done: bool,
+    last_op: u64,
 }
 impl Node {
     pub(super) fn start(root: &std::path::Path) -> Self {
@@ -52,9 +53,23 @@ impl Node {
             replies,
             reader: Some(reader),
             done: false,
+            last_op: 0,
         }
     }
-    pub(super) fn send(&mut self, v: Value) {
+    /// Long operations get the next strictly increasing operation_id unless the
+    /// caller supplied one (the member refuses an id-less long operation).
+    pub(super) fn send(&mut self, mut v: Value) {
+        if let Some(id) = v["operation_id"].as_u64() {
+            self.last_op = self.last_op.max(id);
+        } else if ["receive", "prepare_native", "native_step", "serve"]
+            .contains(&v["command"].as_str().unwrap_or_default())
+        {
+            self.last_op += 1;
+            v["operation_id"] = json!(self.last_op);
+        }
+        self.send_raw(v);
+    }
+    pub(super) fn send_raw(&mut self, v: Value) {
         let input = self.child.stdin.as_mut().unwrap();
         writeln!(input, "{v}").unwrap();
         input.flush().unwrap();
@@ -275,6 +290,9 @@ fn process_transfer(stall: bool) {
     )
     .unwrap();
     offer_tx.send(offer.clone()).unwrap();
+    // F6: a long operation without an operation_id cannot be cancelled: refused.
+    node.send_raw(json!({"command":"receive","offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
+    assert_eq!(node.refusal(), "operator_operation_id_required");
     node.send(json!({"command":"receive","operation_id":1,"offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
     if stall {
         stalled_rx.recv_timeout(allowance()).unwrap();
@@ -333,8 +351,18 @@ fn process_transfer(stall: bool) {
     // A received shard must release its transfer connection while the member
     // remains alive, not rely on process exit or the source's idle timeout.
     let released = finished_rx.recv_timeout(allowance());
-    node.call(json!({"command":"discard"}));
+    let discarded = node.call(json!({"command":"discard"}));
+    assert_eq!(discarded["inert_bytes_discarded"], true);
     assert!(!path.exists());
+    // F4: a second discard owns nothing and must say so.
+    let empty = node.call(json!({"command":"discard"}));
+    assert_eq!(
+        (
+            empty["inert_bytes_discarded"].clone(),
+            empty["nothing_owned"].clone()
+        ),
+        (json!(false), json!(true))
+    );
     let ledger: Value = serde_json::from_slice(
         &fs::read(member_root.join("chain-runs/compiler-storage.private.json")).unwrap(),
     )

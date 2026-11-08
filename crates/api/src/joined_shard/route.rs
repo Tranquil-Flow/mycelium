@@ -48,15 +48,16 @@ const TOKENS_MAGIC: &[u8; 5] = b"MYTK\x01";
 fn int(v: &Value) -> Result<u64> {
     v.as_u64().ok_or(fail("joined_route_invalid"))
 }
-/// Issue a route only from offers whose signed proofs verify NOW against the
-/// current seed rows and the owner's own nonces. `stages` = (offer, proof, nonce).
+/// Issue a route only from stages admitted through the owner's single-use
+/// challenges, whose signed proofs still verify NOW against the current seed
+/// rows, the consumed nonce and the owner-assigned range.
 pub fn issue(
     coordinator: &seed::Coordinator,
     model: &Value,
     deployment_id: &str,
     epoch: u64,
     owner_endpoint_id: &str,
-    stages: &[(Value, Value, String)],
+    stages: &[native::Admitted],
     now: f64,
 ) -> Result<Value> {
     if stages.len() < 2 || owner_endpoint_id.parse::<iroh::EndpointId>().is_err() || epoch == 0 {
@@ -67,8 +68,20 @@ pub fn issue(
         .map_err(|_| fail("budget_unavailable"))?;
     let mut rows = Vec::new();
     let mut next = 0;
-    for (i, (offer, proof, nonce)) in stages.iter().enumerate() {
-        let resident = native::verify_resident(coordinator, offer, nonce, proof)?;
+    let mut nodes = std::collections::BTreeSet::new();
+    for (i, admitted) in stages.iter().enumerate() {
+        let (offer, proof) = (admitted.offer(), admitted.proof());
+        let resident = native::verify_resident(
+            coordinator,
+            offer,
+            admitted.nonce(),
+            admitted.range(),
+            proof,
+        )?;
+        // Distinct members per stage: one member cannot serve two placements.
+        if !nodes.insert(text(&offer["message"]["member"], "node_id")?.to_owned()) {
+            return Err(fail("joined_route_member_repeated"));
+        }
         let prepare = &proof["message"]["prepare"];
         let (start, end) = (int(&prepare["start"])?, int(&prepare["end"])?);
         if start != next || end <= start {

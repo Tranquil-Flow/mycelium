@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, String>;
+/// Operations that block the member for long: each needs its own operation_id.
+pub const LONG: &[&str] = &["receive", "prepare_native", "native_step", "serve"];
 type Active = Arc<Mutex<Option<(Option<u64>, Arc<AtomicBool>)>>>;
 struct CancelOnExit(Active);
 impl Drop for CancelOnExit {
@@ -105,6 +107,11 @@ impl Input {
                     continue;
                 }
                 let id = request.get("operation_id").map(|v| v.as_u64());
+                // Long operations must be individually cancellable (F6).
+                if id.is_none() && LONG.contains(&command) {
+                    reply(&json!({"ok":false,"code":"operator_operation_id_required"}))?;
+                    continue;
+                }
                 if id.is_some_and(|id| id.is_none_or(|id| id <= last_id)) {
                     reply(&json!({"ok":false,"code":"operator_operation_id_invalid"}))?;
                     continue;

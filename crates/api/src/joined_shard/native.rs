@@ -43,12 +43,14 @@ pub fn validate_prepare(offer: &Value, prepare: &Value, reference: &Value) -> Re
 fn stage(prepare: &Value) -> Value {
     json!({"range":[prepare["start"],prepare["end"]],"request_id":prepare["id"],"member_generation":prepare["generation"]})
 }
-/// Verify against the independently held offer/nonce AND the current seed row.
-/// The signed document's claimed key is never the authority for its own identity.
+/// Verify against the independently held offer, the owner's nonce and the
+/// owner-ASSIGNED layer range, AND the current seed row. The signed document's
+/// claimed key and range are never the authority for themselves.
 pub fn verify_resident(
     coordinator: &seed::Coordinator,
     offer: &Value,
     nonce: &str,
+    assigned: [u64; 2],
     envelope: &Value,
 ) -> Result<Value> {
     check_owner(coordinator, offer)?;
@@ -64,6 +66,9 @@ pub fn verify_resident(
     {
         return Err(fail("joined_native_identity_mismatch"));
     }
+    if message["prepare"]["start"] != assigned[0] || message["prepare"]["end"] != assigned[1] {
+        return Err(fail("joined_native_range_unassigned"));
+    }
     let reference = native_compiler::reference().map_err(native)?;
     validate_prepare(offer, &message["prepare"], &reference)?;
     native_compiler::validate_proof(
@@ -74,6 +79,87 @@ pub fn verify_resident(
     )
     .map_err(native)?;
     Ok(message["proof"].clone())
+}
+
+/// Owner-side resident-proof challenges: ONE fresh nonce per member and
+/// assignment, consumed by the first proof that verifies. A replayed, foreign,
+/// or other-member nonce is refused; nonces are never shared between stages.
+#[derive(Default)]
+pub struct Challenges {
+    outstanding: std::sync::Mutex<std::collections::BTreeMap<String, (String, [u64; 2])>>,
+}
+/// A stage admitted from a consumed challenge; only `Challenges::admit` builds it.
+#[derive(Clone, Debug)]
+pub struct Admitted {
+    offer: Value,
+    proof: Value,
+    nonce: String,
+    range: [u64; 2],
+}
+impl Admitted {
+    pub fn offer(&self) -> &Value {
+        &self.offer
+    }
+    pub fn proof(&self) -> &Value {
+        &self.proof
+    }
+    pub fn nonce(&self) -> &str {
+        &self.nonce
+    }
+    pub fn range(&self) -> [u64; 2] {
+        self.range
+    }
+}
+impl Challenges {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Issue a fresh nonce for this member's assigned range; it replaces any
+    /// earlier unconsumed nonce for the same member.
+    pub fn issue(&self, node_id: &str, range: [u64; 2]) -> Result<String> {
+        if node_id.is_empty() || range[0] >= range[1] || range[1] > 28 {
+            return Err(fail("joined_native_challenge_invalid"));
+        }
+        let nonce = crate::app_host::hex(
+            &crate::app_host::random(16).map_err(|_| fail("joined_native_challenge_invalid"))?,
+        );
+        let mut held = self
+            .outstanding
+            .lock()
+            .map_err(|_| fail("joined_native_challenge_poisoned"))?;
+        held.retain(|_, (node, _)| node != node_id);
+        held.insert(nonce.clone(), (node_id.to_owned(), range));
+        Ok(nonce)
+    }
+    /// Verify the proof against its member's outstanding challenge, then consume it.
+    pub fn admit(
+        &self,
+        coordinator: &seed::Coordinator,
+        offer: &Value,
+        envelope: &Value,
+    ) -> Result<Admitted> {
+        let nonce = envelope["message"]["proof"]["nonce"]
+            .as_str()
+            .ok_or(fail("joined_native_nonce_unknown"))?
+            .to_owned();
+        let node = text(&offer["message"]["member"], "node_id")?;
+        let mut held = self
+            .outstanding
+            .lock()
+            .map_err(|_| fail("joined_native_challenge_poisoned"))?;
+        let range = match held.get(&nonce) {
+            Some((owner, range)) if owner == node => *range,
+            _ => return Err(fail("joined_native_nonce_unknown")),
+        };
+        verify_resident(coordinator, offer, &nonce, range, envelope)?;
+        held.remove(&nonce);
+        Ok(Admitted {
+            offer: offer.clone(),
+            proof: envelope.clone(),
+            nonce,
+            range,
+        })
+    }
 }
 
 /// Sole owner of both inert custody and the child. No shard disposal is exposed
@@ -89,17 +175,29 @@ pub struct NativeShard {
 }
 impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
-        let consent = standing_consent::load(&received.root)
-            .map_err(|_| fail("joined_shard_consent_required"))?
-            .ok_or(fail("joined_shard_consent_required"))?;
-        let seconds = consent["caps"]["max_wall_seconds"]
-            .as_u64()
-            .filter(|n| *n > 0)
-            .ok_or(fail("joined_native_consent_invalid"))?;
-        let remaining = consent["caps"]["max_commands"]
-            .as_u64()
-            .filter(|n| *n > 0)
-            .ok_or(fail("joined_native_consent_invalid"))?;
+        Self::try_new(received).map_err(|(error, _)| error)
+    }
+    /// As `new`, but a refusal hands the received custody back to the caller,
+    /// so its byte debt stays owned and can still be retired.
+    pub fn try_new(received: JoinedShard) -> std::result::Result<Self, (Error, JoinedShard)> {
+        let caps = (|| {
+            let consent = standing_consent::load(&received.root)
+                .map_err(|_| fail("joined_shard_consent_required"))?
+                .ok_or(fail("joined_shard_consent_required"))?;
+            let seconds = consent["caps"]["max_wall_seconds"]
+                .as_u64()
+                .filter(|n| *n > 0)
+                .ok_or(fail("joined_native_consent_invalid"))?;
+            let remaining = consent["caps"]["max_commands"]
+                .as_u64()
+                .filter(|n| *n > 0)
+                .ok_or(fail("joined_native_consent_invalid"))?;
+            Ok((consent, seconds, remaining))
+        })();
+        let (consent, seconds, remaining) = match caps {
+            Ok(caps) => caps,
+            Err(error) => return Err((error, received)),
+        };
         Ok(Self {
             received,
             worker: None,
@@ -245,26 +343,33 @@ impl NativeShard {
         self.check(current)?;
         checkpoint()?;
         self.cleanup_proven = false;
-        self.worker = Some(
-            Worker::start_until(
-                &config,
-                &prepare,
-                cancel.clone(),
-                forbidden_source,
-                deadline,
-            )
-            .map_err(native)?,
-        );
+        match Worker::start_scoped_until(
+            &config,
+            &prepare,
+            cancel.clone(),
+            forbidden_source,
+            deadline,
+        ) {
+            Ok(worker) => self.worker = Some(worker),
+            Err(e) => {
+                // A failed start already killed and reaped its exact child; only
+                // a failed kill/reap leaves the release unproven (debt retained).
+                self.cleanup_proven = e.0 != "native_cleanup_unproven";
+                return Err(native(e));
+            }
+        }
         self.check(current)?;
         let worker = self
             .worker
             .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?;
+        // The prepare operation's flag governs this exchange only.
         let (reply, body) = worker
-            .request_until(
+            .request_controlled(
                 &json!({"command":proof::COMMAND,"protocol":proof::REQUEST_PROTOCOL,"nonce":nonce}),
                 &[],
                 deadline,
+                cancel.clone(),
             )
             .map_err(native)?;
         if reply["ok"] != true

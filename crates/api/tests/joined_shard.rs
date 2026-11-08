@@ -367,3 +367,79 @@ fn wrong_signer_endpoint_recipe_and_withdrawn_consent_refuse() {
     );
     assert!(!p.member_root.join("chain-runs/b7b-transfer").exists());
 }
+
+/// F3: a native worker that dies during prepare is reaped by the start itself,
+/// so cleanup is proven and the custody can be retired without a restart. The
+/// pinned "native binary" is the system `false` executable (a real child that
+/// exits at once); no proof or model output is involved.
+#[test]
+fn failed_native_launch_proves_release_and_allows_discard() {
+    let binary = PathBuf::from("/usr/bin/false");
+    let sha = protocol::canonical::sha256_prefixed(&fs::read(&binary).unwrap())[7..].to_owned();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "failed_native_launch_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("MYCELIUM_COMPILER_NATIVE_BINARY", &binary)
+        .env("MYCELIUM_COMPILER_NATIVE_SHA256", sha)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).into_owned()
+        + &String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "{text}");
+}
+#[test]
+#[ignore = "child of failed_native_launch_proves_release_and_allows_discard (pinned env)"]
+fn failed_native_launch_child() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let mut shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let (_, _, bytes) = p.material();
+    shard
+        .write_chunk(
+            0,
+            &bytes,
+            &p.session,
+            &p.signer,
+            &p.carrier,
+            app_host::now(),
+        )
+        .unwrap();
+    shard
+        .verify(&p.session, &p.signer, &p.carrier, &app_host::now)
+        .unwrap();
+    let path = shard.path();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    let error = native
+        .prepare(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            &p.root,
+        )
+        .unwrap_err();
+    eprintln!("failed launch refused: {}", error.0);
+    assert_ne!(error.0, "native_cleanup_unproven");
+    assert_eq!(native.worker_pid(), None, "no live worker remains");
+    native.discard().unwrap();
+    assert!(!path.exists(), "custody retired after proven release");
+}

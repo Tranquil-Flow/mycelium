@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 pub mod native;
 pub mod route;
+pub mod serve;
 mod source;
 pub use source::JoinedSource;
 type Result<T> = std::result::Result<T, Error>;
@@ -350,6 +351,21 @@ impl JoinedShard {
         self.shard.verify(&|| {
             checkpoint()?;
             admit(&self.root, session, signer, carrier, &self.offer, now()).map(drop)
+        })
+    }
+    /// As `verify_checked`, but every bounded read admits against the session
+    /// `session()` returns NOW, so a renewal during a long verify is honoured.
+    pub fn verify_live(
+        &mut self,
+        session: &dyn Fn() -> Result<Session>,
+        signer: &Identity,
+        carrier: &Identity,
+        now: &dyn Fn() -> f64,
+        checkpoint: &dyn Fn() -> Result<()>,
+    ) -> Result<()> {
+        self.shard.verify(&|| {
+            checkpoint()?;
+            admit(&self.root, &session()?, signer, carrier, &self.offer, now()).map(drop)
         })
     }
     /// Signed carrier fetch with live pairing/consent checks on both sides of I/O.
