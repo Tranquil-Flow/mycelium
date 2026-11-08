@@ -88,6 +88,7 @@ pub struct Session {
     swarm_id: String,
     seed_node_id: String,
     endpoint_id: String,
+    signer_key_digest: String,
     incarnation: String,
     pending_join_message_id: Option<String>,
     emitted: Vec<String>,
@@ -120,6 +121,7 @@ impl Session {
             swarm_id: swarm_id.to_owned(),
             seed_node_id: seed_node_id.to_owned(),
             endpoint_id: signer.endpoint_id().to_owned(),
+            signer_key_digest: signer.verification_key_digest(),
             incarnation: incarnation.to_owned(),
             pending_join_message_id: None,
             emitted: Vec::new(),
@@ -160,6 +162,26 @@ impl Session {
             node_id: self.node_id.clone(),
             seed_key_digest: self.seed_key_digest.clone()?,
         })
+    }
+
+    /// Additive transfer identity, derived only from an accepted live session.
+    /// This is not a serving grant or a resource/consent admission.
+    pub fn shard_identity(&self, signer: &Identity, now: f64) -> Result<Value, MemberError> {
+        if signer.endpoint_id() != self.endpoint_id
+            || signer.verification_key_digest() != self.signer_key_digest
+        {
+            return Err(MemberError::membership("joined_shard_identity_mismatch"));
+        }
+        if !now.is_finite() || self.lease_expires_at.is_none_or(|lease| lease <= now) {
+            return Err(MemberError::membership("joined_shard_lease_expired"));
+        }
+        let generation = self
+            .generation
+            .ok_or_else(|| MemberError::membership("joined_shard_not_joined"))?;
+        Ok(json!({"swarm_id":self.swarm_id,"node_id":self.node_id,
+            "endpoint_id":self.endpoint_id,"verification_key_digest":self.signer_key_digest,
+            "incarnation":self.incarnation,"generation":generation,
+            "seed_key_digest":self.seed_key_digest}))
     }
 
     /// `join_request`: the signed request carrying the invite nonce; `message_id` is the one

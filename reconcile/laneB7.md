@@ -22,6 +22,28 @@ Ruling 10: existing rustix dependency enables its fs feature; no new package,
 lockfile change, reserved behavior or artifact-v1 wire change. Private cleanup
 records are explicitly v2. This is inert cleanup, NOT serving-worker leave.
 
+## B7b pairing-bound receiver
+
+`Session::shard_identity` is an additive live-lease/enrolled-key check. New
+`mycelium.joined_shard.{signed,registration,offer}.v1` signed envelopes bind the
+actual accepted node, endpoint, incarnation and generation to its Iroh endpoint,
+compiler recipe and unchanged artifact-v1 grant. The seed checks the current
+member row; `JoinedSource` repeats that check around durable source I/O, while
+`JoinedShard` repeats session/standing-consent checks around receiving/hashing.
+`api --example shard_member --state-root PATH` is a standalone member process:
+private stdin/stdout controls real pairing/accept/renew, consent, LocalOnly QUIC
+receipt, B3 verification/retirement and bounded endpoint close. It does NOT run a
+native worker or provide a serving route. The owner side remains a test driver.
+Real two-process test (explicit B7_MEMBER_BINARY, ignored in routine gates) passed:
+actual join generation, signed transfer, exact corpus bytes, refund, child reap
+and source socket rebind. An actual member resume invalidates the old offer;
+wrong signer, signed-content tamper and withdrawn consent refuse before custody.
+These are corpus byte-custody tests, NOT model/proof/token evidence. Recipe node
+metadata is rebound to the actual joined identity; no native plan is claimed.
+Ruling 10 permits these additive APIs/launcher/versioned envelopes; no reserved
+S1/chat/network-cancellation behavior changed. Full native-serving phases c–f,
+model transport renewal/bounded-source hashing, and physical launch remain TODO.
+
 ## Historical precursor (claims qualified by the repair above)
 
 Base: `1bb931978f08799c97e09bb6da012145e2058a9f`; branch `lane/b7-two-node-serving`.
