@@ -40,7 +40,89 @@ fn clone_file(source: &Path, target: &Path) {
             .success()
     );
 }
-fn pair(node: &mut Node, root: &Path, seed: &app_host::SeedRuntime<app_host::Unmanaged>) -> Value {
+/// LAN rehearsal: a bounded TCP forwarder that exposes the owner's loopback
+/// seed (TLS end to end, installation CA pinned by the member, certificate name
+/// 127.0.0.1) on this host's private LAN interface. Only allow-listed peers.
+pub(super) struct Forwarder {
+    pub(super) address: std::net::SocketAddr,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Forwarder {
+    fn start(
+        interface: std::net::IpAddr,
+        policy: runtime::iroh_host::LanPolicy,
+        target: std::net::SocketAddr,
+    ) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = std::net::TcpListener::bind((interface, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::spawn(move || {
+            // Every pipe is owned: on stop both sockets are shut down, which ends
+            // the copies, and each copy thread is joined.
+            let mut pipes: Vec<(std::net::TcpStream, std::thread::JoinHandle<()>)> = Vec::new();
+            for incoming in listener.incoming() {
+                if flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                let Ok(client) = incoming else { continue };
+                if !client.peer_addr().is_ok_and(|p| policy.allows(p.ip())) {
+                    continue;
+                }
+                let Ok(server) = std::net::TcpStream::connect(target) else {
+                    continue;
+                };
+                for (mut from, mut to) in [
+                    (client.try_clone().unwrap(), server.try_clone().unwrap()),
+                    (server, client),
+                ] {
+                    let held = from.try_clone().unwrap();
+                    let copy = std::thread::spawn(move || {
+                        if let Err(e) = std::io::copy(&mut from, &mut to) {
+                            eprintln!("seed forwarder copy ended: {e}");
+                        }
+                        if let Err(e) = to.shutdown(std::net::Shutdown::Write) {
+                            eprintln!("seed forwarder shutdown: {e}");
+                        }
+                    });
+                    pipes.push((held, copy));
+                }
+            }
+            for (stream, copy) in pipes {
+                // NotConnected means the copy already finished both directions.
+                if let Err(e) = stream.shutdown(std::net::Shutdown::Both) {
+                    eprintln!("seed forwarder close: {e}");
+                }
+                copy.join().unwrap();
+            }
+        });
+        Self {
+            address,
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+impl Drop for Forwarder {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Wake the blocking accept; a refused connect means it already ended.
+        if let Err(e) = std::net::TcpStream::connect(self.address) {
+            eprintln!("seed forwarder wake: {e}");
+        }
+        if let Some(t) = self.thread.take() {
+            t.join().unwrap();
+        }
+    }
+}
+fn pair(
+    node: &mut Node,
+    root: &Path,
+    seed: &app_host::SeedRuntime<app_host::Unmanaged>,
+    seed_address: std::net::SocketAddr,
+) -> Value {
     let request = node.call(json!({"command":"pair_request"}));
     let (signer, _, _) = app_host::identity_in(root, app_host::SEED_IDENTITY_FILE).unwrap();
     let issuer = handoff::Coordinator {
@@ -54,7 +136,7 @@ fn pair(node: &mut Node, root: &Path, seed: &app_host::SeedRuntime<app_host::Unm
         .millis()
         / 1000;
     let handoff=handoff::approve_pairing(root,true,Some(&issuer),&request,&json!(ttl),&json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),app_host::now(),&handoff::Entropy::os).unwrap();
-    let registration=node.call(json!({"command":"accept","handoff":handoff.to_value(),"ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed.address}));
+    let registration=node.call(json!({"command":"accept","handoff":handoff.to_value(),"ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed_address}));
     node.call(json!({"command":"consent","device_memory_bytes":16_000_000_000u64,
         "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
         "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}));
@@ -84,6 +166,8 @@ pub(super) struct Fixture {
     pub(super) manifest_digest: String,
     pub(super) resource_gate: std::ffi::OsString,
     pub(super) began: Instant,
+    /// LAN rehearsal/physical: the seed forwarder (dropped with the fixture).
+    pub(super) forwarder: Option<Forwarder>,
     // Last: removed after every owned process above was reaped.
     pub(super) root: Root,
 }
@@ -122,6 +206,7 @@ fn qualify(prepare_only: bool) {
         manifest_digest: _,
         resource_gate,
         began,
+        forwarder: _forwarder,
     } = fx;
     qualify_received(
         prepare_only,
@@ -149,9 +234,22 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
     let owner = root.0.join("owner");
     fs::create_dir(&owner).unwrap();
     let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b7c-model", None).unwrap();
+    let lan = super::member_remote::lan();
+    let forwarder = lan
+        .clone()
+        .map(|(ip, policy)| Forwarder::start(ip, policy, seed.address));
+    let seed_address = forwarder.as_ref().map_or(seed.address, |f| f.address);
     let mut member_roots = [root.0.join("member0"), root.0.join("member1")];
-    let mut nodes = [Node::start(&member_roots[0]), Node::start(&member_roots[1])];
-    let mut registrations: Vec<_> = nodes.iter_mut().map(|n| pair(n, &owner, &seed)).collect();
+    // Physical two-Mac run: member 1 was started by an operator on the other Mac.
+    let second = match std::env::var("B8_REMOTE_MEMBER") {
+        Ok(remote) => Node::attach(super::member_remote::parse_remote(&remote)),
+        Err(_) => Node::start(&member_roots[1]),
+    };
+    let mut nodes = [Node::start(&member_roots[0]), second];
+    let mut registrations: Vec<_> = nodes
+        .iter_mut()
+        .map(|n| pair(n, &owner, &seed, seed_address))
+        .collect();
     if registrations[0]["message"]["member"]["node_id"]
         .as_str()
         .unwrap()
@@ -169,8 +267,8 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
         .collect();
     eprintln!(
         "B7c paired {} {} elapsed={:?}",
-        nodes[0].child.id(),
-        nodes[1].child.id(),
+        nodes[0].pid(),
+        nodes[1].pid(),
         began.elapsed()
     );
     let cache = PathBuf::from(
@@ -220,7 +318,7 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
         .collect();
     let mut artifact=compiler_inputs::emit_loopback_qualification(&owner,"b7c-source",&build.deployment_id,0,&build,&prepared,
         &json!({"protocol":"mycelium.qwen_live_topology.v1","nodes":ids.iter().map(|id|json!({"node_id":id,"staging_root":owner,"runtime_backend":"mlx"})).collect::<Vec<_>>()}),
-        &json!({"run_id":"b7c-source","deployment_id":build.deployment_id,"scope":"loopback_process_qualification","route_ready":false,"observations":ids.iter().zip(&nodes).map(|(id,node)|json!({"node_id":id,"process_id":node.child.id()})).collect::<Vec<_>>()}),
+        &json!({"run_id":"b7c-source","deployment_id":build.deployment_id,"scope":"loopback_process_qualification","route_ready":false,"observations":ids.iter().zip(&nodes).map(|(id,node)|json!({"node_id":id,"process_id":node.pid()})).collect::<Vec<_>>()}),
         &json!({}), &members.values().cloned().collect::<Vec<_>>()).unwrap();
     artifact
         .produce_stage_shards(&members, app_host::now())
@@ -275,6 +373,7 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
     let (received_tx, received_rx) = mpsc::channel();
     let authority = seed.coordinator.clone();
     let source_root = owner.clone();
+    let source_lan = lan.clone();
     let source_thread = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -287,13 +386,24 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
                 .checked_add(B::MemberChosenWall.span(Entries::ZERO).unwrap())
                 .unwrap()
         };
-        let mut host = LoopbackHost::bind_protocols(
-            &rt,
-            &clock,
-            deadline(),
-            iroh::SecretKey::generate(),
-            &[Channel::ArtifactChunk],
-        )
+        let mut host = match source_lan {
+            Some((ip, policy)) => LoopbackHost::bind_lan(
+                &rt,
+                &clock,
+                deadline(),
+                iroh::SecretKey::generate(),
+                &[Channel::ArtifactChunk],
+                ip,
+                policy,
+            ),
+            None => LoopbackHost::bind_protocols(
+                &rt,
+                &clock,
+                deadline(),
+                iroh::SecretKey::generate(),
+                &[Channel::ArtifactChunk],
+            ),
+        }
         .unwrap();
         let addr = host.address().unwrap();
         let socket = *addr.ip_addrs().next().unwrap();
@@ -356,7 +466,14 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
         // Establish durable journal genesis and verify bytes BEFORE issuing the
         // grant. Issuing first correctly trips the source ledger-reset fence.
         accepting_rx.recv_timeout(allowance()).unwrap();
-        let offer = joined_shard::issue_with_source(
+        // The seed signs the source's dial addresses into the grant (LAN members
+        // dial only those); loopback keeps the unsigned-hint grant shape.
+        let signed_addrs: Vec<std::net::SocketAddr> = if lan.is_some() {
+            addr.ip_addrs().copied().collect()
+        } else {
+            Vec::new()
+        };
+        let offer = joined_shard::issue_with_source_addrs(
             &seed.coordinator,
             &registrations[i],
             &format!("b7c-transfer-{i}"),
@@ -364,6 +481,7 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
             &document["node_slice_plans"][&ids[i]],
             &addr.id.to_string(),
             &key,
+            &signed_addrs,
         )
         .unwrap();
         offer_tx.send(offer.clone()).unwrap();
@@ -393,6 +511,7 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
         manifest_digest: prepared.manifest_digest.clone(),
         resource_gate,
         began,
+        forwarder,
     }
 }
 #[allow(clippy::too_many_arguments)]
@@ -410,7 +529,19 @@ fn qualify_received(
     resource_gate: std::ffi::OsString,
     began: Instant,
 ) {
-    let nonce = app_host::hex(&app_host::random(16).unwrap());
+    // Owner-issued, single-use, per-member challenges (never shared by stages).
+    let challenges = native::Challenges::new();
+    let ids: Vec<String> = offers
+        .iter()
+        .map(|o| {
+            o["message"]["member"]["node_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    let assigned = |i: usize| [ranges[i][0] as u64, ranges[i][1] as u64];
+    let mut nonces = Vec::new();
     let reference: Value =
         serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
     let prompt: Vec<u32> =
@@ -420,12 +551,32 @@ fn qualify_received(
         // Source emission/transport can take minutes; refresh admission here,
         // immediately before EACH native load, not only at harness launch.
         admit_native_load(&resource_gate, &format!("node={i}"));
+        let nonce = challenges.issue(&ids[i], assigned(i)).unwrap();
+        nonces.push(nonce.clone());
         node.send(json!({"command":"prepare_native","range":ranges[i],"tokens":prompt.len()+64,"nonce":nonce,"forbidden_source":source}));
         let signed = node.result_with(allowance());
-        let proof =
-            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &signed).unwrap();
-        assert_ne!(proof["worker_pid"], node.child.id());
-        assert_eq!(signed["message"]["member_pid"], node.child.id());
+        // Wrong assigned range is refused before the nonce is consumed.
+        assert_eq!(
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, [0, 28], &signed)
+                .unwrap_err()
+                .0,
+            "joined_native_range_unassigned"
+        );
+        let proof = challenges
+            .admit(&seed.coordinator, &offers[i], &signed)
+            .unwrap()
+            .proof()["message"]["proof"]
+            .clone();
+        assert_eq!(
+            challenges
+                .admit(&seed.coordinator, &offers[i], &signed)
+                .unwrap_err()
+                .0,
+            "joined_native_nonce_unknown",
+            "a consumed nonce is single-use"
+        );
+        assert_ne!(proof["worker_pid"], node.pid());
+        assert_eq!(signed["message"]["member_pid"], node.pid());
         eprintln!(
             "B7c native node={i} pid={} rows={} elapsed={:?}",
             proof["worker_pid"],
@@ -441,15 +592,22 @@ fn qualify_received(
         wrong["verification_key"] = stranger.public_key_record();
         wrong["signature"] = stranger.sign(&wrong["message"]).unwrap();
         assert!(
-            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &wrong).is_err(),
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, assigned(i), &wrong)
+                .is_err(),
             "wrong identity proof"
         );
         let mut wrong_nonce = nonce.clone();
         wrong_nonce.replace_range(..1, if nonce.starts_with('0') { "1" } else { "0" });
         assert_eq!(
-            native::verify_resident(&seed.coordinator, &offers[i], &wrong_nonce, &signed)
-                .unwrap_err()
-                .0,
+            native::verify_resident(
+                &seed.coordinator,
+                &offers[i],
+                &wrong_nonce,
+                assigned(i),
+                &signed
+            )
+            .unwrap_err()
+            .0,
             "native_proof_binding_mismatch"
         );
         node.send(json!({"command":"discard"}));
@@ -492,9 +650,15 @@ fn qualify_received(
                 .unwrap()
     );
     assert_eq!(
-        native::verify_resident(&seed.coordinator, &offers[0], &nonce, &proofs[0])
-            .unwrap_err()
-            .0,
+        native::verify_resident(
+            &seed.coordinator,
+            &offers[0],
+            &nonces[0],
+            assigned(0),
+            &proofs[0]
+        )
+        .unwrap_err()
+        .0,
         "joined_shard_member_changed"
     );
     nodes[0].send(json!({"command":"native_step","tokens":[1],"payload":""}));

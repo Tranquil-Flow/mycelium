@@ -21,7 +21,7 @@ use iroh::{EndpointAddr, EndpointId, endpoint::Connection};
 use protocol::router_wire;
 use runtime::{
     iroh::IrohTransport,
-    iroh_host::LoopbackHost,
+    iroh_host::{LanPolicy, LoopbackHost},
     iroh_receive::{DispatchRefusal, RouterReceiver},
     m16_coordinator::{SharedClock, SharedIdSource},
     m16_factory::{DeviceFacts, FactoryInputs, LiveM16Runtime, build_live_m16_runtime},
@@ -30,7 +30,7 @@ use runtime::{
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -73,6 +73,25 @@ pub struct StagePeer {
     pub socket: SocketAddr,
     pub generation: u64,
 }
+/// Carrier network of an executor. Loopback is the default; direct LAN is used
+/// only when a caller explicitly configures it with an interface and allow-list.
+#[derive(Clone, Debug)]
+enum Network {
+    Loopback,
+    Lan {
+        interface: IpAddr,
+        policy: LanPolicy,
+    },
+}
+/// Internal dial target: every address comes from a loopback StagePeer or a
+/// member-signed, owner-verified carrier advertisement.
+#[derive(Clone)]
+struct Peer {
+    node_id: String,
+    endpoint: EndpointId,
+    addrs: Vec<SocketAddr>,
+    generation: u64,
+}
 /// Per-stage observable teardown outcome, for host status and qualification.
 #[derive(Clone, Debug, Default)]
 pub struct StageTeardown {
@@ -94,7 +113,27 @@ pub struct Observed {
     pub teardown_requested_ms: Option<f64>,
     pub stages: Vec<StageTeardown>,
     pub teardown_finished: bool,
+    /// Teardown deliveries attempted (first teardown + bounded re-dials).
+    pub teardown_attempts: u64,
+    /// A teardown or re-dial attempt is in flight on the carrier thread.
+    pub teardown_busy: bool,
     pub carrier_closed: bool,
+}
+impl Observed {
+    /// Every stage acknowledged or was settled by exact host death evidence.
+    pub fn settled(&self) -> bool {
+        self.stages
+            .iter()
+            .all(|s| s.acknowledged_ms.is_some() || s.death_evidence.is_some())
+    }
+    /// The single-use epoch can no longer serve: a carrier failure, a setup
+    /// failure, or a teardown that did not follow a completed request.
+    pub fn retired(&self) -> bool {
+        self.failure.is_some()
+            || self.setup_failure.is_some()
+            || (self.teardown_requested_ms.is_some() && !self.completed)
+            || (self.teardown_finished && !self.completed)
+    }
 }
 /// Observable carrier state plus a change signal for an event-driven host pump.
 #[derive(Default)]
@@ -123,6 +162,28 @@ impl RouteWatch {
         }
     }
 }
+impl RouteWatch {
+    /// Readiness of this single-use epoch as the request host must report it.
+    /// `spent` = a submission was already prepared for this epoch. An in-flight
+    /// failure keeps the carrier's specific code until teardown finishes, so the
+    /// request settles under that code; afterwards (and after Stop, a setup
+    /// failure or a carrier exit) the epoch is `route_dropped`.
+    pub fn refusal(&self, spent: bool) -> Result<(), PublicError> {
+        let o = self
+            .state
+            .lock()
+            .map_err(|_| error("joined_route_poisoned"))?;
+        if let Some(code) = o.failure
+            && !o.teardown_finished
+        {
+            return Err(error(code));
+        }
+        if o.retired() || spent {
+            return Err(error("route_dropped"));
+        }
+        Ok(())
+    }
+}
 pub type RouteHandle = Arc<RouteWatch>;
 enum Command {
     Start {
@@ -131,6 +192,8 @@ enum Command {
         max_new_tokens: u64,
     },
     Teardown(Option<Path>),
+    /// Re-dial each unsettled stage and re-send its PathCancellation.
+    Retry,
 }
 pub struct RouteExecutor {
     message: Value,
@@ -145,11 +208,81 @@ pub struct RouteExecutor {
     cancel: Arc<AtomicBool>,
 }
 impl RouteExecutor {
-    /// Bind the owner carrier with its route-pinned key and dial every stage now.
+    /// Bind the owner carrier with its route-pinned key and dial every stage now
+    /// over LocalOnly loopback (the default carrier).
     pub fn connect(
         message: Value,
         secret: iroh::SecretKey,
         peers: Vec<StagePeer>,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        if peers.iter().any(|p| !p.socket.ip().is_loopback()) {
+            return Err(error("joined_route_peer_mismatch"));
+        }
+        let peers = peers
+            .into_iter()
+            .map(|p| Peer {
+                node_id: p.node_id,
+                endpoint: p.endpoint,
+                addrs: vec![p.socket],
+                generation: p.generation,
+            })
+            .collect();
+        Self::open(
+            message,
+            secret,
+            peers,
+            Network::Loopback,
+            currentness,
+            codec,
+        )
+    }
+    /// Explicit direct-LAN carrier: the owner endpoint binds exactly `interface`
+    /// (no relay, no discovery) and dials each stage ONLY at the addresses of its
+    /// member-signed, owner-verified advertisement, all within `policy`. Iroh
+    /// pins each stage's endpoint key, so a different key at an advertised
+    /// address fails the handshake. Same deadlines, cancellation and backpressure
+    /// as the loopback carrier.
+    pub fn connect_lan(
+        message: Value,
+        secret: iroh::SecretKey,
+        carriers: Vec<crate::joined_shard::carrier::VerifiedCarrier>,
+        interface: IpAddr,
+        policy: LanPolicy,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        if !policy.allows(interface)
+            || carriers
+                .iter()
+                .any(|c| c.addrs().iter().any(|a| !policy.allows(a.ip())))
+        {
+            return Err(error("joined_route_address_refused"));
+        }
+        let peers = carriers
+            .iter()
+            .map(|c| Peer {
+                node_id: c.node_id().to_owned(),
+                endpoint: c.endpoint(),
+                addrs: c.addrs().to_vec(),
+                generation: c.generation(),
+            })
+            .collect();
+        Self::open(
+            message,
+            secret,
+            peers,
+            Network::Lan { interface, policy },
+            currentness,
+            codec,
+        )
+    }
+    fn open(
+        message: Value,
+        secret: iroh::SecretKey,
+        peers: Vec<Peer>,
+        network: Network,
         currentness: Currentness,
         codec: Arc<dyn Codec>,
     ) -> Result<(Self, RouteHandle), PublicError> {
@@ -162,7 +295,7 @@ impl RouteExecutor {
                 s["member"]["node_id"] != p.node_id
                     || s["carrier_endpoint_id"] != p.endpoint.to_string()
                     || s["member"]["generation"] != p.generation
-                    || !p.socket.ip().is_loopback()
+                    || p.addrs.is_empty()
             })
         {
             return Err(error("joined_route_peer_mismatch"));
@@ -189,11 +322,20 @@ impl RouteExecutor {
         let cancel = Arc::new(AtomicBool::new(false));
         let (shared, flag, route) = (observed.clone(), cancel.clone(), message.clone());
         let thread = std::thread::spawn(move || {
-            if let Err(code) = carrier(&route, secret, &peers, &currentness, &rx, &shared, &flag)
-                && let Ok(mut o) = shared.state.lock()
+            if let Err(code) = carrier(
+                &route,
+                secret,
+                &peers,
+                &network,
+                &currentness,
+                &rx,
+                &shared,
+                &flag,
+            ) && let Ok(mut o) = shared.state.lock()
             {
                 o.setup_failure.get_or_insert(code.to_owned());
             }
+            shared.changed.notify_all();
         });
         let ready_by = Instant::now()
             + std::time::Duration::from_millis(
@@ -202,21 +344,29 @@ impl RouteExecutor {
                     .map_err(|_| error("budget_unavailable"))?
                     .millis(),
             );
-        loop {
-            {
-                let o = observed
-                    .state
-                    .lock()
-                    .map_err(|_| error("joined_route_poisoned"))?;
-                if o.ready {
-                    break;
-                }
-                if o.setup_failure.is_some() || Instant::now() >= ready_by {
-                    return Err(error("joined_route_connect_failed"));
-                }
+        let mut o = observed
+            .state
+            .lock()
+            .map_err(|_| error("joined_route_poisoned"))?;
+        while !o.ready {
+            let now = Instant::now();
+            if o.setup_failure.is_some() || thread.is_finished() || now >= ready_by {
+                return Err(error("joined_route_connect_failed"));
             }
-            std::thread::yield_now();
+            // Bounded by the owner poll so a finished carrier thread is noticed.
+            let wait = (ready_by - now).min(std::time::Duration::from_millis(
+                B::OwnerPoll
+                    .span(Entries::ZERO)
+                    .map_err(|_| error("budget_unavailable"))?
+                    .millis(),
+            ));
+            o = observed
+                .changed
+                .wait_timeout(o, wait)
+                .map_err(|_| error("joined_route_poisoned"))?
+                .0;
         }
+        drop(o);
         Ok((
             Self {
                 message,
@@ -309,11 +459,18 @@ impl Executor for RouteExecutor {
                 text,
             });
         }
+        #[cfg(test)]
+        tests::between_locks(&self.observed);
         o = self
             .observed
             .state
             .lock()
             .map_err(|_| error("joined_route_poisoned"))?;
+        // Tokens published after the first read are delivered before any
+        // terminal decision: completion never truncates the stream.
+        if o.tokens.len() > self.taken {
+            return Ok(Execution::Pending);
+        }
         if let Some(code) = o.failure {
             return Err(error(code));
         }
@@ -343,19 +500,35 @@ impl Executor for RouteExecutor {
             self.teardown_sent = true;
             return Ok(false);
         }
-        let o = self
+        let mut o = self
             .observed
             .state
             .lock()
             .map_err(|_| error("joined_route_poisoned"))?;
-        if !o.teardown_finished {
+        if !o.teardown_finished || o.teardown_busy {
             return Ok(false);
         }
-        if o.stages
-            .iter()
-            .all(|s| s.acknowledged_ms.is_some() || s.death_evidence.is_some())
-        {
+        if o.settled() {
             return Ok(true);
+        }
+        // A stage did not ACK (stalled past the close budget, or its ACK was
+        // lost): re-dial and re-send, a bounded number of times.
+        let allowed = B::PyMyceliumA13MacosManagedControlHttpRetryAttemptsL315
+            .count()
+            .map_err(|_| error("budget_unavailable"))?
+            .get();
+        let alive = self.thread.as_ref().is_some_and(|t| !t.is_finished());
+        if alive && o.teardown_attempts < allowed {
+            o.teardown_busy = true;
+            drop(o);
+            if let Some(tx) = self.commands.as_ref()
+                && tx.send(Command::Retry).is_ok()
+            {
+                return Ok(false);
+            }
+            if let Ok(mut o) = self.observed.state.lock() {
+                o.teardown_busy = false;
+            }
         }
         // Retained debt: a stage neither acknowledged nor has death evidence.
         Err(PublicError::new(503, "joined_route_cleanup_unproven"))
@@ -397,6 +570,11 @@ fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
 }
 type Fence = Box<dyn Fn() -> ConnectionFence + Send + Sync>;
+fn peer_addr(p: &Peer) -> EndpointAddr {
+    p.addrs
+        .iter()
+        .fold(EndpointAddr::new(p.endpoint), |a, s| a.with_ip_addr(*s))
+}
 struct Link<'a> {
     send: IrohTransport<'a, app_host_clock::Clock, Fence>,
     receive: RouterReceiver<'a, app_host_clock::Clock, Fence>,
@@ -490,7 +668,8 @@ impl Link<'_> {
 fn carrier(
     message: &Value,
     secret: iroh::SecretKey,
-    peers: &[StagePeer],
+    peers: &[Peer],
+    network: &Network,
     currentness: &Currentness,
     commands: &mpsc::Receiver<Command>,
     observed: &RouteHandle,
@@ -502,9 +681,20 @@ fn carrier(
         .build()
         .map_err(|_| "joined_route_runtime_failed")?;
     let clock = crate::managed_carrier::HostClock::default();
-    let mut host =
-        LoopbackHost::bind_with_secret(&rt, &clock, deadline(&clock, B::WorkerStartup)?, secret)
-            .map_err(|_| "joined_route_bind_failed")?;
+    let bound = deadline(&clock, B::WorkerStartup)?;
+    let mut host = match network {
+        Network::Loopback => LoopbackHost::bind_with_secret(&rt, &clock, bound, secret),
+        Network::Lan { interface, policy } => LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            bound,
+            secret,
+            &[Channel::Router],
+            *interface,
+            policy.clone(),
+        ),
+    }
+    .map_err(|_| "joined_route_bind_failed")?;
     let epoch = message["topology_version"]
         .as_u64()
         .ok_or("joined_route_invalid")?;
@@ -517,7 +707,7 @@ fn carrier(
         for set in [&mut data, &mut control] {
             set.push(
                 host.connect_channel(
-                    &EndpointAddr::new(p.endpoint).with_ip_addr(p.socket),
+                    &peer_addr(p),
                     Channel::Router,
                     &clock,
                     deadline(&clock, B::WorkerStartup)?,
@@ -526,7 +716,7 @@ fn carrier(
             );
         }
     }
-    let fence = |p: &StagePeer| -> (ConnectionFence, Fence) {
+    let fence = |p: &Peer| -> (ConnectionFence, Fence) {
         let base = ConnectionFence {
             endpoint_id: *p.endpoint.as_bytes(),
             local_generation: epoch,
@@ -541,7 +731,7 @@ fn carrier(
             }),
         )
     };
-    let link = |c: &Connection, p: &StagePeer| -> Result<Link<'_>, &'static str> {
+    let link = |c: &Connection, p: &Peer| -> Result<Link<'_>, &'static str> {
         let (base, f1) = fence(p);
         let (_, f2) = fence(p);
         Ok(Link {
@@ -559,6 +749,79 @@ fn carrier(
         .lock()
         .map_err(|_| "joined_route_poisoned")?
         .ready = true;
+    let allowed = B::PyMyceliumA13MacosManagedControlHttpRetryAttemptsL315
+        .count()
+        .map_err(|_| "budget_unavailable")?
+        .get();
+    // Concurrent per-member control exchanges; a member ACKs only after its
+    // native worker was closed or killed and reaped.
+    let deliver = |frame: &[u8],
+                   targets: &[(usize, &Connection)],
+                   began: Instant|
+     -> Vec<(usize, Result<f64, String>)> {
+        let dead: Vec<bool> = observed
+            .state
+            .lock()
+            .map(|o| {
+                o.stages
+                    .iter()
+                    .map(|s| s.death_evidence.is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+        std::thread::scope(|inner| {
+            let handles: Vec<_> = targets
+                .iter()
+                .map(|&(i, c)| {
+                    let (frame, clock, link) = (frame.to_vec(), &clock, &link);
+                    let p = &peers[i];
+                    let dead = dead.get(i).copied().unwrap_or(false);
+                    (
+                        i,
+                        inner.spawn(move || -> Result<f64, String> {
+                            if dead {
+                                // Settled by host death evidence; nothing can ACK.
+                                return Err("joined_route_stage_dead".into());
+                            }
+                            link(c, p)?.send_detailed(clock, frame, B::RouterClose)?;
+                            Ok(elapsed_ms(began))
+                        }),
+                    )
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|(i, h)| {
+                    (
+                        i,
+                        h.join()
+                            .unwrap_or(Err("joined_route_teardown_panicked".into())),
+                    )
+                })
+                .collect()
+        })
+    };
+    // Record one delivery attempt; true when the carrier can retire (every stage
+    // settled, or the bounded re-dial allowance is spent).
+    let record = |outcomes: Vec<(usize, Result<f64, String>)>| -> Result<bool, &'static str> {
+        let mut o = observed.state.lock().map_err(|_| "joined_route_poisoned")?;
+        for (i, outcome) in outcomes {
+            if let Some(s) = o.stages.get_mut(i) {
+                match outcome {
+                    Ok(ms) => s.acknowledged_ms = Some(ms),
+                    Err(code) => s.failure = Some(code),
+                }
+            }
+        }
+        o.teardown_attempts += 1;
+        o.teardown_busy = false;
+        o.teardown_finished = true;
+        let done = o.settled() || o.teardown_attempts >= allowed;
+        drop(o);
+        observed.changed.notify_all();
+        Ok(done)
+    };
+    let mut teardown: Option<(Vec<u8>, Instant)> = None;
     let result = std::thread::scope(|scope| -> Result<(), &'static str> {
         let mut worker = None;
         for command in commands.iter() {
@@ -609,6 +872,9 @@ fn carrier(
                     }));
                 }
                 Command::Teardown(path) => {
+                    if teardown.is_some() {
+                        continue;
+                    }
                     let began = Instant::now();
                     cancel.store(true, Ordering::SeqCst);
                     if let Ok(mut o) = observed.state.lock() {
@@ -622,44 +888,8 @@ fn carrier(
                     let body = route::cancellation(message, &path);
                     let frame = router_wire::encode_frame("PathCancellation", &body, &[])
                         .map_err(|_| "joined_route_frame_invalid")?;
-                    // Concurrent per-member control exchanges; a member ACKs only
-                    // after its native worker was closed or killed and reaped.
-                    let outcomes: Vec<Result<f64, String>> = std::thread::scope(|inner| {
-                        let dead: Vec<bool> = observed
-                            .state
-                            .lock()
-                            .map(|o| {
-                                o.stages
-                                    .iter()
-                                    .map(|s| s.death_evidence.is_some())
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let handles: Vec<_> = control
-                            .iter()
-                            .zip(peers)
-                            .enumerate()
-                            .map(|(i, (c, p))| {
-                                let (frame, clock, link) = (frame.clone(), &clock, &link);
-                                let dead = dead.get(i).copied().unwrap_or(false);
-                                inner.spawn(move || -> Result<f64, String> {
-                                    if dead {
-                                        // Settled by host death evidence; nothing can ACK.
-                                        return Err("joined_route_stage_dead".into());
-                                    }
-                                    link(c, p)?.send_detailed(clock, frame, B::RouterClose)?;
-                                    Ok(elapsed_ms(began))
-                                })
-                            })
-                            .collect();
-                        handles
-                            .into_iter()
-                            .map(|h| {
-                                h.join()
-                                    .unwrap_or(Err("joined_route_teardown_panicked".into()))
-                            })
-                            .collect()
-                    });
+                    let targets: Vec<(usize, &Connection)> = control.iter().enumerate().collect();
+                    let outcomes = deliver(&frame, &targets, began);
                     for c in data.iter().chain(&control) {
                         c.close(0u32.into(), b"route_retired");
                     }
@@ -668,17 +898,50 @@ fn carrier(
                     {
                         return Err("joined_route_worker_panicked");
                     }
-                    let mut o = observed.state.lock().map_err(|_| "joined_route_poisoned")?;
-                    for (s, outcome) in o.stages.iter_mut().zip(outcomes) {
-                        match outcome {
-                            Ok(ms) => s.acknowledged_ms = Some(ms),
-                            Err(code) => s.failure = Some(code),
+                    teardown = Some((frame, began));
+                    if record(outcomes)? {
+                        break;
+                    }
+                }
+                Command::Retry => {
+                    let Some((frame, began)) = teardown.as_ref() else {
+                        continue;
+                    };
+                    // Fresh control connection per unsettled stage: the member keeps
+                    // accepting a bounded re-dial after its compute was released.
+                    let unsettled: Vec<usize> = observed
+                        .state
+                        .lock()
+                        .map_err(|_| "joined_route_poisoned")?
+                        .stages
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, s)| s.acknowledged_ms.is_none() && s.death_evidence.is_none())
+                        .map(|(i, _)| i)
+                        .collect();
+                    let mut dialed = Vec::new();
+                    let mut failed = Vec::new();
+                    for i in unsettled {
+                        match deadline(&clock, B::RouterClose).and_then(|d| {
+                            host.connect_channel(&peer_addr(&peers[i]), Channel::Router, &clock, d)
+                                .map_err(|_| "joined_route_redial_failed")
+                        }) {
+                            Ok(c) => dialed.push((i, c)),
+                            Err(code) => failed.push((i, Err(code.to_owned()))),
                         }
                     }
-                    o.teardown_finished = true;
-                    drop(o);
-                    observed.changed.notify_all();
-                    break;
+                    let targets: Vec<(usize, &Connection)> =
+                        dialed.iter().map(|(i, c)| (*i, c)).collect();
+                    let mut outcomes = deliver(frame, &targets, *began);
+                    for (_, c) in &dialed {
+                        c.close(0u32.into(), b"route_retired");
+                    }
+                    drop(targets);
+                    drop(dialed);
+                    outcomes.extend(failed);
+                    if record(outcomes)? {
+                        break;
+                    }
                 }
             }
         }
@@ -850,6 +1113,7 @@ pub struct RouteHost {
     bearer: String,
     next: AtomicU64,
     withdrawn: Mutex<Option<&'static str>>,
+    carrier: Mutex<Option<RouteHandle>>,
 }
 impl RouteHost {
     pub fn new(
@@ -870,7 +1134,28 @@ impl RouteHost {
             bearer,
             next: AtomicU64::new(0),
             withdrawn: Mutex::new(None),
+            carrier: Mutex::new(None),
         })
+    }
+    /// Bind this epoch's carrier: readiness then follows the carrier, so a
+    /// stopped, stalled, failed or dead epoch is no longer offered, and the
+    /// single-use epoch admits no second request.
+    pub fn attach(&self, handle: RouteHandle) -> Result<(), PublicError> {
+        *self
+            .carrier
+            .lock()
+            .map_err(|_| error("joined_route_poisoned"))? = Some(handle);
+        Ok(())
+    }
+    fn carrier_refusal(&self, admitting: bool) -> Result<(), PublicError> {
+        let carrier = self
+            .carrier
+            .lock()
+            .map_err(|_| error("joined_route_poisoned"))?;
+        match carrier.as_ref() {
+            Some(handle) => handle.refusal(admitting && self.next.load(Ordering::SeqCst) > 0),
+            None => Ok(()),
+        }
     }
     pub fn message(&self) -> &Value {
         &self.message
@@ -908,11 +1193,13 @@ impl Host for RouteHost {
         {
             return Err(error(code));
         }
+        self.carrier_refusal(false)?;
         route::verify_owner(&self.coordinator, &self.route, app_host::now())
             .map_err(|_| error("stale_qualification"))?;
         Ok(self.qualification.clone())
     }
     fn prepare(&self, submission: &Value) -> Result<Prepared, PublicError> {
+        self.carrier_refusal(true)?;
         let prompt = submission["prompt"]
             .as_str()
             .ok_or(error("invalid_prompt"))?;
@@ -967,5 +1254,77 @@ impl Host for RouteHost {
             owner_token: app_host::hex(&app_host::random(32)?),
             excluded_placements: vec![],
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    //! Deterministic interleavings of the executor's observation of carrier
+    //! state. The hook runs at the exact point between the token read and the
+    //! terminal read inside `poll`, so no timing or sleep is involved.
+    use super::*;
+    use std::cell::RefCell;
+    type Hook = Box<dyn FnMut(&RouteHandle)>;
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+    }
+    pub(super) fn between_locks(observed: &RouteHandle) {
+        HOOK.with(|h| {
+            if let Some(hook) = h.borrow_mut().as_mut() {
+                hook(observed);
+            }
+        });
+    }
+    struct Text;
+    impl Codec for Text {
+        fn encode(&self, _: &str) -> Result<Vec<u32>, PublicError> {
+            Ok(vec![])
+        }
+        fn decode(&self, token: u32) -> Result<String, PublicError> {
+            Ok(format!("t{token}"))
+        }
+    }
+    fn detached(observed: RouteHandle) -> RouteExecutor {
+        RouteExecutor {
+            message: json!({"stages":[]}),
+            commands: None,
+            observed,
+            pending: VecDeque::new(),
+            taken: 0,
+            codec: Arc::new(Text),
+            path: None,
+            teardown_sent: false,
+            thread: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    /// N1: the carrier publishes the final token and then completion between the
+    /// executor's two observations. The stream must still deliver that token.
+    #[test]
+    fn final_token_published_between_observations_is_never_lost() {
+        let observed: RouteHandle = Arc::new(RouteWatch::default());
+        let mut executor = detached(observed.clone());
+        let mut fired = false;
+        HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |o: &RouteHandle| {
+                if !fired {
+                    fired = true;
+                    let mut s = o.state.lock().unwrap();
+                    s.tokens.push(7);
+                    s.token_times_ms.push(0.0);
+                    drop(s);
+                    o.state.lock().unwrap().completed = true;
+                }
+            }));
+        });
+        let mut delivered = Vec::new();
+        for _ in 0..4 {
+            match executor.poll("r").unwrap() {
+                Execution::Token { token_id, .. } => delivered.push(token_id),
+                Execution::Pending => {}
+                Execution::Completed => break,
+            }
+        }
+        HOOK.with(|h| h.borrow_mut().take());
+        assert_eq!(delivered, vec![7], "completed before every token was taken");
     }
 }
