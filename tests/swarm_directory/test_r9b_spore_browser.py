@@ -20,6 +20,9 @@ def test_fantasy_family_is_varied_and_regenerates_exactly(local):
             'vortex', 'lightning', 'halo', 'petal', 'twins', 'crystal', 'constellation', 'aurora'
         }
         assert {'violet','magenta','teal','gold','ember','frost','ink-violet','iridescent'} <= {s['colour'] for s in result['specs']}
+        assert 10 <= sum(s['colour'] in ('copper','ink-violet') for s in result['specs']) <= 12
+        muted={s['archetype'] for s in result['specs'] if s['colour'] in ('copper','ink-violet')}
+        assert len(muted)>=6, 'pigment mood must not be coupled to two archetypes'
         assert result['unique'] == 48 and result['regenerated']
         assert result['cache']['entries'] <= result['cache']['maxEntries']
         assert result['cache']['bytes'] <= result['cache']['maxBytes']

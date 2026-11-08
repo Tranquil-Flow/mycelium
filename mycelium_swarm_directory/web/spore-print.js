@@ -41,7 +41,10 @@ function rgba(hex, alpha) {
 }
 export function sporeSpec(id) {
   const seed = hash("spore-fantasy-v2|" + id);
-  const pigment = PIGMENTS[hash("pigment|" + id) % PIGMENTS.length];
+  // One quarter are deliberately quieter: earthy copper or inky violet.
+  // Keep the group choice separate from the within-group pigment draw.
+  const choice = hash("pigment|" + id), group = (choice >>> 16) % 4 === 0 ? [6,9] : [0,1,2,3,4,5,7,8];
+  const pigment = PIGMENTS[group[Math.floor(random(choice)() * group.length)]];
   const archetype = ARCHETYPES[hash("anatomy|" + id) % ARCHETYPES.length];
   return {seed, archetype, type: archetype === "crystal" ? "pores" : "gills",
     colour: pigment[0], ink: pigment[1], second: pigment[2], light: pigment[3],
