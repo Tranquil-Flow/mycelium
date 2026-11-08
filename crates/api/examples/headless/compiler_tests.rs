@@ -2,7 +2,10 @@
 //! Bounded source-artifact tests. Controlled member/observation documents are
 //! not authenticated hello sessions, native model execution, or BuildOutput.
 use super::*;
+#[path = "native_tamper_tests.rs"]
+mod native_tamper_tests;
 use api::compiler_inputs::{self, InputArtifact};
+use native_tamper_tests::native_handoff_tamper_refusals;
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -662,6 +665,7 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     let mut facts = BTreeMap::new();
     let mut members = BTreeMap::new();
     let mut keys = Vec::new();
+    let mut signers = Vec::new();
     for (i, node) in f.request.node_ids.iter().enumerate() {
         let signer =
             Identity::from_secret(&format!("endpoint-{node}"), &[i as u8 + 70; 32]).unwrap();
@@ -723,6 +727,7 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             .unwrap(),
         );
         keys.push(signer.public_key_record());
+        signers.push((node.clone(), signer));
         members.insert(node.clone(), current);
     }
     let mut hellos = ControlledHellos {
@@ -778,12 +783,64 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     compiler
         .retain_prepared_source(f.source.clone(), &inputs, &observations)
         .unwrap();
+    let started = std::time::Instant::now();
     compiler.start_build(&f.request);
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_millis(
-            BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis(),
-        );
+    let timeout_ms = if require_native {
+        let budget: Value =
+            serde_json::from_str(include_str!("compiler-native-budget.json")).unwrap();
+        budget["timeout_ms"].as_u64().unwrap()
+    } else {
+        BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis()
+    };
+    let deadline = started + std::time::Duration::from_millis(timeout_ms);
+    // Real model preparation outlives the ordinary lease. Keep the controlled
+    // joined members alive with signed heartbeats, not an enlarged product TTL
+    // or an edited member projection. Exercise this also in the cheap fixtures.
+    let heartbeat_interval = std::time::Duration::from_millis(
+        BudgetId::PyFinalMyceliumSeedCoordinatorKeepaliveIntervalSecondsL182C44
+            .span(Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
+    let mut heartbeat_due = started;
+    let mut sequence = 0_u64;
     let result = loop {
+        if std::time::Instant::now() >= heartbeat_due {
+            sequence += 1;
+            for (node, signer) in &signers {
+                let current = seed.coordinator.member(node).unwrap();
+                let issued = now();
+                let id = format!("b4-heartbeat-{node}-{sequence}");
+                let protocol = protocol::seed_members::HEARTBEAT_PROTOCOL;
+                let message = json!({
+                    "protocol":protocol,"message_id":id,
+                    "swarm_id":seed.coordinator.swarm_id(),
+                    "sender_node_id":node,"sender_endpoint_id":signer.endpoint_id(),
+                    "recipient_node_id":seed.coordinator.seed_node_id(),
+                    "incarnation":current["incarnation"],"generation":current["generation"],
+                    "issued_at":issued,
+                    "expires_at":(issued+ttl).min(current["lease_expires_at"].as_f64().unwrap()),
+                    "heartbeat_sequence":sequence,"lifecycle_state":current["lifecycle_state"],
+                    "route_ready":false,"active_requests":0,"liveness_source":"scheduled_heartbeat",
+                    "activity_receipt_digest":null,"activity_peer_node_id":null
+                });
+                let signed = protocol::membership::sign(
+                    signer,
+                    &message,
+                    seed::coordinator::limits().unwrap(),
+                )
+                .unwrap();
+                seed.coordinator
+                    .receive_member_message(&signed, protocol)
+                    .unwrap();
+                let renewed = seed.coordinator.lease_renewal(node, &id).unwrap();
+                assert_eq!(renewed["message"]["heartbeat_message_id"], id);
+                let after = seed.coordinator.member(node).unwrap();
+                assert_eq!(after["generation"], current["generation"]);
+                assert!(after["lease_expires_at"].as_f64().unwrap() > issued);
+            }
+            heartbeat_due = std::time::Instant::now() + heartbeat_interval;
+        }
         match compiler.poll_build() {
             BuildPoll::Pending => {
                 assert!(std::time::Instant::now() < deadline);
@@ -794,34 +851,17 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     };
     let output = f.root.join("host/chain-runs").join(run);
     if require_native {
-        // Close the real seed before the expected RED assertion, not only on
-        // GREEN. No fixture-owned model copies survive this assertion's unwind.
+        eprintln!(
+            "native compiler verdict after {:?}: {result:?}",
+            started.elapsed()
+        );
+        // Pins cross from the trusted producer; do not infer admission from the
+        // documents the consumer is supposed to check.
+        let pins = compiler.qualified.as_ref().map(|q| q.pins.clone());
         compiler.teardown().unwrap();
         seed.close();
         let built = result.expect("real Qwen3 source must reach native BuildOutput");
-        let mut pins = api::compiled_handoff::Pins::new();
-        for name in [
-            "compile-start.private.json",
-            "compile-complete.private.json",
-            "template.json",
-            "topology.json",
-            "observations.json",
-            "layer-split.json",
-            "compiled/operator-plan.json",
-            "compiled/build-report.json",
-            "compiled/local-challenge-checkpoint.json",
-            "compiled/compilation-cache.json",
-        ] {
-            use sha2::{Digest, Sha256};
-            let bytes = fs::read(output.join(name)).unwrap();
-            pins.insert(
-                name.into(),
-                api::compiled_handoff::Pin {
-                    bytes: bytes.len() as u64,
-                    sha256: format!("{:x}", Sha256::digest(&bytes)),
-                },
-            );
-        }
+        let pins = pins.expect("qualified producer pins");
         let handoff = api::compiled_handoff::CompiledHandoff::open(&output, &pins).unwrap();
         handoff.revalidate().unwrap();
         assert_eq!(handoff.nodes().len(), f.request.node_ids.len());
@@ -829,6 +869,13 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             protocol::canonical::digest(handoff.plan()).unwrap(),
             built.operator_plan_digest
         );
+        assert_eq!(
+            built.physical_host_ids.len(),
+            1,
+            "one physical Mac, not controlled hello IDs"
+        );
+        assert_eq!(handoff.plan()["route_ready"], false);
+        native_handoff_tamper_refusals(&output, &pins, seed.coordinator.signer(), &handoff);
         return;
     }
     assert_eq!(

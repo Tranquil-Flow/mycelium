@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Backend-neutral, in-process stage seam. Not a new wire protocol.
+pub mod native_proof;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

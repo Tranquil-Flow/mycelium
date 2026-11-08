@@ -81,6 +81,39 @@ impl NativeStage {
             binding,
         })
     }
+    /// Export the material actually resident in this worker, after prepare.
+    /// Neither source manifests nor caller-provided digests can fill this proof.
+    pub fn resident_proof(&self, nonce: &str) -> Result<Value> {
+        use stage_contract::{NumericsProfile, native_proof};
+        if !native_proof::valid_nonce(nonce) {
+            return Err("native_proof_request_invalid".into());
+        }
+        pressure()?;
+        let weights = self.worker.weight_digests()?;
+        let digest = canonical::digest(&weights)?;
+        let (host, boot) = crate::hello_bootstrap::identity(nonce)?;
+        let descriptor = &self.binding.descriptor;
+        let hex = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        let profile = match descriptor.profile {
+            NumericsProfile::MlxPackedInt8 => "mlx_packed_int8",
+            NumericsProfile::MlxExplicitF32 => "mlx_explicit_f32",
+            NumericsProfile::CpuInt8F32 => "cpu_int8_f32",
+        };
+        pressure()?;
+        Ok(
+            json!({"protocol":native_proof::PROOF_PROTOCOL,"nonce":nonce,
+            "request_id":hex(&self.binding.request),"load_generation":self.binding.load_generation,
+            "start":descriptor.layers.start,"end":descriptor.layers.end,
+            "checkpoint_sha256":hex(&descriptor.checkpoint),"tensor_manifest_sha256":hex(&descriptor.tensor_manifest),
+            "revision":descriptor.revision,"profile":profile,"worker_pid":std::process::id(),
+            "host_id":host,"boot_id":boot,"weights":weights,"weights_digest":digest}),
+        )
+    }
     pub fn step(&mut self, input: Input) -> Result<stage_contract::Output> {
         pressure()?;
         let step = Step {
