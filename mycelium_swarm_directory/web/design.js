@@ -76,7 +76,7 @@ window.addEventListener("resize", () => {
   clearTimeout(timer);
   timer = setTimeout(() => {
     const rect = hero?.getBoundingClientRect();
-    const next = [rect?.width, rect?.height, devicePixelRatio].join("|");
+    const next = [innerWidth, innerHeight, rect?.width, rect?.height, devicePixelRatio].join("|");
     if (next !== size) {
       size = next;
       rebuild();

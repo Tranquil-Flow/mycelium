@@ -85,8 +85,9 @@ function dendriteWalk(p, angle, len, R) {
   const n = Math.max(2, Math.ceil(len / 3.5)), step = len / n, points = [p];
   let heading = angle, turn = 0, run = 0;
   for (let i = 0; i < n; i++) {
-    if (run-- <= 0) { run = 3 + Math.floor(R() * 6); turn = (R() - .5) * .065; }
-    heading += turn + (R() - .5) * .08;
+    if (run-- <= 0) { run = 2 + Math.floor(R() * 4); turn = (R() - .5) * .55; }
+    heading += turn + (R() - .5) * .18;
+    heading -= Math.atan2(Math.sin(heading-angle),Math.cos(heading-angle))*.055;
     const last = points.at(-1);
     points.push({x:last.x + Math.cos(heading)*step, y:last.y + Math.sin(heading)*step});
   }
@@ -185,4 +186,28 @@ function measurePaths(paths) {
     ]),
   );
 }
-export { rng, setup, rootWalk, wander, dendriteWalk, bridgeRoot, measurePaths };
+// Attach fine laterals to existing roots, never add another background root bank.
+function rootLaterals(roots, attach, R) {
+  let lateralCount=0,minLateralsPer100px=Infinity;
+  for(const p of roots) {
+    const arc=[0];for(let i=1;i<p.points.length;i++)arc.push(arc.at(-1)+Math.hypot(p.points[i].x-p.points[i-1].x,p.points[i].y-p.points[i-1].y));
+    const length=arc.at(-1),count=Math.max(2,Math.ceil(length/18));p.laterals=0;
+    if(!length)continue;
+    for(let k=1;k<=count;k++){
+      const target=length*(k-.25+R()*.3)/(count+1);
+      let i=1;while(i<arc.length-1&&arc[i]<target)i++;
+      const a=p.points[i-1],b=p.points[i],heading=Math.atan2(b.y-a.y,b.x-a.x);
+      attach(p,b,heading+(k%2?1:-1)*(.5+R()*.75),4+R()*11,i);p.laterals++;
+    }
+    if(R()<.28){const b=p.points.at(-1),a=p.points.at(-2),heading=Math.atan2(b.y-a.y,b.x-a.x);
+      for(const side of [-1,1]){attach(p,b,heading+side*.4,5+R()*9,p.points.length-1);p.laterals++;}}
+    lateralCount+=p.laterals;minLateralsPer100px=Math.min(minLateralsPer100px,p.laterals*100/length);
+  }
+  return {mainStrands:roots.length,lateralCount,loneThreads:roots.filter(p=>!p.laterals).length,
+    minLateralsPer100px:Number.isFinite(minLateralsPer100px)?minLateralsPer100px:0};
+}
+function sceneClock() {
+  let elapsed=0,last=null;
+  return {tick(now){if(document.hidden){last=null;return elapsed;}if(last!==null)elapsed+=Math.max(0,now-last)/1000;last=now;return elapsed;},pause(){last=null;}};
+}
+export { rng, setup, rootWalk, wander, dendriteWalk, bridgeRoot, measurePaths, rootLaterals, sceneClock };

@@ -20,6 +20,13 @@ def test_signed_samples_refresh_and_remove_only_their_own_records(tmp_path):
     assert len(rows)==len(NAMES)==10
     swarms=get('/swarms')['swarms']; samples=[s for s in swarms if s['swarm_id']!=sid]
     assert len(samples)==10
+    assert {s['access_mode'] for s in samples}=={'open','request','invite'}
+    from mycelium_a13_macos.run_model import CHOICES
+    assert {s['model'] for s in samples}=={c.model.model_id for c in CHOICES}
+    for s in samples:
+        if '0.5B' in s['model'] or '0.6B' in s['model']: assert s['members']==2 or s['status']=='offline'
+        elif '14B' in s['model']: assert 3<=s['members']<=4 or s['status']=='offline'
+        else: assert 2<=s['members']<=3 or s['status']=='offline'
     assert all(s['entry_origin'].endswith('.invalid') and s['name'].startswith('Sample: ') for s in samples)
     assert {s['status'] for s in samples}==set(STATUSES)
     assert {s['members'] for s in samples if s['status']!='offline'}<=set(MEMBERS)

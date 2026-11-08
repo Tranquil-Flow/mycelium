@@ -18,19 +18,30 @@ from mycelium_a13_macos.model_resources import model_shape
 
 NAMES = ('Violet Lantern', 'Copper Orchard', 'Frost Spiral', 'Teal Constellation',
          'Ember Halo', 'Golden Spores', 'Aurora Grove', 'Twin Moons', 'Crystal Cap', 'Ink Garden')
-MEMBERS = (2, 3, 5, 7, 4, 9, 6, 8, 3, 2)
-STATUSES = ('serving',)*7 + ('warming', 'offline', 'offline')
+# Display assumptions only: typical 16–32 GB Apple-silicon machines with OS/KV
+# headroom and int8 weights. A released swarm still requires at least two devices.
+# Use all five accepted registry models; do not invent 32B/70B/MoE availability.
+MEMBERS = (2, 2, 2, 3, 3, 2, 2, 3, 2, 4)
+ACCESS = ('open','request','invite','open','request','invite','open','request','invite','open')
+STATUSES = ('serving','serving','serving','serving','serving','offline','serving','offline','warming','offline')
 
 
 def metrics(index, members, at):
     # Deliberately synthetic display fixtures, not measurements or benchmarks.
     metric = lambda a, b: {'p50': a, 'p90': b, 'n': 12 + index}
-    layers = model_shape(CHOICES[index % len(CHOICES)].model).num_layers
+    choice=CHOICES[index % len(CHOICES)]
+    shape=model_shape(choice.model)
+    assert shape is not None
+    layers = shape.num_layers
+    # Synthetic values decrease with total weight size, not a performance claim.
+    weight_gb=choice.int8_weight_bytes/1e9
+    decode=int(26000/(1+weight_gb*.52)*(1+.03*(index//len(CHOICES))))
+    first=int(650+weight_gb*230+members*90)
     return {'window_seconds':300,'window_limit':50,'observed_seconds':300,
         'requests_24h':87+index*31,'coverage_seconds':21600,'serving_since':at-21600,
-        'uptime_seconds':21600,'mode':'normal','ttft_ms':metric(900+index*170,1500+index*200),
-        'decode_millitokens_s':metric(4200+index*1350,6000+index*1400),
-        'request_ms':metric(15000+index*1200,24000+index*1500),'stage_window_seconds':300,
+        'uptime_seconds':21600,'mode':'normal','ttft_ms':metric(first,int(first*1.6)),
+        'decode_millitokens_s':metric(decode,int(decode*1.25)),
+        'request_ms':metric(first+int(150000000/decode),int((first+150000000/decode)*1.5)),'stage_window_seconds':300,
         'stages':[{'index':j,'layer_start':j*layers//members,'layer_end':(j+1)*layers//members,
                    'compute_ms':metric(20+index*4+j,35+index*6+j)} for j in range(members)],
         'hops':[{'from_stage':j,'to_stage':j+1,'kind':'activation_rtt','rtt_ms':8+index*3+j,
@@ -62,10 +73,10 @@ def publish(state, get, post, at=None, remove=False):
             if current: post('/delete', docs.delete(signer,sid,current['record']['seq']+1))
             continue
         model = CHOICES[i % len(CHOICES)].model.model_id
-        if not current:
-            post('/records',docs.swarm_record(signer,swarm_id=sid,seq=1,name='Sample: '+NAMES[i],model=model,
+        if not current or current['record']['model']!=model or current['record']['access_mode']!=ACCESS[i]:
+            post('/records',docs.swarm_record(signer,swarm_id=sid,seq=current['record']['seq']+1 if current else 1,name='Sample: '+NAMES[i],model=model,
                 description='Fictional staging swarm. Simulated performance, not a benchmark. No model is running; sample chat is unavailable.',
-                access_mode='open',entry={'origin':f'https://sample-{i+1}.invalid','key':signer.public_key}))
+                access_mode=ACCESS[i],entry={'origin':f'https://sample-{i+1}.invalid','key':signer.public_key}))
         post('/heartbeat',docs.heartbeat(signer,sid,status=STATUSES[i],members=MEMBERS[i],served_model=model,at=at))
         post('/stats',stats_docs.stats(signer,sid,at=at,values=metrics(i,MEMBERS[i],at)))
     after = {s['swarm_id'] for s in get('/swarms')['swarms']}

@@ -446,10 +446,23 @@ def test_access_states_real_entry_and_composer_geometry(local, width, height, th
         visitor.click('#refresh'); capture('killed')
         owner.locator('[data-kill]').click()
         visitor.click('#refresh')
-        # Real short-lived signed allowance: no fake page state or time override.
-        owner.evaluate('async key => { await approve(swarms[0], key, 2/3600, 1, 2000); }', public_key)
-        visitor.click('#refresh')
-        visitor.wait_for_timeout(2100)
+        # Observe this exact real signed allowance before testing its expiry.
+        # Two seconds could elapse during setup on a contended browser host;
+        # an allowance never received cannot be shown as a remembered expiry.
+        with owner.expect_response(lambda r: r.url.endswith('/grants') and r.request.method == 'POST') as short_grant:
+            owner.evaluate('async key => { await approve(swarms[0], key, 10/3600, 1, 2000); }', public_key)
+        grant = short_grant.value.request.post_data_json
+        assert short_grant.value.status == 200
+        # A preceding refresh can still be polling the entry after its UI update.
+        # Wait for it, then perform one fresh signed read of the new allowance.
+        visitor.evaluate('''async () => {
+            while (refreshing) await new Promise(resolve => setTimeout(resolve, 20));
+            await refresh();
+        }''')
+        visitor.wait_for_function('(g) => grantFor(g.swarm_id)?.grant_id === g.grant_id', arg=grant)
+        capture('ready')
+        remaining = visitor.evaluate('(expires) => Math.max(0, expires * 1000 - Date.now())', grant['expires_at'])
+        visitor.wait_for_timeout(remaining + 150)
         visitor.click('#refresh'); capture('expired')
         owner.evaluate('async key => { await approve(swarms[0], key, 1, 1, 2000); }', public_key)
         visitor.click('#refresh')

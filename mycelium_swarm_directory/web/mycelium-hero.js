@@ -3,7 +3,7 @@
  * Geometry is built once per size/palette. Only fractional tips and active bands
  * animate. The returned disposer owns all RAF, observer and raster resources.
  */
-import { rng, wander, dendriteWalk, bridgeRoot, measurePaths } from "./mycelium-geometry.js";
+import { rng, wander, dendriteWalk, bridgeRoot, measurePaths, rootLaterals, sceneClock } from "./mycelium-geometry.js";
 import { extendFieldGraph } from "./mycelium-field.js";
 export function createHero(canvas, { stage, state, reduce }) {
   let pulseCleanup = () => {};
@@ -38,7 +38,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       cords = [],
       tips = [],
       paths = [],
-      CAP = 350000;
+      // Reserve bounded headroom for attached lateral hairs and the wide field.
+      CAP = 500000;
     let branchSerial = 0;
     const liveFusions = [];
     function vertex(x, y, source) {
@@ -456,6 +457,14 @@ export function createHero(canvas, { stage, state, reduce }) {
           3 + gapR() * 42,
         );
       }
+    const explorerRoots=paths.filter(p=>['explorer','gap-explorer'].includes(p.kind));
+    const explorerAudit=rootLaterals(explorerRoots,(parent,start,angle,length,at)=>{
+      const first=paths.length,firstSeg=ss.length;
+      grow(start,angle,length,parent.width*.35,parent.alpha*.5,0,parent.tone||1,false,parent.birth?parent.birth+at*.65:0,parent.branch,false);
+      for(let i=first;i<paths.length;i++){paths[i].kind='explorer-hair';paths[i].hair=true;}
+      for(let i=firstSeg;i<ss.length;i++)ss[i].explorer=true;
+    },rng('r9c-explorer-fuzz'));
+    explorerAudit.straightness=measurePaths(explorerRoots);
     const field = extendFieldGraph({vs,ss,paths,vertex,edge,nodes,w,h});
     // Static geometry is rasterised ONCE. No periodic whole-mat redraw or geometry rebuild.
     const ctx = c.getContext("2d"),
@@ -671,6 +680,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       light,
       blooms,
       growthFraction,
+      explorerAudit,
     };
     window.__fusionEvents = liveFusions.map(f => ({x:f.vertex.x,y:f.vertex.y,branch:f.branch,birth:f.birth,
       degree:f.vertex.edges.length, splits:paths.slice(f.splitStart,f.splitEnd).filter(p=>p.points[0]===f.vertex).length}));
@@ -732,10 +742,11 @@ export function createHero(canvas, { stage, state, reduce }) {
     };
     const routes = buildSignalRoutes(graph);
     for (const r of routes) {
-      r.fieldList = r.list.filter(v=>ss[v.segment].field);
+      // Peripheral routes have their own capped, lower-intensity schedule.
+      r.fieldList = r.list.filter(v=>ss[v.segment].field && !ss[v.segment].fieldPath.margin);
       r.liveList = r.list.filter(v=>ss[v.segment].birth && !ss[v.segment].field);
     }
-    window.__myceliumScene = {graph,field,routes,activeTrips:()=>[]};
+    window.__myceliumScene = {graph,field,routes,clock:sceneClock(),activeTrips:()=>[]};
     Object.assign(c.dataset, {
       segments: ss.length,
       fusions,
@@ -1191,7 +1202,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     function tick(now) {
       raf = 0;
       if (disposed) return;
-      if (last) clock += (now - last) / 1000;
+      clock = window.__myceliumScene.clock.tick(now);
       last = now;
       graph.updateMat(clock);
       draw(clock);
@@ -1227,6 +1238,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       }
     }
     const changed = () => {
+      if(document.hidden||reduce.matches)window.__myceliumScene.clock.pause();
       if (reduce.matches) graph.updateMat(600, true);
       schedule();
     };

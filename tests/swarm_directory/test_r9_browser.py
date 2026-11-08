@@ -32,7 +32,7 @@ def test_glow_preference_motion_and_reserved_layout(local, width, height, theme)
         page.goto(local['directory'].origin + '/swarms/#notice')
         expect(page.locator('body')).to_have_attribute('data-ready','1')
         expect(page.locator('html')).to_have_attribute('data-glow','blue')
-        expect(page.locator('#page-mycelium')).to_have_attribute('data-nodes','0')
+        expect(page.locator('#page-mycelium')).to_have_attribute('data-spore-nodes','0')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         assert not errors
         browser.close()

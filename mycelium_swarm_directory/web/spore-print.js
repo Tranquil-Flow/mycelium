@@ -52,9 +52,9 @@ export function sporeSpec(id) {
 }
 function deposit(spec, pixels) {
   const work = document.createElement("canvas");
-  work.width = work.height = Math.max(192, pixels);
+  work.width = work.height = Math.max(288, pixels * 2);
   const x = work.getContext("2d");
-  x.scale(work.width / 100, work.height / 100);
+  x.scale(work.width / 180, work.height / 180); x.translate(40,40);
   const R = random(spec.seed), phase = R() * TAU, tilt = R() * TAU;
   const small = pixels <= 80;
   const kind = spec.archetype, lobes = 4 + Math.floor(R() * 4);
@@ -175,7 +175,17 @@ function deposit(spec, pixels) {
   if(kind==="twins") {cap(.61,-15,-13,-.35);cap(.55,21,20,.8);}
   else cap(1,0,0,0);
   const result=document.createElement("canvas");result.width=result.height=pixels;
-  const out=result.getContext("2d");out.imageSmoothingQuality="high";out.drawImage(work,0,0,pixels,pixels);
+  const out=result.getContext("2d");out.imageSmoothingQuality="high";
+  // Rasterise into a generous overscan first, then fit every powder/glow pixel.
+  // Internal cap irregularity remains; the canvas itself must never crop it.
+  const data=x.getImageData(0,0,work.width,work.height).data;
+  let left=work.width,top=work.height,right=0,bottom=0;
+  for(let yy=0;yy<work.height;yy++)for(let xx=0;xx<work.width;xx++)if(data[(yy*work.width+xx)*4+3]){
+    left=Math.min(left,xx);right=Math.max(right,xx);top=Math.min(top,yy);bottom=Math.max(bottom,yy);
+  }
+  const sw=right-left+1,sh=bottom-top+1,pad=Math.max(3,Math.ceil(pixels*.065));
+  const scale=(pixels-pad*2)/Math.max(sw,sh),dw=sw*scale,dh=sh*scale;
+  out.drawImage(work,left,top,sw,sh,(pixels-dw)/2,(pixels-dh)/2,dw,dh);
   work.width=work.height=0;return result;
 }
 export function drawSpore(canvas,id,{size=canvas.getBoundingClientRect().width||40,dpr=devicePixelRatio}={}) {

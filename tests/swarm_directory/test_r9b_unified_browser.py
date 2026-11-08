@@ -45,6 +45,20 @@ def test_sample_cards_and_unreachable_chat_never_contact_entries(local,tmp_path,
         expect(page.locator('#prompt')).to_be_disabled()
         composer=page.locator('#prompt').bounding_box()
         assert composer and composer['y']+composer['height']<=844, composer
+        # Clear raster edges are tested at 40/96px separately; these actual UI
+        # placements must also fit every non-scrolling clipping ancestor.
+        for route in ('#browse','#swarm/'+rows[0]['id'],'#chat/'+rows[0]['id'],'#chat'):
+            page.goto(local['directory'].origin+'/swarms/'+route)
+            page.wait_for_selector('body[data-ready="1"]');page.wait_for_timeout(100)
+            clipped=page.evaluate('''()=>[...document.querySelectorAll('canvas[data-print]')].flatMap(c=>{
+              const r=c.getBoundingClientRect();if(!r.width||!r.height)return [];
+              for(let p=c.parentElement;p&&p!==document.body;p=p.parentElement){
+                const s=getComputedStyle(p),b=p.getBoundingClientRect();
+                if(['hidden','clip'].includes(s.overflowX)&&(r.left<b.left-1||r.right>b.right+1))return [p.className];
+                if(['hidden','clip'].includes(s.overflowY)&&(r.top<b.top-1||r.bottom>b.bottom+1))return [p.className];
+              }return [];
+            })''')
+            assert not clipped,(route,clipped)
         assert all(url.startswith(local['directory'].origin+'/') for url in requests)
         assert sum(page.evaluate('__cls'))==0
         b.close()
