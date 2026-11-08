@@ -1,4 +1,48 @@
-# Lane B7 — native received-shard preparation qualified; serving incomplete
+# Lane B7 — loopback two-node serving qualified (e/f); grant renewal and LAN open
+
+## B7e/f continuation (branch lane/b7e-stream from a73a52b)
+
+Commits: 436d7d9 (serving + Stop/stall/death/leave + two RED-tested fixes), a471d71
+(typed test budgets; `record_stage_exit` rename for the TM002 substring heuristic),
+then this docs commit. Gates at a471d71 all PASS (merge 1093, quick 1966, headless 28,
+clippy/Metal clippy/fmt/lint clean). Real ignored run on a471d71, one Mac (Metal, local Qwen3-0.6B, two member processes):
+a chat POSTed to the product gateway was admitted by the live M16 factory, dispatched
+over the signed `mycelium.joined_route.v1` route by `m16_route::RouteExecutor` (owner
+hub, Router v1 HopHeader/TokenEvent/PathCancellation over LocalOnly Iroh) and streamed
+over SSE: 32 tokens == recorded Python/MLX oracle tokens[0..32]; tokenizer prompt ids
+== oracle prompt ids. TTFT 624.4 ms, 24.61 tok/s decode (loopback, one Mac).
+Public DELETE reached both workers in 60.8 ms (ACK after kill+reap of the interrupted
+worker, graceful close of the idle one). SIGSTOP stall -> `joined_route_hop_deadline`
+at 10019.5 ms; SIGKILL death settled 589.5 ms via exact-process evidence
+(`joined_route_stage_died`); product MemberLeave 202.7 ms with member-signed withdrawal,
+consent withdrawn, renewal stopped, shard retired/refunded, durable reopen `left`;
+route refuses 409 `readiness_revoked`. Reservations return to baseline after each.
+
+Class A (new, versioned): `mycelium.joined_route.v1` route + entry token payload,
+`mycelium.joined_shard.withdrawal.v1`. Existing native prepare/step/close bytes and
+joined-native proof v1 unchanged. Ruling 10(b) additive API:
+`requests::Subscription::publisher_generation` (default None keeps prior behavior);
+the gateway binds a resumed stream to the NEW subscription generation (registry bumps
+it per subscribe; previously every resume failed `stream_order_invalid`). RED:
+`joined_route::sse_client_resumes_across_bounded_stream_polls`.
+Worker fix: step cancel flag scoped per exchange (RED
+`native_compiler::worker::tests::step_cancel_flag_does_not_cancel_later_close_exchange`);
+failed graceful close keeps the worker for kill+reap. node-service gains a private
+`mycelium-node tokenize <tokenizer.json>` helper over its existing `tokenizers` dep.
+No lockfile/dependency, reserved status, packaged chat or network-cancel edits.
+
+Owner remains a test driver (pairing/emission/prepare harness, carrier_address,
+waitpid death evidence, withdrawal delivery over operator IPC). Physical
+route_ready=false; scope `loopback_two_node_qualified`.
+
+Not done: artifact-grant renewal (source chunk verification
+`runtime/src/iroh_artifact_source.rs:159`, journal fence `runtime/src/artifact_journal.rs:225`
+— changes shared source-journal behavior, needs a ruling) and a reviewed direct-LAN
+carrier (executor refuses non-loopback peers). Journey risk recorded: M16 streams end
+after each idle OwnerPoll; browser EventSource clients must resume with an advanced
+generation after an empty accepted stream (Python keeps the stream open).
+
+## Earlier: Lane B7 — native received-shard preparation qualified; serving incomplete
 
 ## Current continuation from 52ae99e (m4/main 0c171da merged)
 
