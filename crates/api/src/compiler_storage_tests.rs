@@ -92,6 +92,9 @@ impl Fixture {
         }
     }
     fn emit_run(&self, run: &str) -> InputArtifact {
+        self.emit_run_at(&self.root, run).unwrap()
+    }
+    fn emit_run_at(&self, root: &Path, run: &str) -> Result<InputArtifact> {
         let nodes: Vec<_> = self
             .request
             .node_ids
@@ -107,11 +110,18 @@ impl Fixture {
             .iter()
             .map(|n| json!({"node_id":n,"host_id":format!("controlled-{n}")}))
             .collect();
-        compiler_inputs::emit(&self.root, run, &self.request.deployment_id, 0,
-            &self.request, &self.source,
+        compiler_inputs::emit(
+            root,
+            run,
+            &self.request.deployment_id,
+            0,
+            &self.request,
+            &self.source,
             &json!({"protocol":"mycelium.qwen_live_topology.v1","nodes":nodes}),
             &json!({"run_id":run,"deployment_id":self.request.deployment_id,"observations":observations}),
-            &json!({}), &self.members.values().cloned().collect::<Vec<_>>()).unwrap()
+            &json!({}),
+            &self.members.values().cloned().collect::<Vec<_>>(),
+        )
     }
 }
 impl Drop for Fixture {
@@ -150,6 +160,64 @@ fn temporaries(root: &Path) -> Vec<PathBuf> {
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "tmp"))
         .collect()
+}
+
+#[test]
+fn compiler_storage_accepts_roots_below_a_symlinked_ancestor() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let alias = f.root.join("alias");
+    std::os::unix::fs::symlink(&f.root, &alias).unwrap();
+    let physical = f.root.join("app");
+    fs::create_dir(&physical).unwrap();
+    storage_policy(&physical, 4_000_000_000);
+    let root = alias.join("app");
+    f.source.source_root = alias.join("snapshot");
+    assert_ne!(root.canonicalize().unwrap(), root);
+    assert_ne!(
+        f.source.source_root.canonicalize().unwrap(),
+        f.source.source_root
+    );
+    let mut artifact = f.emit_run_at(&root, "linked-ancestor").unwrap();
+    artifact.produce_stage_shards(&f.members, 0.0).unwrap();
+    artifact.validate_stage_shards(&f.members, 0.0).unwrap();
+    assert_eq!(artifact.root(), physical.join("chain-runs/linked-ancestor"));
+    let ledger: Value = serde_json::from_slice(
+        &fs::read(physical.join("chain-runs").join(STORAGE_LEDGER)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ledger["entries"]["linked-ancestor"]["phase"], "retained");
+}
+
+#[test]
+fn compiler_storage_refuses_symlinks_below_trusted_roots() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let foreign = f.root.join("foreign");
+    directory(&foreign).unwrap();
+    fs::write(foreign.join("sentinel"), b"untouched").unwrap();
+    let runs = f.root.join("chain-runs");
+    std::os::unix::fs::symlink(&foreign, &runs).unwrap();
+    assert_eq!(
+        f.emit_run_at(&f.root, "refused").unwrap_err().0,
+        "compiler_directory_invalid"
+    );
+    assert_eq!(fs::read_dir(&foreign).unwrap().count(), 1);
+    fs::remove_file(runs).unwrap();
+    let mut artifact = f.emit_run("refuse-output-link");
+    artifact.produce_stage_shards(&f.members, 0.0).unwrap();
+    let shards = artifact.root().join("stage-shards");
+    let moved = f.root.join("moved-shards");
+    fs::rename(&shards, &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, &shards).unwrap();
+    assert_eq!(
+        artifact
+            .validate_stage_shards(&f.members, 0.0)
+            .unwrap_err()
+            .0,
+        "compiler_source_path_invalid"
+    );
+    assert_eq!(fs::read(foreign.join("sentinel")).unwrap(), b"untouched");
 }
 
 #[test]
