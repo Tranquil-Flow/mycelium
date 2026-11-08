@@ -150,6 +150,65 @@ fn settle(leave: &MemberLeave) {
         );
     }
 }
+#[test]
+fn completed_membership_leave_retains_failed_cleanup_for_resume_only() {
+    struct Debt {
+        calls: Vec<String>,
+        refused: bool,
+    }
+    impl Steps for Debt {
+        fn step(&mut self, name: &str) -> Result<(), Option<String>> {
+            self.calls.push(name.into());
+            if name == "cancel_work" && self.refused {
+                Err(Some("helper_reap_unproven".into()))
+            } else {
+                Ok(())
+            }
+        }
+    }
+    let dir = fresh("cleanup-debt", &json!({}));
+    let leave = MemberLeave::new(&dir, Limits::default());
+    let mut debt = Debt {
+        calls: Vec::new(),
+        refused: true,
+    };
+    let record = leave.run("instant", &mut debt, &mut Fixed).unwrap();
+    assert_eq!(
+        record["state"], "left",
+        "privacy departure is independent of cleanup"
+    );
+    assert_eq!(
+        debt.calls,
+        ["fence", "withdraw_consent", "disconnect", "cancel_work"]
+    );
+    debt.calls.clear();
+    // Reopen the durable record, as a restart does, without inventing a new leave.
+    let reopened = MemberLeave::new(&dir, Limits::default());
+    let failed = reopened.resume(&mut debt, &mut Fixed).unwrap();
+    assert!(
+        failed.is_some(),
+        "left must not discard failed cleanup debt"
+    );
+    assert_eq!(debt.calls, ["cancel_work"]);
+    debt.calls.clear();
+    debt.refused = false;
+    let completed = reopened.resume(&mut debt, &mut Fixed).unwrap().unwrap();
+    assert_eq!(debt.calls, ["cancel_work"]);
+    assert_eq!(completed["started_at"], record["started_at"]);
+    assert_eq!(completed["steps"].as_array().unwrap().len(), 4);
+    assert!(
+        completed["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["ok"] == true)
+    );
+    debt.calls.clear();
+    assert!(reopened.resume(&mut debt, &mut Fixed).unwrap().is_none());
+    assert!(debt.calls.is_empty());
+    fs::remove_dir_all(dir).unwrap();
+}
+
 fn fixture() -> Value {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/oracle_leave.json")).unwrap();
     assert_eq!(

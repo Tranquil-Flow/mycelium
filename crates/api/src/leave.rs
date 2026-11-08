@@ -34,6 +34,13 @@ pub struct TypeError;
 #[derive(Debug, PartialEq)]
 pub struct Unobservable;
 
+/// Positive cleanup evidence: an owned set was cleaned, or durably owns nothing.
+#[derive(Clone, Copy, Debug)]
+pub enum ComputeCleanup {
+    Proven,
+    NoneOwned,
+}
+
 /// A host's side of a leave that may run on a background thread (`member_leave.app_steps`). The host
 /// hands one out per leave (`Host::leave_worker`); it must own whatever it touches (shared state).
 pub trait LeaveWorker: Send + 'static {
@@ -45,6 +52,11 @@ pub trait LeaveWorker: Send + 'static {
     /// Requests still running here (`adaptive_drain.inflight_count`); `Err` = unobservable.
     fn inflight(&mut self) -> Result<i64, Unobservable> {
         Ok(0)
+    }
+    /// An explicit host proof, separate from membership departure. None means
+    /// this legacy worker has no compute-proof interface, not successful cleanup.
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
+        None
     }
     /// `time.time()`.
     fn now_seconds(&self) -> f64;
@@ -68,6 +80,11 @@ pub trait Steps {
         Ok(0)
     }
     fn handoff(&mut self) -> Option<Result<bool, Unobservable>> {
+        None
+    }
+    /// Forward the host's explicit compute proof; membership steps alone cannot
+    /// manufacture one. A refusal remains durable and retryable.
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
         None
     }
     /// `resume_leave`: keep a leave that already happened fenced (and, when `left`, not renewing).
@@ -107,10 +124,16 @@ pub struct Limits {
 }
 impl Default for Limits {
     fn default() -> Self {
+        let seconds = |id: budgets::BudgetId| {
+            id.span(budgets::Entries::ZERO)
+                .expect("fixed leave duration budget")
+                .millis() as f64
+                / 1000.0
+        };
         Self {
-            stall: 30.0,
-            cap: 120.0,
-            poll: 0.5,
+            stall: seconds(budgets::BudgetId::PyMyceliumA13MacosMemberLeaveLeaveSmoothStallSL33),
+            cap: seconds(budgets::BudgetId::PyMyceliumA13MacosMemberLeaveLeaveSmoothCapSL34),
+            poll: seconds(budgets::BudgetId::PyMyceliumA13MacosMemberLeavePollSL35),
         }
     }
 }
@@ -257,7 +280,13 @@ impl MemberLeave {
             return Ok(None);
         };
         if record["state"] == "left" {
-            return Ok(None);
+            return if cleanup_pending(&record) {
+                self.execute(record, steps, clock)
+                    .map(Some)
+                    .map_err(ResumeError::Failed)
+            } else {
+                Ok(None)
+            };
         }
         let wall = clock.wall();
         let record = self
@@ -273,9 +302,10 @@ impl MemberLeave {
         steps: &mut dyn Steps,
         clock: &mut dyn Clock,
     ) -> Result<Record, PublicError> {
+        let retrying = record["state"] == "left";
         self.step(&mut record, "fence", steps);
         let smooth = record["mode"] == "smooth";
-        if smooth && record["fallback"].is_null() {
+        if !retrying && smooth && record["fallback"].is_null() {
             self.smooth(&mut record, steps, clock)?;
         }
         if record["fallback"].is_null() && smooth {
@@ -288,12 +318,27 @@ impl MemberLeave {
         self.step(&mut record, "withdraw_consent", steps);
         self.step(&mut record, "disconnect", steps);
         self.step(&mut record, "cancel_work", steps);
+        if !record.get("compute_cleanup").is_some_and(cleanup_proven)
+            && let Some(proof) = steps.compute_cleanup()
+        {
+            record.insert("compute_cleanup".into(), match proof {
+                Ok(ComputeCleanup::Proven) => json!({"state":"proven","code":null}),
+                Ok(ComputeCleanup::NoneOwned) => json!({"state":"none_owned","code":null}),
+                Err(code) => json!({"state":"unproven","code": if code_shaped(&code) { code } else { "compute_cleanup_unproven".into() }}),
+            });
+        }
         record["state"] = Value::from("left");
         record.insert("finished_at".into(), json!(clock.wall()));
         self.save(&record)?;
         Ok(record)
     }
     fn step(&self, record: &mut Record, name: &str, steps: &mut dyn Steps) {
+        if record["steps"].as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|row| row["name"] == name && row["ok"] == true)
+        }) {
+            return;
+        }
         let row = match steps.step(name) {
             Ok(()) => json!({"name": name, "ok": true, "code": null}),
             Err(code) => {
@@ -304,7 +349,11 @@ impl MemberLeave {
             }
         };
         if let Some(Value::Array(list)) = record.get_mut("steps") {
-            list.push(row);
+            if let Some(old) = list.iter_mut().find(|row| row["name"] == name) {
+                *old = row;
+            } else {
+                list.push(row);
+            }
         }
     }
     fn smooth(
@@ -368,15 +417,35 @@ pub enum ResumeError {
     Type,
     Failed(PublicError),
 }
-/// `leave_status`: `{mode, state, fallback, handoff, steps}` of the persisted record, or null.
+fn cleanup_proven(proof: &Value) -> bool {
+    matches!(proof["state"].as_str(), Some("proven" | "none_owned")) && proof["code"].is_null()
+}
+/// A finished membership action can still owe cleanup. Do not clear its rows
+/// or issue a new leave just because the legacy membership label is `left`.
+pub fn cleanup_pending(record: &Map<String, Value>) -> bool {
+    record["steps"]
+        .as_array()
+        .is_some_and(|rows| rows.iter().any(|row| row["ok"] != true))
+        || record
+            .get("compute_cleanup")
+            .is_some_and(|proof| !cleanup_proven(proof))
+}
+/// `leave_status`: membership progress plus any explicit compute proof.
 pub fn status_view(leave: &MemberLeave) -> Result<Value, TypeError> {
     Ok(match leave.status()? {
         None => Value::Null,
         Some(record) => Value::Object(
-            ["mode", "state", "fallback", "handoff", "steps"]
-                .iter()
-                .filter_map(|key| record.get(*key).map(|v| ((*key).to_owned(), v.clone())))
-                .collect(),
+            [
+                "mode",
+                "state",
+                "fallback",
+                "handoff",
+                "steps",
+                "compute_cleanup",
+            ]
+            .iter()
+            .filter_map(|key| record.get(*key).map(|v| ((*key).to_owned(), v.clone())))
+            .collect(),
         ),
     })
 }
@@ -391,7 +460,11 @@ pub fn resume_leave(
     };
     if record["state"] == "left" {
         steps.mark(true, true);
-        return Ok(Some(record));
+        return if cleanup_pending(&record) {
+            leave.resume(steps, clock)
+        } else {
+            Ok(Some(record))
+        };
     }
     steps.mark(true, false);
     leave.resume(steps, clock)

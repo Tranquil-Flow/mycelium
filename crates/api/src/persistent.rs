@@ -130,7 +130,9 @@ pub trait Host: Send {
         Err(PublicError::new(409, "action_not_completed"))
     }
     /// `app._stop_local_contributor()`: nothing to stop without one.
-    fn local_contributor_stop(&mut self) {}
+    fn local_contributor_stop(&mut self) -> Result<(), PublicError> {
+        Ok(())
+    }
     /// `(root / 'local-contributor').exists()`.
     fn local_contributor_retained(&self) -> bool {
         false
@@ -399,6 +401,9 @@ impl crate::leave::Steps for RunnerSteps<'_> {
     fn inflight(&mut self) -> Result<i64, crate::leave::Unobservable> {
         self.0.worker.borrow_mut().inflight()
     }
+    fn compute_cleanup(&mut self) -> Option<Result<crate::leave::ComputeCleanup, String>> {
+        self.0.worker.borrow_mut().compute_cleanup()
+    }
 }
 impl crate::leave::Clock for RunnerClock<'_> {
     fn monotonic(&mut self) -> f64 {
@@ -643,12 +648,32 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
                 })
                 .map(Json::from)
         };
-        if self.leave_thread.as_ref().is_some_and(|t| !t.is_finished()) {
+        // execute publishes `left` after its last step. The OS thread may still
+        // be returning/dropping its worker; that is not an in-progress action.
+        // `left` is membership/action completion, never compute-cleanup proof.
+        if self.leave_thread.as_ref().is_some_and(|t| !t.is_finished())
+            && !matches!(leave.status(), Ok(Some(record)) if record["state"] == "left")
+        {
             return status(&leave);
         }
         let smooth = body["mode"].as_str() == Some("smooth");
         let worker = self.host.leave_worker();
         let wall = self.host.now_seconds();
+        let previous = match leave.status() {
+            Ok(record) => record,
+            Err(_) => {
+                eprintln!("leave_state_invalid: starting an explicit replacement leave");
+                None
+            }
+        };
+        if let Some(record) = previous
+            && record["state"] == "left"
+            && crate::leave::cleanup_pending(&record)
+        {
+            let runner = LeaveRunner::new(worker, &self.root);
+            leave.execute(record, &mut runner.steps(), &mut runner.clock())?;
+            return status(&leave);
+        }
         if !smooth {
             let runner = LeaveRunner::new(worker, &self.root);
             leave.execute(
@@ -1127,7 +1152,7 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
             // the consent gate of `create_local_contributor`).
             Action::LocalContributorStart => self.host.local_contributor_start(),
             Action::LocalContributorStop => {
-                self.host.local_contributor_stop();
+                self.host.local_contributor_stop()?;
                 Ok(crate::jobj! {
                     "state" => "stopped", "identity_retained" => true, "route_ready" => false,
                 })
@@ -1137,7 +1162,7 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
             // stop on a host without them; the authority's stop closes its seed runtime.
             Action::Stop => {
                 self.host.cancel_acquisition();
-                self.host.local_contributor_stop();
+                self.host.local_contributor_stop()?;
                 self.host.stop_authority();
                 Ok(crate::jobj! {
                     "stopped" => true, "identity_retained" => true, "evidence_retained" => true,

@@ -132,6 +132,9 @@ struct Core {
     demo: DemoView,
     /// `DemoApp.local_contributor`: the owner's own member (`local_contributor.py`), renewed by the loop.
     contributor: Option<ContributorState>,
+    // Serializes bootstrap side effects and cleanup; never held with Core on entry.
+    bootstrap_lifecycle: Arc<Mutex<()>>,
+    bootstrap_incarnation: Arc<()>,
     bootstrap: Option<observation::target::Worker>,
     bootstrap_failure: Option<api::bootstrap_process::CleanupFailure>,
     /// `DemoApp.run_exchange`, bound to the seed runtime it was made for (`exchange.mailbox is mailbox`).
@@ -348,6 +351,12 @@ fn session_lease(session: &Option<api::member::Session>) -> Option<f64> {
 /// `accept_pairing`). v0.1.4 does not renew at once, so the member stays `NEW` until the renewal loop's first
 /// pass (executed: `status_after_start` lifecycle `NEW`).
 fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
+    let lifecycle = core
+        .lock()
+        .map_err(|_| failure())?
+        .bootstrap_lifecycle
+        .clone();
+    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
     let (root, runtime, record, already, target, running, has_policy) = {
         let c = core.lock().map_err(|_| failure())?;
         (
@@ -363,6 +372,7 @@ fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
     if already {
         return Err(PublicError::new(400, "local_contributor_already_running"));
     }
+    observation::target::admit_cleanup_free(&root).map_err(|e| PublicError::new(409, e.0))?;
     let current = HeadlessHost {
         core: core.clone(),
         runs: None,
@@ -480,13 +490,18 @@ fn renew_contributor(core: &Shared) {
 }
 
 /// `app._stop_local_contributor()`: the membership stays retained, the live session ends.
-fn stop_local_contributor(core: &Shared) {
-    if let Err(e) = observation::target::close(core) {
-        eprintln!("local target cleanup: {}", e.0);
-    }
-    if let Ok(mut c) = core.lock() {
-        c.contributor = None;
-    }
+fn stop_local_contributor(core: &Shared) -> Result<(), PublicError> {
+    // target::close puts refused cleanup owners back. Retain their contributor
+    // too: reporting stopped or permitting a replacement would erase the debt.
+    let lifecycle = core
+        .lock()
+        .map_err(|_| failure())?
+        .bootstrap_lifecycle
+        .clone();
+    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
+    observation::target::close_locked(core).map_err(|e| PublicError::new(409, e.0))?;
+    core.lock().map_err(|_| failure())?.contributor = None;
+    Ok(())
 }
 
 // ---- the run exchange (demo_app.ensure_exchange, app.py:1245-1250)
@@ -1124,22 +1139,91 @@ struct HeadlessHost {
     /// `DemoApp.owner_run` and its driver; absent in the throwaway hosts that only read the core.
     runs: Option<Arc<Mutex<DemoRuns>>>,
 }
-/// The leave steps of a host with no model, relay or downloads: the fence and the left flag.
+/// Membership departure is not owned-worker cleanup. Only a durably empty
+/// owned set can succeed without a joined-worker cleanup port.
 struct HeadlessLeave {
     core: Shared,
 }
+impl HeadlessLeave {
+    fn none_owned(&self) -> Result<bool, String> {
+        let core = self
+            .core
+            .lock()
+            .map_err(|_| "member_leave_state_unavailable".to_owned())?;
+        if core.bootstrap.is_some()
+            || core.bootstrap_failure.is_some()
+            || core.contributor.is_some()
+            || core.compiled_workflow.is_some()
+        {
+            return Ok(false);
+        }
+        // Missing memory after restart is insufficient. Require absent durable
+        // worker/stage evidence, rejecting unreadable paths and symlink residue.
+        let contributor = core.root.join("local-contributor");
+        let native = contributor.join("native-bootstrap");
+        for path in [&contributor, &native] {
+            let absent_or_directory = match fs::symlink_metadata(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(_) => return Err("member_compute_ownership_unavailable".into()),
+                Ok(metadata) => metadata.is_dir(),
+            };
+            if !absent_or_directory {
+                return Ok(false);
+            }
+        }
+        let native_empty = match fs::read_dir(&native) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => return Err("member_compute_ownership_unavailable".into()),
+            Ok(mut entries) => entries.next().is_none(),
+        };
+        if !native_empty {
+            return Ok(false);
+        }
+        let previous = private_state::load(&core.root.join("leave-state.json"), cap())
+            .map_err(|e| e.0.to_owned())?;
+        // A removed stage is not enough to retire already-recorded cleanup debt.
+        Ok(previous.is_none_or(|record| {
+            record.get("steps").is_some_and(Value::is_array)
+                && !api::leave::cleanup_pending(&record)
+        }))
+    }
+}
 impl LeaveWorker for HeadlessLeave {
     fn step(&mut self, name: &str) -> Result<(), Option<String>> {
-        let mut core = match self.core.lock() {
-            Ok(core) => core,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        if matches!(name, "unload" | "cancel_work" | "publish_withdrawal")
+            && !self.none_owned().map_err(Some)?
+        {
+            return Err(Some(if name == "publish_withdrawal" {
+                "member_withdrawal_publication_unavailable".into()
+            } else {
+                "member_compute_cleanup_unavailable".into()
+            }));
+        }
+        let mut core = self
+            .core
+            .lock()
+            .map_err(|_| Some("member_leave_state_unavailable".into()))?;
         match name {
             "fence" => core.fenced = true,
             "disconnect" => core.left = true,
             _ => {}
         }
         Ok(())
+    }
+    fn inflight(&mut self) -> Result<i64, api::leave::Unobservable> {
+        match self.none_owned() {
+            Ok(true) => Ok(0),
+            Ok(false) | Err(_) => Err(api::leave::Unobservable),
+        }
+    }
+    fn compute_cleanup(&mut self) -> Option<Result<api::leave::ComputeCleanup, String>> {
+        Some(self.none_owned().and_then(|empty| {
+            if empty {
+                Ok(api::leave::ComputeCleanup::NoneOwned)
+            } else {
+                Err("member_compute_cleanup_unavailable".into())
+            }
+        }))
     }
     fn now_seconds(&self) -> f64 {
         SystemClock::default().wall()
@@ -1386,8 +1470,8 @@ impl Host for HeadlessHost {
     fn local_contributor_start(&mut self) -> Result<Json, PublicError> {
         start_local_contributor(&self.core)
     }
-    fn local_contributor_stop(&mut self) {
-        stop_local_contributor(&self.core);
+    fn local_contributor_stop(&mut self) -> Result<(), PublicError> {
+        stop_local_contributor(&self.core)
     }
     fn local_contributor_retained(&self) -> bool {
         self.with(|c| contributor_dir(&c.root).exists())
@@ -2411,6 +2495,8 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
         pending: PendingWindows::default(),
         demo: DemoView::default(),
         contributor: None,
+        bootstrap_lifecycle: Arc::new(Mutex::new(())),
+        bootstrap_incarnation: Arc::new(()),
         bootstrap: None,
         bootstrap_failure: None,
         exchange: None,
@@ -2435,14 +2521,16 @@ fn resume_interrupted_leave(core: &Shared) {
                     .map(|_| ())
                     .map_err(|e| Some(e.0.to_owned()));
             }
-            if let Ok(mut c) = self.0.lock() {
-                match name {
-                    "fence" => c.fenced = true,
-                    "disconnect" => c.left = true,
-                    _ => {}
-                }
+            HeadlessLeave {
+                core: self.0.clone(),
             }
-            Ok(())
+            .step(name)
+        }
+        fn compute_cleanup(&mut self) -> Option<Result<api::leave::ComputeCleanup, String>> {
+            HeadlessLeave {
+                core: self.0.clone(),
+            }
+            .compute_cleanup()
         }
         fn mark(&mut self, fence: bool, left: bool) {
             if let Ok(mut c) = self.0.lock() {
@@ -2457,11 +2545,13 @@ fn resume_interrupted_leave(core: &Shared) {
     };
     if target {
         let leave = MemberLeave::new(&root, Limits::default());
-        drop(resume_leave(
+        if let Err(error) = resume_leave(
             &leave,
             &mut Resume(core, root.clone()),
             &mut SystemClock::default(),
-        ));
+        ) {
+            eprintln!("member_leave_resume_failed: {error:?}");
+        }
     }
 }
 
