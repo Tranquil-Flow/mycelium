@@ -60,9 +60,12 @@ impl Forwarder {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let thread = std::thread::spawn(move || {
+            // Every pipe is owned: on stop both sockets are shut down, which ends
+            // the copies, and each copy thread is joined.
+            let mut pipes: Vec<(std::net::TcpStream, std::thread::JoinHandle<()>)> = Vec::new();
             for incoming in listener.incoming() {
                 if flag.load(Ordering::SeqCst) {
-                    return;
+                    break;
                 }
                 let Ok(client) = incoming else { continue };
                 if !client.peer_addr().is_ok_and(|p| policy.allows(p.ip())) {
@@ -75,7 +78,8 @@ impl Forwarder {
                     (client.try_clone().unwrap(), server.try_clone().unwrap()),
                     (server, client),
                 ] {
-                    std::thread::spawn(move || {
+                    let held = from.try_clone().unwrap();
+                    let copy = std::thread::spawn(move || {
                         if let Err(e) = std::io::copy(&mut from, &mut to) {
                             eprintln!("seed forwarder copy ended: {e}");
                         }
@@ -83,7 +87,15 @@ impl Forwarder {
                             eprintln!("seed forwarder shutdown: {e}");
                         }
                     });
+                    pipes.push((held, copy));
                 }
+            }
+            for (stream, copy) in pipes {
+                // NotConnected means the copy already finished both directions.
+                if let Err(e) = stream.shutdown(std::net::Shutdown::Both) {
+                    eprintln!("seed forwarder close: {e}");
+                }
+                copy.join().unwrap();
             }
         });
         Self {
