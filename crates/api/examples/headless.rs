@@ -56,6 +56,8 @@ use api::{
 };
 #[path = "headless/compiler.rs"]
 mod compiler;
+#[path = "headless/listener_wait.rs"]
+mod listener_wait;
 #[path = "headless/observation.rs"]
 mod observation;
 #[cfg(test)]
@@ -2764,7 +2766,12 @@ fn run() -> Result<(), String> {
                             }
                             return;
                         }
-                        thread::sleep(span(BudgetId::OwnerPoll));
+                        if let Err(error) =
+                            listener_wait::wait(&listener, span(BudgetId::OwnerPoll))
+                        {
+                            eprintln!("headless_listener_wait_failed: {:?}", error.kind());
+                            return;
+                        }
                     }
                     Err(_) => return,
                 }

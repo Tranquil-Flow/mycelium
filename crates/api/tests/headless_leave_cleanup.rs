@@ -39,6 +39,7 @@ fn exe_dir() -> PathBuf {
     profile_dir().with_file_name("release")
 }
 fn build() {
+    let measured = Instant::now();
     let target = exe_dir();
     let target = target.parent().expect("target");
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
@@ -48,14 +49,15 @@ fn build() {
     command.arg("--manifest-path").arg(manifest);
     command.arg("--target-dir").arg(target);
     let output = command.output().expect("cargo is runnable");
+    eprintln!("leave-profile build {:?}", measured.elapsed());
     assert!(
         output.status.success(),
         "nested build failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
-/// Every test here creates a swarm (RSA-2048 TLS generation) and runs real launchers for a minute: one at a
-/// time keeps the host load of this file predictable.
+/// Each test owns real launcher processes and durable membership; serialize
+/// within this binary so their setup and cleanup do not contend with each other.
 fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock()
@@ -158,6 +160,7 @@ impl Instance {
         env: &[(&str, String)],
         observe: impl FnOnce(&mut Child) -> std::io::Result<String>,
     ) -> Self {
+        let measured = Instant::now();
         fs::create_dir_all(root).expect("root");
         fs::set_permissions(root, fs::Permissions::from_mode(0o700)).expect("mode");
         let mut command = Command::new(exe_dir().join("examples/headless"));
@@ -234,6 +237,7 @@ impl Instance {
             .and_then(|c| c.split(';').next())
             .expect("session cookie")
             .to_owned();
+        eprintln!("leave-profile launch {:?}", measured.elapsed());
         me
     }
     fn raw(
@@ -243,6 +247,7 @@ impl Instance {
         body: &[u8],
         headers: &[(&str, &str)],
     ) -> (u16, String, Vec<u8>) {
+        let measured = Instant::now();
         let limit = budget(BudgetId::WorkerStartup);
         let mut stream =
             TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, self.port)), limit)
@@ -299,6 +304,10 @@ impl Instance {
             .nth(1)
             .and_then(|s| s.parse().ok())
             .expect("status");
+        eprintln!(
+            "leave-profile http {method} {path} {:?}",
+            measured.elapsed()
+        );
         (status, head, reply[split + 4..].to_vec())
     }
     fn get(&self, path: &str) -> (u16, Value) {
@@ -394,6 +403,7 @@ impl Instance {
 }
 impl Drop for Instance {
     fn drop(&mut self) {
+        let measured = Instant::now();
         kill_process(self.pid(), Signal::TERM).unwrap_or_default();
         let deadline = Instant::now() + patience();
         while self.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
@@ -409,6 +419,7 @@ impl Drop for Instance {
             "orphan {}",
             self.child.id()
         );
+        eprintln!("leave-profile reap {:?}", measured.elapsed());
         if !self.keep_state {
             fs::remove_dir_all(&self.root).unwrap_or_default();
         }
