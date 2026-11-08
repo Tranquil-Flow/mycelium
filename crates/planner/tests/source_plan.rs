@@ -61,6 +61,41 @@ impl Fixture {
 }
 
 #[test]
+fn stage_shards_accept_a_trusted_root_below_a_symlinked_ancestor() {
+    let f = Fixture::new(rows().remove(0));
+    let physical = f.root.join("physical");
+    fs::create_dir(&physical).unwrap();
+    let trusted = physical.join("trusted");
+    fs::create_dir(&trusted).unwrap();
+    let alias = f.root.join("alias");
+    std::os::unix::fs::symlink(&physical, &alias).unwrap();
+    let root = alias.join("trusted");
+    assert_ne!(root.canonicalize().unwrap(), root);
+    let produced = f.emit_shards(&f.request, &root.join("produced")).unwrap();
+    assert_eq!(produced.files.len(), f.request.node_ids.len());
+    for (name, file) in &produced.files {
+        assert_eq!(
+            fs::metadata(trusted.join("produced").join(name))
+                .unwrap()
+                .len(),
+            file.metadata().unwrap().len()
+        );
+    }
+    let foreign = f.root.join("foreign");
+    fs::create_dir(&foreign).unwrap();
+    fs::write(foreign.join("sentinel"), b"untouched").unwrap();
+    std::os::unix::fs::symlink(&foreign, root.join("planted")).unwrap();
+    assert_eq!(
+        f.emit_shards(&f.request, &root.join("planted"))
+            .unwrap_err()
+            .code,
+        "stage_shard_output_invalid"
+    );
+    assert_eq!(fs::read(foreign.join("sentinel")).unwrap(), b"untouched");
+    assert_eq!(fs::read_dir(foreign).unwrap().count(), 1);
+}
+
+#[test]
 fn cancellation_after_reservation_prevents_shard_writes() {
     let f = Fixture::new(rows().remove(0));
     let output = f.root.join("cancelled-output");
