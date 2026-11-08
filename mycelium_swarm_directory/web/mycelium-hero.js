@@ -3,7 +3,8 @@
  * Geometry is built once per size/palette. Only fractional tips and active bands
  * animate. The returned disposer owns all RAF, observer and raster resources.
  */
-import { rng, wander, bridgeRoot, measurePaths } from "./mycelium-geometry.js";
+import { rng, wander, dendriteWalk, bridgeRoot, measurePaths } from "./mycelium-geometry.js";
+import { extendFieldGraph } from "./mycelium-field.js";
 export function createHero(canvas, { stage, state, reduce }) {
   let pulseCleanup = () => {};
   function drawWeb(c) {
@@ -39,6 +40,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       paths = [],
       CAP = 350000;
     let branchSerial = 0;
+    const liveFusions = [];
     function vertex(x, y, source) {
       const v = { x, y, source, id: vs.length, edges: [] };
       vs.push(v);
@@ -103,16 +105,24 @@ export function createHero(canvas, { stage, state, reduce }) {
       old = false,
       birth = 0,
       branch = null,
+      canFuse = true,
     ) {
       branch = branch ?? branchSerial++;
-      const points = wander(p, angle, len, R),
+      const points = (birth ? dendriteWalk : wander)(p, angle, len, R),
         poly = [p],
         fork1 = 0.2 + R() * 0.22,
         fork2 = 0.55 + R() * 0.25;
       let a = p;
       for (let j = 1; j < points.length; j++) {
-        const point = points[j],
-          b = vertex(point.x, point.y, p.source),
+        const point = points[j];
+        // A growing tip actually terminates at an existing graph vertex.
+        // Re-splits share that vertex, so pulse routes also cross the junction.
+        let fuse = null;
+        if (birth && canFuse && j > 8) {
+          const list = grid.get(`${Math.floor(point.x / cell)},${Math.floor(point.y / cell)}`) || [];
+          fuse = list.find(v => v !== p && Math.hypot(v.x-point.x,v.y-point.y)<2.4);
+        }
+        const b = fuse || vertex(point.x, point.y, p.source),
           seg = edge(
             a,
             b,
@@ -125,6 +135,16 @@ export function createHero(canvas, { stage, state, reduce }) {
           );
         if (seg) seg.branch = branch;
         poly.push(b);
+        if (fuse) {
+          const arrival = birth + j * .65;
+          const heading = Math.atan2(b.y-a.y,b.x-a.x);
+          const splitStart = paths.length;
+          for (const side of [-1, 1]) grow(b, heading + side * (.3+R()*.35),
+            22+R()*32, width*.62, alpha*.9, 1, tone, old, arrival+1.2, branch, false);
+          liveFusions.push({vertex:b, branch, birth:arrival, splitStart, splitEnd:paths.length});
+          a = b;
+          break;
+        }
         if (
           depth > 0 &&
           (j === Math.floor(points.length * fork1) ||
@@ -142,6 +162,7 @@ export function createHero(canvas, { stage, state, reduce }) {
             old,
             birth ? birth + j * 0.65 + 1.2 : 0,
             branch,
+            canFuse,
           );
         a = b;
       }
@@ -435,6 +456,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           3 + gapR() * 42,
         );
       }
+    const field = extendFieldGraph({vs,ss,paths,vertex,edge,nodes,w,h});
     // Static geometry is rasterised ONCE. No periodic whole-mat redraw or geometry rebuild.
     const ctx = c.getContext("2d"),
       oldLayer = document.createElement("canvas"),
@@ -470,6 +492,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     oldx.globalCompositeOperation = light ? "source-over" : "lighter";
     const growing = [];
     for (const seg of ss) {
+      if (seg.field) continue;
       if (seg.birth) growing.push(seg);
       else stroke(seg.old ? oldx : ctx, seg);
     }
@@ -517,8 +540,10 @@ export function createHero(canvas, { stage, state, reduce }) {
           (((seconds * 4.212 + phaseSeed * period) % period) + period) % period;
       // All roots are uniformly phase-distributed; 1.2 x R8's 3.51 clock.
       const local = phase - 12 - (birth - (branchStart.get(branch) ?? birth)),
-        out = smooth((period - 14 - phase) / 25),
-        q = Math.max(0, Math.min(local, period - 12 - phase)),
+        out = smooth((period - 8 - phase - (birth - (branchStart.get(branch) ?? birth)) * .16) / 14),
+        // Never run the drawn endpoint backwards. Old branches dim in place;
+        // later subapical forks fade first, then their parent. Reset only at zero.
+        q = Math.max(0, local),
         eased = q < 2 ? (q * q) / 4 : q - 1,
         extent = (eased / 0.65) * 3.5;
       return { extent, alpha: smooth(local / 2.5) * out, phase, local };
@@ -603,6 +628,17 @@ export function createHero(canvas, { stage, state, reduce }) {
         growthCount += Math.ceil((p.points.length - 1) * u);
         maxStep = Math.max(maxStep, ((3.5 / 0.65) * 4.212) / 60);
       }
+      for (const fusion of liveFusions) {
+        const v = life(fusion.branch, fusion.birth, t);
+        if (v.local < 0 || v.alpha <= 0) continue;
+        const q = fusion.vertex;
+        gx.globalAlpha = v.alpha * .65; gx.fillStyle = core;
+        gx.beginPath(); gx.arc(q.x,q.y,1.05,0,Math.PI*2); gx.fill();
+        // A little extra material at the joined strand, not a travelling bead.
+        const seg = ss[q.edges[0]];
+        gx.lineWidth = Math.min(1.5,seg.width+.45); gx.strokeStyle = glow;
+        gx.beginPath(); gx.moveTo(seg.a.x,seg.a.y); gx.lineTo(seg.b.x,seg.b.y); gx.stroke();
+      }
       // Breathing and old-fibre fade are compositor opacity, not costly bitmap recopy.
       c.style.opacity = reduce.matches
         ? ".88"
@@ -635,6 +671,18 @@ export function createHero(canvas, { stage, state, reduce }) {
       light,
       blooms,
       growthFraction,
+    };
+    window.__fusionEvents = liveFusions.map(f => ({x:f.vertex.x,y:f.vertex.y,branch:f.branch,birth:f.birth,
+      degree:f.vertex.edges.length, splits:paths.slice(f.splitStart,f.splitEnd).filter(p=>p.points[0]===f.vertex).length}));
+    window.__dendriticProbe = (t) => {
+      let activeTips=0, regressingTips=0;
+      for(const p of live) {
+        const a=life(p.branch,p.birth,t), b=life(p.branch,p.birth,t+1/60);
+        if(a.alpha>0 && a.extent>0 && a.extent<p.length)activeTips++;
+        if(a.alpha>.8 && b.alpha>.8 && b.phase>=a.phase && b.extent<a.extent)regressingTips++;
+      }
+      return {activeTips,regressingTips,fusions:liveFusions.length,
+        connectedSplits:liveFusions.filter(f=>paths.slice(f.splitStart,f.splitEnd).filter(p=>p.points[0]===f.vertex).length===2).length};
     };
     window.__liveProbe = (t) =>
       live.map((p) => {
@@ -683,6 +731,11 @@ export function createHero(canvas, { stage, state, reduce }) {
       };
     };
     const routes = buildSignalRoutes(graph);
+    for (const r of routes) {
+      r.fieldList = r.list.filter(v=>ss[v.segment].field);
+      r.liveList = r.list.filter(v=>ss[v.segment].birth && !ss[v.segment].field);
+    }
+    window.__myceliumScene = {graph,field,routes,activeTrips:()=>[]};
     Object.assign(c.dataset, {
       segments: ss.length,
       fusions,
@@ -841,7 +894,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           tileY = Math.floor((s.a.y + s.b.y) / 2 / 64),
           level = highway ? 5 : Math.min(4, Math.floor(amp * 5)),
           type = highway ? "cord" : s.explorer ? "explorer" : "fine",
-          key = `${tileX},${tileY}|${level}|${s.birth ? Math.ceil(s.birth) : 0}|${s.explorer ? "outer" : ""}`;
+          key = `${tileX},${tileY}|${level}|${s.birth ? Math.ceil(s.birth) : 0}|${s.explorer ? "outer" : ""}|${s.field ? "field" : "hero"}`;
         let bucket = buckets.get(index);
         if (!bucket) {
           bucket = new Map();
@@ -862,6 +915,7 @@ export function createHero(canvas, { stage, state, reduce }) {
             amp: highway ? 1 : (level + 0.5) / 5,
             type,
             birth: s.birth,
+            field: s.field,
             end: null,
           };
           bucket.set(key, item);
@@ -889,7 +943,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         b.image = { width: 0, height: 0 };
         b.bytes = 0;
         for (const item of b.values()) {
-          if (item.birth) continue;
+          if (item.birth || item.field) continue;
           if (!groups.has(item.tile)) groups.set(item.tile, []);
           groups.get(item.tile).push(item);
         }
@@ -1018,6 +1072,10 @@ export function createHero(canvas, { stage, state, reduce }) {
       from = route.to;
     }
     const period = start + 10;
+    window.__myceliumScene.activeTrips = t => {
+      const elapsed=t%period;
+      return trips.map(trip=>({route:trip.route,age:elapsed-trip.start})).filter(trip=>trip.age>=0&&trip.age<=trip.route.arrivalMax+4.2);
+    };
     const tileBytes = routes.reduce(
       (n, r) =>
         n +
@@ -1089,6 +1147,14 @@ export function createHero(canvas, { stage, state, reduce }) {
               );
             drawn++;
             // Live tips retain their own slow growth; only already-mature graph edges glow.
+          }
+          for (const item of r.liveList) {
+            const dt=age-item.arrival,s=graph.ss[item.segment];
+            if(dt<0||dt>4.2)continue;
+            const mature=graph.growthFraction(s,seconds);if(mature<.95)continue;
+            const env=dt<1.05?Math.sin(dt/1.05*Math.PI/2)**2:Math.cos((dt-1.05)/3.15*Math.PI/2)**2;
+            x.globalAlpha=env*item.amp*.65;x.strokeStyle=core;x.lineWidth=Math.max(.45,s.width*1.5);
+            x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();
           }
           for (const landing of r.landings) {
             const landed = age - landing.time;

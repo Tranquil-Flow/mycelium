@@ -22,7 +22,7 @@ class Copy(HTMLParser):
 
 def test_owner_directed_copy_is_pinned_except_hue_controls():
     web=Path(__file__).resolve().parents[2]/'mycelium_swarm_directory/web'
-    expected={'apex.html': 'e9841530bbf782cd8d88a7109f1cb89ae5c0f3aad5337a0cdd455025d572a4c0', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
+    expected={'apex.html': '165b9b745b5df78d83ce8f3328f63392d991ee6b7addc491e40492df2ee1858c', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
     for name, digest in expected.items():
         parser=Copy(); parser.feed((web/name).read_text())
         assert hashlib.sha256(''.join(parser.parts).encode()).hexdigest() == digest, name

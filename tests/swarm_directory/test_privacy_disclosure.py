@@ -35,7 +35,7 @@ def test_the_page_footer_no_longer_claims_unqualified_no_logs():
 
 
 def test_the_directory_privacy_note_and_demo_label_name_cloudflare():
-    assert 'Cloudflare' in PRIVACY_NOTE and 'seen by this swarm' in PRIVACY_NOTE
+    assert 'Cloudflare' in PRIVACY_NOTE and 'devices can read your prompts and replies' in PRIVACY_NOTE
     assert 'Cloudflare' in server.DEMO_LABEL
     assert 'directory never sees prompts' in PRIVACY_NOTE
 

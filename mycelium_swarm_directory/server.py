@@ -22,6 +22,7 @@ import argparse
 import json
 import re
 import threading
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,9 @@ from .crypto import verify
 from .directory import Directory, Limits, PRIVACY_NOTE
 from .store import SqliteStore
 
+STAGING_BANNER = ('<aside id="staging-banner" class="staging-banner" aria-label="Staging notice">'
+                  '<strong>Staging · sample data</strong> · Sample swarms and metrics are fictional. '
+                  'No sample model is running; sample chat is unavailable.</aside>').encode()
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
 ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
@@ -86,6 +90,8 @@ class DirectoryServer(ThreadingHTTPServer):
         super().__init__(('127.0.0.1', port), _Handler)
         self.origin = 'http://127.0.0.1:%d' % self.server_port
         self.public_origin = public_origin or self.origin
+        self.staging_samples = (os.environ.get('MYCELIUM_STAGING_SAMPLES') == '1'
+                                and self.public_origin == 'https://next.mycelium.now')
         self.thread: threading.Thread | None = None
 
     def process_request(self, request, client_address):
@@ -157,7 +163,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(404, {'error': 'route_unknown'})
         if path in ASSETS:
             name, kind = ASSETS[path]
-            return self._send(200, (WEB / name).read_bytes(), kind)
+            raw = (WEB / name).read_bytes()
+            if self.server.staging_samples and name in ('apex.html', 'index.html'):
+                raw = raw.replace(b'<header class="top">', STAGING_BANNER + b'<header class="top">', 1)
+            return self._send(200, raw, kind)
         if path == API + '/config':
             return self._json(200, {'directory': self.server.public_origin, 'privacy': PRIVACY_NOTE,
                                     'demo': DEMO_LABEL, 'download': self.server.download, 'limits': {'max_prompt_chars': docs.MAX_PROMPT_CHARS,

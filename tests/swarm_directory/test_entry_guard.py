@@ -225,4 +225,4 @@ def test_state_is_public_and_bounded(world):
     status, state = world['gateway'].handle('/swarm-entry/v1/state', b'{}', 'ip:1')
     assert status == 200 and state['swarm_id'] == SWARM and state['access_mode'] == 'request'
     assert state['available'] is True and state['limits']['max_new_tokens'] == 256
-    assert 'seen by this swarm' in state['privacy']
+    assert 'devices can read your prompts and replies' in state['privacy']

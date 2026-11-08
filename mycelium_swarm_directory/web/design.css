@@ -188,6 +188,8 @@ button {
   min-height: 6.6em;
 }
 .hero-art {
+  /* Offscreen source rasters: the viewport scene is the sole visible canvas. */
+  visibility: hidden;
   position: absolute;
   inset: 0 -44px;
   z-index: -1;
@@ -224,14 +226,14 @@ button {
   height: 100%;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.42;
+  opacity: 1;
 }
 @media (prefers-color-scheme: light) {
   .pulse-canvas {
     mix-blend-mode: multiply;
   }
   .page-mycelium {
-    opacity: 0.19;
+    opacity: 1;
   }
 }
 .apex-now {
@@ -266,6 +268,52 @@ button {
 }
 .apex-steps {
   gap: 22px;
+}
+.staging-banner {
+  position: relative;
+  z-index: 2;
+  padding: 10px 18px;
+  text-align: center;
+  background: var(--card);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.goals-heading {
+  margin: 36px 0 8px;
+  font-size: 24px;
+}
+.goal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 36px;
+  margin-top: 28px;
+}
+.goal-grid article {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.goal-grid h4 {
+  font-size: 20px;
+  font-weight: 550;
+  margin: 0 0 12px;
+}
+.apex .goal-grid p {
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 10px 0;
+}
+.goal-today {
+  background: var(--card);
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+@media (max-width: 640px) {
+  .goal-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
 }
 .apex .card h3 {
   font-size: 18px;

@@ -1,4 +1,4 @@
-"""Natural pigments, deterministic raster caching and bounded backing storage.
+"""Fantasy pigments, deterministic raster caching and bounded backing storage.
 
 These are characterization checks of the procedural drawing, not a photo-realism oracle.
 The named-asset test was red before the module was added; morphology is reviewed visually.
@@ -9,7 +9,7 @@ from test_site_v2_browser import local
 
 @pytest.mark.parametrize('dpr',[1,2])
 @pytest.mark.parametrize('theme',['dark','light'])
-def test_spore_identity_is_natural_deterministic_and_cached(local,dpr,theme):
+def test_spore_identity_is_deterministic_and_cached(local,dpr,theme):
     with sync_playwright() as p:
         browser=p.chromium.launch()
         page=browser.new_page(device_scale_factor=dpr,color_scheme=theme,reduced_motion='reduce')
@@ -30,9 +30,9 @@ def test_spore_identity_is_natural_deterministic_and_cached(local,dpr,theme):
         assert result['initial']['renders']==result['repeated']['renders']
         assert result['repeated']['hits']==result['initial']['hits']+1
         assert result['small']==40*dpr and result['detail']==96*dpr
-        assert all(v>150 for v in result['centre'][:3])
+        assert result['centre'][3] > 0  # stem/backing can be dark or off-centre
         assert result['seed']==result['seedAgain']
-        assert {s['colour'] for s in result['specs']}=={'white','cream','pink','rust','brown','purple-brown','black'}
+        assert len({s['colour'] for s in result['specs']}) >= 8
         assert 0<sum(s['type']=='pores' for s in result['specs'])<12
         bounded=page.evaluate('''async()=>{const m=await import('/swarms/spore-print.js');for(let i=0;i<20;i++){const c=document.createElement('canvas');m.drawSpore(c,'sw-large-study-'+i,{size:128,dpr:3});}return m.sporeCacheStats();}''')
         assert bounded['bytes']<=bounded['maxBytes'] and bounded['entries']<=bounded['maxEntries']

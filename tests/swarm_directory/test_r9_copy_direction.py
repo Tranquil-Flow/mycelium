@@ -11,7 +11,10 @@ def test_current_platforms_are_explicit_only_where_action_requires_them():
         assert part.count(TODAY)==1
         assert 'at least two devices' in part
     home=(ROOT/'apex.html').read_text()
-    assert 'Apple silicon' not in home and 'Macs' not in home
+    # Current support is now also adjacent to the aspirations, never hidden.
+    assert home.count('Apple silicon Macs') == 2
+    outside = home.split('<div class="goal-grid">')[0] + home.split('<div class="goal-grid">', 1)[1].split('</div></section>', 1)[1]
+    assert 'Macs' not in outside
     assert 'at least two devices' in home
 
 def test_vision_is_direction_not_current_platform_or_privacy_promise():

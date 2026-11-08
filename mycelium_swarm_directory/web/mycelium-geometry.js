@@ -79,6 +79,19 @@ function rootWalk(p, angle, len, R) {
 function wander(p, angle, len, R) {
   return rootWalk(p, angle, len, R);
 }
+// Growing tips need persistent, modest heading changes, not the old walk's
+// forced bends to satisfy a straightness ceiling. Coordinates are laid once.
+function dendriteWalk(p, angle, len, R) {
+  const n = Math.max(2, Math.ceil(len / 3.5)), step = len / n, points = [p];
+  let heading = angle, turn = 0, run = 0;
+  for (let i = 0; i < n; i++) {
+    if (run-- <= 0) { run = 3 + Math.floor(R() * 6); turn = (R() - .5) * .065; }
+    heading += turn + (R() - .5) * .08;
+    const last = points.at(-1);
+    points.push({x:last.x + Math.cos(heading)*step, y:last.y + Math.sin(heading)*step});
+  }
+  return points;
+}
 function bridgeRoot(a, b, R) {
   const len = Math.hypot(b.x - a.x, b.y - a.y),
     angle = Math.atan2(b.y - a.y, b.x - a.x),
@@ -172,4 +185,4 @@ function measurePaths(paths) {
     ]),
   );
 }
-export { rng, setup, rootWalk, wander, bridgeRoot, measurePaths };
+export { rng, setup, rootWalk, wander, dendriteWalk, bridgeRoot, measurePaths };

@@ -128,7 +128,7 @@ def _step_02_every_swarm_is_listed_with_live_status(world):
     assert rows[a_id]['status'] == 'serving' and rows[a_id]['members'] == 2
     assert rows[a_id]['access_mode'] == 'request' and rows[a_id]['entry_origin'] == world['a']['proxy'].origin
     assert rows[world['b']['id']]['status'] == 'serving' and rows[world['b']['id']]['access_mode'] == 'open'
-    assert all('seen by this swarm' in row['privacy'] for row in rows.values())
+    assert all('devices can read your prompts and replies' in row['privacy'] for row in rows.values())
 
 
 def _step_03_request_access_owner_approves_in_app_and_chat_returns_tokens(world):

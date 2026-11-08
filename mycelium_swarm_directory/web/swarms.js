@@ -189,6 +189,8 @@ async function directory(path, doc) {
 }
 async function entry(origin, route, doc) {
   if (!origin || new URL(origin).origin === location.origin) throw new Error('entry_is_directory');
+  // Reserved invalid entries are unreachable: do not leak even a DNS request.
+  if (new URL(origin).hostname.endsWith('.invalid')) throw new Error('entry_not_published');
   const response = await fetch(origin + '/swarm-entry/v1/' + route, {method: 'POST', mode: 'cors', cache: 'no-store',
     signal: AbortSignal.timeout(12000),
     credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
@@ -260,7 +262,7 @@ function renderSwarm(s) {
     el('p', {class: 'desc'}, s.description || 'A model running on devices people choose to share.'),
     el('div', {class: 'stats'}, ...[['macs','Devices','Reported by the swarm'], ['reported_speed','Decode p50','Self-reported by the owner app'], ['ttft','First token p50','Self-reported by the owner app'], ['hop','Hop RTT','Largest recent RTT: consecutive-stage transport estimate, or owner-to-device network round trip (probe), including mailbox polling and health-command execution. See detail for source, link, sample count and age. Not one-way latency.']].map(([key,label,source]) =>
       el('div', {class: 'stat', title: source}, el('div', {class: 'k'}, label), el('div', {class: 'v', 'data-stat': key}, '—')))),
-    el('p', {class:'card-performance-note muted'}, 'App stats · self-reported'),
+    el('p', {class:'card-performance-note muted'}, document.getElementById('staging-banner') && s.entry_origin?.endsWith('.invalid') ? 'Sample · simulated stats, not measurements' : 'App stats · self-reported'),
     el('p', {class: 'card-fresh muted'}, el('span', {'data-card-fresh': ''}), el('span', {'data-card-quota': ''})),
     el('div', {class: 'foot'}, el('span', {class: 'who'}, 'Owner ', el('span', {class: 'owner-chip', 'data-card-owner': ''})),
       el('button', {type: 'button', 'data-open-chat': '', on: () => openChat(currentSwarm(s.swarm_id))}, 'Chat')),

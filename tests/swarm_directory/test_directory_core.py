@@ -51,7 +51,7 @@ def test_create_and_list_shows_every_swarm_with_public_fields(env):
     assert row['name'] == 'Berlin coworking' and row['model'] == 'Qwen/Qwen3-0.6B'
     assert row['owner_fingerprint'] == fingerprint(alice.public_key)
     assert row['status'] == 'offline' and row['members'] == 0 and row['access_mode'] == 'request'
-    assert row['privacy'] == PRIVACY_NOTE and 'seen by this swarm' in PRIVACY_NOTE
+    assert row['privacy'] == PRIVACY_NOTE and 'devices can read your prompts and replies' in PRIVACY_NOTE
     assert rows['sw-bbbbbbbbbbbbbbbbbbbb']['access_mode'] == 'invite'
     # the signed record travels with the listing so clients verify it themselves
     assert row['record']['sig'] and row['record']['owner_key'] == alice.public_key
