@@ -309,11 +309,18 @@ impl Executor for RouteExecutor {
                 text,
             });
         }
+        #[cfg(test)]
+        tests::between_locks(&self.observed);
         o = self
             .observed
             .state
             .lock()
             .map_err(|_| error("joined_route_poisoned"))?;
+        // Tokens published after the first read are delivered before any
+        // terminal decision: completion never truncates the stream.
+        if o.tokens.len() > self.taken {
+            return Ok(Execution::Pending);
+        }
         if let Some(code) = o.failure {
             return Err(error(code));
         }
@@ -967,5 +974,77 @@ impl Host for RouteHost {
             owner_token: app_host::hex(&app_host::random(32)?),
             excluded_placements: vec![],
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    //! Deterministic interleavings of the executor's observation of carrier
+    //! state. The hook runs at the exact point between the token read and the
+    //! terminal read inside `poll`, so no timing or sleep is involved.
+    use super::*;
+    use std::cell::RefCell;
+    type Hook = Box<dyn FnMut(&RouteHandle)>;
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+    }
+    pub(super) fn between_locks(observed: &RouteHandle) {
+        HOOK.with(|h| {
+            if let Some(hook) = h.borrow_mut().as_mut() {
+                hook(observed);
+            }
+        });
+    }
+    struct Text;
+    impl Codec for Text {
+        fn encode(&self, _: &str) -> Result<Vec<u32>, PublicError> {
+            Ok(vec![])
+        }
+        fn decode(&self, token: u32) -> Result<String, PublicError> {
+            Ok(format!("t{token}"))
+        }
+    }
+    fn detached(observed: RouteHandle) -> RouteExecutor {
+        RouteExecutor {
+            message: json!({"stages":[]}),
+            commands: None,
+            observed,
+            pending: VecDeque::new(),
+            taken: 0,
+            codec: Arc::new(Text),
+            path: None,
+            teardown_sent: false,
+            thread: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    /// N1: the carrier publishes the final token and then completion between the
+    /// executor's two observations. The stream must still deliver that token.
+    #[test]
+    fn final_token_published_between_observations_is_never_lost() {
+        let observed: RouteHandle = Arc::new(RouteWatch::default());
+        let mut executor = detached(observed.clone());
+        let mut fired = false;
+        HOOK.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move |o: &RouteHandle| {
+                if !fired {
+                    fired = true;
+                    let mut s = o.state.lock().unwrap();
+                    s.tokens.push(7);
+                    s.token_times_ms.push(0.0);
+                    drop(s);
+                    o.state.lock().unwrap().completed = true;
+                }
+            }));
+        });
+        let mut delivered = Vec::new();
+        for _ in 0..4 {
+            match executor.poll("r").unwrap() {
+                Execution::Token { token_id, .. } => delivered.push(token_id),
+                Execution::Pending => {}
+                Execution::Completed => break,
+            }
+        }
+        HOOK.with(|h| h.borrow_mut().take());
+        assert_eq!(delivered, vec![7], "completed before every token was taken");
     }
 }
