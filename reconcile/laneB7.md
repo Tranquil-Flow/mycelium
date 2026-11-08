@@ -57,4 +57,20 @@ This is a verified sub-boundary WITHIN phase 2, not phase 2 completion:
    remain blocked on the actual serving composition. Never use N0 as a shortcut.
 
 No demonstrated need to change Evis-reserved behavior; these are implementation
-follow-ups, not a request for wider permission. Final gates are reported separately.
+follow-ups, not a request for wider permission.
+
+## Final precursor gates (code f9677be)
+
+- Six-package merge: 1075/1075 passed, 48 skipped (347.810 s tests; 713 s command).
+- `cargo xtask quick --base m4/main`: 1924/1924 passed, 131 skipped; 16 affected
+  crates, no exclusions (138.705 s tests; 949 s command). No RU-053 re-pin.
+- Headless 28 passed/4 ignored. Default and Metal all-target clippy -D warnings,
+  fmt and lint passed; lint 1280 files, zero violations.
+- Final logs contain no failed/leaked/timed-out test diagnostic. Exact lane-target
+  process inventory and B7 fixture-root inventory are both empty; final disk 35 GiB.
+- Durable raw logs, commands and parsed receipt live outside the repo at
+  `../mycelium-m4-program/qualification/laneB7-f9677be/`.
+- This precursor is gate-qualified for review. Requested B7 serving is INCOMPLETE;
+  no model two-node gate, reference comparison or native Stop/leave was executed.
+  TWO-MAC-TEST.md has runnable precursor commands, but physical serving commands
+  remain unavailable. Do not promote these gates into the missing journey proof.
