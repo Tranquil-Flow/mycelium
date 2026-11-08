@@ -814,7 +814,7 @@ async function renderOwned() {
           }},'Approve'),
             el('button',{type:'button',class:'secondary',on:()=>holdDecision(row,'Decline',()=>deny(s,r.requester_key))},'Decline'),
             el('button',{type:'button','data-undo':''},'Undo')));
-          row=el('div',{class:'request','data-request':r.requester_fingerprint},el('p',{}),actions,
+          row=el('div',{class:'request','data-request':r.requester_fingerprint},el('p',{tabindex:'0'}),actions,
             el('div',{class:'decision-slot'},el('span',{'data-decision':'',role:'status'})));
           n.requests.set(r.requester_key,row);n.grants.append(row);
         }

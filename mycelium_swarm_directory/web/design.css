@@ -108,6 +108,16 @@ h3 {
   font-weight: 550;
   letter-spacing: -0.035em;
 }
+@media (min-width: 641px) {
+  .owner-grid > div {
+    height: 320px;
+  }
+}
+.request > p {
+  height: 3.1em;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
 .msg.run-metrics {
   /* Six lines plus padding, reserved before the async entry responds. */
   height: 128px;
@@ -368,10 +378,25 @@ button {
     min-width: 52px;
     padding-inline: 8px;
   }
-  .apex .top .wrap { position:relative; }
-  .apex .top nav { display:contents; }
-  .apex .top nav > a:not(.btn) { position:absolute;right:18px;top:8px;display:flex;align-items:center;min-height:44px;font-size:11px; }
-  .apex .top nav > .btn { order:3;margin-left:auto; }
+  .apex .top .wrap {
+    position: relative;
+  }
+  .apex .top nav {
+    display: contents;
+  }
+  .apex .top nav > a:not(.btn) {
+    position: absolute;
+    right: 18px;
+    top: 8px;
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    font-size: 11px;
+  }
+  .apex .top nav > .btn {
+    order: 3;
+    margin-left: auto;
+  }
   .hero-copy {
     width: 100%;
   }

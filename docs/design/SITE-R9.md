@@ -15,6 +15,9 @@ No protocol, heartbeat, grant, API, directory state or inference change is inten
   box before entry responses arrive. Delayed real send/event responses previously
   moved the following served-by line; the new regression holds both responses
   beyond the recent-input window and requires exact-zero CLS in all four cases.
+  Owner request summaries likewise reserve two lines and remain keyboard-scrollable;
+  a status/long-note update cannot move the held-decision slot. Desktop owner panels
+  include the additional reserved line, keeping the complete hold explanation visible.
 - `design.js`: owns palette/media changes, renderer disposal and swarm print paints.
   It does not fetch, route, publish, sign or send prompts.
 - `mycelium-geometry.js`: deterministic aperiodic walks, guarded bridges and
