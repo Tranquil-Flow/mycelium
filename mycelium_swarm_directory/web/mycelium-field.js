@@ -963,7 +963,7 @@ export function createField({ stage, state, reduce }) {
     const begin = performance.now(),
       reduced = reduce.matches,
       t = reduced ? 32 : T,
-      A = scene ? (reduced ? 1e5 : scene.startAge + t) : 0,
+      A = scene ? (reduced ? 1e5 : (scene.ageAt ? scene.ageAt(t) : scene.startAge + t)) : 0,
       scroll = scrollY,
       heroTop = scene ? scene.hero.top : 0,
       oy = heroTop - scroll; // page-space origin of scene coordinates
