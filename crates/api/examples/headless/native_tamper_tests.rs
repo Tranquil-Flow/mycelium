@@ -18,11 +18,12 @@ pub(super) fn native_handoff_tamper_refusals(
     let put = |name: &str, doc: &Value| {
         fs::write(root.join(name), protocol::canonical::to_bytes(doc).unwrap()).unwrap()
     };
-    for mutation in [
-        "swapped-stage-order",
-        "wrong-challenge-token",
-        "stale-member-generation",
-        "wrong-resident-digest",
+    for (mutation, expected_code) in [
+        ("swapped-stage-order", "native_stage_order_changed"),
+        ("inconsistent-transcript", "native_challenge_mismatch"),
+        ("wrong-challenge-token", "native_reference_token_mismatch"),
+        ("stale-member-generation", "compiler_member_changed"),
+        ("wrong-resident-digest", "native_resident_digest_mismatch"),
     ] {
         let mut plan = read("compiled/operator-plan.json");
         let mut checkpoint = read("compiled/local-challenge-checkpoint.json");
@@ -30,10 +31,13 @@ pub(super) fn native_handoff_tamper_refusals(
         let mut template = read("template.json");
         match mutation {
             "swapped-stage-order" => plan["stages"].as_array_mut().unwrap().swap(0, 1),
-            "wrong-challenge-token" => {
+            "wrong-challenge-token" | "inconsistent-transcript" => {
                 let wrong = checkpoint["output_token_ids"][0].as_u64().unwrap() + 1;
                 checkpoint["output_token_ids"][0] = json!(wrong);
                 checkpoint["steps"][0]["output_token_id"] = json!(wrong);
+                if mutation == "wrong-challenge-token" {
+                    checkpoint["steps"][1]["input_token_ids"] = json!([wrong]);
+                }
                 report["challenge_output_token_ids"] = checkpoint["output_token_ids"].clone();
             }
             "stale-member-generation" => {
@@ -96,11 +100,11 @@ pub(super) fn native_handoff_tamper_refusals(
                 )
             })
             .collect();
-        assert!(
-            CompiledHandoff::open(root, &tampered).is_err(),
-            "accepted {mutation}"
-        );
-        eprintln!("native tamper refused: {mutation}");
+        let refusal = CompiledHandoff::open(root, &tampered)
+            .err()
+            .expect("tamper refused");
+        assert_eq!(refusal.code, expected_code, "{mutation}");
+        eprintln!("native tamper refused: {mutation}: {}", refusal.code);
         for (name, bytes) in &original {
             fs::write(root.join(name), bytes).unwrap();
         }
@@ -131,15 +135,15 @@ pub(super) fn native_handoff_tamper_refusals(
     file.seek(SeekFrom::End(-1)).unwrap();
     file.write_all(&[original_byte[0] ^ 1]).unwrap();
     file.sync_all().unwrap();
-    let retained_refused = handoff.revalidate().is_err();
-    let reopen_refused = CompiledHandoff::open(root, pins).is_err();
+    let retained_refused = handoff.revalidate().unwrap_err();
+    let reopen_refused = CompiledHandoff::open(root, pins)
+        .err()
+        .expect("changed source refused");
     file.seek(SeekFrom::End(-1)).unwrap();
     file.write_all(&original_byte).unwrap();
     file.sync_all().unwrap();
-    assert!(
-        retained_refused && reopen_refused,
-        "changed shard byte accepted"
-    );
+    assert_eq!(retained_refused.code, "compiled_handoff_invalid");
+    assert_eq!(reopen_refused.code, "compiled_handoff_invalid");
     eprintln!("native tamper refused: changed-shard-byte");
     handoff.revalidate().unwrap();
     CompiledHandoff::open(root, pins).unwrap();

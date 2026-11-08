@@ -9,6 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+mod tests;
+
 fn duration(id: BudgetId) -> Result<Duration> {
     Ok(Duration::from_millis(
         id.span(Entries::ZERO)
@@ -34,6 +37,14 @@ impl Worker {
             .stdout(Stdio::from(OwnedFd::from(server)))
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
+        let mut worker = Self::from_child(child, client, cancel)?;
+        let (reply, body) = worker.request(prepare, &[])?;
+        if reply != json!({"ok":true}) || !body.is_empty() {
+            return Err(Error("native_prepare_reply_invalid"));
+        }
+        Ok(worker)
+    }
+    fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {
         let link = match Link::new(client, duration(BudgetId::MemberChosenWall)?) {
             Ok(link) => link,
             Err(error) => {
@@ -48,16 +59,11 @@ impl Worker {
                 return Err(Error("native_socket_failed"));
             }
         };
-        let mut worker = Self {
+        Ok(Self {
             child: Some(child),
             link,
             cancel,
-        };
-        let (reply, body) = worker.request(prepare, &[])?;
-        if reply != json!({"ok":true}) || !body.is_empty() {
-            return Err(Error("native_prepare_reply_invalid"));
-        }
-        Ok(worker)
+        })
     }
     pub(super) fn pid(&self) -> Result<u32> {
         self.child
@@ -66,46 +72,41 @@ impl Worker {
             .ok_or(Error("native_worker_closed"))
     }
     pub(super) fn request(&mut self, head: &Value, body: &[u8]) -> Result<(Value, Vec<u8>)> {
-        if self.cancel.load(Ordering::SeqCst) {
-            return Err(Error("compiler_stopped"));
+        self.request_until(
+            head,
+            body,
+            Instant::now() + duration(BudgetId::MemberChosenWall)?,
+        )
+    }
+    fn request_until(
+        &mut self,
+        head: &Value,
+        body: &[u8],
+        deadline: Instant,
+    ) -> Result<(Value, Vec<u8>)> {
+        use crate::native_worker_link::LinkError;
+        let (reply, body) = self
+            .link
+            .request_until(
+                head,
+                body,
+                deadline,
+                &self.cancel,
+                duration(BudgetId::RegistryPoll)?,
+            )
+            .map_err(|error| {
+                eprintln!("native_worker_exchange_failed: {error}");
+                Error(match error {
+                    LinkError::Cancelled => "compiler_stopped",
+                    LinkError::Deadline => "native_worker_deadline",
+                    _ => "native_worker_exchange_failed",
+                })
+            })?;
+        if let Some(error) = reply.get("error") {
+            eprintln!("native_worker_refused: {error}");
+            return Err(Error("native_worker_refused"));
         }
-        self.link.send(head, body).map_err(|e| {
-            eprintln!("native_worker_send_failed: {e}");
-            Error("native_worker_send_failed")
-        })?;
-        let deadline = Instant::now() + duration(BudgetId::MemberChosenWall)?;
-        loop {
-            if self.cancel.load(Ordering::SeqCst) {
-                return Err(Error("compiler_stopped"));
-            }
-            if Instant::now() >= deadline {
-                return Err(Error("native_worker_deadline"));
-            }
-            if let Some((reply, body)) =
-                self.link
-                    .poll(duration(BudgetId::RegistryPoll)?)
-                    .map_err(|e| {
-                        eprintln!("native_worker_receive_failed: {e}");
-                        Error("native_worker_receive_failed")
-                    })?
-            {
-                if let Some(error) = reply.get("error") {
-                    eprintln!("native_worker_refused: {error}");
-                    return Err(Error("native_worker_refused"));
-                }
-                return Ok((reply, body));
-            }
-            if self
-                .child
-                .as_mut()
-                .ok_or(Error("native_worker_closed"))?
-                .try_wait()
-                .map_err(|_| Error("native_worker_status_failed"))?
-                .is_some()
-            {
-                return Err(Error("native_worker_exited"));
-            }
-        }
+        Ok((reply, body))
     }
     pub(super) fn close(mut self) -> Result<Value> {
         let (reply, body) = self.request(&json!({"command":"close"}), &[])?;

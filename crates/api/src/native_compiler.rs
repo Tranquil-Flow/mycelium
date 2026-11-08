@@ -281,11 +281,13 @@ pub(crate) fn validate_evidence(plan: &Value, checkpoint: &Value, reference: &Va
         || checkpoint["protocol"] != contract::CHECKPOINT_PROTOCOL
         || checkpoint["state"] != "passed"
         || checkpoint["prompt_token_ids"] != reference["recorded"]["workload"]["prompt_ids"]
-        || checkpoint["output_token_ids"] != json!(expected)
         || checkpoint["reference_digest"] != digest(reference)?
         || plan["reference_digest"] != checkpoint["reference_digest"]
     {
         return Err(Error("native_challenge_mismatch"));
+    }
+    if checkpoint["output_token_ids"] != json!(expected) {
+        return Err(Error("native_reference_token_mismatch"));
     }
     Ok(())
 }

@@ -108,7 +108,8 @@ pub(super) fn open_native(
         &checkpoint["output_token_ids"],
     )?;
     let reference = crate::native_compiler::reference().map_err(|_| bad())?;
-    crate::native_compiler::validate_evidence(plan, checkpoint, &reference).map_err(|_| bad())?;
+    crate::native_compiler::validate_evidence(plan, checkpoint, &reference)
+        .map_err(|error| WorkflowError::refused(error.0))?;
     let mut all_pins = pins.clone();
     let mut paths = BTreeMap::new();
     for role in ["source", "binary"] {

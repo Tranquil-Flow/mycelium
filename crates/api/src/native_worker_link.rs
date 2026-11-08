@@ -8,6 +8,7 @@
 //! `UnixStream` socketpair end per worker, inherited as the worker's descriptor 1, so no
 //! filesystem path and no TCP socket exists. The link carries a bounded JSON head and a bounded
 //! binary payload; a peer that is gone is a typed [`LinkError::Closed`], never a silent hang.
+mod deadline;
 use protocol::router_wire::MAX_PAYLOAD_BYTES;
 use serde_json::Value;
 use std::{
@@ -23,6 +24,10 @@ pub enum LinkError {
     Closed,
     /// The peer is alive but silent past the allowance.
     Timeout,
+    /// An absolute request deadline expired.
+    Deadline,
+    /// The owner cancelled this request.
+    Cancelled,
     /// The bytes are not a frame of this link.
     Frame(&'static str),
     /// The peer answered `{"error": code}`.
@@ -31,6 +36,8 @@ pub enum LinkError {
 impl std::fmt::Display for LinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Deadline => f.write_str("worker_link_deadline"),
+            Self::Cancelled => f.write_str("worker_link_cancelled"),
             Self::Closed => f.write_str("worker_link_closed"),
             Self::Timeout => f.write_str("worker_link_timeout"),
             Self::Frame(code) => f.write_str(code),
@@ -48,8 +55,8 @@ fn io_error(error: &std::io::Error) -> LinkError {
 }
 
 /// One end of the link.
-pub struct Link {
-    stream: UnixStream,
+pub struct Link<S = UnixStream> {
+    stream: S,
     frame_wait: Duration,
     read_wait: Duration,
 }
@@ -64,6 +71,8 @@ impl Link {
             read_wait: wait,
         })
     }
+}
+impl<S: Read + Write> Link<S> {
     /// Frame: `u32 BE head length | head JSON | u32 BE payload length | payload`.
     pub fn send(&mut self, head: &Value, payload: &[u8]) -> Result<(), LinkError> {
         let head =
@@ -118,6 +127,8 @@ impl Link {
             Err(LinkError::Closed)
         }
     }
+}
+impl Link {
     /// Best effort: macOS refuses `setsockopt` on a socket whose peer already closed (EINVAL), and
     /// the read that follows then reports the buffered bytes or the end of the stream anyway.
     fn read_timeout(&mut self, wait: Duration) {
@@ -153,6 +164,8 @@ impl Link {
     pub fn receive(&mut self) -> Result<(Value, Vec<u8>), LinkError> {
         self.poll(self.frame_wait)?.ok_or(LinkError::Timeout)
     }
+}
+impl<S: Read + Write> Link<S> {
     fn frame(&mut self, first: Option<u8>) -> Result<(Value, Vec<u8>), LinkError> {
         let head_len = self.length(
             protocol::remote::REMOTE_MAX_FRAME_BYTES,
@@ -166,6 +179,8 @@ impl Link {
         let payload = self.exact(payload_len)?;
         Ok((head, payload))
     }
+}
+impl Link {
     /// Send one command and read its reply; an `{"error": code}` reply is [`LinkError::Remote`].
     pub fn request(&mut self, head: &Value, payload: &[u8]) -> Result<(Value, Vec<u8>), LinkError> {
         self.send(head, payload)?;
