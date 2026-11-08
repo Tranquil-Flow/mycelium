@@ -10,7 +10,19 @@ const scheme = matchMedia("(prefers-color-scheme: light)");
 const state = {
   glow: document.documentElement.dataset.glow || "green",
   theme: scheme.matches ? "light" : "dark",
+  style: "mycelium",
 };
+// STAGING ONLY: the server injects [data-bg-choice] buttons only on
+// next.mycelium.now with staging samples; without them the r9 "electric"
+// renderer is never imported (and not served).
+const STYLE_KEY = "mycelium-staging-bg-style-v1";
+const styleButtons = [...document.querySelectorAll("[data-bg-choice]")];
+if (styleButtons.length)
+  try {
+    if (localStorage.getItem(STYLE_KEY) === "electric") state.style = "electric";
+  } catch {}
+let electric = null,
+  generation = 0;
 let disposeHero = () => {},
   disposeField = () => {},
   timer,
@@ -33,19 +45,55 @@ function paintPrints() {
     canvas.dataset.painted = key;
   }
 }
+function mount(renderer) {
+  if (hero) disposeHero = renderer.createHero(hero, { stage, state, reduce });
+  disposeField = renderer.createField({ stage, state, reduce });
+  paintPrints();
+}
 function rebuild() {
+  // Exactly one renderer at a time: tear down before (possibly async) mounting.
   disposeHero();
   disposeField();
+  disposeHero = disposeField = () => {};
+  // The r9 (staging) hero leaves helper layers beside #hyphae; drop any leftovers.
+  for (const c of document.querySelectorAll(".hero-art canvas:not(#hyphae)")) c.remove();
+  const gen = ++generation;
+  window.__myceliumScene = undefined; // no renderer may attach to a disposed scene
   stage.dataset.theme = state.theme;
   for (const button of document.querySelectorAll("[data-glow-choice]"))
     button.setAttribute(
       "aria-pressed",
       String(button.dataset.glowChoice === state.glow),
     );
-  if (hero) disposeHero = createHero(hero, { stage, state, reduce });
-  disposeField = createField({ stage, state, reduce });
-  paintPrints();
+  for (const button of styleButtons)
+    button.setAttribute("aria-pressed", String(button.dataset.bgChoice === state.style));
+  if (styleButtons.length && state.style === "electric") {
+    document.documentElement.dataset.bgStyle = "electric";
+    electric ??= Promise.all([import("./mycelium-hero-electric.js"), import("./mycelium-field-electric.js")]).then(([h, f]) => ({
+      createHero: h.createHero,
+      createField: f.createField,
+    }));
+    electric.then((renderer) => gen === generation && mount(renderer)).catch(() => {
+      electric = null;
+      if (gen === generation) {
+        state.style = "mycelium";
+        rebuild();
+      }
+    });
+    return;
+  }
+  delete document.documentElement.dataset.bgStyle;
+  mount({ createHero, createField });
 }
+for (const button of styleButtons)
+  button.addEventListener("click", () => {
+    if (state.style === button.dataset.bgChoice) return;
+    state.style = button.dataset.bgChoice === "electric" ? "electric" : "mycelium";
+    try {
+      localStorage.setItem(STYLE_KEY, state.style);
+    } catch {}
+    rebuild();
+  });
 for (const button of document.querySelectorAll("[data-glow-choice]"))
   button.addEventListener("click", () => {
     state.glow = button.dataset.glowChoice;

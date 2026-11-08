@@ -69,6 +69,22 @@ _DIRECTORY_ASSET_PATHS = frozenset(
         _hosted.DIRECTORY_MOUNT_PREFIX + "/site.css",
     }
 )
+# STAGING ONLY: the r9 "electric" background renderer behind the staging style
+# toggle. Allowed only with MYCELIUM_STAGING_SAMPLES=1 on next.mycelium.now.
+_STAGING_DIRECTORY_ASSET_PATHS = frozenset(
+    {
+        "/swarms/mycelium-hero-electric.js",
+        "/swarms/mycelium-field-electric.js",
+        "/swarms/mycelium-geometry-electric.js",
+    }
+)
+_STAGING_PUBLIC_HOST = "next.mycelium.now"
+
+
+def _staging_style_assets(public_host: str) -> bool:
+    return os.environ.get("MYCELIUM_STAGING_SAMPLES") == "1" and public_host == _STAGING_PUBLIC_HOST
+
+
 _DIRECTORY_API_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/api/v1/"
 _DIRECTORY_CONFIG_PATH = _DIRECTORY_API_PREFIX + "config"
 _DIRECTORY_DOWNLOAD_PREFIX = _hosted.DIRECTORY_MOUNT_PREFIX + "/download/"
@@ -389,7 +405,9 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
         if self._config.helper_zip_path is not None and self.command in {"GET", "HEAD"}:
             if self.path.startswith(_DIRECTORY_DOWNLOAD_PREFIX) and self._serve_helper_download():
                 return
-        allowed, status, code = _directory_route_decision(self.command, self.path)
+        allowed, status, code = _directory_route_decision(
+            self.command, self.path, _staging_style_assets(config.public_host)
+        )
         if not allowed:
             self._send_json_error(status, code)
             return
@@ -1002,7 +1020,7 @@ def _is_directory_mount(path: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
-def _directory_route_decision(method: str, raw_path: str) -> tuple[bool, int, str]:
+def _directory_route_decision(method: str, raw_path: str, staging: bool = False) -> tuple[bool, int, str]:
     """Allow only the directory's own page assets and ``/swarms/api/v1/*``.
 
     Judged on the raw request target: no dot segments, escapes, queries,
@@ -1015,6 +1033,8 @@ def _directory_route_decision(method: str, raw_path: str) -> tuple[bool, int, st
         return False, 404, "public_route_not_found"
     if method in {"GET", "HEAD"}:
         if raw_path in _DIRECTORY_ASSET_PATHS or _DIRECTORY_API_PATH.fullmatch(raw_path):
+            return True, 200, "ok"
+        if staging and raw_path in _STAGING_DIRECTORY_ASSET_PATHS:
             return True, 200, "ok"
     elif method == "POST":
         if _DIRECTORY_API_PATH.fullmatch(raw_path):

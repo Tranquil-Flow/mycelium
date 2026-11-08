@@ -1428,7 +1428,12 @@ export function createHero(canvas, { stage, state, reduce }) {
     });
     window.__growthGeometry = { nodes: g.nodes.map((n) => ({ x: n.x, y: n.y, id: n.source })), cords: g.linkCords.map((c) => ({ from: c.a.source, to: c.b.source, length: c.length })), segments: g.ss.length };
     let rootPaths = null;
-    Object.defineProperty(window, "__rootPaths", { configurable: true, get: () => (rootPaths ??= g.paths.filter((P) => P.pts.length >= 9 && P.kind !== "hair").slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }))) });
+    Object.defineProperty(window, "__rootPaths", {
+      configurable: true,
+      get: () => (rootPaths ??= g.paths.filter((P) => P.pts.length >= 9 && P.kind !== "hair").slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }))),
+      // Another renderer (staging style toggle) may assign a plain value.
+      set: (v) => Object.defineProperty(window, "__rootPaths", { value: v, writable: true, configurable: true, enumerable: true }),
+    });
     window.__fusionEvents = g.paths.filter((P) => P.fused).slice(0, 2000).map((P) => ({ x: P.pts.at(-1).x, y: P.pts.at(-1).y, birth: P.done, degree: P.pts.at(-1).edges.length }));
     window.__dendriticProbe = (T) => {
       const A = START_AGE + T;

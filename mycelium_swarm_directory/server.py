@@ -37,8 +37,19 @@ from .store import SqliteStore
 STAGING_BANNER = ('<aside id="staging-banner" class="staging-banner" aria-label="Staging notice">'
                   '<strong>Staging · sample data</strong> · Sample swarms and metrics are fictional. '
                   'No sample model is running; sample chat is unavailable.</aside>').encode()
+# STAGING ONLY: background-style toggle (r10 "Mycelium" default, r9 "Electric").
+# Injected and served only when staging samples are enabled on next.mycelium.now;
+# never promoted to production.
+GLOW_SWITCH_END = b'data-glow-choice="blue" aria-pressed="false">Blue</button></div>'
+STAGING_STYLE_SWITCH = ('<div class="glow-switch style-switch" role="group" aria-label="Background style (staging only)">'
+                        '<button type="button" data-bg-choice="mycelium" aria-pressed="true">Mycelium</button>'
+                        '<button type="button" data-bg-choice="electric" aria-pressed="false">Electric (r9)</button></div>').encode()
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
+WEB_STAGING = Path(__file__).resolve().parent / 'web_staging'
+STAGING_ASSETS = {'/swarms/mycelium-hero-electric.js': ('mycelium-hero-electric.js', 'text/javascript; charset=utf-8'),
+                  '/swarms/mycelium-field-electric.js': ('mycelium-field-electric.js', 'text/javascript; charset=utf-8'),
+                  '/swarms/mycelium-geometry-electric.js': ('mycelium-geometry-electric.js', 'text/javascript; charset=utf-8')}
 ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/apex.js': ('apex.js', 'text/javascript; charset=utf-8'),
           '/swarms/design.css': ('design.css', 'text/css; charset=utf-8'),
@@ -166,7 +177,11 @@ class _Handler(BaseHTTPRequestHandler):
             raw = (WEB / name).read_bytes()
             if self.server.staging_samples and name in ('apex.html', 'index.html'):
                 raw = raw.replace(b'<header class="top">', STAGING_BANNER + b'<header class="top">', 1)
+                raw = raw.replace(GLOW_SWITCH_END, GLOW_SWITCH_END + STAGING_STYLE_SWITCH, 1)
             return self._send(200, raw, kind)
+        if self.server.staging_samples and path in STAGING_ASSETS:
+            name, kind = STAGING_ASSETS[path]
+            return self._send(200, (WEB_STAGING / name).read_bytes(), kind)
         if path == API + '/config':
             return self._json(200, {'directory': self.server.public_origin, 'privacy': PRIVACY_NOTE,
                                     'demo': DEMO_LABEL, 'download': self.server.download, 'limits': {'max_prompt_chars': docs.MAX_PROMPT_CHARS,

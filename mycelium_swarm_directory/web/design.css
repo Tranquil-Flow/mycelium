@@ -537,3 +537,8 @@ button {
     opacity: 0.06;
   }
 }
+
+/* STAGING ONLY: background style toggle (never rendered in production). */
+.style-switch {
+  margin-inline-start: 6px;
+}
