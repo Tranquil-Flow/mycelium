@@ -737,6 +737,8 @@ function* buildGeometry(L, budget, out = {}) {
   const knotR = rng("r11-hyphal-knots"),
     knots = [];
   function knot(v, h, t0, src, primordium = false) {
+    // Never under or near text (the text-safe field is ~1 well clear of copy).
+    if (protect(v.x, v.y) < 0.97) return null;
     const r = primordium ? 2.5 + knotR() * 1.5 : 1 + 2 * Math.pow(knotR(), 2.2),
       el = primordium ? 1.4 + knotR() * 0.6 : 1 + knotR() * 0.6,
       off = (knotR() - 0.5) * r * 0.7,
@@ -1921,7 +1923,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     window.__knotAudit = () =>
       g.knots.map((K) => {
         const c = g.colonies.reduce((a, b) => (Math.hypot(b.node.x - K.x, b.node.y - K.y) < Math.hypot(a.node.x - K.x, a.node.y - K.y) ? b : a));
-        return { x: K.x, y: K.y, r: K.r, el: K.el, primordium: K.primordium, fibres: K.fibres, lobes: K.lobes.length, colonyDistance: Math.hypot(c.node.x - K.x, c.node.y - K.y) / c.R0, onGraph: g.vs[K.v]?.edges.length >= 2 };
+        return { x: K.x, y: K.y, r: K.r, el: K.el, primordium: K.primordium, fibres: K.fibres, lobes: K.lobes.length, colonyDistance: Math.hypot(c.node.x - K.x, c.node.y - K.y) / c.R0, onGraph: g.vs[K.v]?.edges.length >= 2, textSafe: g.protect(K.x, K.y) };
       });
     // r11 item 4: residue alpha per layer of a route at a trip age.
     scene.residueProbe = (routeIndex, age) => {

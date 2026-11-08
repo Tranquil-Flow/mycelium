@@ -182,6 +182,8 @@ def test_hyphal_knots_are_sparse_irregular_tangles_on_strands(local):
         knots = page.evaluate('__knotAudit()')
         assert 12 <= len(knots) <= 140, len(knots)
         assert all(k['onGraph'] and k['fibres'] >= 3 and 3 <= k['lobes'] <= 6 for k in knots)
+        # Never under or near text (a bright knot under a glyph broke 4.5:1 at 1920).
+        assert min(k['textSafe'] for k in knots) >= 0.97
         plain = [k for k in knots if not k['primordium']]
         radii = sorted(k['r'] for k in plain)
         # Heavy-tailed sizes: mostly tiny, a few larger; never uniform beads.
