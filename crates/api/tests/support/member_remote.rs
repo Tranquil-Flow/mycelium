@@ -313,6 +313,14 @@ pub fn raw(
 }
 /// Signed status over the channel (immediate, also while an operation runs).
 pub fn status(member: &iroh::EndpointAddr, enrolled: Option<String>) -> Result<Value, String> {
+    probe(member, enrolled, &[])
+}
+/// Signed status asking the member about exact pids on its own host.
+pub fn probe(
+    member: &iroh::EndpointAddr,
+    enrolled: Option<String>,
+    pids: &[i32],
+) -> Result<Value, String> {
     with_owner(owner_secret(), |owner, client, until| {
         Remote {
             addr: member.clone(),
@@ -321,7 +329,7 @@ pub fn status(member: &iroh::EndpointAddr, enrolled: Option<String>) -> Result<V
         .call(
             owner,
             client,
-            json!({"command":"status"}),
+            json!({"command":"status","probe_pids":pids}),
             until(),
             api::app_host::now(),
         )

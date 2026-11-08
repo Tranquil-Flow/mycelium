@@ -479,19 +479,27 @@ fn wait_gone(fx: &Fixture, pids: &[i32]) -> f64 {
         if fx.nodes[i].local() {
             wait_workers_gone(&[*pid]);
         } else {
-            wait_remote_worker_gone(fx, i);
+            wait_remote_worker_gone(fx, i, *pid);
         }
     }
     ms(began)
 }
-fn wait_remote_worker_gone(fx: &Fixture, i: usize) {
+/// The member on the other host reports, in its signed status, that the
+/// exact worker pid named in its own signed proof is gone (signal 0 there).
+fn wait_remote_worker_gone(fx: &Fixture, i: usize, pid: i32) {
     let end = Instant::now() + span(B::RouterClose);
     let control = fx.nodes[i].control.clone().unwrap();
-    while super::member_remote::status(&control, None)
-        .map(|s| s["result"]["worker_alive"] != false)
-        .unwrap_or(true)
-    {
-        assert!(Instant::now() < end, "remote worker still reported alive");
+    loop {
+        let reply = super::member_remote::probe(&control, None, &[pid]);
+        if let Ok(s) = &reply
+            && s["result"]["probe_alive"][pid.to_string()] == false
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "remote worker {pid} still reported alive: {reply:?}"
+        );
     }
 }
 fn wait_workers_gone(pids: &[i32]) -> f64 {
@@ -734,7 +742,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     if fx.nodes[survivor].local() {
         wait_workers_gone(&[e.worker_pids[survivor]]);
     } else {
-        wait_remote_worker_gone(&fx, survivor);
+        wait_remote_worker_gone(&fx, survivor, e.worker_pids[survivor]);
     }
     let o = e.handle.state.lock().unwrap();
     eprintln!(
@@ -800,7 +808,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     } else {
         // Remote member: its signed leave reply is the evidence.
         assert_eq!(left["refunded"], true, "{left}");
-        wait_remote_worker_gone(&fx, survivor);
+        wait_remote_worker_gone(&fx, survivor, leave_pid);
     }
     assert_eq!(left["record"]["state"], "left");
     assert_eq!(

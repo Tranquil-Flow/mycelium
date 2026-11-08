@@ -206,12 +206,29 @@ fn handle(dispatcher: &Dispatcher, status: &Status, request: Value) -> Value {
             .lock()
             .map(|s| {
                 let mut s = s.clone();
-                // Live worker check by exact pid (signal 0), even mid-operation.
-                let alive = s["worker_pid"]
-                    .as_u64()
-                    .and_then(|p| rustix::process::Pid::from_raw(p as i32))
-                    .map(|p| rustix::process::test_kill_process(p).is_ok());
-                s["worker_alive"] = json!(alive);
+                // Exact-pid liveness on THIS host (signal 0), even mid-operation:
+                // the owned worker, plus up to 8 pids the owner asks about (e.g.
+                // workers named in this member's signed proofs).
+                let alive = |p: u64| {
+                    i32::try_from(p)
+                        .ok()
+                        .and_then(rustix::process::Pid::from_raw)
+                        .map(|p| rustix::process::test_kill_process(p).is_ok())
+                };
+                s["worker_alive"] = json!(s["worker_pid"].as_u64().and_then(alive));
+                let probes: serde_json::Map<String, Value> = request["probe_pids"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .take(8)
+                            .filter_map(Value::as_u64)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| (p.to_string(), json!(alive(p))))
+                    .collect();
+                s["probe_alive"] = Value::Object(probes);
                 s["active_operation_id"] = json!(dispatcher.active_id());
                 s["pid"] = json!(std::process::id());
                 s

@@ -222,7 +222,10 @@ impl Drop for Node {
 #[test]
 #[ignore = "runbook helper: needs B8_OWNER_CONTROL_KEY"]
 fn print_owner_control_pin() {
-    assert!(std::env::var_os("B8_OWNER_CONTROL_KEY").is_some());
+    if std::env::var_os("B8_OWNER_CONTROL_KEY").is_none() {
+        eprintln!("print_owner_control_pin: set B8_OWNER_CONTROL_KEY to the owner key file");
+        return;
+    }
     println!(
         "B8_OWNER_CONTROL_PIN={}",
         super::member_remote::owner_secret().public()
@@ -278,6 +281,22 @@ fn member_control_channel_is_pinned_signed_and_replay_safe() {
     assert_eq!(s["ok"], true, "{s}");
     assert_eq!(s["result"]["pid"], child.0.id());
     assert_eq!(s["result"]["joined"], false);
+    // Exact-pid liveness on the member's host: a live pid and a reaped one.
+    let mut gone = Command::new("/usr/bin/true").spawn().unwrap();
+    let gone_pid = gone.id() as i32;
+    gone.wait().unwrap();
+    let me = std::process::id() as i32;
+    let probed = super::member_remote::probe(&addr, None, &[me, gone_pid]).unwrap();
+    assert_eq!(
+        probed["result"]["probe_alive"][me.to_string()],
+        true,
+        "{probed}"
+    );
+    assert_eq!(
+        probed["result"]["probe_alive"][gone_pid.to_string()],
+        false,
+        "{probed}"
+    );
     // An unpinned owner key: the member closes the connection, no reply.
     let stranger = iroh::SecretKey::generate();
     let refused = with_owner(&stranger, |owner, client, until| {
