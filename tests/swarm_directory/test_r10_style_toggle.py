@@ -94,6 +94,13 @@ def switch(page, style):
     page.click(f'[data-bg-choice="{style}"]')
     page.wait_for_function(f"document.querySelector('[data-bg-choice=\"{style}\"]').getAttribute('aria-pressed')==='true'")
     page.wait_for_function(READY)
+    # r11: the field attaches (and grows in) before the hero scene completes;
+    # wait for the hero too so its breathing layer is counted.
+    if style == 'mycelium':
+        for _ in range(200):
+            if page.evaluate('()=>!!(window.__myceliumScene && __myceliumScene.ready)'):
+                break
+            page.wait_for_timeout(100)
     page.wait_for_timeout(2500)
 
 
