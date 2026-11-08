@@ -175,16 +175,23 @@ pub fn serve(
         .ok_or("route_invalid")?;
     let worker_pid = compute.worker_pid();
     let mut connections = Vec::new();
-    for _ in 0..2 {
-        let c = s
-            .host
-            .accept(s.clock, s.until(None)?)
-            .map_err(|e| format!("route_accept_failed:{e:?}"))?;
+    let setup = s.until(None)?;
+    while connections.len() < 2 {
+        // Within the one setup deadline: a failed inbound handshake (stale or
+        // refused path) or an unpinned dialer is dropped, never served and
+        // never allowed to abort the owner's route (no remote kill switch).
+        let c = match s.host.accept(s.clock, setup) {
+            Ok(c) => c,
+            Err(transport::Error::Authentication) => continue,
+            Err(e) => {
+                // Compute is still owned here: release it before refusing.
+                stop(compute, false)?;
+                return Err(format!("route_accept_failed:{e:?}"));
+            }
+        };
         if c.remote_id() != owner {
             c.close(2u32.into(), b"unpinned route owner");
-            // Unpinned dialers never reach compute; release it before refusing.
-            stop(compute, false)?;
-            return Err("route_carrier_unpinned".into());
+            continue;
         }
         connections.push(c);
     }
@@ -545,8 +552,13 @@ fn linger(
         if left.is_zero() {
             return Ok(None);
         }
-        let Ok(c) = s.host.accept(s.clock, mono(s.clock, left)?) else {
-            return Ok(None);
+        let c = match s.host.accept(s.clock, mono(s.clock, left)?) {
+            Ok(c) => c,
+            // One failed inbound handshake (an abandoned or stale dial queued
+            // ahead of the owner's re-dial, or a refused LAN path) must not end
+            // the window: keep accepting until it elapses.
+            Err(transport::Error::Authentication) => continue,
+            Err(_) => return Ok(None),
         };
         if c.remote_id() != owner {
             c.close(2u32.into(), b"unpinned route owner");

@@ -199,7 +199,7 @@ impl Member {
 /// How a member stage server binds its carrier endpoint.
 enum Bind {
     Loopback,
-    Lan(iroh::SecretKey, std::net::IpAddr, LanPolicy),
+    Lan(Box<(iroh::SecretKey, std::net::IpAddr, LanPolicy)>),
 }
 type Live = Arc<dyn Fn() -> Result<Value, Error> + Send + Sync>;
 fn member(member: Value, offer: Value, last: bool, script: Script, proof: String) -> Member {
@@ -233,16 +233,19 @@ fn member_at(
         };
         let mut host = match bind {
             Bind::Loopback => LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap(),
-            Bind::Lan(secret, interface, policy) => LoopbackHost::bind_lan(
-                &rt,
-                &clock,
-                until(B::RouterClose),
-                secret,
-                &[transport::Channel::Router],
-                interface,
-                policy,
-            )
-            .unwrap(),
+            Bind::Lan(lan) => {
+                let (secret, interface, policy) = *lan;
+                LoopbackHost::bind_lan(
+                    &rt,
+                    &clock,
+                    until(B::RouterClose),
+                    secret,
+                    &[transport::Channel::Router],
+                    interface,
+                    policy,
+                )
+                .unwrap()
+            }
         };
         let addr = host.address().unwrap();
         addr_tx
@@ -419,7 +422,9 @@ impl Route {
         let mut seen = 0;
         while !done(self) {
             assert!(Instant::now() < end, "pump bound: {:?}", self.state());
-            self.service.tick().unwrap();
+            if let Err(e) = self.service.tick() {
+                panic!("tick: {e:?}; {}", self.state());
+            }
             seen = self.handle.wait(seen, span(B::OwnerPoll));
         }
     }
@@ -562,6 +567,9 @@ fn stage_stalled_past_the_close_budget_is_settled_by_redial() {
         assert!(o.stages[1].failure.is_some());
     }
     assert!(r.terminal().is_none(), "debt retained while unsettled");
+    // A stale inbound dial (abandoned before the member could accept it) is
+    // queued ahead of the owner's re-dial; it must not end the re-dial window.
+    abandoned_dial(&r.members[1]);
     open.send(()).unwrap();
     r.pump_until(span(B::WorkerStartup), |r| r.terminal().is_some());
     assert_eq!(r.terminal().as_deref(), Some("cancelled"), "{}", r.state());
@@ -572,6 +580,36 @@ fn stage_stalled_past_the_close_budget_is_settled_by_redial() {
     assert!(reports[1]["redial_ack_ms"].is_number(), "{:?}", reports[1]);
 }
 
+/// Dial `member` from a throwaway endpoint while it is not accepting, give up
+/// at a short deadline, and close that endpoint (deterministic stale incoming).
+fn abandoned_dial(member: &Member) {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = HostClock::default();
+    let until = |id: B| {
+        clock
+            .monotonic()
+            .checked_add(id.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
+    let mut stray = LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap();
+    let addr = iroh::EndpointAddr::new(member.endpoint).with_ip_addr(member.socket);
+    assert!(
+        stray
+            .connect_channel(
+                &addr,
+                transport::Channel::Router,
+                &clock,
+                until(B::OwnerPoll)
+            )
+            .is_err(),
+        "member is blocked in close: the dial cannot complete"
+    );
+    stray.close(&clock, until(B::RouterClose)).unwrap();
+}
 // ---- Direct-LAN carrier over REAL pairing: seed rows, sessions, offers, signed adverts.
 use api::{
     handoff, joined_shard,
@@ -740,7 +778,7 @@ impl Swarm {
                     .map_err(|_| Error("test_member_invalid"))
             });
             let served = member_at(
-                Bind::Lan(m.secret.clone(), interface, policy.clone()),
+                Bind::Lan(Box::new((m.secret.clone(), interface, policy.clone()))),
                 live,
                 m.offer.clone(),
                 i == 1,
@@ -798,6 +836,11 @@ fn lan_streams(interface: IpAddr, policy: LanPolicy) {
     for (m, v) in members.iter().zip(&verified) {
         assert_eq!(v.addrs(), &[m.socket], "dials exactly the signed address");
         assert_eq!(m.socket.ip(), interface);
+    }
+    // A stray dial, abandoned before the member accepts, must not abort the
+    // member's route setup (no remote kill switch on a shared network).
+    if interface.is_loopback() {
+        abandoned_dial(&members[0]);
     }
     let current = currentness(&s);
     let r = s
