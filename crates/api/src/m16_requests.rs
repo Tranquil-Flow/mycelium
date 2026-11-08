@@ -644,6 +644,9 @@ impl Subscription for Stream {
             }
         }
     }
+    fn publisher_generation(&self) -> Option<u64> {
+        Some(self.sub.publisher_generation)
+    }
     fn ack(&mut self, sequence: u64) -> Result<(), PublicError> {
         let mut s = self.shared.lock()?;
         let now = Shared::now(&s)?;

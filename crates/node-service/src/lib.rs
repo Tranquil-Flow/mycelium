@@ -36,5 +36,7 @@ pub mod receipts;
 pub mod service;
 pub mod spawn;
 pub mod status;
+#[cfg(feature = "metal")]
+pub mod tokenize;
 pub mod worker;
 pub mod worker_link;

@@ -122,8 +122,12 @@ impl Worker {
         deadline: Instant,
         cancel: Arc<AtomicBool>,
     ) -> Result<(Value, Vec<u8>)> {
-        self.cancel = cancel;
-        self.request_until(head, body, deadline)
+        // The caller's flag governs THIS exchange only; later commands (close)
+        // keep the worker's own flag, so a route cancellation cannot cancel them.
+        let own = std::mem::replace(&mut self.cancel, cancel);
+        let result = self.request_until(head, body, deadline);
+        self.cancel = own;
+        result
     }
     pub(crate) fn request_until(
         &mut self,
@@ -171,6 +175,11 @@ impl Worker {
         Ok((reply, body))
     }
     pub(crate) fn close(mut self) -> Result<Value> {
+        self.close_in_place()
+    }
+    /// Graceful close that leaves the worker owned on failure, so the caller can
+    /// still kill and reap the exact child.
+    pub(crate) fn close_in_place(&mut self) -> Result<Value> {
         let (reply, body) = self.request(&json!({"command":"close"}), &[])?;
         if !body.is_empty()
             || reply["ok"] != true
@@ -200,6 +209,35 @@ impl Worker {
             }
             std::thread::yield_now();
         }
+    }
+}
+impl Worker {
+    /// Interrupted framing cannot carry a graceful close. Kill and wait for the
+    /// exact owned child; return reap evidence only after the OS reported its exit.
+    /// This is process-release evidence, NOT native-context-closed evidence.
+    pub(crate) fn kill_and_reap(mut self) -> Result<Value> {
+        let mut child = self.child.take().ok_or(Error("native_worker_closed"))?;
+        let pid = child.id();
+        let killed = match child
+            .try_wait()
+            .map_err(|_| Error("native_worker_reap_failed"))?
+        {
+            Some(_) => false,
+            None => {
+                child
+                    .kill()
+                    .map_err(|_| Error("native_worker_kill_failed"))?;
+                true
+            }
+        };
+        let status = child
+            .wait()
+            .map_err(|_| Error("native_worker_reap_failed"))?;
+        use std::os::unix::process::ExitStatusExt;
+        Ok(
+            json!({"worker_pid":pid,"context_closed":false,"worker_reaped":true,"killed":killed,
+            "exit_code":status.code(),"exit_signal":status.signal()}),
+        )
     }
 }
 impl Drop for Worker {

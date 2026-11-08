@@ -36,6 +36,15 @@ fn fake_worker_process() {
         wire.write_all(&frame).unwrap();
         return;
     }
+    if mode == "healthy_twice" {
+        wire.write_all(&frame).unwrap();
+        Link::new(wire.try_clone().unwrap(), guard)
+            .unwrap()
+            .receive()
+            .unwrap();
+        wire.write_all(&frame).unwrap();
+        return;
+    }
     let (prefix, trickle) = match mode.as_str() {
         "trickled_header" => (1, true),
         "trickled_body" => (20, true),
@@ -186,3 +195,49 @@ case!(cancel_trickled_body_reaps, "trickled_body", true);
 case!(cancel_stalled_frame_reaps, "stalled_frame", true);
 case!(cancel_blocked_write_reaps, "blocked_write", true);
 case!(timely_frame_succeeds, "healthy", false);
+
+#[test]
+fn step_cancel_flag_does_not_cancel_later_close_exchange() {
+    let root = std::env::temp_dir().join(format!(
+        "b7e-io-{}-{}",
+        std::process::id(),
+        crate::app_host::hex(&crate::app_host::random(8).unwrap())
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let socket = root.join("s");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let phase_listener = UnixListener::bind(root.join("s.phase")).unwrap();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "native_compiler::worker::tests::fake_worker_process",
+            "--nocapture",
+        ])
+        .env("B5_FAKE_SOCKET", &socket)
+        .env("B5_FAKE_MODE", "healthy_twice")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    let (_phase, _) = phase_listener.accept().unwrap();
+    let mut worker = Worker::from_child(child, stream, Arc::new(AtomicBool::new(false))).unwrap();
+    let deadline = Instant::now() + duration(BudgetId::ModelSelection).unwrap();
+    let route = Arc::new(AtomicBool::new(false));
+    worker
+        .request_controlled(&json!({"command":"step"}), &[], deadline, route.clone())
+        .unwrap();
+    // Route teardown sets the step flag; the following close-class exchange must
+    // still run under the worker's own flag.
+    route.store(true, Ordering::SeqCst);
+    assert_eq!(
+        worker
+            .request_until(&json!({"command":"close"}), &[], deadline)
+            .unwrap(),
+        (json!({"ok":true}), vec![7; 16])
+    );
+    let evidence = worker.kill_and_reap().unwrap();
+    assert_eq!(evidence["worker_reaped"], true);
+    std::fs::remove_dir_all(&root).unwrap();
+}

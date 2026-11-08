@@ -15,12 +15,14 @@ use runtime::sidecar_artifact::grant_limits;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 pub mod native;
+pub mod route;
 mod source;
 pub use source::JoinedSource;
 type Result<T> = std::result::Result<T, Error>;
 const ENVELOPE: &str = "mycelium.joined_shard.signed.v1";
 const REGISTER: &str = "mycelium.joined_shard.registration.v1";
 const OFFER: &str = "mycelium.joined_shard.offer.v1";
+const WITHDRAWAL: &str = "mycelium.joined_shard.withdrawal.v1";
 fn fail(code: &'static str) -> Error {
     Error(code)
 }
@@ -413,4 +415,60 @@ impl JoinedShard {
     pub fn discard(&mut self) -> Result<()> {
         self.shard.discard()
     }
+}
+/// Member leave publication: the enrolled key signs that this held offer's
+/// compute and custody are withdrawn, with the member's own cleanup evidence.
+pub fn withdrawal(
+    session: &Session,
+    signer: &Identity,
+    offer: &Value,
+    evidence: &Value,
+    now: f64,
+) -> Result<Value> {
+    let member = live(session, signer, now)?;
+    if offer["message"]["member"] != member {
+        return Err(fail("joined_shard_member_changed"));
+    }
+    signed(
+        signer,
+        json!({"protocol":WITHDRAWAL,"member":member,"offer_digest":digest(offer)?,
+        "reason":"member_leave","native":evidence,"route_ready":false,"withdrawn_at":now}),
+    )
+}
+/// Owner side: the enrolled key of the offer's member row must have signed it.
+pub fn verify_withdrawal(
+    coordinator: &seed::Coordinator,
+    offer: &Value,
+    envelope: &Value,
+) -> Result<Value> {
+    open(
+        offer,
+        OFFER,
+        &coordinator.signer().verification_key_digest(),
+    )?;
+    let member = &offer["message"]["member"];
+    let row = coordinator
+        .member(text(member, "node_id")?)
+        .map_err(|_| fail("joined_shard_member_changed"))?;
+    let message = open(envelope, WITHDRAWAL, text(&row, "verification_key_digest")?)?;
+    exact(
+        message,
+        &[
+            "protocol",
+            "member",
+            "offer_digest",
+            "reason",
+            "native",
+            "route_ready",
+            "withdrawn_at",
+        ],
+    )?;
+    if message["member"] != *member
+        || message["offer_digest"] != digest(offer)?
+        || envelope["signature"]["signer_endpoint_id"] != member["endpoint_id"]
+        || message["route_ready"] != false
+    {
+        return Err(fail("joined_shard_identity_mismatch"));
+    }
+    Ok(message.clone())
 }
