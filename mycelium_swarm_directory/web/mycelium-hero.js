@@ -15,7 +15,7 @@ export const START_AGE = 110; // visitors arrive to a mature core with living ri
 const RIM = 1.5, // front brightness boost (D8)
   RIM_TAU = 4.5,
   RIM_WIN = 20, // seconds a laid segment keeps its rim glow before baking
-  CAP = 560000,
+  CAP = 760000,
   CHUNK = 6;
 const geometryCache = new Map();
 
@@ -270,7 +270,8 @@ function* buildGeometry(L, budget, out = {}) {
   const colonies = nodes.map((n, i) => {
     const away = Math.atan2(n.y - nodes[1].y, n.x - nodes[1].x);
     return {
-      node: n, i, R0: R0 * (0.85 + R() * 0.3) * (i === 1 ? 1.1 : 1),
+      node: n, i, R0: R0 * (0.68 + R() * 0.62) * (i === 1 ? 1.15 : 1),
+      lobes: [0.18 + R() * 0.16, R() * 6.28, 0.1 + R() * 0.12, R() * 6.28],
       fan: i === 1 ? R() * 6.28 : away + gauss(R) * 0.5,
       spread: 0.9 + R() * 0.7,
       start: n.birth,
@@ -283,15 +284,17 @@ function* buildGeometry(L, budget, out = {}) {
   const sectorSpeed = (c, h) => c.vel * (1 + 0.16 * Math.sin(h + c.phases[0]) + 0.1 * Math.sin(2 * h + c.phases[1]) + 0.06 * Math.sin(3 * h + c.phases[2]));
   yield "layout";
 
-  // ---- D2 radiating tufts: bright convergence core, fan-biased, heavy tails ----
-  const densePerColony = mobile ? 300 : 520;
+  // ---- D2 cottony radiating tufts: a broad soft mat (no point soma), fan-biased
+  // and lobed (not circles), heavy-tailed radiating hyphae and dense forward fuzz.
+  const shapeR = (c, h) => (0.66 + 0.34 * Math.cos(h - c.fan)) * (1 + c.lobes[0] * Math.sin(2 * h + c.lobes[1]) + c.lobes[2] * Math.sin(3 * h + c.lobes[3]));
+  const densePerColony = mobile ? 220 : 380;
   for (const c of colonies) {
     const n = c.node;
     for (let k = 0; k < densePerColony; k++) {
       const h = R() < 0.62 ? c.fan + gauss(R) * c.spread : R() * 6.28,
-        reach = c.R0 * (0.62 + 0.38 * Math.cos(h - c.fan)) * (R() < 0.08 ? 1.2 + R() * 0.45 : 0.16 + 0.84 * Math.pow(R(), 1.25)),
-        r0 = Math.abs(gauss(R)) * 3.5,
-        o0 = R() * 6.28,
+        reach = c.R0 * shapeR(c, h) * (R() < 0.08 ? 1.2 + R() * 0.45 : 0.16 + 0.84 * Math.pow(R(), 1.25)),
+        r0 = Math.sqrt(R()) * c.R0 * 0.2, // a disc of origins: no point convergence
+        o0 = h + gauss(R) * 0.8,
         start = { x: n.x + Math.cos(o0) * r0, y: n.y + Math.sin(o0) * r0 },
         v = sectorSpeed(c, h);
       const outward = (x, y, mean) => Math.atan2(Math.sin(Math.atan2(y - n.y, x - n.x) - mean), Math.cos(Math.atan2(y - n.y, x - n.x) - mean)) * 0.005;
@@ -319,6 +322,25 @@ function* buildGeometry(L, budget, out = {}) {
     }
   }
 
+  // Cotton: dense short tangled-forward fuzz over the whole colony area,
+  // attached to laid vertices (graph-connected), density falling outwards.
+  const fuzzR = rng("r10-colony-cotton");
+  for (const c of colonies) {
+    const n = c.node,
+      count = Math.round((mobile ? 1000 : 2300) * (c.R0 / R0));
+    for (let k = 0; k < count; k++) {
+      const th = fuzzR() < 0.6 ? c.fan + gauss(fuzzR) * c.spread * 1.1 : fuzzR() * 6.28,
+        rr = c.R0 * shapeR(c, th) * Math.pow(fuzzR(), 0.75) * 0.95,
+        at = nearest(n.x + Math.cos(th) * rr, n.y + Math.sin(th) * rr, 7, (v) => v.owner !== undefined && v.owner >= 0 && v.source === c.i);
+      if (!at) continue;
+      const u = Math.min(1, rr / c.R0),
+        len = Math.min(34, 5 + -Math.log(1 - fuzzR()) * 9 * (1.2 - 0.5 * u));
+      lay(persistWalk(at, Math.atan2(at.y - n.y, at.x - n.x) + gauss(fuzzR) * 0.75, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
+        kind: "hair", source: c.i, t0: (at.birth || c.start) + 1 + fuzzR() * 4, v: c.vel * 0.7, w0: 0.2 + fuzzR() * 0.06, w1: 0.15, a0: 0.24 * (1 - 0.45 * u), a1: 0.1, tone: fuzzR() < 0.12 ? 1 : 0, cord: -1,
+      });
+      if (k % 60 === 0 && budget()) yield "cotton";
+    }
+  }
   // ---- D3/D5 rhizomorph cords: two halves grown from both colonies fuse mid-way ----
   function* cord(from, target, o) {
     const id = cords.length,
@@ -343,7 +365,8 @@ function* buildGeometry(L, budget, out = {}) {
     }
     for (let f = 0; f < F; f++) {
       // Staggered start/end: fibres join from the base over time (accretion).
-      const s0 = Lc * 0.3 * Math.pow(R(), 2.2),
+      // Fibres emerge from the mat, not from one point at the node.
+      const s0 = Math.min(Lc * 0.5, (o.emerge ?? 0) * (0.6 + 0.8 * R()) + Lc * 0.3 * Math.pow(R(), 2.2)),
         s1 = Lc * (1 - 0.45 * Math.pow(R(), 2.4)),
         delay = (f / F) * o.accrete + R() * 3,
         pts = [];
@@ -397,7 +420,7 @@ function* buildGeometry(L, budget, out = {}) {
       }
     }
     // Fine fused web alongside the cord (owner item 7): acute, long-running, 2-3 orders.
-    const webCount = Math.round((Lc / 9) * o.web);
+    const webCount = Math.round((Lc / 6) * o.web);
     for (let k = 0; k < webCount; k++) {
       const s = Lc * (0.05 + 0.9 * R()),
         at = along(spine, s),
@@ -438,7 +461,7 @@ function* buildGeometry(L, budget, out = {}) {
       const dist = Math.hypot(meet.x - from.x, meet.y - from.y),
         v = 6.2 * (0.9 + R() * 0.2),
         t0 = C0.start + 7;
-      halves.push(yield* cord(from, meetV, { meet: meetV, t0, v, w0: 8 + R() * 4, w1: 2.2, fibres: 30 + Math.floor(R() * 11), accrete: 40, fringe: 1, web: 1.6, brush: false }));
+      halves.push(yield* cord(from, meetV, { meet: meetV, emerge: C0.R0 * 0.22, t0, v, w0: 8 + R() * 4, w1: 2.2, fibres: 30 + Math.floor(R() * 11), accrete: 40, fringe: 1, web: 1.6, brush: false }));
       void dist;
       void other;
     }
@@ -483,7 +506,7 @@ function* buildGeometry(L, budget, out = {}) {
       const at = { x: c.node.x + Math.cos(best.h) * best.l, y: c.node.y + Math.sin(best.h) * best.l };
       const unit = units.push({ id: units.length, paths: [], kind: "dead-end" }) - 1;
       units[unit].period = 1e9; // dead-end cords persist; their explorers recycle
-      yield* cord(c.node, at, { t0: c.start + 18 + R() * 30, v: 4.8, w0: 5 + R() * 2.5, w1: 1.3, fibres: 16 + Math.floor(R() * 8), accrete: 45, fringe: 1.6, web: 1.4, brush: true });
+      yield* cord(c.node, at, { emerge: c.R0 * 0.22, t0: c.start + 18 + R() * 30, v: 4.8, w0: 5 + R() * 2.5, w1: 1.3, fibres: 16 + Math.floor(R() * 8), accrete: 45, fringe: 1.6, web: 1.4, brush: true });
       budget() && (yield "dead-end");
     }
   }
@@ -492,7 +515,7 @@ function* buildGeometry(L, budget, out = {}) {
   // ---- dense-zone mat: fine anastomosing cobweb around colonies and along cords ----
   const matR = rng("r10-dense-mat");
   const anchorsFor = cords.flatMap((C) => C.spine.pts.filter((_, i) => i % 3 === 0).map((v) => ({ v, h: null, C })));
-  const matCount = mobile ? 900 : 2200;
+  const matCount = mobile ? 1400 : 3600;
   for (let k = 0; k < matCount; k++) {
     let start, h, t0, src;
     if (matR() < 0.55) {
@@ -517,7 +540,7 @@ function* buildGeometry(L, budget, out = {}) {
     if (!start) continue;
     t0 = (start.birth || 0) + 6 + matR() * 14;
     const P = hypha(start, h, 18 + -Math.log(1 - matR()) * 34, {
-      kind: "mat", t0, v: 3.4, w0: 0.26, w1: 0.15, a0: 0.24, a1: 0.1, tone: matR() < 0.1 ? 1 : 0, source: src, fuse: 2.6, thin: 0.4,
+      kind: "mat", t0, v: 3.4, w0: 0.26, w1: 0.15, a0: 0.28, a1: 0.11, tone: matR() < 0.1 ? 1 : 0, source: src, fuse: 2.6, thin: 0.4,
       walk: { k: 0.018, run: 35, jit: 0.035 }, forkMean: 22, forkAngle: [0.3, 0.6], firstFork: 8, forkLag: 1.5,
     }, 1);
     void P;
@@ -574,7 +597,7 @@ function* buildGeometry(L, budget, out = {}) {
     if (!u.paths.length) continue;
     u.start = Math.min(...u.paths.map((p) => p.t0));
     u.grow = Math.max(...u.paths.map((p) => p.done)) - u.start;
-    if (u.kind === "explorer") u.period = u.grow + 70 + hash01(u.id * 7 + 3) * 120;
+    if (u.kind === "explorer") u.period = u.grow + 30 + hash01(u.id * 7 + 3) * 80;
   }
   return {
     vs, ss, paths, units, nodes, colonies, cords, linkCords, vertex, edge, fusions, explorerRoots, explorerAudit, L, protect,
@@ -682,16 +705,18 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
   }
   function drawCores(ctx, g, A) {
+    // A broad soft glow over the colony centre (20-40 px), never a point soma.
     for (const c of g.colonies) {
-      const grow = smooth((A - c.start) / 6);
+      const grow = smooth((A - c.start) / 10);
       if (grow <= 0) continue;
       const n = c.node,
-        r = (mobile() ? 8 : 11) * (0.6 + 0.4 * grow),
+        r = Math.max(20, Math.min(40, c.R0 * 0.2)) * (0.6 + 0.4 * grow),
         p = g.protect(n.x, n.y);
       const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
-      grad.addColorStop(0, palette.core);
+      grad.addColorStop(0, palette.glow);
+      grad.addColorStop(0.45, palette.glow);
       grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.globalAlpha = (light ? 0.24 : 0.42) * grow * p;
+      ctx.globalAlpha = (light ? 0.07 : 0.12) * grow * p;
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
@@ -1346,7 +1371,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         return { colony: c.i, meanFront: mean, frontCV: mean ? sd / mean : 0, sectors: live.length };
       });
       const cords = g.cords.filter((C) => C.link).map((C) => {
-        const base = C.length * 0.15;
+        const base = C.length * 0.35; // beyond the mat where fibres emerge
         let fibres = 0;
         for (const P of g.paths) if (P.group === C.id && P.s0 <= base && (A - P.t0) * P.v + P.s0 >= base) fibres++;
         const tipReached = Math.min(C.length, Math.max(0, (A - C.spine.t0) * C.spine.v));

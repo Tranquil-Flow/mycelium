@@ -556,8 +556,6 @@ export function createField({ stage, state, reduce }) {
       x.clearRect(0, 0, width, height);
       x.globalCompositeOperation = "source-over";
       x.globalAlpha = 1;
-      if (scene && oy < height && oy + scene.hero.H > 0) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
-      x.globalCompositeOperation = light ? "source-over" : "lighter";
       const origin = oy + field.top,
         first = Math.floor(-origin / field.height);
       for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
@@ -565,6 +563,17 @@ export function createField({ stage, state, reduce }) {
         if (y > height || y + field.height < 0) continue;
         x.drawImage(tile, field.left, y);
       }
+      if (scene && origin + 280 > 0 && origin < height) {
+        // The field fades in beneath the hero: no horizontal start line.
+        const fade = x.createLinearGradient(0, origin, 0, origin + 280);
+        fade.addColorStop(0, "rgba(0,0,0,1)");
+        fade.addColorStop(1, "rgba(0,0,0,0)");
+        x.globalCompositeOperation = "destination-out";
+        x.fillStyle = fade;
+        x.fillRect(0, origin, width, 280);
+      }
+      x.globalCompositeOperation = light ? "source-over" : "lighter";
+      if (scene && oy < height && oy + scene.hero.H > 0) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
       x.globalCompositeOperation = "source-over";
       lastScroll = scroll;
       lastVersion = version;
