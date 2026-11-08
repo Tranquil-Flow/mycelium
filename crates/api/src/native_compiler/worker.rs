@@ -25,13 +25,32 @@ pub(super) struct Worker {
     cancel: Arc<AtomicBool>,
 }
 impl Worker {
-    pub(super) fn start(config: &Config, prepare: &Value, cancel: Arc<AtomicBool>) -> Result<Self> {
+    pub(super) fn start(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+    ) -> Result<Self> {
         config.verify()?;
         if cancel.load(Ordering::SeqCst) {
             return Err(Error("compiler_stopped"));
         }
         let (client, server) = UnixStream::pair().map_err(|_| Error("native_socket_failed"))?;
-        let child = Command::new(&config.binary)
+        let mut command = if prepare["command"] == stage_contract::native_shard::COMMAND {
+            let home = std::env::var_os("HOME").ok_or(Error("native_shard_path_invalid"))?;
+            let profile = super::shard_sandbox::profile(
+                Path::new(text(prepare, "checkpoint")?),
+                source,
+                &PathBuf::from(home).join(".cache/huggingface"),
+            )
+            .map_err(Error)?;
+            let mut command = Command::new("/usr/bin/sandbox-exec");
+            command.args(["-p", &profile]).arg(&config.binary);
+            command
+        } else {
+            Command::new(&config.binary)
+        };
+        let child = command
             .arg("native-worker")
             .stdin(Stdio::null())
             .stdout(Stdio::from(OwnedFd::from(server)))
@@ -104,6 +123,21 @@ impl Worker {
             })?;
         if let Some(error) = reply.get("error") {
             eprintln!("native_worker_refused: {error}");
+            use stage_contract::native_shard as shard;
+            let code = reply["code"].as_str();
+            for known in [
+                shard::HASH,
+                shard::LENGTH,
+                shard::RECIPE,
+                shard::BINDING,
+                shard::TENSORS,
+                shard::PATH,
+                shard::READ,
+            ] {
+                if code == Some(known) {
+                    return Err(Error(known));
+                }
+            }
             return Err(Error("native_worker_refused"));
         }
         Ok((reply, body))

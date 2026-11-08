@@ -229,9 +229,13 @@ impl InputArtifact {
         }
         // The host rechecks exact current members separately; a cloned request
         // is not presented as fresh planner/resource/consent admission.
+        // Shard compilation retains the same source-bound assignment identity.
+        // This projection changes no source facts and does not itself emit bytes.
+        let mut whole = self.request.clone();
+        whole.stage_sharded = false;
         let output = planner::source_plan::producer::compile_source_assignments(
-            &self.request,
-            &self.request,
+            &whole,
+            &whole,
             planner::source_plan::PreparedSource {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,

@@ -471,6 +471,7 @@ impl CompilePort for Compiler {
                 if request.stage_sharded {
                     artifact.produce_stage_shards(&check()?, now())?;
                     artifact.validate_stage_shards(&check()?, now())?;
+                    artifact.produce_assignments(&check()?, now())?;
                 } else {
                     artifact.produce_assignments(&check()?, now())?;
                     artifact.validate_assignments(&check()?, now())?;

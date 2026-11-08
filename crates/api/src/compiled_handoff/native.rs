@@ -18,7 +18,8 @@ pub(super) fn open_native(
     if plan.as_object().is_none_or(|p| {
         p.len() != contract::PLAN_FIELDS.len()
             || contract::PLAN_FIELDS.iter().any(|f| !p.contains_key(*f))
-    }) || plan["protocol"] != contract::PLAN_PROTOCOL
+    }) || (plan["protocol"] != contract::PLAN_PROTOCOL
+        && plan["protocol"] != stage_contract::native_shard::PLAN_PROTOCOL)
         || plan["scope"] != "local_native_qualification"
         || plan["route_ready"] != false
         || complete["protocol"] != "mycelium.chain_compile_complete.v1"
@@ -138,6 +139,27 @@ pub(super) fn open_native(
         &plan["source"]["bytes"],
         &reference["recorded"]["identity"]["checkpoint_bytes"],
     )?;
+    if plan["protocol"] == stage_contract::native_shard::PLAN_PROTOCOL {
+        for stage in array(&plan["stages"])? {
+            let row = &stage["shard"]["transfer"];
+            let name = text(&row["path"])?
+                .strip_prefix("deployment/")
+                .filter(|s| !s.contains('/') && !s.starts_with('.'))
+                .ok_or_else(bad)?;
+            let pin = Pin {
+                bytes: row["size_bytes"].as_u64().ok_or_else(bad)?,
+                sha256: text(&row["content_digest"])?
+                    .strip_prefix("sha256:")
+                    .ok_or_else(bad)?
+                    .into(),
+            };
+            let key = format!("stage-shards/{name}");
+            let mut file = open(root, &key)?;
+            check(&mut file, &pin)?;
+            files.insert(key.clone(), file);
+            all_pins.insert(key, pin);
+        }
+    }
     paths.insert(
         "operator_plan".into(),
         root.join("compiled/operator-plan.json"),

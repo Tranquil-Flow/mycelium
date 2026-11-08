@@ -21,6 +21,7 @@ use std::{
     },
     time::Instant,
 };
+pub mod shard_sandbox;
 mod worker;
 
 #[derive(Debug, Clone)]
@@ -229,6 +230,31 @@ pub(crate) fn validate_evidence(plan: &Value, checkpoint: &Value, reference: &Va
         {
             return Err(Error("native_stage_order_changed"));
         }
+        if plan["protocol"] == stage_contract::native_shard::PLAN_PROTOCOL {
+            let shard = &stage["shard"];
+            let recipe = &shard["recipe"];
+            let mut body = recipe.clone();
+            body.as_object_mut()
+                .ok_or(Error("native_shard_recipe_mismatch"))?
+                .remove("node_plan_digest");
+            if shard["protocol"] != stage_contract::native_shard::PROTOCOL
+                || shard["range"] != stage["range"]
+                || shard["node_id"] != stage["node_id"]
+                || recipe["node_id"] != stage["node_id"]
+                || recipe["model_id"] != "Qwen/Qwen3-0.6B"
+                || recipe["resolved_commit"] != reference["recorded"]["identity"]["revision"]
+                || shard["recipe_digest"] != digest(&body)?
+                || recipe["node_plan_digest"] != shard["recipe_digest"]
+                || recipe["files"].as_array().is_none_or(|a| a.len() != 1)
+            {
+                return Err(Error("native_shard_recipe_mismatch"));
+            }
+            for key in ["path", "size_bytes", "content_digest"] {
+                if shard["transfer"][key] != recipe["files"][0][key] {
+                    return Err(Error("native_shard_binding_mismatch"));
+                }
+            }
+        }
         validate_proof(proof, stage, nonce, reference)?;
     }
     if !fields(checkpoint, contract::CHECKPOINT_FIELDS) {
@@ -301,7 +327,7 @@ pub fn build(
     cancel: Arc<AtomicBool>,
 ) -> Result<Option<Qualified>> {
     let request = artifact.request();
-    if request.model_id != "Qwen/Qwen3-0.6B" || request.stage_sharded {
+    if request.model_id != "Qwen/Qwen3-0.6B" {
         return Ok(None);
     }
     let Some(config) = Config::from_environment()? else {
@@ -327,6 +353,20 @@ pub fn build(
     artifact
         .validate_assignments(&current()?, crate::app_host::now())
         .map_err(|e| Error(e.0))?;
+    let shard_document = if request.stage_sharded {
+        artifact
+            .validate_stage_shards(&current()?, crate::app_host::now())
+            .map_err(|e| Error(e.0))?;
+        Some(
+            serde_json::from_slice::<Value>(
+                &fs::read(artifact.root().join("source-shards.private.json"))
+                    .map_err(|_| Error("native_shard_recipe_mismatch"))?,
+            )
+            .map_err(|_| Error("native_shard_recipe_mismatch"))?,
+        )
+    } else {
+        None
+    };
     let source = artifact.source().source_root.join("model.safetensors");
     let source_pin = file_pin(&source)?;
     if source_pin.sha256 != text(&oracle["identity"], "checkpoint_sha256")?
@@ -359,7 +399,7 @@ pub fn build(
         let id = id
             .strip_prefix("sha256:")
             .ok_or(Error("native_assignment_changed"))?;
-        let stage = json!({"node_id":node,"range":range,"request_id":id,"member_generation":member["generation"],"member_incarnation":member["incarnation"],"assignment":assignment});
+        let mut stage = json!({"node_id":node,"range":range,"request_id":id,"member_generation":member["generation"],"member_incarnation":member["incarnation"],"assignment":assignment});
         let memory =
             budgets::BudgetId::PyFinalScriptsA13OperatorSingleMacUiRehearsalMaxMemoryBytesL171C55
                 .bytes()
@@ -370,9 +410,28 @@ pub fn build(
             .ok_or(Error("native_reference_invalid"))?
             .len()
             + contract::CHALLENGE_OUTPUT_TOKENS;
-        let prepare = json!({"command":"prepare","checkpoint":source,"start":range[0],"end":range[1],"total":28,"memory":memory,"tokens":tokens,"id":id,"generation":member["generation"],
+        let mut prepare = json!({"command":"prepare","checkpoint":source,"start":range[0],"end":range[1],"total":28,"memory":memory,"tokens":tokens,"id":id,"generation":member["generation"],
             "stage_image":{"model_id":request.model_id,"revision":request.resolved_commit,"image_digest":oracle["identity"]["checkpoint_sha256"],"tensor_manifest":oracle["identity"]["manifest_sha256"],"profile":"packed_int8","layers":{"start":range[0],"end":range[1]},"total_layers":28,"source_metadata":{"header_sha256":oracle["identity"]["header_sha256"]}}});
-        let mut worker = worker::Worker::start(&config, &prepare, cancel.clone())?;
+        if let Some(document) = &shard_document {
+            let recipe = &document["node_slice_plans"][node];
+            let transfer = &document["node_files"][node][0];
+            let name = text(transfer, "path")?
+                .strip_prefix("deployment/")
+                .filter(|s| !s.contains('/'))
+                .ok_or(Error("native_shard_path_invalid"))?;
+            let shard = json!({"protocol":stage_contract::native_shard::PROTOCOL,
+                "node_id":node,"range":range,"transfer":transfer,"recipe":recipe,"recipe_digest":recipe["node_plan_digest"]});
+            prepare["command"] = json!(stage_contract::native_shard::COMMAND);
+            prepare["checkpoint"] = json!(artifact.root().join("stage-shards").join(name));
+            prepare["shard"] = shard.clone();
+            stage["shard"] = shard;
+        }
+        let mut worker = worker::Worker::start(
+            &config,
+            &prepare,
+            cancel.clone(),
+            &artifact.source().source_root,
+        )?;
         let (reply,body)=worker.request(&json!({"command":contract::COMMAND,"protocol":contract::REQUEST_PROTOCOL,"nonce":nonce}),&[])?;
         if reply["ok"] != true
             || !body.is_empty()
@@ -429,6 +488,12 @@ pub fn build(
         "source":{"path":source,"bytes":source_pin.bytes,"sha256":source_pin.sha256},
         "binary":{"path":config.binary,"bytes":config.pin.bytes,"sha256":config.pin.sha256},
         "reference_digest":digest(&reference)?,"documents":{},"verification_keys":artifact.verification_keys(),"signer":signer.public_key_record()});
+    if request.stage_sharded {
+        plan["protocol"] = json!(stage_contract::native_shard::PLAN_PROTOCOL);
+        artifact
+            .validate_stage_shards(&current()?, crate::app_host::now())
+            .map_err(|e| Error(e.0))?;
+    }
     validate_evidence(&plan, &checkpoint, &reference)?;
     emit(
         artifact,
