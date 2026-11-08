@@ -5,8 +5,10 @@
  * low-frequency flow away from the hero, the margin colonies and off-screen
  * sources, branching acutely into 2nd/3rd orders that run alongside the parent
  * and occasionally fuse into elongated cells. Density falls with distance from
- * sources and towards text. Two fixed viewport canvases: a static composite
- * (redrawn only on scroll or bake) and a live layer (fronts, pulses, blooms).
+ * sources and towards text. Layers (r11 v2): full-DPR horizontal band tiles of
+ * the static field and a hero-box static composite, both moved by compositor
+ * transforms on scroll (never re-rastered on scroll), and a viewport-sized live
+ * layer (fronts, pulses, blooms).
  */
 import { rng, gauss, smooth, persistWalk, measurePaths, auditPaths, sceneClock } from "./mycelium-geometry.js";
 
@@ -29,26 +31,78 @@ function contentBounds(offset = 0) {
  * rarer in the sparse field than near the margin colonies. Each knot is a few
  * overlapping soft lobes (never a circle) with short fibres wound tangentially
  * into it; radius at DPR1 is heavy-tailed, r = 1 + 2u^2.2 (diameter 2-6 px). */
+/** Bead test for one knot group: order members along their principal axis;
+ * consecutive spacing CV <= 0.4, or any 3 members collinear at near-equal
+ * spacing, reads as a string of beads. */
+export function beadLike(members) {
+  if (members.length < 3) return false;
+  const mx = members.reduce((n, m) => n + m.x, 0) / members.length,
+    my = members.reduce((n, m) => n + m.y, 0) / members.length;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const m of members) {
+    sxx += (m.x - mx) ** 2;
+    sxy += (m.x - mx) * (m.y - my);
+    syy += (m.y - my) ** 2;
+  }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy),
+    ord = [...members].sort((a, b) => (a.x - b.x) * Math.cos(th) + (a.y - b.y) * Math.sin(th));
+  const gaps = ord.slice(1).map((m, k) => Math.hypot(m.x - ord[k].x, m.y - ord[k].y)),
+    mean = gaps.reduce((n, v) => n + v, 0) / gaps.length,
+    cv = Math.sqrt(gaps.reduce((n, v) => n + (v - mean) ** 2, 0) / gaps.length) / Math.max(1e-6, mean);
+  if (cv <= 0.4) return true;
+  for (let i = 0; i < ord.length; i++)
+    for (let j = i + 1; j < ord.length; j++)
+      for (let k = j + 1; k < ord.length; k++) {
+        const [a, b, c] = [ord[i], ord[j], ord[k]],
+          span = Math.hypot(c.x - a.x, c.y - a.y),
+          off = Math.abs((c.x - a.x) * (a.y - b.y) - (a.x - b.x) * (c.y - a.y)) / Math.max(1e-6, span),
+          g1 = Math.hypot(b.x - a.x, b.y - a.y),
+          g2 = Math.hypot(c.x - b.x, c.y - b.y);
+        if (off < 0.2 * span && Math.max(g1, g2) / Math.max(1e-6, Math.min(g1, g2)) < 1.4) return true;
+      }
+  return false;
+}
+
 export function placeKnots({ strands, junctions, marginKnots, layout, w, top, height }) {
   const R = rng("r11-hyphal-knots"),
     knots = [];
   const nearColony = (q) => marginKnots.reduce((m, k) => Math.min(m, Math.hypot(q.x - k.x, q.y - k.y)), Infinity);
-  const make = (p, i, group) => {
+  // r11 v2: a group is never a row of beads. Members differ in size (one
+  // dominant ball, smaller satellites) and lobe shape, sit at alternately short
+  // and long gaps (ratio >= 2.5) and often on a lateral leaving the host, and a
+  // group that still measures as even or collinear is trimmed.
+  const make = (p, i, group, r) => {
     const a = p.points[Math.max(0, i - 1)],
       b = p.points[Math.min(p.points.length - 1, i + 1)],
       q = p.points[i],
-      r = 1 + 2 * Math.pow(R(), 2.2),
       lobes = [],
       fibres = [];
-    for (let j = 0, n = 3 + Math.floor(R() * 4); j < n; j++) {
+    for (let j = 0, n = 2 + Math.floor(R() * 5); j < n; j++) {
       const o = R() * 6.283,
-        d = r * (0.2 + R() * 0.4);
-      lobes.push([Math.cos(o) * d, Math.sin(o) * d, r * (0.55 + R() * 0.45)]);
+        d = r * (0.15 + R() * 0.55);
+      lobes.push([Math.cos(o) * d, Math.sin(o) * d, r * (0.4 + R() * 0.6)]);
     }
     for (let j = 0, n = 3 + Math.floor(R() * 5); j < n; j++) fibres.push([R() * 6.283, (1.5 + R() * 2) * (R() < 0.5 ? -1 : 1), 0.6 + R() * 0.8, 0.8 + R() * 0.5]);
-    knots.push({ x: q.x, y: q.y, r, el: 1 + R() * 0.6, ang: Math.atan2(b.y - a.y, b.x - a.x), lobes, fibres, p, i, group, bright: 0.55 + R() * 0.35 });
-    (p.knots ||= []).push(knots.at(-1));
+    return { x: q.x, y: q.y, r, el: 1 + R() * 0.9, ang: Math.atan2(b.y - a.y, b.x - a.x) + gauss(R) * 0.35, lobes, fibres, p, i, group, bright: 0.55 + R() * 0.35 };
   };
+  const arcs = new Map();
+  const arcOf = (p) => {
+    let a = arcs.get(p);
+    if (!a) {
+      a = [0];
+      for (let i = 1; i < p.points.length; i++) a.push(a[i - 1] + Math.hypot(p.points[i].x - p.points[i - 1].x, p.points[i].y - p.points[i - 1].y));
+      arcs.set(p, a);
+    }
+    return a;
+  };
+  const at = (p, s) => {
+    const a = arcOf(p);
+    let i = 0;
+    while (i < a.length - 1 && a[i] < s) i++;
+    return i;
+  };
+  const kids = new Map();
+  for (const p of strands) if (p.static && p.introParent) (kids.get(p.introParent) || kids.set(p.introParent, []).get(p.introParent)).push(p);
   let groups = 0;
   const area = w * height,
     sparseTarget = area / 120000,
@@ -57,12 +111,33 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
     const q = p.points[i];
     if (!q || q.y < top || q.y > top + height) return false;
     const n = 1 + Math.floor(Math.pow(R(), 1.8) * 4),
-      g = groups++;
-    make(p, i, g);
+      g = groups++,
+      lead = 1.3 + 1.7 * Math.pow(R(), 1.6),
+      members = [make(p, i, g, lead)];
+    let host = p,
+      s = arcOf(p)[i],
+      dir = R() < 0.5 ? -1 : 1,
+      short = R() < 0.5;
     for (let k = 1; k < n; k++) {
-      // Members sit along the same strand 6-30 px apart, irregularly.
-      const j = i + Math.round((R() < 0.5 ? -1 : 1) * (2 + R() * 10));
-      if (j > 0 && j < p.points.length - 1) make(p, j, g);
+      const gap = short ? 3 + R() * 3 : 15 + R() * 13;
+      short = !short;
+      // Often step onto a lateral leaving near the current member (off the host's line).
+      const lat = host === p ? (kids.get(p) || []).filter((c) => Math.abs((c.introAt ?? -99) - s) < 20 && arcOf(c).at(-1) > gap + 2) : [];
+      if (lat.length && R() < 0.6) {
+        host = lat[Math.floor(R() * lat.length)];
+        s = gap;
+        dir = 1;
+      } else s += dir * gap;
+      const a = arcOf(host);
+      if (s <= 1 || s >= a.at(-1) - 1) break;
+      const j = at(host, s);
+      if (j <= 0 || j >= host.points.length - 1) break;
+      members.push(make(host, j, g, Math.max(1, lead * (0.4 + R() * 0.45))));
+    }
+    while (members.length > 2 && beadLike(members)) members.pop();
+    for (const m of members) {
+      knots.push(m);
+      (m.p.knots ||= []).push(m);
     }
     return true;
   };
@@ -266,31 +341,93 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         const centre = vertex(px + gauss(R) * 14, y + gauss(R) * 30, 0);
         knots.push(centre);
         marginKnots.push(centre);
-        // Fan biased along the margin, heavy-tailed lengths: never a 16-ray asterisk.
-        const fan = Math.PI / 2 + gauss(R) * 0.4 + (R() < 0.5 ? Math.PI : 0);
-        for (let j = 0; j < Math.round(150 * marginDensityRatio); j++) {
-          const hh = R() < 0.65 ? fan + gauss(R) * 0.9 : R() * 6.28,
-            o0 = R() * 6.28,
-            r0 = 3 + Math.abs(gauss(R)) * 8, // a disc of origins: a mat, never a point soma
-            ln = 14 + 70 * Math.pow(R(), 1.5) * (0.6 + 0.4 * Math.cos(hh - fan));
-          const p = add(persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 }), { width: 0.24 + R() * 0.16, alpha: 0.62, margin: true });
+        // r11 v2 cottony mat (refs; owner: no neuron/starburst): no point centre.
+        // A broad lobed core of short curled felt hyphae whose origins are spread
+        // over the whole mat, short forward-pointing fuzz on the fan side, and
+        // long hyphae that leave through the rim after a bent inner course.
+        const fan = Math.PI / 2 + gauss(R) * 0.4 + (R() < 0.5 ? Math.PI : 0),
+          lobes = [];
+        for (let j = 0, n = 2 + Math.floor(R() * 3); j < n; j++) {
+          const along = (R() - 0.25) * 20,
+            across = gauss(R) * 9;
+          lobes.push({ x: centre.x + Math.cos(fan) * along - Math.sin(fan) * across, y: centre.y + Math.sin(fan) * along + Math.cos(fan) * across, r: 9 + R() * 9 });
+        }
+        const inMat = (front = 0) => {
+          for (;;) {
+            const l = lobes[Math.floor(R() * lobes.length)],
+              o = R() * 6.283,
+              rr = l.r * Math.sqrt(R()),
+              q = { x: l.x + Math.cos(o) * rr, y: l.y + Math.sin(o) * rr };
+            // front > 0 biases origins to the leading half of the mat
+            if (front <= 0 || (q.x - centre.x) * Math.cos(fan) + (q.y - centre.y) * Math.sin(fan) > -4 || R() > front) return q;
+          }
+        };
+        const curl = (o, h, len, turn) => {
+          const pts = [o],
+            n = Math.max(3, Math.ceil(len / 1.8));
+          let a = h,
+            t = gauss(R) * turn;
+          for (let k = 0; k < n; k++) {
+            t = t * 0.8 + gauss(R) * turn * 0.5;
+            a += t;
+            const q = pts.at(-1);
+            pts.push({ x: q.x + (Math.cos(a) * len) / n, y: q.y + (Math.sin(a) * len) / n });
+          }
+          return pts;
+        };
+        const tuft = (pts, width, alpha) => {
+          const p = add(pts, { width, alpha, margin: true });
           p.hair = true;
           p.tuft = true;
           p.marginRoot = centre;
           p.introStart = R2() * 30;
-        }
+          return p;
+        };
+        // Felt: the soft core (random headings, tightly curled, short).
+        for (let j = 0; j < 56; j++) tuft(curl(inMat(), R() * 6.283, 6 + R() * 12, 0.32), 0.22 + R() * 0.16, 0.62);
+        // Forward fuzz: near-parallel along the fan, gently curving, heavy-tailed lengths.
+        for (let j = 0; j < 36; j++) tuft(curl(inMat(0.7), fan + gauss(R) * 0.45, 8 + 34 * Math.pow(R(), 1.6), 0.07), 0.22 + R() * 0.14, 0.6);
+        // A short rear/side fringe.
+        for (let j = 0; j < 8; j++) tuft(curl(inMat(), fan + Math.PI + gauss(R) * 0.9, 4 + R() * 6, 0.12), 0.2, 0.45);
+        // Long hyphae stay graph-connected to the colony vertex through two
+        // meandering spines inside the mat; each leaves from its own spine vertex
+        // and exits at a scattered rim point, so nothing converges on one point.
+        const spines = [fan, fan + Math.PI].map((h, k) => {
+          const p = tuft(curl(centre, h + gauss(R) * 0.5, k ? 12 + R() * 8 : 22 + R() * 12, 0.3), 0.3, 0.5);
+          if (!k) p.haze = lobes; // the broad soft glow of the mat (no peak at the centre)
+          return p.points.slice(2);
+        });
+        const hubs = spines.flat();
+        const leave = (hh) => {
+          const l = lobes[Math.floor(R() * lobes.length)],
+            e = hh + gauss(R) * 0.7,
+            o = { x: l.x + Math.cos(e) * l.r * (0.8 + R() * 0.3), y: l.y + Math.sin(e) * l.r * (0.8 + R() * 0.3) },
+            diff = (v) => Math.abs(Math.atan2(Math.sin(Math.atan2(o.y - v.y, o.x - v.x) - hh), Math.cos(Math.atan2(o.y - v.y, o.x - v.x) - hh)));
+          // A hub behind the exit point (no U-turn or sharp kink into the walk).
+          const ok = hubs.filter((v) => Math.hypot(o.x - v.x, o.y - v.y) > 5 && diff(v) < 0.5);
+          if (!ok.length) {
+            const v = hubs[Math.floor(R() * hubs.length)];
+            return { inner: [], o: v };
+          }
+          const v = ok[Math.floor(R() * ok.length)];
+          return { inner: [v, { x: (v.x + o.x) / 2 + gauss(R) * 1.2, y: (v.y + o.y) / 2 + gauss(R) * 1.2 }], o };
+        };
         // ...dissolving into a few long sparse hyphae.
         for (let j = 0; j < 7; j++) {
-          const hh = fan + gauss(R) * 1.2;
-          const p = add(persistWalk(centre, hh, 140 + R() * 220, R, { ...sparseWalk, pull: undefined }), { width: 0.45, alpha: 0.75, margin: true });
+          const hh = fan + gauss(R) * 1.2,
+            { inner, o } = leave(hh),
+            walk = persistWalk(o, hh, 140 + R() * 220, R, { ...sparseWalk, pull: undefined });
+          const p = add([...inner, ...walk], { width: 0.45, alpha: 0.75, margin: true });
+          p.marginRoot = centre;
           mainRoots.push(p);
         }
         // r11: runners leave the colony for the content column (ref-8 sparse
         // hyphae flowing inwards), so text sections carry mycelium as in r9.
         const inward = side < 0 ? 0 : Math.PI;
         for (let j = 0, n = 4 + Math.floor(R2() * 4); j < n; j++) {
-          const hh = inward + gauss(R2) * 0.6;
-          const p = add(persistWalk(centre, hh, 380 + R2() * 420, R2, { ...sparseWalk, k: 0.016, pull: undefined }), { width: 0.5, alpha: 0.8 });
+          const hh = inward + gauss(R2) * 0.6,
+            { inner, o } = leave(hh);
+          const p = add([...inner, ...persistWalk(o, hh, 380 + R2() * 420, R2, { ...sparseWalk, k: 0.016, pull: undefined })], { width: 0.5, alpha: 0.8 });
           p.runner = true;
           mainRoots.push(p);
         }
@@ -485,8 +622,14 @@ export function createField({ stage, state, reduce }) {
   live.setAttribute("aria-hidden", "true");
   c.after(live);
   const lx = live.getContext("2d");
-  const tile = document.createElement("canvas"),
-    bx = tile.getContext("2d");
+  // Static field: horizontal band tiles at device pixels (sharp), as DOM
+  // canvases in a fixed box. Scrolling only moves them (compositor transform);
+  // r11 blitted one 4x-pixel tile into the viewport canvas on every scroll.
+  const bandBox = document.createElement("div");
+  bandBox.className = "page-mycelium-field";
+  bandBox.setAttribute("aria-hidden", "true");
+  c.before(bandBox);
+  let bands = [];
   const hero = document.getElementById("hyphae"),
     css = getComputedStyle(stage),
     light = state.theme === "light",
@@ -495,10 +638,15 @@ export function createField({ stage, state, reduce }) {
   const width = Math.round(document.documentElement.clientWidth || innerWidth),
     height = Math.round(innerHeight),
     d = Math.min(devicePixelRatio || 1, 2);
-  for (const k of [c, live]) {
-    k.width = width * d;
-    k.height = height * d;
-  }
+  live.width = width * d;
+  live.height = height * d;
+  // The static composite holds only the hero (page-anchored, hero-box sized)
+  // and is translated by the compositor on scroll.
+  c.width = width * d;
+  c.height = 2;
+  c.style.bottom = "auto";
+  c.style.height = "1px";
+  if (!light) c.style.mixBlendMode = "plus-lighter"; // hero adds onto the field, as the old 'lighter' composite
   x.setTransform(d, 0, 0, d, 0, 0);
   lx.setTransform(d, 0, 0, d, 0, 0);
   const fieldAlpha = light ? 0.24 : 0.62,
@@ -550,11 +698,14 @@ export function createField({ stage, state, reduce }) {
     column = apex ? (light ? 0.4 : 0.7) : 0.32;
   const columnWeight = (px) => column + (1 - column) * marginWeight(px);
   const CH = 10;
+  const hazeIn = rgba(glow, 0.16),
+    hazeMid = rgba(glow, 0.07),
+    hazeOut = rgba(glow, 0);
   /** Draws points [from, to) of a strand (fractional ends), chunked with a
    * per-chunk column weight and distal taper fixed by chunk position, so
    * incremental (intro) and one-shot rasters match. Butt caps throughout: no
    * alpha beads at joints. Fuzz and knots inside the range are drawn too. */
-  function drawRange(ctx, p, from, to, alpha, detail = false) {
+  function drawRange(ctx, p, from, to, alpha, detail = false, yr = null) {
     const pts = p.points,
       n = pts.length - 1,
       end = Math.min(n, to);
@@ -562,6 +713,21 @@ export function createField({ stage, state, reduce }) {
     ctx.lineCap = "butt";
     let f = 0;
     if (detail && !p.fuzz && p.fuzzSeed >= 0) p.fuzz = makeFuzz(p, p.fuzzSeed);
+    if (p.haze && from === 0) {
+      // Cottony mat glow: overlapping broad soft lobes, never a bright point.
+      const op = ctx.globalCompositeOperation;
+      for (const l of p.haze) {
+        const R1 = l.r * 1.6,
+          g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, R1);
+        g.addColorStop(0, hazeIn);
+        g.addColorStop(0.55, hazeMid);
+        g.addColorStop(1, hazeOut);
+        ctx.globalAlpha = Math.min(1, alpha * marginWeight(l.x) * lightMul);
+        ctx.fillStyle = g;
+        ctx.fillRect(l.x - R1, l.y - R1, R1 * 2, R1 * 2);
+      }
+      ctx.globalCompositeOperation = op;
+    }
     const fz = detail ? p.fuzz : null;
     if (fz) while (f < fz.length && fz[f] < from) f += 7;
     for (let c0 = Math.floor(from / CH) * CH; c0 < end; c0 += CH) {
@@ -569,7 +735,19 @@ export function createField({ stage, state, reduce }) {
         i0 = Math.max(c0, from),
         mid = pts[Math.min(n, c0 + CH / 2)],
         w = p.margin ? marginWeight(mid.x) : columnWeight(mid.x);
-      if (w <= 0.01) {
+      let skip = w <= 0.01;
+      if (!skip && yr) {
+        // Band culling: chunks wholly outside this band (plus hair overhang) are skipped.
+        let y0 = Infinity,
+          y1 = -Infinity;
+        for (let k = c0; k <= j; k++) {
+          const yy = pts[k].y;
+          if (yy < y0) y0 = yy;
+          if (yy > y1) y1 = yy;
+        }
+        skip = y1 < yr[0] - 14 || y0 > yr[1] + 14;
+      }
+      if (skip) {
         if (fz) while (f < fz.length && fz[f] < j) f += 7;
         continue;
       }
@@ -601,7 +779,7 @@ export function createField({ stage, state, reduce }) {
       }
     }
     if (detail && p.knots)
-      for (const k of p.knots) if (k.i >= from && k.i < end && !k.underText) drawKnot(ctx, k, alpha * (p.margin ? marginWeight(k.x) : columnWeight(k.x)) * lightMul);
+      for (const k of p.knots) if (k.i >= from && k.i < end && !k.underText && (!yr || (k.y > yr[0] - 10 && k.y < yr[1] + 10))) drawKnot(ctx, k, alpha * (p.margin ? marginWeight(k.x) : columnWeight(k.x)) * lightMul);
   }
   const knotCore = rgba(light ? glow : core, 1),
     knotMid = rgba(glow, 0.55),
@@ -640,25 +818,202 @@ export function createField({ stage, state, reduce }) {
     ctx.restore();
   }
   const statics = () => field.strands.filter((p) => p.static);
+  /** Calls fn(ctx, yr) for every band (and wrap copy) the strand overlaps;
+   * yr is the band's range in the strand's own (unshifted) coordinates. */
   function eachShift(p, fn) {
     for (const shift of [-field.height, 0, field.height]) {
-      if (p.box[3] + shift < field.top || p.box[1] + shift > field.top + field.height) continue;
-      bx.save();
-      bx.translate(0, shift);
-      fn();
-      bx.restore();
+      const y0 = p.box[1] + shift - field.top,
+        y1 = p.box[3] + shift - field.top;
+      if (y1 < 0 || y0 > field.height) continue;
+      for (const b of bands) {
+        if (y1 < b.y0 || y0 > b.y0 + b.h) continue;
+        b.cx.save();
+        b.cx.translate(0, shift);
+        fn(b.cx, [field.top + b.y0 - shift, field.top + b.y0 + b.h - shift]);
+        b.cx.restore();
+      }
     }
   }
+  const BAND = 240;
   function resetTile() {
     // Full device-pixel resolution: r9/r10 rastered this tile at CSS pixels and
     // the DPR transform upscaled it (the blurry sidebars and field).
-    tile.width = Math.ceil(field.width * d);
-    tile.height = Math.ceil(field.height * d);
-    bx.setTransform(d, 0, 0, d, -field.left * d, -field.top * d);
-    bx.clearRect(field.left, field.top, field.width, field.height);
-    bx.strokeStyle = glow;
-    bx.globalCompositeOperation = light ? "source-over" : "lighter";
+    const n = Math.ceil(field.height / BAND);
+    if (bands.length !== n || bands[0]?.cv.width !== Math.ceil(field.width * d)) {
+      for (const b of bands) {
+        b.cv.width = b.cv.height = 0;
+        b.cv.remove();
+      }
+      bands = [];
+      for (let i = 0; i < n; i++) {
+        const y0 = i * BAND,
+          h = Math.min(BAND, field.height - y0),
+          cv = document.createElement("canvas");
+        cv.width = Math.ceil(field.width * d);
+        cv.height = Math.ceil(h * d);
+        cv.style.cssText = `left:${field.left}px;width:${field.width}px;height:${cv.height / d}px;visibility:hidden`;
+        bandBox.appendChild(cv);
+        bands.push({ cv, cx: cv.getContext("2d"), y0, h, k: null, ty: NaN, shown: false, ready: true, queued: false, job: null });
+      }
+    }
+    for (const b of bands) prepBand(b);
+    settled = false;
+    bandQueue.length = 0;
+    lastScroll = NaN;
     for (const p of field.strands) p.drawn = 0;
+  }
+  /** (Re)allocates a band's full-DPR backing and resets its drawing state. */
+  function prepBand(b) {
+    const w = Math.ceil(field.width * d),
+      h = Math.ceil(b.h * d);
+    if (b.cv.width !== w || b.cv.height !== h) {
+      b.cv.width = w;
+      b.cv.height = h;
+    }
+    const g = b.cx;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = "source-over";
+    g.clearRect(0, 0, w, h);
+    g.setTransform(d, 0, 0, d, -field.left * d, -(field.top + b.y0) * d);
+    g.strokeStyle = glow;
+    g.globalCompositeOperation = light ? "source-over" : "lighter";
+    b.k = null;
+    b.ready = true;
+    b.queued = false;
+  }
+  // Residency (after the intro and the first full raster): when the resident
+  // bands exceed the byte budget the farthest ones (never within KEEP CSS px of
+  // the viewport) free their backing; bands within KEEP px are re-rastered from
+  // the vector strands ahead of time (bounded slices), and a band that becomes
+  // visible before it is ready is finished synchronously.
+  const KEEP = BAND,
+    BAND_BUDGET = 60e6; // bytes of resident band backing (all bands fit at <=1440 DPR2)
+  let settled = false;
+  const bandQueue = [];
+  function rasterBand(b, budgetMs = Infinity) {
+    if (!b.job) {
+      const q = b.queued;
+      prepBand(b);
+      b.ready = false;
+      b.queued = q;
+      b.job = { list: statics(), i: 0 };
+    }
+    const job = b.job,
+      t0 = performance.now(),
+      top = field.top + b.y0,
+      bottom = top + b.h;
+    while (job.i < job.list.length && performance.now() - t0 < budgetMs) {
+      const p = job.list[job.i++],
+        n = p.points.length - 1;
+      for (const shift of [-field.height, 0, field.height]) {
+        if (p.box[3] + shift < top || p.box[1] + shift > bottom) continue;
+        b.cx.save();
+        b.cx.translate(0, shift);
+        drawRange(b.cx, p, 0, n, p.alpha * fieldAlpha, true, [top - shift, bottom - shift]);
+        b.cx.restore();
+      }
+    }
+    metrics.bandRasterMs = (metrics.bandRasterMs || 0) + (performance.now() - t0);
+    if (job.i < job.list.length) return false;
+    b.job = null;
+    b.ready = true;
+    b.queued = false;
+    metrics.bandRasters = (metrics.bandRasters || 0) + 1;
+    (metrics.bandRasterLog ||= []).push(bands.indexOf(b));
+    if (metrics.bandRasterLog.length > 200) metrics.bandRasterLog.shift();
+    return true;
+  }
+  const bandCh = new MessageChannel();
+  bandCh.port1.onmessage = () => {
+    if (disposed) return;
+    while (bandQueue[0] && bandQueue[0].ready && !bandQueue[0].job) bandQueue.shift(); // finished elsewhere
+    const b = bandQueue[0];
+    if (!b) return;
+    if (rasterBand(b, 4)) {
+      bandQueue.shift();
+      lastScroll = NaN; // present it
+      if (frozen !== null || reduce.matches) paint(frozen ?? clock.elapsed);
+    }
+    if (bandQueue.length) bandCh.port2.postMessage(0);
+  };
+  function evict(b) {
+    b.cv.width = b.cv.height = 0;
+    b.ready = false;
+    b.queued = false;
+    b.job = null;
+    b.k = null;
+  }
+  /** Places each band on the page copy nearest the viewport (compositor
+   * transform, device-pixel snapped); the first copy fades in beneath the hero. */
+  function placeBands(origin) {
+    for (const b of bands) {
+      // The nearest page copy of this band (the field repeats every field.height).
+      const k0 = Math.round((-origin - b.y0 + (height - b.h) / 2) / field.height);
+      b.dist = Infinity;
+      for (let k = k0 - 1; k <= k0 + 1; k++) {
+        if (scene && k < 0) continue;
+        const y = origin + k * field.height + b.y0,
+          dist = y + b.h < 0 ? -(y + b.h) : y > height ? y - height : 0;
+        if (dist < b.dist) {
+          b.dist = dist;
+          b.vy = y;
+          b.vk = k;
+        }
+      }
+      b.visible = b.dist === 0 && b.vy < height && b.vy + b.h > 0;
+    }
+    if (settled) {
+      // Least-needed eviction only when over the byte budget, never inside KEEP.
+      const per = Math.ceil(field.width * d) * Math.ceil(BAND * d) * 4,
+        maxRes = Math.max(Math.ceil((height + 2 * KEEP) / BAND) + 1, Math.floor(BAND_BUDGET / per));
+      let resident = bands.filter((b) => b.ready || b.job).length;
+      const want = bands.filter((b) => !b.ready && !b.job && b.dist <= KEEP).length;
+      for (const b of [...bands].sort((p, q) => q.dist - p.dist)) {
+        if (resident + want <= maxRes || b.dist <= KEEP) break;
+        if (b.ready && !b.job) {
+          evict(b);
+          resident--;
+        }
+      }
+      for (const b of [...bands].sort((p, q) => p.dist - q.dist)) {
+        if (b.ready) continue;
+        if (b.visible) {
+          rasterBand(b); // finish now: never show an empty band
+          const at = bandQueue.indexOf(b);
+          if (at >= 0) bandQueue.splice(at, 1);
+        } else if (!b.queued && b.dist <= KEEP) {
+          b.queued = true;
+          bandQueue.push(b);
+          if (bandQueue.length === 1) bandCh.port2.postMessage(0);
+        }
+      }
+    }
+    for (const b of bands) {
+      const k = b.vk,
+        y = b.vy,
+        show = b.visible && b.ready;
+      if (show !== b.shown) {
+        b.cv.style.visibility = show ? "visible" : "hidden";
+        b.shown = show;
+      }
+      if (!show) continue;
+      const ty = Math.round(y * d) / d;
+      if (ty !== b.ty) {
+        b.cv.style.transform = `translate3d(0,${ty}px,0)`;
+        b.ty = ty;
+      }
+      if (k !== b.k) {
+        b.k = k;
+        const FADE = 280;
+        if (scene && k === 0 && b.y0 < FADE) {
+          const a0 = (b.y0 / FADE).toFixed(3),
+            stop = FADE - b.y0,
+            m = stop < b.h ? `linear-gradient(to bottom, rgba(0,0,0,${a0}) 0px, #000 ${stop}px)` : `linear-gradient(to bottom, rgba(0,0,0,${a0}), rgba(0,0,0,${((b.y0 + b.h) / FADE).toFixed(3)}))`;
+          b.cv.style.maskImage = b.cv.style.webkitMaskImage = m;
+        } else b.cv.style.maskImage = b.cv.style.webkitMaskImage = "";
+      }
+    }
   }
   // The static tile is rasterised in bounded slices (no long task); it is
   // presented as it fills, like the hero.
@@ -667,7 +1022,8 @@ export function createField({ stage, state, reduce }) {
     resetTile();
     const list = statics(),
       job = ++rasterJob;
-    let i = 0;
+    let i = 0,
+      spent = 0;
     const ch = new MessageChannel();
     ch.port1.onmessage = () => {
       if (disposed || job !== rasterJob) return;
@@ -675,12 +1031,18 @@ export function createField({ stage, state, reduce }) {
       while (i < list.length && performance.now() - t0 < 8) {
         const p = list[i++],
           n = p.points.length - 1;
-        eachShift(p, () => drawRange(bx, p, 0, n, p.alpha * fieldAlpha, true));
+        eachShift(p, (g, yr) => drawRange(g, p, 0, n, p.alpha * fieldAlpha, true, yr));
         p.drawn = n;
       }
+      spent += performance.now() - t0;
       tileVersion++;
       if (i < list.length) ch.port2.postMessage(0);
-      else c.dataset.tile = "1";
+      else {
+        metrics.rasterMs = +spent.toFixed(1);
+        c.dataset.tile = "1";
+        settled = true;
+        lastScroll = NaN; // re-evaluate band residency
+      }
     };
     ch.port2.postMessage(0);
   }
@@ -727,7 +1089,7 @@ export function createField({ stage, state, reduce }) {
         break;
       }
       const from = p.drawn;
-      eachShift(p, () => drawRange(bx, p, from, target, p.alpha * fieldAlpha, true));
+      eachShift(p, (g, yr) => drawRange(g, p, from, target, p.alpha * fieldAlpha, true, yr));
       p.drawn = target;
       drawn = true;
     }
@@ -742,12 +1104,14 @@ export function createField({ stage, state, reduce }) {
         const n = p.points.length - 1;
         if (p.drawn < n) {
           const from = p.drawn;
-          eachShift(p, () => drawRange(bx, p, from, n, p.alpha * fieldAlpha, true));
+          eachShift(p, (g, yr) => drawRange(g, p, from, n, p.alpha * fieldAlpha, true, yr));
           p.drawn = n;
         }
       }
       tileVersion++;
       c.dataset.tile = "1";
+      settled = true;
+      lastScroll = NaN;
     }
     intro = null;
     tips = [];
@@ -872,12 +1236,20 @@ export function createField({ stage, state, reduce }) {
       ...field.rootAudit, explorerLoneThreads: scene?.graph.explorerAudit?.loneThreads ?? 0, explorerAudit: scene?.graph.explorerAudit,
       marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: 0.75, marginPulseLeak: 135,
       marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,
-      canvasPixels: c.width * c.height, bytes: (2 * c.width * c.height + tile.width * tile.height) * 4, tileScale: tile.width / field.width, dpr: d,
+      canvasPixels: live.width * live.height, bands: bands.length, tileScale: Math.ceil(field.width * d) / field.width, dpr: d,
       runners: field.strands.filter((p) => p.runner).length,
       knots: field.hyphalKnots.length, knotsUnderText: knotsHidden, knotGroups: new Set(field.hyphalKnots.map((k) => k.group)).size, knotRadii: field.hyphalKnots.map((k) => +k.r.toFixed(2)),
       introMs: INTRO_MS, columnWeight: column,
     };
     Object.defineProperty(window.__understoryAudit, "fuzz", { enumerable: true, get: fuzzCount });
+    // Resident buffer bytes (bands are evicted/re-rastered by viewport distance).
+    const bandBytes = () => bands.reduce((n, b) => n + b.cv.width * b.cv.height, 0) * 4;
+    Object.defineProperty(window.__understoryAudit, "bandBytes", { enumerable: true, get: bandBytes });
+    Object.defineProperty(window.__understoryAudit, "bandBytesMax", { enumerable: true, get: () => Math.ceil(field.width * d) * Math.ceil(field.height * d) * 4 });
+    // `bytes` is the fixed upper bound (every band resident, as during the intro);
+    // `bytesResident` is what is allocated now.
+    Object.defineProperty(window.__understoryAudit, "bytes", { enumerable: true, get: () => (c.width * c.height + live.width * live.height) * 4 + window.__understoryAudit.bandBytesMax });
+    Object.defineProperty(window.__understoryAudit, "bytesResident", { enumerable: true, get: () => (c.width * c.height + live.width * live.height) * 4 + bandBytes() });
     // Heavy audits are computed lazily on first read, never during start-up.
     let straightness = null,
       morphology = null;
@@ -972,34 +1344,17 @@ export function createField({ stage, state, reduce }) {
     if (intro && intro.manual === null) introStep(begin);
     // Bakes are batched to 4 s while running (one static redraw per batch at most).
     if (scene?.bakeUntil) frozen !== null || reduced ? scene.bakeUntil(A) : scene.bakeUntil(Math.floor(A / 4) * 4, true);
-    const version = (scene ? scene.hero.version : 0) * 1000 + tileVersion;
-    // ---- static composite: only on scroll or newly baked material ----
-    if (force || scroll !== lastScroll || version !== lastVersion) {
-      x.clearRect(0, 0, width, height);
-      x.globalCompositeOperation = "source-over";
-      x.globalAlpha = 1;
-      const origin = oy + field.top,
-        first = Math.floor(-origin / field.height);
-      for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
-        const y = origin + k * field.height;
-        if (y > height || y + field.height < 0) continue;
-        x.drawImage(tile, field.left, y, tile.width / d, tile.height / d);
-      }
-      if (scene && origin + 280 > 0 && origin < height) {
-        // The field fades in beneath the hero: no horizontal start line.
-        const fade = x.createLinearGradient(0, origin, 0, origin + 280);
-        fade.addColorStop(0, "rgba(0,0,0,1)");
-        fade.addColorStop(1, "rgba(0,0,0,0)");
-        x.globalCompositeOperation = "destination-out";
-        x.fillStyle = fade;
-        x.fillRect(0, origin, width, 280);
-      }
-      x.globalCompositeOperation = light ? "source-over" : "lighter";
-      if (scene && oy < height && oy + scene.hero.H > 0) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
-      x.globalCompositeOperation = "source-over";
-      lastScroll = scroll;
+    // ---- static layers: scroll only moves them; the hero box redraws on bakes ----
+    const version = scene ? scene.hero.version : 0;
+    if (scene && (force || version !== lastVersion)) {
+      drawHero();
       lastVersion = version;
       metrics.staticRedraws++;
+    }
+    if (force || scroll !== lastScroll) {
+      placeBands(oy + field.top);
+      if (scene) placeHero(oy);
+      lastScroll = scroll;
     }
     // ---- live layer ----
     const lb = performance.now();
@@ -1181,7 +1536,7 @@ export function createField({ stage, state, reduce }) {
         breath.style.opacity = bo;
       }
     }
-    Object.assign(c.dataset, { time: t.toFixed(3), paths: field.strands.length, nodes: field.marginKnots.length, sporeNodes: 0, canvasPixels: c.width * c.height });
+    Object.assign(c.dataset, { time: t.toFixed(3), paths: field.strands.length, nodes: field.marginKnots.length, sporeNodes: 0, canvasPixels: live.width * live.height });
   }
   function tick(now) {
     raf = 0;
@@ -1207,6 +1562,36 @@ export function createField({ stage, state, reduce }) {
       raf = 0;
     }
   }
+  /** Hero-box static composite at page coordinates (redrawn only when the hero bakes). */
+  function drawHero() {
+    const hc = scene.hero.canvas,
+      w = Math.ceil(scene.hero.W * d),
+      h = Math.ceil(scene.hero.H * d);
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+      c.style.height = `${h / d}px`;
+      c.style.width = `${w / d}px`;
+      x.setTransform(d, 0, 0, d, 0, 0);
+      heroY = NaN;
+    }
+    x.clearRect(0, 0, scene.hero.W, scene.hero.H);
+    x.drawImage(hc, 0, 0, scene.hero.W, scene.hero.H);
+  }
+  let heroY = NaN,
+    heroShown = true;
+  function placeHero(oy) {
+    const show = oy < height && oy + scene.hero.H > 0;
+    if (show !== heroShown) {
+      c.style.visibility = show ? "" : "hidden";
+      heroShown = show;
+    }
+    const ty = Math.round(oy * d) / d;
+    if (show && ty !== heroY) {
+      c.style.transform = `translate3d(0,${ty}px,0)`;
+      heroY = ty;
+    }
+  }
   // Progressive presentation while the scene builds: blit the static raster as it fills.
   let buildRaf = 0;
   function buildTick(now) {
@@ -1215,10 +1600,12 @@ export function createField({ stage, state, reduce }) {
     firstFrame(now);
     if (scene) {
       const oy = scene.hero.top - scrollY;
-      if (scene.hero.version !== lastVersion || scrollY !== lastScroll) {
-        x.clearRect(0, 0, width, height);
-        if (!reduce.matches) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
+      if (scene.hero.version !== lastVersion && !reduce.matches) {
+        drawHero();
         lastVersion = scene.hero.version;
+      }
+      if (scrollY !== lastScroll) {
+        placeHero(oy);
         lastScroll = scrollY;
       }
       clock.tick(now);
@@ -1307,7 +1694,10 @@ export function createField({ stage, state, reduce }) {
     window.removeEventListener("scroll", scrolled);
     document.removeEventListener("visibilitychange", changed);
     reduce.removeEventListener("change", changed);
-    tile.width = tile.height = 0;
+    for (const b of bands) b.cv.width = b.cv.height = 0;
+    bands = [];
+    bandBox.remove();
+    c.style.cssText = "";
     for (const s of colonySprites.values()) s.cv.width = s.cv.height = 0;
     colonySprites.clear();
     live.width = live.height = 0;

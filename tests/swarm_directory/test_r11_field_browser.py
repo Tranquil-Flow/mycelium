@@ -1,7 +1,12 @@
 """R11 field lane: full-DPR sharp field and margins, r9-level mycelium behind the
 below-fold text, fine-hair fuzz on every persistent strand, sparse hyphal knots
-(never under glyphs, never arcs), a living (never frozen) field, and the shared
-6 s load-in intro. Real local stack only."""
+(never under glyphs, never arcs, never beads), cottony margin colonies (no point
+centre), compositor-only scrolling of the full-DPR field bands with a bounded
+resident budget, a living (never frozen) field, and the shared 6 s load-in
+intro. Real local stack only."""
+import math
+import statistics
+
 import pytest
 from playwright.sync_api import sync_playwright
 from test_site_v2_browser import local, CLS  # noqa: F401  (fixture)
@@ -117,5 +122,91 @@ def test_intro_skipped_for_reduced_motion_and_never_replayed(local, how):  # noq
             page.wait_for_selector(READY, state='attached', timeout=30000)
             page.wait_for_timeout(300)
             assert page.get_attribute('#page-mycelium', 'data-intro') == 'skipped'
+        assert not errors, errors
+        browser.close()
+
+
+def _bead_like(group):
+    """True when a knot group reads as beads: consecutive spacing along the
+    group's principal axis has CV <= 0.4, or any 3 members are collinear at
+    near-equal spacing."""
+    if len(group) < 3:
+        return False
+    mx = sum(k['x'] for k in group) / len(group)
+    my = sum(k['y'] for k in group) / len(group)
+    sxx = sum((k['x'] - mx) ** 2 for k in group)
+    syy = sum((k['y'] - my) ** 2 for k in group)
+    sxy = sum((k['x'] - mx) * (k['y'] - my) for k in group)
+    th = 0.5 * math.atan2(2 * sxy, sxx - syy)
+    o = sorted(group, key=lambda k: k['x'] * math.cos(th) + k['y'] * math.sin(th))
+    gaps = [math.hypot(b['x'] - a['x'], b['y'] - a['y']) for a, b in zip(o, o[1:])]
+    if statistics.pstdev(gaps) / max(1e-6, statistics.mean(gaps)) <= 0.4:
+        return True
+    for i in range(len(o)):
+        for j in range(i + 1, len(o)):
+            for k in range(j + 1, len(o)):
+                a, b, c = o[i], o[j], o[k]
+                span = math.hypot(c['x'] - a['x'], c['y'] - a['y'])
+                off = abs((c['x'] - a['x']) * (a['y'] - b['y']) - (a['x'] - b['x']) * (c['y'] - a['y'])) / max(1e-6, span)
+                g1 = math.hypot(b['x'] - a['x'], b['y'] - a['y'])
+                g2 = math.hypot(c['x'] - b['x'], c['y'] - b['y'])
+                if off < 0.2 * span and max(g1, g2) / max(1e-6, min(g1, g2)) < 1.4:
+                    return True
+    return False
+
+
+def test_knot_groups_are_irregular_and_colonies_have_no_point_centre(local):  # noqa: F811
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, local, 1440)
+        knots = page.evaluate('__myceliumScene.field.hyphalKnots.map(k=>({x:k.x,y:k.y,r:k.r,g:k.group,lobes:k.lobes.length,el:k.el}))')
+        groups = {}
+        for k in knots:
+            groups.setdefault(k['g'], []).append(k)
+        multi = [g for g in groups.values() if len(g) >= 3]
+        assert len(multi) >= 3, len(multi)  # small groups exist, so the check is not vacuous
+        beads = [[(round(k['x'], 1), round(k['y'], 1)) for k in g] for g in multi if _bead_like(g)]
+        assert not beads, beads
+        # Size and lobe-shape variance inside every group (one dominant ball, smaller satellites).
+        for g in groups.values():
+            if len(g) >= 2:
+                radii = [k['r'] for k in g]
+                assert max(radii) / min(radii) >= 1.15, radii
+                assert len({(k['lobes'], round(k['el'], 2)) for k in g}) == len(g), g
+        # Cottony margin mats: no point soma. Only the cords and the mat's own two
+        # meandering spines touch the colony vertex (r11 05a4ef0e: 13-17 strands).
+        hubs = page.evaluate("""()=>{const f=__myceliumScene.field;return f.marginKnots.map(c=>f.strands.filter(p=>p.points[0]===c||p.points.at(-1)===c).length)}""")
+        assert hubs and max(hubs) <= 5, hubs
+        # Tuft hairs start across a broad mat, not on a point or a thin ring.
+        spread = page.evaluate("""()=>{const f=__myceliumScene.field;return f.marginKnots.map(c=>{const d=f.strands.filter(p=>p.tuft&&p.marginRoot===c).map(p=>Math.hypot(p.points[0].x-c.x,p.points[0].y-c.y)).sort((a,b)=>a-b);return [d[Math.floor(d.length*0.25)],d[Math.floor(d.length*0.75)]]})}""")
+        assert all(q75 >= 8 and q75 - q25 >= 4 for q25, q75 in spread), spread
+        assert not errors, errors
+        browser.close()
+
+
+def test_scrolling_moves_full_dpr_field_bands_without_reraster(local):  # noqa: F811
+    with sync_playwright() as p:
+        browser, page, errors = _open(p, local, 1920, dpr=2)
+        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=20000)
+        page.evaluate('__setUnderstoryTime(24)')
+        for _ in range(50):  # (CSP: no string wait_for_function)
+            if page.evaluate('__understoryAudit.bandBytes || 0') > 0:
+                break
+            page.wait_for_timeout(100)
+        assert page.evaluate('__understoryAudit.bandBytes || 0') > 0, 'no full-DPR field band tiles'
+        before = page.evaluate('({redraws: __understoryMetrics.staticRedraws, rasters: __understoryMetrics.bandRasters || 0})')
+        sweep = page.evaluate("""async()=>{const H=document.documentElement.scrollHeight-innerHeight,a=__understoryAudit;let mx=0,sharp=true;
+          for(let y=0;y<=H;y+=37){scrollTo(0,y);await new Promise(r=>requestAnimationFrame(r));mx=Math.max(mx,a.bandBytes);
+            for(const c of document.querySelectorAll('.page-mycelium-field canvas'))if(c.style.visibility==='visible'&&c.width!==Math.ceil(innerWidth*2))sharp=false}
+          return {mx,sharp,max:a.bandBytesMax,bands:a.bands}}""")
+        after = page.evaluate('({redraws: __understoryMetrics.staticRedraws, rasters: __understoryMetrics.bandRasters || 0})')
+        # Shown bands are always full device-pixel tiles; scrolling never redraws the
+        # static composite (it is moved by compositor transforms).
+        assert sweep['sharp'] and sweep['bands'] >= 6, sweep
+        assert after['redraws'] == before['redraws'], (before, after)
+        # Resident band memory stays within the budget (66 MB if every band were resident).
+        assert sweep['mx'] <= 60e6 < sweep['max'], sweep
+        # A one-way sweep re-rasters each evicted band at most once.
+        assert after['rasters'] - before['rasters'] <= sweep['bands'], (before, after, page.evaluate('__understoryMetrics.bandRasterLog'))
+        assert sum(page.evaluate('__cls')) == 0
         assert not errors, errors
         browser.close()
