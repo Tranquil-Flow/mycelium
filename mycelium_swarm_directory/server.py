@@ -37,6 +37,12 @@ API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
 ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/apex.js': ('apex.js', 'text/javascript; charset=utf-8'),
+          '/swarms/design.css': ('design.css', 'text/css; charset=utf-8'),
+          '/swarms/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
+          '/swarms/design.js': ('design.js', 'text/javascript; charset=utf-8'),
+          '/swarms/mycelium-geometry.js': ('mycelium-geometry.js', 'text/javascript; charset=utf-8'),
+          '/swarms/mycelium-hero.js': ('mycelium-hero.js', 'text/javascript; charset=utf-8'),
+          '/swarms/mycelium-field.js': ('mycelium-field.js', 'text/javascript; charset=utf-8'),
           '/swarms': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),

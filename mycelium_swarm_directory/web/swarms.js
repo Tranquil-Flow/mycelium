@@ -254,6 +254,7 @@ function grantFor(swarmId) {
 
 function renderSwarm(s) {
   const card = el('article', {class: 'card swarm swarm-card', 'data-swarm': s.swarm_id},
+    el('canvas', {class:'spore-icon', 'data-print':s.swarm_id, 'aria-hidden':'true'}),
     el('div', {class: 'row between'}, el('h3', {}, el('a', {href: '#swarm/' + s.swarm_id, 'data-name': ''}, s.name)), el('span', {class: 'status'})),
     el('p', {class: 'meta'}, el('span', {'data-card-model': ''}), el('span', {class: 'tag', 'data-mode': ''})),
     el('p', {class: 'desc'}, s.description || 'A model running on Macs people choose to share.'),
@@ -304,7 +305,7 @@ function renderLists() {
   for (const s of swarms.filter(s => s.access_mode === 'open' || grantFor(s.swarm_id) || mine.pending.includes(s.swarm_id) || s.owner_key === me?.key || s.swarm_id === routeId)) {
     chatIds.add(s.swarm_id);
     let item = $('chat-list').querySelector(`[data-chat-id="${s.swarm_id}"]`);
-    if (!item) { item = el('a', {class: 'chat-item', 'data-chat-id': s.swarm_id, href: '#chat/' + s.swarm_id}, el('div', {class: 'n'}), el('div', {class: 's'})); $('chat-list').append(item); }
+    if (!item) { item = el('a', {class: 'chat-item', 'data-chat-id': s.swarm_id, href: '#chat/' + s.swarm_id}, el('canvas', {class:'spore-icon','data-print':s.swarm_id,'aria-hidden':'true'}), el('div', {class: 'n'}), el('div', {class: 's'})); $('chat-list').append(item); }
     setText(item.querySelector('.n'), s.name); setText(item.querySelector('.s'), s.status + ' · ' + accessLabel(s.access_mode));
     item.setAttribute('aria-current', String(routeId === s.swarm_id));
   }
@@ -313,6 +314,7 @@ function renderLists() {
 function renderDetail() {
   if (routeName !== 'swarm') return;
   const s = currentSwarm(routeId); if (!s) { setText($('detail-name'), 'Swarm not found'); return; }
+  $('detail-print').dataset.print = s.swarm_id;
   setText($('detail-name'), s.name); setText($('detail-description'), s.description);
   setText($('detail-owner'), 'Owner key ' + s.owner_fingerprint);
   setText($('detail-model'), s.model + ' · ' + accessLabel(s.access_mode));
@@ -512,6 +514,7 @@ function updateGate() {
     killed: ['Stopped by the owner', 'The owner paused new prompts with the kill switch. Access is kept; only the owner can reopen the swarm.'],
     ready: ['Ready to chat', 'Your prompt travels directly to this swarm, not through the directory.']
   }[kind];
+  $('chat-print').dataset.print = s.swarm_id;
   setText($('chat-title'), 'Chat with ' + s.name); setText($('chat-model'), s.model);
   setText($('gate-title'), copy[0]); setText($('gate-copy'), copy[1]);
   $('gate').dataset.state = kind;
@@ -545,7 +548,10 @@ async function send(event) {
   event.preventDefault();
   const prompt = $('prompt').value.trim(); if (!prompt || sending || !chatTarget || $('prompt').disabled) return;
   sending = true; $('send').disabled = true; $('prompt').disabled = true;
-  line('you', prompt); const answer = line('swarm', '…'); const meta = line('meta', '');
+  line('you', prompt); const answer = line('swarm', '…'); const meta = line('meta run-metrics', '');
+  // Late metrics must not move the already visible served-by line. The reserved
+  // scrollable box also keeps unusually long measurements readable by keyboard.
+  meta.tabIndex = 0;
   const {swarm, grant} = chatTarget;
   const started = performance.now(); let firstToken = null, tokenCount = 0;
   let text = '', outcome = null;
@@ -567,8 +573,8 @@ async function send(event) {
     }
     const served = (accepted.served_by || []).map(row => `${row.label}${row.layers ? ' (layers ' + row.layers.join('-') + ')' : ''}`);
     if (served.length) line('meta', 'Served by: ' + served.join(', '));
-    meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
-      `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`;
+    followLog(() => { meta.textContent = (accepted.clamped ? `capped at ${accepted.max_new_tokens} tokens · ` : '') +
+      `left on your grant: ${accepted.quota.requests_left} requests, ${accepted.quota.tokens_left} tokens`; });
     running = {swarm, requestId: accepted.request_id};
     if (waitingCancelled) await stop();
     $('chat-state').textContent = 'Generating…'; $('prompt').value = '';
@@ -582,7 +588,7 @@ async function send(event) {
         const elapsed = (performance.now() - started) / 1000;
         const speed = tokenCount / elapsed;
         measurements.set(swarm.swarm_id, {...measurements.get(swarm.swarm_id), speed});
-        meta.textContent += ` · ${speed.toFixed(1)} tok/s · ${tokenCount} tokens · first word ${firstToken === null ? '—' : ((firstToken-started)/1000).toFixed(1) + ' s'} · measured in your browser (includes network and wait)`;
+        followLog(() => { meta.textContent += ` · ${speed.toFixed(1)} tok/s · ${tokenCount} tokens · first word ${firstToken === null ? '—' : ((firstToken-started)/1000).toFixed(1) + ' s'} · measured in your browser (includes network and wait)`; });
         outcome = {kind: classify(page.error, page), code: page.error, seconds: page.seconds}; break;
       }
       await new Promise(resolve => setTimeout(resolve, POLL_MS));

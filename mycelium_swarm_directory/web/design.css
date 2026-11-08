@@ -1,0 +1,466 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+   Approved R9 palette, typography and living background. The existing app's
+   reserved state boxes remain authoritative: decoration never sizes content. */
+:root {
+  --bg: #010301;
+  --bg-2: #091208;
+  --card: #091208;
+  --card-2: #111c10;
+  --ink: #e7f2e3;
+  --muted: #b0bfa9;
+  --accent: #58f56a;
+  --accent-ink: #092a0c;
+  --line: #30442a;
+  --line-2: #7c9172;
+  --strand: #1dbc24;
+  --glow: #35df47;
+  --core: #a4ffad;
+  --radius: 16px;
+  --surface: var(--card);
+  --surface2: var(--card-2);
+}
+:root[data-glow="blue"] {
+  --bg: #01050b;
+  --bg-2: #071321;
+  --card: #071321;
+  --card-2: #0b1e30;
+  --ink: #e1f5ff;
+  --muted: #a3bfd5;
+  --accent: #31caff;
+  --accent-ink: #032035;
+  --line: #254663;
+  --line-2: #748da2;
+  --strand: #04629e;
+  --glow: #06a8f0;
+  --core: #b4f5ff;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #e9eddf;
+    --bg-2: #f6f7ed;
+    --card: #f6f7ed;
+    --card-2: #dce3d0;
+    --ink: #1b2c18;
+    --muted: #405638;
+    --accent: #245c22;
+    --accent-ink: #fff;
+    --line: #adbaa0;
+    --line-2: #6b7e60;
+    --strand: #245c22;
+    --glow: #245c22;
+    --core: #163d16;
+  }
+  :root[data-glow="blue"] {
+    --bg: #eae9e2;
+    --bg-2: #f7f5ee;
+    --card: #f7f5ee;
+    --card-2: #dfdfd7;
+    --ink: #202d3b;
+    --muted: #405267;
+    --accent: #24568c;
+    --accent-ink: #fff;
+    --line: #aab4bf;
+    --line-2: #758394;
+    --strand: #24568c;
+    --glow: #24568c;
+    --core: #173a61;
+  }
+}
+html {
+  scrollbar-gutter: stable;
+}
+body {
+  position: relative;
+  isolation: isolate;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main,
+footer.foot {
+  position: relative;
+  z-index: 1;
+}
+a {
+  text-underline-offset: 4px;
+}
+.wrap {
+  max-width: 1280px;
+  padding-inline: 44px;
+}
+.top {
+  background: var(--bg);
+  border-color: var(--line);
+}
+.top .wrap,
+.apex .top .wrap {
+  height: 88px;
+  min-height: 88px;
+  gap: 22px;
+  flex-wrap: nowrap;
+}
+.brand {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+h1,
+h2,
+h3 {
+  font-weight: 550;
+  letter-spacing: -0.035em;
+}
+.msg.run-metrics {
+  /* Six lines plus padding, reserved before the async entry responds. */
+  height: 128px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.glow-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--muted);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--card);
+}
+.glow-switch button {
+  font: 12px var(--sans);
+  min-width: 58px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.glow-switch button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.top nav {
+  flex-wrap: nowrap;
+  font-size: 12px;
+}
+.btn,
+button {
+  border-radius: 8px;
+}
+.btn {
+  font-weight: 550;
+}
+.apex-hero {
+  position: relative;
+  isolation: isolate;
+  max-width: none;
+  min-height: 590px;
+  padding: 66px 0 68px;
+}
+.hero-copy {
+  width: 49%;
+}
+.apex-hero h1 {
+  font-size: clamp(43px, 4.4vw, 64px);
+  line-height: 1.04;
+  max-width: 15ch;
+  margin: 20px 0 26px;
+}
+.apex-hero .apex-lead {
+  font-size: 16px;
+  line-height: 1.85;
+}
+.apex-hero .btn {
+  font-size: 12px;
+  padding: 10px 13px;
+}
+.apex-demo {
+  font-size: 12px;
+  line-height: 1.65;
+  min-height: 6.6em;
+}
+.hero-art {
+  position: absolute;
+  inset: 0 -44px;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.art-canvas,
+.pulse-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mask-image:
+    linear-gradient(
+      90deg,
+      #0000000a 0%,
+      #00000008 36%,
+      #00000044 48%,
+      #000 60%,
+      #000 96%,
+      transparent
+    ),
+    linear-gradient(0deg, transparent, #000 12%, #000 90%, transparent);
+  mask-composite: intersect;
+}
+.pulse-canvas {
+  mix-blend-mode: screen;
+}
+.page-mycelium {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.42;
+}
+@media (prefers-color-scheme: light) {
+  .pulse-canvas {
+    mix-blend-mode: multiply;
+  }
+  .page-mycelium {
+    opacity: 0.19;
+  }
+}
+.apex-now {
+  max-width: none;
+  padding: 30px 32px;
+}
+.apex-now h2 {
+  font-size: 18px;
+}
+.apex-counts {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+.apex-counts strong {
+  font-size: 42px;
+  font-weight: 450;
+}
+.apex-counts span {
+  font-size: 12px;
+}
+.apex .sect {
+  padding: 58px 0;
+}
+.apex .sect > h2 {
+  font-size: 38px;
+  line-height: 1.15;
+  margin-bottom: 24px;
+}
+.apex .sect p {
+  line-height: 1.8;
+}
+.apex-steps {
+  gap: 22px;
+}
+.apex .card h3 {
+  font-size: 18px;
+}
+.apex footer.foot {
+  padding: 28px 44px;
+}
+.page-head h1 {
+  font-size: 38px;
+}
+.card {
+  border-color: var(--line);
+}
+.swarm-card {
+  position: relative;
+}
+.swarm-card > .row:first-of-type {
+  padding-left: 56px;
+  min-height: 44px;
+}
+.spore-icon {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  pointer-events: none;
+}
+.swarm-card > .spore-icon {
+  position: absolute;
+  left: 17px;
+  top: 17px;
+}
+.detail-head {
+  position: relative;
+  padding-left: 88px;
+}
+.detail-head > .spore-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 76px;
+  height: 76px;
+}
+.chat-head > .spore-icon {
+  width: 42px;
+  height: 42px;
+}
+.chat-item {
+  position: relative;
+  padding-left: 58px;
+}
+.chat-item > .spore-icon {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  left: 9px;
+  top: 12px;
+}
+.keychip {
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  .top .preview {
+    display: none;
+  }
+  .top .wrap {
+    gap: 12px;
+  }
+  .wrap {
+    padding-inline: 32px;
+  }
+  .hero-art {
+    inset-inline: -32px;
+  }
+  .hero-copy {
+    width: 53%;
+  }
+}
+@media (max-width: 640px) {
+  .wrap {
+    padding-inline: 18px;
+  }
+  .top .wrap,
+  .apex .top .wrap {
+    height: 116px;
+    min-height: 116px;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding-block: 8px;
+  }
+  .brand {
+    font-size: 23px;
+    margin-right: auto;
+  }
+  .top .spacer {
+    display: none;
+  }
+  .top .glow-switch {
+    order: 2;
+  }
+  .top .keychip,
+  .top nav {
+    order: 3;
+    margin-left: auto;
+  }
+  .top .brand {
+    flex-basis: 100%;
+    height: 30px;
+  }
+  .top .glow-switch button {
+    min-width: 52px;
+    padding-inline: 8px;
+  }
+  .apex .top .wrap { position:relative; }
+  .apex .top nav { display:contents; }
+  .apex .top nav > a:not(.btn) { position:absolute;right:18px;top:8px;display:flex;align-items:center;min-height:44px;font-size:11px; }
+  .apex .top nav > .btn { order:3;margin-left:auto; }
+  .hero-copy {
+    width: 100%;
+  }
+  .apex-hero {
+    padding: 36px 0 300px;
+    min-height: 820px;
+  }
+  .apex-hero h1 {
+    font-size: 43px;
+    line-height: 1.06;
+    max-width: 15ch;
+  }
+  .apex-hero .apex-lead {
+    font-size: 14px;
+    line-height: 1.75;
+  }
+  .apex-hero .row {
+    gap: 8px;
+  }
+  .apex-hero .btn {
+    font-size: 11px;
+    padding: 10px 12px;
+  }
+  .apex-demo {
+    min-height: 6.6em;
+  }
+  .hero-art {
+    inset-inline: -18px;
+  }
+  .art-canvas,
+  .pulse-canvas {
+    mask-image: linear-gradient(
+      0deg,
+      transparent,
+      #000 6%,
+      #000 29%,
+      #00000018 43%,
+      #00000009 100%
+    );
+  }
+  .apex-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .apex-counts strong {
+    font-size: 34px;
+  }
+  .apex-now {
+    padding: 22px 18px;
+  }
+  .apex .sect {
+    padding: 40px 0;
+  }
+  .apex .sect > h2 {
+    font-size: 29px;
+  }
+  .apex footer.foot {
+    padding: 24px 18px;
+  }
+  .page-head h1 {
+    font-size: 32px;
+  }
+  .chat {
+    min-height: 334px;
+    height: calc(100dvh - 401px);
+  }
+  .chat-head {
+    gap: 6px;
+  }
+  .chat-head > .spore-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .swarm-card > .row:first-of-type {
+    gap: 4px;
+    padding-left: 46px;
+  }
+  .swarm-card > .spore-icon {
+    width: 42px;
+    height: 42px;
+    left: 13px;
+    top: 17px;
+  }
+  .swarm-card .status {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}

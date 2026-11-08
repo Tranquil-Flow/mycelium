@@ -55,6 +55,12 @@ _DIRECTORY_ASSET_PATHS = frozenset(
     {
         '/',
         '/apex.js',
+        "/swarms/design.css",
+        "/swarms/theme.js",
+        "/swarms/design.js",
+        "/swarms/mycelium-geometry.js",
+        "/swarms/mycelium-hero.js",
+        "/swarms/mycelium-field.js",
         _hosted.DIRECTORY_MOUNT_PREFIX,
         _hosted.DIRECTORY_MOUNT_PREFIX + "/",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",

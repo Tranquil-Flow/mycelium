@@ -83,7 +83,7 @@ def test_twenty_real_app_behaviours(local):
         visitor.click('#send')
         expect(terminal(visitor, 'completed')).to_be_visible()
         expect(visitor.locator('#log')).to_contain_text('tok/s')
-        assert sum(visitor.evaluate('window.__cls')) == 0
+        assert sum(visitor.evaluate('window.__cls')) == 0, visitor.evaluate('window.__clsDetails')
         # 15–17: keyboard tab routing, search empty state, offline entries folded.
         visitor.goto(local['directory'].origin + '/swarms/#browse')
         visitor.focus('#tab-browse')
