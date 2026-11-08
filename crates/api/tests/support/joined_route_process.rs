@@ -629,7 +629,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reaped_ms = ms(killed);
     let dead_worker = e.worker_pids[1];
     let worker_gone = wait_workers_gone(&[dead_worker]);
-    m16_route::settle_dead_stage(&e.handle, 1, json!({"process_exited":true,"worker_absent":true,
+    m16_route::record_stage_exit(&e.handle, 1, json!({"process_exited":true,"worker_absent":true,
         "member_pid":member_pid,"exit_signal":std::os::unix::process::ExitStatusExt::signal(&status),
         "worker_pid":dead_worker,"observed_by":"owner_test_driver"})).unwrap();
     collect(&e, &r, usize::MAX, &mut all);

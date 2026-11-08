@@ -363,7 +363,7 @@ impl Executor for RouteExecutor {
 }
 /// Host-supplied death evidence (exact owned process exit + absent worker PID).
 /// Only an unacknowledged stage can be settled this way.
-pub fn settle_dead_stage(
+pub fn record_stage_exit(
     handle: &RouteHandle,
     stage: usize,
     evidence: Value,

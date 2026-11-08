@@ -8,7 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 pub fn http(addr: SocketAddr, method: &str, path: &str, extra: &str, body: &str) -> (u16, Value) {
-    let timeout = Duration::from_secs(5);
+    let timeout = Duration::from_millis(
+        budgets::BudgetId::ModelSelection
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
     let mut c = TcpStream::connect(addr).unwrap();
     c.set_read_timeout(Some(timeout)).unwrap();
     write!(c, "{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{extra}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();

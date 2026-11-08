@@ -22,6 +22,13 @@ use std::sync::{
 #[path = "support/sse_client.rs"]
 mod sse_client;
 
+fn span(id: budgets::BudgetId) -> std::time::Duration {
+    std::time::Duration::from_millis(id.span(budgets::Entries::ZERO).unwrap().millis())
+}
+/// Test pump/accept poll interval (typed start-poll row).
+fn poll() -> std::time::Duration {
+    span(budgets::BudgetId::PyPhysicalInferenceNodePhysicalnodeserviceStartPollIntervalSecondsL3528)
+}
 fn digest(text: &str) -> String {
     protocol::canonical::sha256_prefixed(text.as_bytes())
 }
@@ -238,21 +245,22 @@ fn hop_frames_bind_request_position_and_placement() {
 fn http_gateway_streams_route_tokens_over_sse_with_reconnect_client() {
     gateway_stream(
         std::time::Duration::ZERO,
-        std::time::Duration::from_secs(5),
+        span(budgets::BudgetId::ModelSelection),
         2,
     );
 }
 #[test]
 fn sse_client_resumes_across_bounded_stream_polls() {
-    // Tokens slower than the server connection budget force Last-Event-ID resumes.
+    // Tokens slower than the M16 stream's idle bound (OwnerPoll) end each stream,
+    // forcing Last-Event-ID resumes; the gap is the gateway's TTFT target row.
     gateway_stream(
-        std::time::Duration::from_millis(700),
-        std::time::Duration::from_millis(500),
+        span(budgets::BudgetId::PyFinalMyceliumRequestGatewayBackendTargetTtftMsL234C12),
+        span(budgets::BudgetId::ModelSelection),
         256,
     );
 }
 fn gateway_stream(gap: std::time::Duration, budget: std::time::Duration, connections: usize) {
-    use std::{net::TcpListener, sync::mpsc, time::Duration};
+    use std::{net::TcpListener, sync::mpsc};
     let message = controlled_message();
     let runtime = api::m16_route::runtime(
         &message,
@@ -276,14 +284,14 @@ fn gateway_stream(gap: std::time::Duration, budget: std::time::Duration, connect
     let server_stop = stop.clone();
     let server = std::thread::spawn(move || {
         let stop = server_stop;
-        let end = std::time::Instant::now() + Duration::from_secs(10);
+        let end = std::time::Instant::now() + span(budgets::BudgetId::WorkerStartup);
         let mut served_count = 0;
         while served_count < connections
             && std::time::Instant::now() < end
             && !stop.load(Ordering::SeqCst)
         {
             let Ok((stream, _)) = listener.accept() else {
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(poll());
                 continue;
             };
             stream.set_nonblocking(false).unwrap();
@@ -313,7 +321,7 @@ fn gateway_stream(gap: std::time::Duration, budget: std::time::Duration, connect
         accepted["session_token"].as_str().unwrap()
     );
     let reader = std::thread::spawn(move || {
-        sse_client::stream(addr, path, auth, tx, Duration::from_secs(10))
+        sse_client::stream(addr, path, auth, tx, span(budgets::BudgetId::WorkerStartup))
     });
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ticker = {
@@ -321,7 +329,7 @@ fn gateway_stream(gap: std::time::Duration, budget: std::time::Duration, connect
         std::thread::spawn(move || {
             while !done.load(Ordering::SeqCst) {
                 service.tick().unwrap();
-                std::thread::sleep(Duration::from_millis(5));
+                std::thread::sleep(poll());
             }
         })
     };
