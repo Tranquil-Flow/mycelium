@@ -19,11 +19,13 @@ def test_current_platforms_are_explicit_only_where_action_requires_them():
 
 def test_vision_is_direction_not_current_platform_or_privacy_promise():
     home=(ROOT/'apex.html').read_text()
-    assert 'Our vision' in home and 'Our goal' in home
+    # The vision eyebrow is the owner-approved 'AI, grown together' (formerly 'Our vision').
+    assert 'AI, grown together' in home and 'Our goal' in home
+    assert 'Our vision' not in home
     assert 'larger models' in home and 'stronger privacy' in home
     assert 'This is the first step' in home
     assert 'not end-to-end encrypted' in home and 'Do not send secrets' in home
     assert 'Cloudflare' in home and 'plaintext traffic' in home
     assert 'phone book' not in home and 'phonebook' not in home
     assert 'MVP' not in home
-    assert home.index('Our vision')<home.index('id="right-now"')
+    assert home.index('AI, grown together')<home.index('id="right-now"')

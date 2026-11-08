@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Owner-directed R9 text-node bytes, excluding the independent hue controls."""
+"""Owner-directed text-node bytes, excluding the independent hue controls.
+
+apex.html is pinned to the owner-approved positioning copy (9d9289b1: hero
+'AI for everyone, controlled by no one.', vision eyebrow 'AI, grown together').
+"""
 import hashlib
 from html.parser import HTMLParser
 from pathlib import Path
@@ -22,7 +26,7 @@ class Copy(HTMLParser):
 
 def test_owner_directed_copy_is_pinned_except_hue_controls():
     web=Path(__file__).resolve().parents[2]/'mycelium_swarm_directory/web'
-    expected={'apex.html': '165b9b745b5df78d83ce8f3328f63392d991ee6b7addc491e40492df2ee1858c', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
+    expected={'apex.html': '92abf38606e32584eeb82c0ae384361e1fc87ebb6aa890525569914460b74882', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
     for name, digest in expected.items():
         parser=Copy(); parser.feed((web/name).read_text())
         assert hashlib.sha256(''.join(parser.parts).encode()).hexdigest() == digest, name

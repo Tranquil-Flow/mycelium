@@ -553,3 +553,14 @@ button {
     row-gap: 6px;
   }
 }
+
+/* r11 (field lane): the home page's below-fold field is denser (r9-level), so
+   text is protected locally: a background-coloured halo directly under the
+   glyphs, never a global dimming of the field. Opaque cards and buttons need none. */
+.apex main > .sect,
+.apex footer.foot {
+  text-shadow: 0 0 2px var(--bg), 0 0 4px var(--bg), 0 0 10px var(--bg);
+}
+.apex main > .sect :is(.card:not(.flat), .btn, button) {
+  text-shadow: none;
+}
