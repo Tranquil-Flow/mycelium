@@ -78,14 +78,15 @@ def test_pulse_leaves_as_a_ripple_without_a_disc(local):
           for(let yy=Math.max(0,(y+top-r1)*s|0);yy<Math.min(c.height,(y+top+r1)*s);yy+=1)for(let xx=Math.max(0,(x-r1)*s|0);xx<Math.min(c.width,(x+r1)*s);xx+=1){
             const q=Math.hypot(xx/s-x,yy/s-y-top);if(q<r0||q>r1)continue;const i=(yy*c.width+xx)*4;n+=d[i]+d[i+1]+d[i+2];}return n}'''
         args = [node['x'], node['y'], 0.3 * R0, 0.7 * R0]
-        page.evaluate(f"__setPulseTime({trip['start'] - 0.3})")
-        before = page.evaluate(ring, args)
-        lit = []
-        for dt in (0.3, 0.6, 0.9):
-            page.evaluate(f"__setPulseTime({trip['start'] + dt})")
-            lit.append(page.evaluate(ring, args))
-        # The ripple has not reached 0.3 R0 yet: the annulus stays as it was.
-        assert max(lit) <= before * 1.15 + 2000, (before, lit)
+        def at(t, pulses):
+            page.evaluate(f"__myceliumScene.pulsesOff={'false' if pulses else 'true'};__setPulseTime({t})")
+            return page.evaluate(ring, args)
+        # The live layer also carries field life (living tips, margin pulses), so
+        # compare each frame with the same frame without hero pulses.
+        base = at(trip['start'] - 0.3, True)
+        added = [at(trip['start'] + dt, True) - at(trip['start'] + dt, False) for dt in (0.3, 0.6, 0.9)]
+        # The ripple has not reached 0.3 R0 yet: the pulse adds (almost) nothing there.
+        assert max(added) <= 0.08 * base + 2000, (base, added)
         assert not errors
         browser.close()
 

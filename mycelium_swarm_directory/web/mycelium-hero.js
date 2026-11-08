@@ -1331,7 +1331,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         let pops = 0;
         while (heap.a.length) {
           const [time, id] = heap.pop();
-          if (++pops % 30000 === 0) yield "route";
+          if (++pops % 12000 === 0) yield "route";
           if (time > at[id] + 0.00001) continue;
           const v = vs[id];
           for (const si of v.edges) {
@@ -1352,7 +1352,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         let count = 0, highwayCount = 0, fineCount = 0, maxFine = 0;
         let seen = 0;
         for (const s of ss) {
-          if (++seen % 40000 === 0) yield "route-list";
+          if (++seen % 15000 === 0) yield "route-list";
           const highway = s.cord >= 0,
             a = at[s.a.id] <= at[s.b.id] ? s.a : s.b,
             dd = fine[a.id] + (highway ? 0 : s.len / 2);

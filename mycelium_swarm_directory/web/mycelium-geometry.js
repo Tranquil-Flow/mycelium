@@ -155,7 +155,45 @@ function persistWalk(p, heading, len, R, opts = {}) {
         }
       }
   }
+  if (opts.vary) unruler(points, ds);
   return points;
+}
+/**
+ * r11: deterministic last resort against ruler-straight windows in the sparse
+ * vocabulary (a rare calm strand can slip past the guard during a cool-down).
+ * A window whose chord/arc ratio still exceeds the visible-scale ceiling gets a
+ * smooth sine bow (a few px over 150-400 px) on the side it already curves to.
+ * Consumes no randomness; the first point (a graph vertex) never moves.
+ */
+function unruler(points, ds) {
+  const n = points.length - 1;
+  let arc = null;
+  const prefix = () => {
+    arc = new Float64Array(n + 1);
+    for (let k = 1; k <= n; k++) arc[k] = arc[k - 1] + Math.hypot(points[k].x - points[k - 1].x, points[k].y - points[k - 1].y);
+  };
+  for (const [span, ceiling] of [[150, 0.9965], [250, 0.9955], [400, 0.995]]) {
+    const w = Math.round(span / ds);
+    if (n < w + 2) continue;
+    if (!arc) prefix();
+    for (let i = w + 1; i <= n; i++) {
+      const a = points[i - w],
+        b = points[i],
+        chord = Math.hypot(b.x - a.x, b.y - a.y);
+      if (chord / (arc[i] - arc[i - w]) <= ceiling) continue;
+      // Sagitta for the target ratio (circular arc approx.): 1 - 8/3 (s/L)^2.
+      const sag = chord * Math.sqrt(((1 - (ceiling - 0.003)) * 3) / 8),
+        nx = -(b.y - a.y) / chord,
+        ny = (b.x - a.x) / chord,
+        m = points[i - (w >> 1)],
+        side = (m.x - a.x) * nx + (m.y - a.y) * ny >= 0 ? 1 : -1;
+      for (let j = i - w + 1; j < i; j++) {
+        const f = Math.sin((Math.PI * (j - (i - w))) / w) * sag * side;
+        points[j] = { x: points[j].x + nx * f, y: points[j].y + ny * f };
+      }
+      prefix();
+    }
+  }
 }
 /** Steered walk that ends near `target`, still correlated-turn (cords). */
 function steerWalk(p, target, R, opts = {}) {
