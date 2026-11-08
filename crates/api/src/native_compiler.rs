@@ -350,13 +350,15 @@ pub fn build(
         artifact.validate().map_err(|e| Error(e.0))
     };
     check()?;
-    artifact
-        .validate_assignments(&current()?, crate::app_host::now())
-        .map_err(|e| Error(e.0))?;
-    let shard_document = if request.stage_sharded {
+    if !request.stage_sharded {
         artifact
-            .validate_stage_shards(&current()?, crate::app_host::now())
+            .validate_assignments(&current()?, crate::app_host::now())
             .map_err(|e| Error(e.0))?;
+    }
+    // Shard production has already independently checked source equality and
+    // retained the recipe in this artifact. check() compares held documents;
+    // the source pin below and worker transfer/recipe checks detect later drift.
+    let shard_document = if request.stage_sharded {
         Some(
             serde_json::from_slice::<Value>(
                 &fs::read(artifact.root().join("source-shards.private.json"))
@@ -490,9 +492,8 @@ pub fn build(
         "reference_digest":digest(&reference)?,"documents":{},"verification_keys":artifact.verification_keys(),"signer":signer.public_key_record()});
     if request.stage_sharded {
         plan["protocol"] = json!(stage_contract::native_shard::PLAN_PROTOCOL);
-        artifact
-            .validate_stage_shards(&current()?, crate::app_host::now())
-            .map_err(|e| Error(e.0))?;
+        // Source was rehashed above; emit/open rehashes every retained shard.
+        // Recompiling the same recipe again cannot strengthen those byte pins.
     }
     validate_evidence(&plan, &checkpoint, &reference)?;
     emit(

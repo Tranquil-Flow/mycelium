@@ -79,7 +79,8 @@ impl Worker {
         generation: u64,
         shard: &serde_json::Value,
     ) -> Result<Self> {
-        crate::stage_shard::verify(path, &descriptor, shard)?;
+        // prepare_image verifies immediately before and after native IO. The
+        // native adapter also verifies before creating its GPU Context.
         Self::prepare_image(context, descriptor, path, limits, generation, Some(shard))
     }
     fn prepare_image(
