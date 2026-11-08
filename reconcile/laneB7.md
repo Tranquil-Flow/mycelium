@@ -18,7 +18,7 @@ all four exact PIDs independently absent. These are NOT public Stop/leave timing
 The fixture establishes one durable source journal before grant issuance, gates
 connect on source verification/accept readiness, and removes emitted source links
 only after the received shard is verified. It retains the producer charge (no
-retained BuildOutput/refund claim). Peak sampled free disk was 28.173 GiB.
+retained BuildOutput/refund claim). Minimum sampled free disk was 28.173 GiB.
 Source snapshot uses APFS clone; object publication uses hardlinks, not copies.
 Physical route_ready=false. Owner remains a test driver; no M16 chat/Stop/leave.
 
@@ -55,9 +55,19 @@ Expired-prepare coverage is added characterization, not a claimed pre-fix RED.
 Current evidence: scratch/b7d-{1,2,4}. Two failed model attempts are retained:
 first second-member connect Expired; second correctly refused a grant predating
 journal genesis. Neither reached native load. No deadline/guard was weakened.
-Full current-code gates pending; full B7 merge-ready NO. Remaining: genuine
-M16 carrier/graph/tokenizer composition, streamed chat, public bounded Stop and
-leave, death-midstream/stall settlement, artifact-grant renewal. See report.
+Current-code gates at acd194d: six-package merge 1088/1088 PASS (52 skipped;
+728.841 s command / 340.891 s tests), quick --base m4/main 1961/1961 PASS
+(136 skipped; 818.228 s command / 96.373 s tests), headless 28 PASS / 4 ignored
+(20.256 s), default/Metal clippy PASS (40.762 / 14.231 s), fmt PASS (4.113 s),
+lint PASS (1293 files, zero violations; 14.340 s). No LEAK diagnostic recurred.
+Both new pre-cancel and expired-prepare controls executed in merge and passed.
+No owned runner/member/native PIDs, lane-target processes or model fixtures remain.
+Evidence: ../mycelium-m4-program/qualification/laneB7d-acd194d/ (71 raw files,
+hash manifest and exact cleanup receipt). Full B7 merge-ready NO. Remaining:
+genuine M16 carrier/graph/tokenizer composition, streamed chat, public bounded
+Stop and leave, death-midstream/stall settlement, artifact-grant renewal. The
+CONTINUATION.md describes the actual missing producer and cleanup-ownership seams;
+these are unfinished implementation, not fabricated proof or a permission blocker.
 
 ## B7b review repair (supersedes precursor cleanup claims below)
 
