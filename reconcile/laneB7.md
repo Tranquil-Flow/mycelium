@@ -17,7 +17,7 @@ owner and absent stage directory; v1 missing-path refunds fail closed.
 Tests cover moved file/directory on restart, swaps at the last cleanup checkpoint,
 four interruption phases, stale replacement-ledger recovery, and a replaced
 retirement inode. Focused storage + member tests and api clippy passed;
-full gates are pending at this commit.
+full-gate outcomes are recorded below.
 Ruling 10: existing rustix dependency enables its fs feature; no new package,
 lockfile change, reserved behavior or artifact-v1 wire change. Private cleanup
 records are explicitly v2. This is inert cleanup, NOT serving-worker leave.
@@ -43,6 +43,27 @@ metadata is rebound to the actual joined identity; no native plan is claimed.
 Ruling 10 permits these additive APIs/launcher/versioned envelopes; no reserved
 S1/chat/network-cancellation behavior changed. Full native-serving phases c–f,
 model transport renewal/bounded-source hashing, and physical launch remain TODO.
+
+## B7b qualification on code 9d16574
+
+- Member custody 11 PASS/1 ignored; compiler storage 8 PASS; paired member process
+  4 PASS including the explicitly invoked ignored process test (3.17 s).
+- Six-package merge 1081 PASS/1 FAIL/49 skipped, 341.145 s tests (910.020 s wall).
+  Failure: known network_start window-reopen 409; exact binary 5/5 isolated PASS.
+  Root cause remains unestablished; original full failure is not relabelled green.
+- Quick --base m4/main: 1931/1931 PASS, 132 skipped, 121.186 s tests (995.927 s wall),
+  exact 16 affected crates/no exclusions. RU-053 inventory not selected or re-pinned.
+- Headless 28 PASS/4 ignored; default and Metal clippy, fmt, lint PASS.
+  Wall seconds respectively: 35.035, 66.496, 39.209, 8.152, 29.221.
+- Initial Metal setup refusal (missing MLXC env) and Quick disk-guard abort retained.
+  Authorized stale duplicate-executable sweep touched only this lane's debug/deps;
+  no active/open files, newest executable per stem and all libraries preserved.
+  454 removals reclaimed 3.820 GiB; final Quick minimum 29.077 GiB. No <25 GiB sample.
+- Exact final process inventory is empty. No native two-node model test exists yet;
+  no token/reference or Stop/leave timing. Phases c–f remain implementation work,
+  NOT permission-blocked. Full B7 is NOT merge-ready; no readiness promotion.
+- Durable raw evidence: ../mycelium-m4-program/qualification/laneB7b-9d16574/.
+  REPORT-laneB7.md and TWO-MAC-TEST.md name executable commands and explicit gaps.
 
 ## Historical precursor (claims qualified by the repair above)
 
