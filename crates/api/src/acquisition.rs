@@ -419,10 +419,12 @@ fn private_root(candidate: &Path) -> Result<PathBuf, AcqError> {
         .mode(0o700)
         .create(candidate)
         .map_err(|_| unsafe_root())?;
+    // Admit the trusted root once, including legitimate ancestor aliases such
+    // as macOS /var. Retain only its physical path; secure_directory and file
+    // no-follow checks still refuse every symlink below this boundary.
     let resolved = fs::canonicalize(candidate).map_err(|_| unsafe_root())?;
     let meta = fs::symlink_metadata(candidate).map_err(|_| unsafe_root())?;
-    if resolved != candidate
-        || meta.file_type().is_symlink()
+    if meta.file_type().is_symlink()
         || !meta.is_dir()
         || meta.uid() != euid()
         || meta.mode() & 0o077 != 0

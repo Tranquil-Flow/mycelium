@@ -465,6 +465,18 @@ impl<M: ManagedSlot> Authority<M> {
     /// swarm record, a persisted v0.1.x authority and the configured public origin. Nothing runs
     /// yet (an owner starts `running`, a target does not).
     pub fn load(root: PathBuf) -> Result<Self, &'static str> {
+        // Admit the trusted app root once, before handing paths to any subsystem.
+        // Ancestor aliases (notably macOS /var) are valid; a root symlink itself
+        // and links planted below the admitted physical root remain forbidden.
+        fs::create_dir_all(&root).map_err(|_| "state_root_invalid")?;
+        if fs::symlink_metadata(&root)
+            .map_err(|_| "state_root_invalid")?
+            .file_type()
+            .is_symlink()
+        {
+            return Err("state_root_invalid");
+        }
+        let root = root.canonicalize().map_err(|_| "state_root_invalid")?;
         let role =
             private_state::load(&root.join("installation-role.json"), 4096).map_err(|e| e.0)?;
         let target = role.is_some_and(|m| m.get("role") == Some(&json!("target")));
