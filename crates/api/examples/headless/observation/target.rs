@@ -157,11 +157,55 @@ impl Drop for Worker {
         }
     }
 }
+/// Shared durable admission for contributor Start/resume and ownerless Stop.
+/// Never infer cleanup authority from a persisted PID.
+pub(crate) fn admit_cleanup_free(root: &Path) -> OResult<()> {
+    let contributor = root.join("local-contributor");
+    let native = contributor.join("native-bootstrap");
+    for path in [&contributor, &native] {
+        let valid = match fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(_) => return Err(OwnerError("bootstrap_stage_unavailable")),
+            Ok(metadata) => metadata.is_dir() && !metadata.file_type().is_symlink(),
+        };
+        if !valid {
+            return Err(OwnerError("control_restart_requires_reconciliation"));
+        }
+    }
+    let limit = private_state::private_json_limit().map_err(|e| OwnerError(e.0))?;
+    let state =
+        private_state::load(&native.join("state.json"), limit).map_err(|e| OwnerError(e.0))?;
+    let stage_absent = match fs::symlink_metadata(native.join("stage")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => return Err(OwnerError("bootstrap_stage_unavailable")),
+        Ok(_) => false,
+    };
+    let leave =
+        private_state::load(&root.join("leave-state.json"), limit).map_err(|e| OwnerError(e.0))?;
+    if !stage_absent
+        || state.is_some_and(|record| record.get("phase") != Some(&json!("closed")))
+        || leave.is_some_and(|record| {
+            !record.get("steps").is_some_and(Value::is_array)
+                || api::leave::cleanup_pending(&record)
+        })
+    {
+        return Err(OwnerError("control_restart_requires_reconciliation"));
+    }
+    Ok(())
+}
 pub(crate) fn close(core: &Shared) -> OResult<()> {
+    let lifecycle = locked(core)?.bootstrap_lifecycle.clone();
+    let _lifecycle = locked(&lifecycle)?;
+    close_locked(core)
+}
+/// Caller owns bootstrap_lifecycle through settlement and contributor removal.
+pub(crate) fn close_locked(core: &Shared) -> OResult<()> {
     // Move owners out only while doing blocking cleanup, and put a refused
     // owner back intact. A later Stop can retry the exact incarnation.
     let (worker, failure, root) = {
         let mut c = locked(core)?;
+        // Invalidate even a reservation that has not created its stage yet.
+        c.bootstrap_incarnation = Arc::new(());
         (
             c.bootstrap.take(),
             c.bootstrap_failure.take(),
@@ -171,22 +215,7 @@ pub(crate) fn close(core: &Shared) -> OResult<()> {
     if worker.is_none() && failure.is_none() {
         // Restart (or another closer temporarily owning the handle) is not
         // cleanup proof. Never reconstruct process authority from a saved PID.
-        let root = root.join("local-contributor/native-bootstrap");
-        let state = private_state::load(
-            &root.join("state.json"),
-            private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
-        )
-        .map_err(|e| OwnerError(e.0))?;
-        let stage_absent = match fs::symlink_metadata(root.join("stage")) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-            Err(_) => return Err(OwnerError("bootstrap_stage_unavailable")),
-            Ok(_) => false,
-        };
-        if !stage_absent
-            || state.is_some_and(|record| record.get("phase") != Some(&json!("closed")))
-        {
-            return Err(OwnerError("control_restart_requires_reconciliation"));
-        }
+        admit_cleanup_free(&root)?;
     }
     let mut result = Ok(());
     if let Some(mut worker) = worker
@@ -399,6 +428,37 @@ impl TargetHost for Host {
         self.ack(root, removed).map_err(|e| e.0)
     }
 }
+fn startup_test_seam() -> OResult<Option<std::net::TcpStream>> {
+    use std::io::{Read, Write};
+    let Some(address) = std::env::var_os("MYCELIUM_L10_TEST_BOOTSTRAP_BEFORE_STAGE") else {
+        return Ok(None);
+    };
+    let invalid = |_| OwnerError("bootstrap_test_seam_failed");
+    let address: std::net::SocketAddr = address
+        .to_str()
+        .ok_or(OwnerError("bootstrap_test_seam_invalid"))?
+        .parse()
+        .map_err(|_| OwnerError("bootstrap_test_seam_invalid"))?;
+    if !address.ip().is_loopback() {
+        return Err(OwnerError("bootstrap_test_seam_invalid"));
+    }
+    let limit = std::time::Duration::from_millis(
+        BudgetId::WorkerStartup
+            .span(Entries::ZERO)
+            .map_err(|_| OwnerError("budget_unavailable"))?
+            .millis(),
+    );
+    let mut stream = std::net::TcpStream::connect_timeout(&address, limit).map_err(invalid)?;
+    stream.set_read_timeout(Some(limit)).map_err(invalid)?;
+    stream.set_write_timeout(Some(limit)).map_err(invalid)?;
+    stream.write_all(b"held").map_err(invalid)?;
+    let mut release = [0];
+    stream.read_exact(&mut release).map_err(invalid)?;
+    if release != [1] {
+        return Err(OwnerError("bootstrap_test_seam_invalid"));
+    }
+    Ok(Some(stream))
+}
 pub(super) fn start(
     core: &Shared,
     pinned: PinnedHost,
@@ -407,7 +467,21 @@ pub(super) fn start(
     offer: Value,
     archive: Vec<u8>,
 ) -> OResult<()> {
-    let root = locked(core)?.root.clone();
+    let lifecycle = locked(core)?.bootstrap_lifecycle.clone();
+    // Reserve under Stop's guard before startup side effects. The signer pointer
+    // identifies this contributor incarnation, not merely a reusable member ID.
+    let (root, incarnation) = {
+        let _lifecycle = locked(&lifecycle)?;
+        let c = locked(core)?;
+        if !c
+            .contributor
+            .as_ref()
+            .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))
+        {
+            return Err(OwnerError("bootstrap_start_fenced"));
+        }
+        (c.root.clone(), c.bootstrap_incarnation.clone())
+    };
     if locked(core)?.bootstrap_failure.is_some() {
         return Err(OwnerError("control_restart_requires_reconciliation"));
     }
@@ -442,14 +516,42 @@ pub(super) fn start(
     )
     .map_err(OwnerError)?;
     let seed = pinned.pin()?;
+    let startup_current = || -> OResult<()> {
+        let c = locked(core)?;
+        if c.closed
+            || !c.running
+            || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
+            || !c
+                .contributor
+                .as_ref()
+                .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))
+        {
+            return Err(OwnerError("bootstrap_start_fenced"));
+        }
+        Ok(())
+    };
     let host = Host {
         pinned,
-        signer,
+        signer: signer.clone(),
         scope: scope.clone(),
         offer: offer.clone(),
         swarm: seed.coordinator.swarm_id().into(),
         owner: seed.coordinator.seed_node_id().into(),
     };
+    // Opt-in loopback seam, like the other MYCELIUM_L10_TEST_* launcher ports.
+    // The connection stays owned until this startup returns (EOF proves settlement).
+    let _startup_seam = startup_test_seam()?;
+    let _lifecycle = locked(&lifecycle)?;
+    startup_current()?;
+    // Recheck durable admission after reacquiring the guard: no second owner
+    // may have created a stage while this reservation was held outside it.
+    {
+        let c = locked(core)?;
+        if c.bootstrap.is_some() || c.bootstrap_failure.is_some() {
+            return Err(OwnerError("control_restart_requires_reconciliation"));
+        }
+    }
+    admit_cleanup_free(&root)?;
     host.current(true)?;
     let root = root.join("local-contributor/native-bootstrap");
     fs::create_dir_all(&root).map_err(|_| OwnerError("bootstrap_stage_create_failed"))?;
@@ -457,6 +559,7 @@ pub(super) fn start(
         .map_err(|_| OwnerError("bootstrap_stage_create_failed"))?;
     let stage = BootstrapStage::create(&root.join("stage"), &scope, &offer, &archive)
         .map_err(OwnerError)?;
+    startup_current()?; // before spawn; Stop cannot cross the lifecycle guard
     let fence = TargetFence::default();
     let mut pump = match TargetPump::start(
         &root,
@@ -529,7 +632,15 @@ pub(super) fn start(
         failure: None,
     };
     let mut c = locked(core)?;
-    if c.bootstrap.is_some() || c.closed || !c.running {
+    if c.bootstrap.is_some()
+        || c.closed
+        || !c.running
+        || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
+        || !c
+            .contributor
+            .as_ref()
+            .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))
+    {
         drop(c);
         if let Err(error) = worker.close() {
             let control = worker.process.clone();

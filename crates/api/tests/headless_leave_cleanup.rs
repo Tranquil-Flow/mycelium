@@ -5,7 +5,7 @@ use rustix::process::{Pid, Signal, kill_process, test_kill_process};
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
@@ -75,6 +75,65 @@ fn free_port() -> u16 {
     listener.local_addr().expect("addr").port()
 }
 
+fn startup_line(
+    mut reader: impl Read + std::os::fd::AsFd,
+    limit: Duration,
+) -> std::io::Result<String> {
+    // Nonblocking pipe reads enforce the deadline even for a partial line; no
+    // detached reader thread can outlive a timed-out launcher's cleanup guard.
+    rustix::io::ioctl_fionbio(&reader, true)?;
+    let deadline = Instant::now() + limit;
+    let mut first = Vec::new();
+    loop {
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "launcher_startup_timeout",
+            ));
+        }
+        let mut byte = [0];
+        match reader.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                first.push(byte[0]);
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(
+                    poll_every().min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    String::from_utf8(first)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+#[test]
+fn startup_observation_has_a_local_deadline() {
+    let (read, write) = std::os::unix::net::UnixStream::pair().unwrap();
+    let (settled, done) = std::sync::mpsc::sync_channel(1);
+    let producer = std::thread::spawn(move || {
+        // The producer holds an incomplete line until the observer settles, or
+        // the independent budget guard fires on the unfixed blocking observer.
+        match done.recv_timeout(budget(BudgetId::WorkerStartup)) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => drop(write),
+            Err(error) => panic!("startup observer disconnected: {error}"),
+        }
+    });
+    let result = startup_line(read, budget(BudgetId::OwnerPoll));
+    let signalled = settled.send(());
+    producer.join().unwrap();
+    assert!(
+        matches!(result, Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut),
+        "missing bounded startup observation: {result:?}; signal={signalled:?}"
+    );
+}
+
 /// One launcher process; dropped = SIGTERM then wait (exact pid), the drop asserts the pid is gone.
 struct Instance {
     child: Child,
@@ -87,6 +146,18 @@ struct Instance {
 }
 impl Instance {
     fn launch(root: &Path, env: &[(&str, String)]) -> Self {
+        Self::launch_observing(root, env, |child| {
+            startup_line(
+                child.stdout.take().expect("stdout"),
+                budget(BudgetId::WorkerStartup),
+            )
+        })
+    }
+    fn launch_observing(
+        root: &Path,
+        env: &[(&str, String)],
+        observe: impl FnOnce(&mut Child) -> std::io::Result<String>,
+    ) -> Self {
         fs::create_dir_all(root).expect("root");
         fs::set_permissions(root, fs::Permissions::from_mode(0o700)).expect("mode");
         let mut command = Command::new(exe_dir().join("examples/headless"));
@@ -108,11 +179,20 @@ impl Instance {
         for (name, value) in env {
             command.env(name, value);
         }
-        let mut child = command.spawn().expect("the headless example was built");
-        let mut first = String::new();
-        BufReader::new(child.stdout.take().expect("stdout"))
-            .read_line(&mut first)
-            .expect("first line");
+        let child = command.spawn().expect("the headless example was built");
+        // Own the process before observing stdout, parsing the form or signing in.
+        let mut me = Self {
+            child,
+            root: root.to_path_buf(),
+            port: 0,
+            cookie: String::new(),
+            env: env
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                .collect(),
+            keep_state: false,
+        };
+        let first = observe(&mut me.child).expect("bounded first line");
         assert!(
             first.contains("launcher_started"),
             "{first:?} stderr: {}",
@@ -132,17 +212,7 @@ impl Instance {
             .and_then(|rest| rest.strip_suffix("/session"))
             .and_then(|p| p.parse().ok())
             .expect("loopback origin");
-        let mut me = Self {
-            child,
-            root: root.to_path_buf(),
-            port,
-            cookie: String::new(),
-            env: env
-                .iter()
-                .map(|(k, v)| ((*k).to_owned(), v.clone()))
-                .collect(),
-            keep_state: false,
-        };
+        me.port = port;
         let signed_in = me.raw(
             "POST",
             "/session",
@@ -343,6 +413,33 @@ impl Drop for Instance {
             fs::remove_dir_all(&self.root).unwrap_or_default();
         }
     }
+}
+
+#[test]
+fn startup_observation_timeout_reaps_owned_launcher() {
+    let _serial = one_at_a_time();
+    build();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("lane-a-startup-timeout-{}", std::process::id()));
+    let mut pid = None;
+    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Instance::launch_observing(&root, &[], |child| {
+            pid = Pid::from_raw(child.id().try_into().unwrap());
+            let mut stdout = child.stdout.take().unwrap();
+            let first = startup_line(&mut stdout, budget(BudgetId::WorkerStartup))?;
+            assert!(first.contains("launcher_started"));
+            // A real live launcher, with the startup notification withheld from
+            // the harness. It emits no second line: only the local deadline ends it.
+            startup_line(stdout, budget(BudgetId::OwnerPoll))
+        })
+    }));
+    assert!(failure.is_err(), "startup silence must fail admission");
+    assert_eq!(
+        test_kill_process(pid.unwrap()),
+        Err(rustix::io::Errno::SRCH)
+    );
+    assert!(!root.exists(), "guard cleans up even before sign-in");
 }
 
 fn consent(storage: u64) -> Value {
@@ -655,6 +752,9 @@ impl Drop for Repository {
     }
 }
 fn mounted_cleanup() -> (PathBuf, Instance, Instance, Repository) {
+    mounted_cleanup_with_env(&[])
+}
+fn mounted_cleanup_with_env(extra: &[(&str, String)]) -> (PathBuf, Instance, Instance, Repository) {
     build();
     let base = fs::canonicalize(std::env::temp_dir())
         .unwrap()
@@ -689,6 +789,8 @@ fn mounted_cleanup() -> (PathBuf, Instance, Instance, Repository) {
             exe_dir().join("examples/headless").display().to_string(),
         ),
     ];
+    let mut env = env.to_vec();
+    env.extend_from_slice(extra);
     let (owner, member, proxy) = pair_up_with_owner_env(&base, &env);
     {
         let config = std::env::var("MYCELIUM_BOOTSTRAP_TEST_CONFIG")
@@ -787,6 +889,94 @@ fn mounted_cleanup() -> (PathBuf, Instance, Instance, Repository) {
     };
     signed_headless_exchange_report(&owner, &member, proxy, Some(&report));
     (base, owner, member, repository)
+}
+
+#[test]
+#[ignore = "requires explicitly pinned admitted model-free Rust helper artifact"]
+fn contributor_stop_fences_admitted_bootstrap_before_stage() {
+    let _serial = one_at_a_time();
+    let barrier = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    barrier.set_nonblocking(true).unwrap();
+    let (base, owner, member, repository) = mounted_cleanup_with_env(&[(
+        "MYCELIUM_L10_TEST_BOOTSTRAP_BEFORE_STAGE",
+        barrier.local_addr().unwrap().to_string(),
+    )]);
+    let deadline = Instant::now() + budget(BudgetId::WorkerStartup);
+    let mut held = loop {
+        match barrier.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "bootstrap did not reach held seam"
+                );
+                std::thread::sleep(poll_every());
+            }
+            Err(error) => panic!("bootstrap barrier: {error}"),
+        }
+    };
+    held.set_read_timeout(Some(budget(BudgetId::WorkerStartup)))
+        .unwrap();
+    held.set_write_timeout(Some(budget(BudgetId::WorkerStartup)))
+        .unwrap();
+    let mut entered = [0; 4];
+    held.read_exact(&mut entered).unwrap();
+    assert_eq!(&entered, b"held");
+    let native = owner.root.join("local-contributor/native-bootstrap");
+    assert!(
+        !native.exists(),
+        "held before any stage/state/spawn side effect"
+    );
+    let stopped = owner.post("/api/local-contributor/stop", &json!({}));
+    assert_eq!(stopped.0, 200, "{stopped:?}");
+    assert_eq!(stopped.1["state"], "stopped");
+    held.write_all(&[1]).unwrap();
+    held.set_nonblocking(true).unwrap();
+    let deadline = Instant::now() + budget(BudgetId::WorkerStartup);
+    loop {
+        assert!(
+            !native.exists(),
+            "bootstrap created stage/state after successful Stop"
+        );
+        match held.read(&mut [0]) {
+            Ok(0) => break,
+            Ok(_) => panic!("unexpected startup seam bytes"),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    Instant::now() < deadline,
+                    "startup must settle, not merely pause"
+                );
+                std::thread::sleep(poll_every());
+            }
+            Err(error) => panic!("startup settlement: {error}"),
+        }
+    }
+    // Creation leaves the native root/state behind even if the worker later closes.
+    // Its absence at settled EOF rules out a transient post-Stop stage or spawn.
+    assert!(
+        !native.exists(),
+        "bootstrap created stage/state after successful Stop"
+    );
+    let helpers = Command::new("/usr/bin/pgrep")
+        .args([
+            "-P",
+            &owner.child.id().to_string(),
+            "-f",
+            "mycelium-hello-bootstrap",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        helpers.status.code(),
+        Some(1),
+        "post-Stop helper PID: {:?}",
+        helpers.stdout
+    );
+    assert_eq!(owner.post("/api/local-contributor/stop", &json!({})).0, 200);
+    drop(member);
+    drop(owner);
+    drop(repository);
+    fs::remove_dir_all(base).unwrap();
 }
 
 struct StagePermissions(PathBuf);
@@ -913,6 +1103,24 @@ fn contributor_restart_keeps_unreconciled_stage_debt_visible() {
     );
     assert_eq!(test_kill_process(pid), Err(rustix::io::Errno::SRCH));
     assert!(stage.exists());
+    let debt = fs::read(&path).unwrap();
+    let membership = fs::read(owner.root.join("local-contributor/membership.state.json")).unwrap();
+    let started = owner.post("/api/local-contributor/start", &json!({}));
+    assert_eq!(
+        started.0, 409,
+        "restart Start must refuse debt: {started:?}"
+    );
+    assert_eq!(
+        started.1["error"],
+        "control_restart_requires_reconciliation"
+    );
+    assert_eq!(fs::read(&path).unwrap(), debt);
+    assert_eq!(
+        fs::read(owner.root.join("local-contributor/membership.state.json")).unwrap(),
+        membership
+    );
+    assert!(stage.exists());
+    assert_eq!(test_kill_process(pid), Err(rustix::io::Errno::SRCH));
     drop(member);
     drop(owner);
     drop(repository);

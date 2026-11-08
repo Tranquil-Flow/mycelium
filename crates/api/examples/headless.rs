@@ -132,6 +132,9 @@ struct Core {
     demo: DemoView,
     /// `DemoApp.local_contributor`: the owner's own member (`local_contributor.py`), renewed by the loop.
     contributor: Option<ContributorState>,
+    // Serializes bootstrap side effects and cleanup; never held with Core on entry.
+    bootstrap_lifecycle: Arc<Mutex<()>>,
+    bootstrap_incarnation: Arc<()>,
     bootstrap: Option<observation::target::Worker>,
     bootstrap_failure: Option<api::bootstrap_process::CleanupFailure>,
     /// `DemoApp.run_exchange`, bound to the seed runtime it was made for (`exchange.mailbox is mailbox`).
@@ -348,6 +351,12 @@ fn session_lease(session: &Option<api::member::Session>) -> Option<f64> {
 /// `accept_pairing`). v0.1.4 does not renew at once, so the member stays `NEW` until the renewal loop's first
 /// pass (executed: `status_after_start` lifecycle `NEW`).
 fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
+    let lifecycle = core
+        .lock()
+        .map_err(|_| failure())?
+        .bootstrap_lifecycle
+        .clone();
+    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
     let (root, runtime, record, already, target, running, has_policy) = {
         let c = core.lock().map_err(|_| failure())?;
         (
@@ -363,6 +372,7 @@ fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
     if already {
         return Err(PublicError::new(400, "local_contributor_already_running"));
     }
+    observation::target::admit_cleanup_free(&root).map_err(|e| PublicError::new(409, e.0))?;
     let current = HeadlessHost {
         core: core.clone(),
         runs: None,
@@ -483,7 +493,13 @@ fn renew_contributor(core: &Shared) {
 fn stop_local_contributor(core: &Shared) -> Result<(), PublicError> {
     // target::close puts refused cleanup owners back. Retain their contributor
     // too: reporting stopped or permitting a replacement would erase the debt.
-    observation::target::close(core).map_err(|e| PublicError::new(409, e.0))?;
+    let lifecycle = core
+        .lock()
+        .map_err(|_| failure())?
+        .bootstrap_lifecycle
+        .clone();
+    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
+    observation::target::close_locked(core).map_err(|e| PublicError::new(409, e.0))?;
     core.lock().map_err(|_| failure())?.contributor = None;
     Ok(())
 }
@@ -2479,6 +2495,8 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
         pending: PendingWindows::default(),
         demo: DemoView::default(),
         contributor: None,
+        bootstrap_lifecycle: Arc::new(Mutex::new(())),
+        bootstrap_incarnation: Arc::new(()),
         bootstrap: None,
         bootstrap_failure: None,
         exchange: None,
