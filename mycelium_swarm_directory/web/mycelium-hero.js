@@ -24,9 +24,9 @@ const RIM = 1.5, // front brightness boost (D8)
   CAP = 760000,
   CHUNK = 6;
 // r11 density between 6405a6fa and 02e3dcad (see D46).
-const COTTON = 1700,
+const COTTON = 2200,
   COTTON_POW = 1.05,
-  MAT = 1800,
+  MAT = 2700,
   // Persistent fuzz: hairs per px of persistent strand (owner: like pulse growth).
   FUZZ_RATE = 1 / 9,
   CORD_W0 = 5, // link cords 5-7 px at the colony (r10: 8-12): always under the mat core
@@ -280,7 +280,9 @@ function* buildGeometry(L, budget, out = {}) {
     return n;
   });
   const links = (mobile ? [[0, 1], [1, 2], [1, 3], [3, 4]] : [[0, 1], [1, 2], [1, 3], [3, 4]]).concat(leftColony ? [[4, 5]] : []);
-  const R0 = mobile ? 100 : 172;
+  // r11: colonies scale with the hero region (1920 read too sparse at 1440 sizes).
+  const areaScale = mobile ? 1 : Math.max(0.85, Math.min(1.25, Math.pow(rw / 660, 0.42))),
+    R0 = mobile ? 100 : 172 * areaScale;
   const colonies = nodes.map((n, i) => {
     const away = Math.atan2(n.y - nodes[1].y, n.x - nodes[1].x);
     return {
@@ -309,7 +311,7 @@ function* buildGeometry(L, budget, out = {}) {
   }
   const shapeR = (c, h, sub = c) =>
     (0.66 + 0.34 * Math.cos(h - sub.fan)) * (1 + c.lobes[0] * Math.sin(2 * h + c.lobes[1]) + c.lobes[2] * Math.sin(3 * h + c.lobes[3])) * (1 + c.elong * Math.cos(2 * (h - c.axis)));
-  const densePerColony = mobile ? 220 : 380;
+  const densePerColony = mobile ? 220 : Math.round(380 * areaScale * areaScale);
   const pickSub = (c, r) => {
     let x = r() * c.subW;
     for (const sb of c.subs) if ((x -= sb.w) <= 0) return sb;
@@ -336,7 +338,7 @@ function* buildGeometry(L, budget, out = {}) {
       const sb = pickSub(c, R),
         h = R() < 0.62 ? sb.fan + gauss(R) * c.spread : R() * 6.28,
         reach = sb.R * shapeR(c, h, sb) * (R() < 0.08 ? 1.2 + R() * 0.45 : 0.16 + 0.84 * Math.pow(R(), 1.25)),
-        r0 = Math.sqrt(R()) * sb.R * 0.2, // a disc of origins: no point convergence
+        r0 = Math.sqrt(R()) * sb.R * 0.3, // a disc of origins: no point convergence
         o0 = h + gauss(R) * 0.8,
         start = { x: sb.x + Math.cos(o0) * r0, y: sb.y + Math.sin(o0) * r0 },
         v = sectorSpeed(c, h);
@@ -374,7 +376,7 @@ function* buildGeometry(L, budget, out = {}) {
   for (const c of colonies) {
     // r11: fewer, more central cotton hairs: a defined, densely matted colony
     // centre (always denser than any cord leaving it) with dark space around.
-    const count = Math.round((mobile ? 800 : COTTON) * (c.R0 / R0) * (0.8 + 0.25 * c.subW));
+    const count = Math.round((mobile ? 800 : COTTON * areaScale * areaScale) * (c.R0 / R0) * (0.8 + 0.25 * c.subW));
     for (let k = 0; k < count; k++) {
       const sb = pickSub(c, fuzzR),
         th = fuzzR() < 0.6 ? sb.fan + gauss(fuzzR) * c.spread * 1.1 : fuzzR() * 6.28,
@@ -383,8 +385,12 @@ function* buildGeometry(L, budget, out = {}) {
       if (!at) continue;
       const u = Math.min(1, rr / sb.R),
         len = Math.min(34, 5 + -Math.log(1 - fuzzR()) * 9 * (1.2 - 0.5 * u));
-      lay(persistWalk(at, Math.atan2(at.y - sb.y, at.x - sb.x) + gauss(fuzzR) * 0.75, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
-        kind: "hair", source: c.i, t0: (at.birth || c.start) + 1 + fuzzR() * 4, v: c.vel * 0.7, w0: 0.2 + fuzzR() * 0.06, w1: 0.15, a0: 0.24 * (1 - 0.45 * u), a1: 0.1, tone: fuzzR() < 0.12 ? 1 : 0, cord: -1,
+      // Inside the core the cotton is tangled (any heading): radial hairs there
+      // converge on a point and read as a neuron soma.
+      const radialH = Math.atan2(at.y - sb.y, at.x - sb.x),
+        hh = u < 0.32 ? fuzzR() * 6.28 : radialH + gauss(fuzzR) * (0.75 + 0.9 * smooth((0.5 - u) / 0.2));
+      lay(persistWalk(at, hh, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
+        kind: "hair", source: c.i, t0: (at.birth || c.start) + 1 + fuzzR() * 4, v: c.vel * 0.7, w0: 0.2 + fuzzR() * 0.06, w1: 0.15, a0: 0.27 * (1 - 0.45 * u), a1: 0.11, tone: fuzzR() < 0.12 ? 1 : 0, cord: -1,
       });
       if (k % 60 === 0 && budget()) yield "cotton";
     }
@@ -392,7 +398,7 @@ function* buildGeometry(L, budget, out = {}) {
   // ---- D3/D5 rhizomorph cords: two halves grown from both colonies fuse mid-way ----
   function* cord(from, target, o) {
     const id = cords.length,
-      centre = steerWalk(from, target, R, { k: 0.016, run: 80, jit: 0.014, steer: 0.014, restore: 0.03, launch: 0.12 });
+      centre = steerWalk(from, target, R, { k: 0.019, run: 70, jit: 0.016, steer: 0.014, restore: 0.03, launch: 0.14 });
     if (o.meet) centre[centre.length - 1] = o.meet;
     // Braids: the bundle diverges into 2-3 sub-cords over an "eye" and fuses
     // again; the spine (pulse route) follows one of the sub-cords.
@@ -428,7 +434,11 @@ function* buildGeometry(L, budget, out = {}) {
         for (const q of islands) off += binOffset(q, q.follow, arcC[i]);
         if (off) centre[i] = { x: centre[i].x + ncx[i] * off, y: centre[i].y + ncy[i] * off };
       }
-    const spine = lay(centre, { kind: "cord-centre", cord: id, t0: o.t0, v: o.v, w0: 0.7, w1: 0.45, a0: 0.3, a1: 0.2, tone: 1, source: from.source, unit: o.unit });
+    // r11: the spine (pulse route) is invisible inside the mat it leaves: drawn
+    // from the colony centre, cord spines converged on a point (a soma).
+    const emergeR = Math.max(o.emerge ?? 0, 4),
+      spineAlpha = (x, y) => smooth((Math.hypot(x - from.x, y - from.y) - emergeR * 0.6) / (emergeR * 1.4));
+    const spine = lay(centre, { kind: "cord-centre", cord: id, t0: o.t0, v: o.v, w0: 0.7, w1: 0.45, a0: 0.3, a1: 0.2, tone: 1, source: from.source, unit: o.unit, alphaAt: o.emerge ? spineAlpha : undefined });
     if (!spine) return null;
     const C = { id, a: from, b: spine.pts.at(-1), spine, length: spine.len, poly: spine.pts };
     cords.push(C);
@@ -574,7 +584,7 @@ function* buildGeometry(L, budget, out = {}) {
       const dist = Math.hypot(meet.x - from.x, meet.y - from.y),
         v = 6.2 * (0.9 + R() * 0.2),
         t0 = C0.start + 7;
-      halves.push(yield* cord(from, meetV, { meet: meetV, emerge: C0.R0 * 0.22, t0, v, w0: CORD_W0 + R() * 2, w1: 1.6, fibres: 22 + Math.floor(R() * 7), accrete: 40, fringe: 1.2, web: 0.55, brush: false, tribs: 1, link: true }));
+      halves.push(yield* cord(from, meetV, { meet: meetV, emerge: C0.R0 * 0.3, t0, v, w0: CORD_W0 + R() * 2, w1: 1.6, fibres: 23 + Math.floor(R() * 6), accrete: 40, fringe: 1.2, web: 0.55, brush: false, tribs: 1, link: true }));
       void dist;
       void other;
     }
@@ -619,7 +629,7 @@ function* buildGeometry(L, budget, out = {}) {
       const at = { x: c.node.x + Math.cos(best.h) * best.l, y: c.node.y + Math.sin(best.h) * best.l };
       const unit = units.push({ id: units.length, paths: [], kind: "dead-end" }) - 1;
       units[unit].period = 1e9; // dead-end cords persist; their explorers recycle
-      yield* cord(c.node, at, { emerge: c.R0 * 0.22, t0: c.start + 18 + R() * 30, v: 4.8, w0: 3.5 + R() * 1.5, w1: 1.2, fibres: 13 + Math.floor(R() * 6), accrete: 45, fringe: 1.6, web: 0.9, brush: true });
+      yield* cord(c.node, at, { emerge: c.R0 * 0.3, t0: c.start + 18 + R() * 30, v: 4.8, w0: 3.5 + R() * 1.5, w1: 1.2, fibres: 13 + Math.floor(R() * 6), accrete: 45, fringe: 1.6, web: 0.9, brush: true });
       budget() && (yield "dead-end");
     }
   }
@@ -628,7 +638,7 @@ function* buildGeometry(L, budget, out = {}) {
   // ---- dense-zone mat: fine anastomosing cobweb around colonies and along cords ----
   const matR = rng("r10-dense-mat");
   const anchorsFor = cords.flatMap((C) => C.spine.pts.filter((_, i) => i % 3 === 0).map((v) => ({ v, h: null, C })));
-  const matCount = mobile ? 1000 : MAT;
+  const matCount = mobile ? 1000 : Math.round(MAT * areaScale * areaScale);
   for (let k = 0; k < matCount; k++) {
     let start, h, t0, src;
     if (matR() < 0.7) {
@@ -667,7 +677,7 @@ function* buildGeometry(L, budget, out = {}) {
   const explorerRoots = [];
   const sources = [];
   for (const C of cords) for (let k = 0; k < 2; k++) sources.push({ C, s: C.length * (0.15 + 0.8 * R()) });
-  for (const c of colonies) for (let k = 0; k < (mobile ? 3 : 4); k++) sources.push({ c, h: R() * 6.28 });
+  for (const c of colonies) for (let k = 0; k < (mobile ? 3 : 5); k++) sources.push({ c, h: R() * 6.28 });
   for (const src of sources) {
     let start, h, t0, from;
     if (src.C) {
@@ -693,7 +703,7 @@ function* buildGeometry(L, budget, out = {}) {
     // The distal continuation (and its forks) is a recycling unit far from the core.
     const end = trunk.pts.at(-1),
       eh = Math.atan2(end.y - trunk.pts.at(-3).y, end.x - trunk.pts.at(-3).x),
-      cont = hypha(end, eh, total - trunkLen, sparse({ kind: "explorer", t0: trunk.done, v: 4.4, unit: unitId, source: from.source, w0: 0.42 }), 1);
+      cont = hypha(end, eh, total - trunkLen, sparse({ kind: "explorer", t0: trunk.done, v: 2.4, unit: unitId, source: from.source, w0: 0.42 }), 1);
     void cont;
     budget() && (yield "explorer");
   }
@@ -825,7 +835,7 @@ function* buildGeometry(L, budget, out = {}) {
     if (!u.paths.length) continue;
     u.start = Math.min(...u.paths.map((p) => p.t0));
     u.grow = Math.max(...u.paths.map((p) => p.done)) - u.start;
-    if (u.kind === "explorer") u.period = u.grow + 30 + hash01(u.id * 7 + 3) * 80;
+    if (u.kind === "explorer") u.period = u.grow + 20 + hash01(u.id * 7 + 3) * 55;
   }
   return {
     vs, ss, paths, units, nodes, colonies, cords, linkCords, vertex, edge, fusions, explorerRoots, explorerAudit, L, protect, knots,
@@ -938,11 +948,11 @@ export function createHero(canvas, { stage, state, reduce }) {
   function drawKnot(ctx, K, mul = 1) {
     const save = ctx.globalAlpha;
     for (const l of K.lobes) {
-      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 1.6 * Math.max(l.rx, l.ry));
+      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 1.3 * Math.max(l.rx, l.ry));
       g.addColorStop(0, palette.core);
       g.addColorStop(0.3, palette.glow);
       g.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.globalAlpha = Math.min(1, l.a * 0.2 * mul * (light ? 0.75 : 1));
+      ctx.globalAlpha = Math.min(1, l.a * 0.3 * mul * (light ? 0.75 : 1));
       ctx.fillStyle = g;
       ctx.save();
       // Elongated along the host strand: scale about the lobe centre.
@@ -950,7 +960,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       ctx.rotate(K.h);
       ctx.scale(l.rx / Math.max(l.rx, l.ry), l.ry / Math.max(l.rx, l.ry));
       ctx.translate(-l.x, -l.y);
-      const e = 1.6 * Math.max(l.rx, l.ry);
+      const e = 1.3 * Math.max(l.rx, l.ry);
       ctx.fillRect(l.x - e, l.y - e, 2 * e, 2 * e);
       ctx.restore();
     }
