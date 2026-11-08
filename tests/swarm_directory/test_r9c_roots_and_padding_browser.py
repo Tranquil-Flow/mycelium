@@ -41,7 +41,15 @@ def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
         if width>=1440:
             assert any(s['active'] for s in pulses)
             assert page.evaluate('''()=>__myceliumScene.routes.every(r=>r.fieldList.every(v=>!__myceliumScene.graph.ss[v.segment].fieldPath.margin))'''), 'Hero leak must not add a second margin pulse'
-        assert all(s['intensity']==.5 for s in pulses)
+        assert all(s['intensity']==.75 for s in pulses)
+        web=audit.get('web',{})
+        assert web.get('spacingCV',0)>.5,web
+        assert web.get('spectralPeakFraction',1)<.15,web
+        assert all(web.get('orders',{}).get(str(order),0)>0 for order in (1,2,3)),web
+        assert web.get('fusions',0)>0,web
+        if width>=1440:
+            assert all(.85<=r<=1 for r in audit['marginPulseRateRelative'])
+        assert audit['marginPulseLeak']==135
         page.set_viewport_size({'width':800,'height':900});page.wait_for_timeout(400)
         assert page.evaluate('__understoryAudit.marginKnots')==0
         b.close()

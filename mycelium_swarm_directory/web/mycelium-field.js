@@ -106,10 +106,62 @@ export function extendFieldGraph({vs,ss,paths,vertex,edge,nodes,w,h}) {
     marginRoutes.push({side,paths:route,knots,source});
   }
   const mainRoots=strands.slice();
-  const rootAudit=rootLaterals(mainRoots,(parent,start,angle,length,at)=>{
-    const p=add(dendriteWalk(start,angle,length,R),parent,parent.birth?parent.birth+at*.5:0,parent.width*.35,parent.alpha*.48);
-    p.hair=true;p.margin=parent.margin;p.marginRoot=parent.marginRoot||parent.points[0];p.marginDistance=(parent.marginDistance||0)+parent.points.slice(1,at+1).reduce((n,q,i)=>n+Math.hypot(q.x-parent.points[i].x,q.y-parent.points[i].y),0);
-  },R);
+  // Poisson-like attachment positions, long acute laterals and two finer orders.
+  // The old equal-arc comb (one 4–15px tick every 18px) read as stripes.
+  const webR=rng('r9-irregular-root-web'),orders={1:0,2:0,3:0},gaps=[];
+  let webFusions=0,lateralCount=0,minLateralsPer100px=Infinity;
+  const webGrid=new Map(),webCell=8;
+  function indexWeb(p){for(const q of p.points){const key=`${Math.floor(q.x/webCell)},${Math.floor(q.y/webCell)}`;
+    if(!webGrid.has(key))webGrid.set(key,[]);webGrid.get(key).push({q,p});}}
+  for(const p of mainRoots)indexWeb(p);
+  function fineWeb(parent,order){
+    const arc=[0];for(let i=1;i<parent.points.length;i++)arc.push(arc.at(-1)+Math.hypot(parent.points[i].x-parent.points[i-1].x,parent.points[i].y-parent.points[i-1].y));
+    const length=arc.at(-1);if(!length)return;
+    const count=order===1?Math.max(2,Math.ceil(length/18)):(length>18?2:1);
+    const positions=Array.from({length:count},()=>length*(.04+webR()*.86)).sort((a,b)=>a-b);
+    parent.laterals=0;
+    for(let k=0;k<positions.length;k++){
+      let at=1;while(at<arc.length-1&&arc[at]<positions[k])at++;
+      const start=parent.points[at],prev=parent.points[at-1],heading=Math.atan2(start.y-prev.y,start.x-prev.x);
+      const spacing=Math.max(6,((positions[k+1]??length)-(positions[k-1]??0))/2);
+      const distance=spacing*(.3+webR()*1.2),side=webR()<.5?-1:1;
+      const angle=heading+side*(Math.PI/12+webR()*Math.PI/6),steps=Math.max(2,Math.ceil(distance/3));
+      let direction=angle,turn=0,points=[start];
+      for(let j=1;j<=steps;j++){
+        turn=turn*.65+(webR()-.5)*.16;
+        direction+=turn-Math.atan2(Math.sin(direction-heading),Math.cos(direction-heading))*.045;
+        const a=points.at(-1),q={x:a.x+Math.cos(direction)*distance/steps,y:a.y+Math.sin(direction)*distance/steps};
+        let hit=null,best=2.4;
+        if(j>steps*.55)for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+          const near=webGrid.get(`${Math.floor(q.x/webCell)+dx},${Math.floor(q.y/webCell)+dy}`)||[];
+          for(const candidate of near){if(candidate.p===parent||candidate.p.static!==parent.static)continue;
+            const delta=Math.hypot(q.x-candidate.q.x,q.y-candidate.q.y);
+            if(delta<best&&Math.hypot(start.x-candidate.q.x,start.y-candidate.q.y)>5){hit=candidate.q;best=delta;}}
+        }
+        points.push(hit||q);if(hit){webFusions++;break;}
+      }
+      const child=add(points,parent,parent.birth?parent.birth+at*.5:0,parent.width*(order===1?.55:.66),parent.alpha*(order===1?.6:.8));
+      child.hair=true;child.order=order;child.margin=parent.margin;
+      child.marginRoot=parent.marginRoot||parent.points[0];child.marginDistance=(parent.marginDistance||0)+arc[at];
+      indexWeb(child);orders[order]++;lateralCount++;parent.laterals++;
+      if(order<3&&distance>7)fineWeb(child,order+1);
+    }
+    if(order===1){
+      for(let k=1;k<positions.length;k++)gaps.push((positions[k]-positions[k-1])/(length/count));
+      minLateralsPer100px=Math.min(minLateralsPer100px,parent.laterals*100/length);
+    }
+  }
+  for(const parent of mainRoots)fineWeb(parent,1);
+  const mean=gaps.reduce((n,v)=>n+v,0)/gaps.length;
+  const spacingCV=Math.sqrt(gaps.reduce((n,v)=>n+(v-mean)**2,0)/gaps.length)/mean;
+  // Gap-sequence periodogram: a regular repeating spacing modulation must not
+  // dominate. CV separately rejects the old almost-constant comb spacing.
+  const sample=gaps.slice(0,512),power=[];
+  for(let k=1;k<=64;k++){let re=0,im=0;for(let j=0;j<sample.length;j++){
+    const phase=2*Math.PI*k*j/sample.length;re+=(sample[j]-mean)*Math.cos(phase);im+=(sample[j]-mean)*Math.sin(phase);}
+    power.push(re*re+im*im);}
+  const rootAudit={mainStrands:mainRoots.length,lateralCount,minLateralsPer100px,loneThreads:mainRoots.filter(p=>!p.laterals).length,
+    web:{orders,spacingCV,spectralPeakFraction:Math.max(...power)/power.reduce((n,v)=>n+v,0),fusions:webFusions,spacingSamples:gaps.length}};
   // Periodic projection below the first tile: paired boundary vertices are
   // identical under the page-space tile translation. Finite storage at any height.
   return {strands,fusions,connectors,top,height,width:w,left,layout,baseCount,count,rootAudit,marginKnots,marginRoutes,marginDensityRatio,
@@ -140,22 +192,32 @@ export function createField({stage,state,reduce}) {
   tile.width=field.width;tile.height=Math.ceil(field.height);
   const fieldAlpha=light?.17:.4,sharedClock=scene?.clock||sceneClock();
   const marginWeight=x=>{const l=field.layout,px=x+l.offset;if(!l.enabled)return 0;const distance=px<l.left?l.left-px:px>l.right?px-l.right:0;const q=Math.max(0,Math.min(1,distance/72));return q*q*(3-2*q);};
-  function drawPath(ctx,p,extent,retire=0) {
+  const marginGradients=new WeakMap();
+  function marginGradient(ctx){
+    if(marginGradients.has(ctx))return marginGradients.get(ctx);
+    const gradient=ctx.createLinearGradient(-field.layout.offset,0,width-field.layout.offset,0);
+    // Smooth spatial attenuation on a connected stroke, not overlapping round
+    // caps whose double alpha produced a bead at every ~3.5px graph vertex.
+    for(let i=0;i<=128;i++){
+      const rgb=glow.startsWith('#')?parseInt(glow.slice(1),16):0;
+      gradient.addColorStop(i/128,`rgba(${rgb>>16},${rgb>>8&255},${rgb&255},${marginWeight(i*width/128-field.layout.offset)})`);
+    }
+    marginGradients.set(ctx,gradient);return gradient;
+  }
+  function drawPath(ctx,p,extent,retire=0){
+    const style=ctx.strokeStyle,join=ctx.lineJoin;
+    if(p.margin){ctx.strokeStyle=marginGradient(ctx);ctx.lineJoin='round';}
+    tracePath(ctx,p,extent,retire);ctx.strokeStyle=style;ctx.lineJoin=join;
+  }
+  function tracePath(ctx,p,extent,retire=0) {
     if(retire>0){
       // Fixed laid edges dim from tip to root; the root never slides forwards.
       const alpha=ctx.globalAlpha,front=(1-retire)*(p.points.length-1),solid=Math.max(0,Math.min(extent,front-3));
       drawPath(ctx,p,solid);
       for(let i=Math.floor(solid)+1;i<=Math.min(Math.ceil(extent),Math.ceil(front+3));i++){
         const a=p.points[i-1],b=p.points[i];if(!b)continue;
-        ctx.globalAlpha=alpha*Math.max(0,Math.min(1,(front+3-i)/6))*(p.margin?marginWeight(b.x):1);
+        ctx.globalAlpha=alpha*Math.max(0,Math.min(1,(front+3-i)/6));
         ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
-      }ctx.globalAlpha=alpha;return;
-    }
-    if(p.margin){const alpha=ctx.globalAlpha;
-      for(let i=1;i<p.points.length&&i<=Math.ceil(extent);i++){
-        const a=p.points[i-1],b=p.points[i],f=Math.min(1,extent-i+1);if(f<=0)break;
-        ctx.globalAlpha=alpha*marginWeight((a.x+b.x)/2);if(!ctx.globalAlpha)continue;
-        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(a.x+(b.x-a.x)*f,a.y+(b.y-a.y)*f);ctx.stroke();
       }ctx.globalAlpha=alpha;return;
     }
     ctx.beginPath();ctx.moveTo(p.points[0].x,p.points[0].y);
@@ -177,7 +239,7 @@ export function createField({stage,state,reduce}) {
   const heroInterval=scene?Math.max(14.4,...scene.routes.map(r=>r.arrivalMax+5)):24;
   const marginSchedules=field.marginRoutes.map((r,side)=>{
     const legs=r.paths.map(p=>{let distance=0;const segments=p.segments.map(s=>{const start=distance;distance+=s.len;return {s,arrival:start/80};});return {p,segments,duration:distance/80};});
-    const period=Math.max(38,heroInterval*1.6,...legs.map(l=>l.duration+12));
+    const period=Math.max(38,heroInterval/ .9,...legs.map(l=>l.duration+12));
     const landing=scene?.routes[0]?.landings.find(l=>l.node===r.source.source)?.time||0;
     return {...r,legs,period,phase:landing+3+side*9};
   });
@@ -186,14 +248,14 @@ export function createField({stage,state,reduce}) {
     const cycle=Math.floor(elapsed/s.period),age=elapsed%s.period,leg=s.legs[cycle%s.legs.length];
     return age<leg.duration+5?[{...s,leg,age}]:[];
   });}
-  window.__marginPulseProbe=t=>({active:marginTrips(t).map(s=>s.side),periods:marginSchedules.map(s=>s.period),intensity:.5,heroInterval});
+  window.__marginPulseProbe=t=>({active:marginTrips(t).map(s=>s.side),periods:marginSchedules.map(s=>s.period),intensity:.75,heroInterval});
   let raf=0,last=0,clock=0,frozen=null,disposed=false;
   window.__understoryMetrics={costs:[],frames:0,paused:false};
   window.__understoryAudit={paths:field.strands.length,branches:field.strands.filter(p=>!p.static).length,
     fusions:field.fusions.length,nodes:field.marginKnots.length,sporeNodes:0,densityMultiplier:1.2,baseCount:field.baseCount,count:field.count,
     sharedGraph:!!scene,connectors:field.connectors.length,canvasCount:2,
     ...field.rootAudit,explorerLoneThreads:scene?.graph.explorerAudit?.loneThreads??0,
-    explorerAudit:scene?.graph.explorerAudit,marginKnots:field.marginKnots.length,marginDensityRatio:field.marginDensityRatio,marginPulseIntensity:.5,marginPulseLeak:90,marginPulsePeriods:marginSchedules.map(s=>s.period),marginPulseRateRelative:marginSchedules.map(s=>heroInterval/s.period),protectedRects:field.layout.rects,
+    explorerAudit:scene?.graph.explorerAudit,marginKnots:field.marginKnots.length,marginDensityRatio:field.marginDensityRatio,marginPulseIntensity:.75,marginPulseLeak:135,marginPulsePeriods:marginSchedules.map(s=>s.period),marginPulseRateRelative:marginSchedules.map(s=>heroInterval/s.period),protectedRects:field.layout.rects,
     canvasPixels:c.width*c.height,bytes:(c.width*c.height+tile.width*tile.height)*4,
     straightness:measurePaths(field.strands.filter(p=>!p.hair).map(p=>({kind:'understory',points:p.points})))};
   function paint(seconds) {
@@ -238,23 +300,23 @@ export function createField({stage,state,reduce}) {
       // One calm node-to-node trip per side, on the same graph. Subsequent
       // legs start from the previous receiving colony, not independent flashes.
       if(!reduce.matches)for(const trip of marginTrips(t)){
-        x.strokeStyle=core;
+        x.strokeStyle=core;x.lineCap='butt';
         for(const item of trip.leg.segments){
           const dt=trip.age-item.arrival;if(dt<0||dt>4.2)continue;
           const env=dt<1.05?Math.sin(dt/1.05*Math.PI/2)**2:Math.cos((dt-1.05)/3.15*Math.PI/2)**2;
-          const s=item.s;x.globalAlpha=env*.5*(light?.2:.65)*marginWeight((s.a.x+s.b.x)/2);
+          const s=item.s;x.globalAlpha=env*.75*(light?.2:.65)*marginWeight((s.a.x+s.b.x)/2);
           x.lineWidth=Math.max(.45,s.width*1.6);x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();
         }
         const node=trip.leg.p.points.at(-1),age=trip.age-trip.leg.duration;
         if(age>=0&&age<5){
           const env=Math.sin(age/5*Math.PI)**2;
-          x.globalAlpha=env*.5*(light?.2:.65)*marginWeight(node.x);x.fillStyle=core;
+          x.globalAlpha=env*.75*(light?.2:.65)*marginWeight(node.x);x.fillStyle=core;
           x.beginPath();x.arc(node.x,node.y,1.4,0,Math.PI*2);x.fill();
           // Short peripheral leak follows attached roots and their lateral hairs.
           for(const p of field.strands){if(!p.margin||(p.marginRoot||p.points[0])!==node)continue;
             let distance=p.marginDistance||0;
-            for(const s of p.segments){const dt=age-distance/35;distance+=s.len;if(distance>90||dt<0||dt>3)continue;
-              x.globalAlpha=Math.sin(dt/3*Math.PI)**2*.5*(light?.2:.65)*Math.exp(-distance/45)*marginWeight(s.a.x);
+            for(const s of p.segments){const dt=age-distance/35;distance+=s.len;if(distance>135||dt<0||dt>3)continue;
+              x.globalAlpha=Math.sin(dt/3*Math.PI)**2*.75*(light?.2:.65)*Math.exp(-distance/67.5)*marginWeight(s.a.x);
               x.lineWidth=Math.max(.25,s.width*1.5);x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();}
           }
         }
@@ -291,7 +353,7 @@ export function createField({stage,state,reduce}) {
   function schedule(){const moving=!disposed&&!reduce.matches&&!document.hidden&&frozen===null;window.__understoryMetrics.paused=!moving;if(moving&&!raf)raf=requestAnimationFrame(tick);else if(!moving){cancelAnimationFrame(raf);raf=0;last=0;}}
   const changed=()=>{if(document.hidden||reduce.matches)sharedClock.pause();paint(frozen??clock);schedule();},scrolled=()=>paint(frozen??clock);
   window.__setUnderstoryTime=t=>{frozen=t;schedule();paint(t);};window.__paintUnderstory=paint;
-  const layoutObserver=new MutationObserver(()=>{const previous=field.layout;field.layout=contentBounds(previous.offset);window.__understoryAudit.protectedRects=field.layout.rects;if(previous.left!==field.layout.left||previous.right!==field.layout.right)rasterStatic();});
+  const layoutObserver=new MutationObserver(()=>{const previous=field.layout;field.layout=contentBounds(previous.offset);window.__understoryAudit.protectedRects=field.layout.rects;if(previous.left!==field.layout.left||previous.right!==field.layout.right){marginGradients.delete(bx);marginGradients.delete(x);rasterStatic();}});
   layoutObserver.observe(document.querySelector('main'),{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
   paint(0);schedule();window.addEventListener('scroll',scrolled,{passive:true});document.addEventListener('visibilitychange',changed);reduce.addEventListener('change',changed);
   return ()=>{disposed=true;layoutObserver.disconnect();cancelAnimationFrame(raf);window.removeEventListener('scroll',scrolled);document.removeEventListener('visibilitychange',changed);reduce.removeEventListener('change',changed);tile.width=tile.height=0;};
