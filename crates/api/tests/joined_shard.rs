@@ -17,6 +17,10 @@ use std::{
 mod native_process;
 #[path = "support/joined_shard_process.rs"]
 mod process;
+#[path = "support/joined_route_process.rs"]
+mod route_process;
+#[path = "support/sse_client.rs"]
+mod sse_client;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Pair {
     root: PathBuf,

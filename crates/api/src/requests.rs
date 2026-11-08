@@ -21,6 +21,12 @@ pub trait Subscription: Send {
     /// Only called after a complete frame was written and flushed.
     fn ack(&mut self, sequence: u64) -> Result<(), PublicError>;
     fn close(&mut self) -> Result<(), PublicError>;
+    /// The generation this subscription publishes under, when the service
+    /// advances it per subscribe (registry.subscribe). `None` keeps the
+    /// client's Last-Event-ID generation as the resume binding.
+    fn publisher_generation(&self) -> Option<u64> {
+        None
+    }
 }
 pub trait Service: Send + Sync + 'static {
     fn authorized(&self, request: &Request) -> bool;
@@ -148,7 +154,13 @@ impl<S: Service> Gateway<S> {
                         .map(|s| (s, cursor))
                 });
                 let (subscription, resume) = match result {
-                    Ok(s) => s,
+                    // A resume continues the cursor's sequence under the NEW
+                    // subscription's publisher generation (subscribe advances it).
+                    Ok((s, resume)) => {
+                        let resume =
+                            resume.map(|(g, n)| (s.publisher_generation().unwrap_or(g), n));
+                        (s, resume)
+                    }
                     Err(e) => {
                         return error(
                             if e.code == "unknown_request" {

@@ -5,6 +5,7 @@ fn main() -> node_service::loopback::Result<()> {
     match args.get(1).map(String::as_str) {
         Some("member") if args.len()==4=>node_service::native::member(&args[2],std::path::Path::new(&args[3]),false),
         Some("native-worker") if args.len()==2=>node_service::native::native_worker(),
+        Some("tokenize") if args.len()==3=>node_service::tokenize::serve(std::path::Path::new(&args[2])),
         Some("qualification-member") if args.len()==4=>node_service::native::qualification_member(&args[2],std::path::Path::new(&args[3])),
         Some("owner-leaf") if args.len()==4=>node_service::native::member(&args[2],std::path::Path::new(&args[3]),true),
         #[cfg(feature = "desktop-shell")]

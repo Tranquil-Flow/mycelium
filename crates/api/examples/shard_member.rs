@@ -20,6 +20,10 @@ mod membership;
 use membership::Membership;
 #[path = "shard_member/control.rs"]
 mod control;
+#[path = "shard_member/leave.rs"]
+mod leave;
+#[path = "shard_member/serve.rs"]
+mod serve;
 type Result<T> = std::result::Result<T, String>;
 fn main() {
     if let Err(code) = run() {
@@ -65,6 +69,9 @@ fn run() -> Result<()> {
     let mut session: Option<Membership> = None;
     let mut native: Option<NativeShard> = None;
     let mut shard: Option<JoinedShard> = None;
+    // Digest of the last signed resident proof THIS process produced.
+    let mut proof_digest: Option<String> = None;
+    let mut left = false;
     let input = control::Input::start()?;
     while let Ok(operation) = input.requests.recv() {
         let operation = operation?;
@@ -73,6 +80,58 @@ fn run() -> Result<()> {
             .as_str()
             .ok_or("operator_command_invalid")?;
         let reply: Result<Value> = (|| match command {
+            _ if left
+                && matches!(
+                    command,
+                    "receive" | "prepare_native" | "serve" | "accept" | "resume"
+                ) =>
+            {
+                Err("member_left".into())
+            }
+            "carrier_address" => Ok(json!({"endpoint_id":addr.id.to_string(),
+                "socket":addr.ip_addrs().next().ok_or("carrier_address_missing")?})),
+            "serve" => {
+                let member = session.as_ref().ok_or("not_joined")?;
+                serve::serve(
+                    &host,
+                    &rt,
+                    &clock,
+                    native.as_mut().ok_or("native_required")?,
+                    member,
+                    &signer,
+                    &request["route"],
+                    proof_digest.as_deref().ok_or("native_proof_required")?,
+                    &operation,
+                )
+            }
+            "leave" => {
+                let mode = request["mode"]
+                    .as_str()
+                    .ok_or("leave_mode_invalid")?
+                    .to_owned();
+                let began = std::time::Instant::now();
+                let mut steps = leave::Leave {
+                    root: root.clone(),
+                    signer: &signer,
+                    native: &mut native,
+                    shard: &mut shard,
+                    session: &mut session,
+                    fenced: &mut left,
+                    began,
+                    withdrawal: None,
+                    unload: json!(null),
+                    timings: Vec::new(),
+                    refunded: false,
+                };
+                let record = api::leave::MemberLeave::new(&root, api::leave::Limits::default())
+                    .run(&mode, &mut steps, &mut api::leave::SystemClock::default())
+                    .map_err(|e| e.code.to_owned())?;
+                Ok(
+                    json!({"record":record,"withdrawal":steps.withdrawal,"unload":steps.unload,
+                    "steps":steps.timings,"refunded":steps.refunded,
+                    "elapsed_ms":began.elapsed().as_secs_f64()*1000.0,"route_ready":false}),
+                )
+            }
             "pair_request" => app_host::build_pair_request(&root, &root)
                 .map(|v| v.to_value())
                 .map_err(|e| e.code.to_owned()),
@@ -318,7 +377,7 @@ fn run() -> Result<()> {
                         .as_str()
                         .ok_or("source_invalid")?,
                 );
-                native
+                let signed = native
                     .as_mut()
                     .unwrap()
                     .prepare_until(
@@ -331,7 +390,11 @@ fn run() -> Result<()> {
                         &source,
                         operation.deadline,
                     )
-                    .map_err(|e| e.0.to_owned())
+                    .map_err(|e| e.0.to_owned())?;
+                proof_digest = Some(
+                    api::joined_shard::route::proof_digest(&signed).map_err(|e| e.0.to_owned())?,
+                );
+                Ok(signed)
             }
             "native_step" => {
                 use base64::Engine;

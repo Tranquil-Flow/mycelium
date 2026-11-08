@@ -19,10 +19,10 @@ use std::{
     time::{Duration, Instant},
 };
 use transport::{Channel, Clock};
-fn allowance() -> Duration {
+pub(super) fn allowance() -> Duration {
     Duration::from_millis(B::MemberChosenWall.span(Entries::ZERO).unwrap().millis())
 }
-struct Root(PathBuf);
+pub(super) struct Root(pub(super) PathBuf);
 impl Drop for Root {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.0).unwrap();
@@ -70,12 +70,80 @@ fn two_member_processes_prepare_received_shards_and_match_reference() {
 fn member_process_prepares_received_shard_and_verifies_enrolled_proof() {
     qualify(true);
 }
+/// Paired members holding verified received shards; native workers not started.
+pub(super) struct Fixture {
+    pub(super) seed: app_host::SeedRuntime<app_host::Unmanaged>,
+    pub(super) member_roots: [PathBuf; 2],
+    pub(super) nodes: [Node; 2],
+    pub(super) registrations: Vec<Value>,
+    pub(super) ids: Vec<String>,
+    pub(super) source: PathBuf,
+    pub(super) offers: Vec<Value>,
+    pub(super) paths: Vec<PathBuf>,
+    pub(super) ranges: Vec<[usize; 2]>,
+    pub(super) manifest_digest: String,
+    pub(super) resource_gate: std::ffi::OsString,
+    pub(super) began: Instant,
+    // Last: removed after every owned process above was reaped.
+    pub(super) root: Root,
+}
+/// Refresh host admission immediately before EACH native load.
+pub(super) fn admit_native_load(gate: &std::ffi::OsStr, label: &str) {
+    let gate = std::process::Command::new("python3")
+        .arg(gate)
+        .args(["--memory-gb", "6", "--duration-s"])
+        .arg(allowance().as_secs().to_string())
+        .arg("--json")
+        .output()
+        .unwrap();
+    eprintln!(
+        "B7 pre-native resource gate {label}: {}",
+        String::from_utf8_lossy(&gate.stdout)
+    );
+    assert!(
+        gate.status.success(),
+        "resource admission refused before native launch"
+    );
+}
 fn qualify(prepare_only: bool) {
     let count = if prepare_only { 1 } else { 2 };
+    let fx = setup(count, "b7c-model");
+    let Fixture {
+        root: _root,
+        seed,
+        member_roots,
+        mut nodes,
+        registrations,
+        ids: _,
+        source,
+        offers,
+        paths,
+        ranges,
+        manifest_digest: _,
+        resource_gate,
+        began,
+    } = fx;
+    qualify_received(
+        prepare_only,
+        count,
+        seed,
+        member_roots,
+        &mut nodes,
+        registrations,
+        source,
+        offers,
+        paths,
+        ranges,
+        resource_gate,
+        began,
+    );
+}
+pub(super) fn setup(count: usize, label: &str) -> Fixture {
     let resource_gate = std::env::var_os("B7_RESOURCE_GATE")
         .expect("explicit local resource preflight script required");
+    let prepare_only = count == 1;
     let began = Instant::now();
-    let path = std::env::temp_dir().join(format!("b7c-model-{}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("{label}-{}", std::process::id()));
     fs::create_dir(&path).unwrap();
     let root = Root(path.canonicalize().unwrap());
     let owner = root.0.join("owner");
@@ -311,6 +379,37 @@ fn qualify(prepare_only: bool) {
         );
     }
     source_thread.join().unwrap();
+    Fixture {
+        root,
+        seed,
+        member_roots,
+        nodes,
+        registrations,
+        ids,
+        source,
+        offers,
+        paths,
+        ranges,
+        manifest_digest: prepared.manifest_digest.clone(),
+        resource_gate,
+        began,
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn qualify_received(
+    prepare_only: bool,
+    count: usize,
+    seed: app_host::SeedRuntime<app_host::Unmanaged>,
+    member_roots: [PathBuf; 2],
+    nodes: &mut [Node; 2],
+    registrations: Vec<Value>,
+    source: PathBuf,
+    offers: Vec<Value>,
+    paths: Vec<PathBuf>,
+    ranges: Vec<[usize; 2]>,
+    resource_gate: std::ffi::OsString,
+    began: Instant,
+) {
     let nonce = app_host::hex(&app_host::random(16).unwrap());
     let reference: Value =
         serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
@@ -320,21 +419,7 @@ fn qualify(prepare_only: bool) {
     for (i, node) in nodes.iter_mut().take(count).enumerate() {
         // Source emission/transport can take minutes; refresh admission here,
         // immediately before EACH native load, not only at harness launch.
-        let gate = std::process::Command::new("python3")
-            .arg(&resource_gate)
-            .args(["--memory-gb", "6", "--duration-s"])
-            .arg(allowance().as_secs().to_string())
-            .arg("--json")
-            .output()
-            .unwrap();
-        eprintln!(
-            "B7c pre-native resource gate node={i}: {}",
-            String::from_utf8_lossy(&gate.stdout)
-        );
-        assert!(
-            gate.status.success(),
-            "resource admission refused before native launch"
-        );
+        admit_native_load(&resource_gate, &format!("node={i}"));
         node.send(json!({"command":"prepare_native","range":ranges[i],"tokens":prompt.len()+64,"nonce":nonce,"forbidden_source":source}));
         let signed = node.result_with(allowance());
         let proof =

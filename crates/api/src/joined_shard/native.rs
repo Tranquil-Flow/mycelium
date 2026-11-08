@@ -184,8 +184,11 @@ impl NativeShard {
         };
         checkpoint()?;
         self.check(current)?;
+        // A fresh worker per serving epoch is allowed only after the previous one's
+        // close/reap was proven. The consent wall and command budget keep running
+        // from the FIRST prepare; a new worker never resets the granted lifetime.
         if self.worker.is_some()
-            || self.started.is_some()
+            || !self.cleanup_proven
             || !proof::valid_nonce(nonce)
             || range[0] >= range[1]
             || range[1] > 28
@@ -200,7 +203,13 @@ impl NativeShard {
             return Err(fail("joined_native_identity_mismatch"));
         }
         // Admission is repeated through each bounded verification read.
-        self.started = Some(Instant::now());
+        if self.started.is_none() {
+            self.started = Some(Instant::now());
+        }
+        if self.remaining == 0 {
+            return Err(fail("joined_native_consent_exhausted"));
+        }
+        self.remaining -= 1;
         let offer_member = self.received.offer["message"]["member"].clone();
         self.received.shard.verify(&|| {
             checkpoint()?;
@@ -330,11 +339,32 @@ impl NativeShard {
     pub fn close(&mut self) -> Result<Value> {
         let worker = self
             .worker
-            .take()
+            .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?;
-        let stats = worker.close().map_err(native)?;
+        // A failed graceful close keeps the worker owned for abort().
+        let stats = worker.close_in_place().map_err(native)?;
+        self.worker = None;
         self.cleanup_proven = true;
         Ok(stats)
+    }
+    /// After an interrupted step the socket framing is not reusable: kill and
+    /// reap the exact owned child. Cleanup is proven only by the OS exit report;
+    /// the evidence says `context_closed:false`, never a graceful close.
+    pub fn abort(&mut self) -> Result<Value> {
+        let worker = self
+            .worker
+            .take()
+            .ok_or(fail("joined_native_not_prepared"))?;
+        let evidence = worker.kill_and_reap().map_err(native)?;
+        self.cleanup_proven = true;
+        Ok(evidence)
+    }
+    pub fn worker_pid(&self) -> Option<u32> {
+        self.worker.as_ref().and_then(|w| w.pid().ok())
+    }
+    /// The offer this compute custody serves, for route binding checks.
+    pub fn offer(&self) -> &Value {
+        &self.received.offer
     }
     pub fn discard(&mut self) -> Result<()> {
         if self.worker.is_some() || !self.cleanup_proven {
