@@ -61,6 +61,11 @@ def test_toggle_and_electric_assets_need_flag_and_staging_origin(local, monkeypa
             assert status == 200
             assert (b'data-bg-choice' in html) is staging
             assert (b'electric' in html.lower()) is staging
+            if staging:
+                # Owner (r11): the label is plain 'Electric', with no round suffix.
+                labels = [part.split(b'>', 1)[1].split(b'<', 1)[0] for part in html.split(b'data-bg-choice=')[1:]]
+                assert labels == [b'Mycelium', b'Electric'], labels
+                assert b'(r9)' not in html
         for path in ELECTRIC:
             status, body = fetch(srv.origin + path)
             if staging:

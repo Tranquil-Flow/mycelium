@@ -43,7 +43,7 @@ STAGING_BANNER = ('<aside id="staging-banner" class="staging-banner" aria-label=
 GLOW_SWITCH_END = b'data-glow-choice="blue" aria-pressed="false">Blue</button></div>'
 STAGING_STYLE_SWITCH = ('<div class="glow-switch style-switch" role="group" aria-label="Background style (staging only)">'
                         '<button type="button" data-bg-choice="mycelium" aria-pressed="true">Mycelium</button>'
-                        '<button type="button" data-bg-choice="electric" aria-pressed="false">Electric (r9)</button></div>').encode()
+                        '<button type="button" data-bg-choice="electric" aria-pressed="false">Electric</button></div>').encode()
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
 WEB_STAGING = Path(__file__).resolve().parent / 'web_staging'
