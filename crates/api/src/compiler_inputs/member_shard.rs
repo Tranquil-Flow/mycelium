@@ -10,6 +10,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
 };
+mod cleanup;
 const RECORD: &str = "member-shard.private.json";
 const REFUND: &str = "member-shard-refund.private.json";
 
@@ -298,6 +299,11 @@ impl MemberShard {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None, // discard retry after directory removal
             Err(_) => return Err(fail("member_shard_read_failed")),
         };
+        // Absence alone is never evidence of deletion. Only a captured inode
+        // with a matching durable cleanup intent may resume cleanup-only custody.
+        if file.is_none() {
+            cleanup::captured(&root, &record, &row)?;
+        }
         let file_identity = file.as_ref().map(file_identity).transpose()?;
         if file_identity.is_some_and(|id| id != expected_id) {
             return Err(fail("member_shard_identity_changed"));
@@ -321,6 +327,9 @@ impl MemberShard {
             .join(self.record["name"].as_str().unwrap())
     }
     fn check(&self) -> Result<()> {
+        if cleanup::has_intent(&self.root)? {
+            return Err(fail("member_shard_discarding"));
+        }
         if self.refunded
             || fs::canonicalize(&self.root).map_err(|_| fail("member_shard_identity_changed"))?
                 != self.root
@@ -513,13 +522,19 @@ impl MemberShard {
         Ok(())
     }
     /// Explicit inert-byte cleanup; no refund on Drop. The handle retains the
-    /// run lock through unlink, directory fsync, durable refund marker and ledger
+    /// run lock through inode retirement, fsync, durable refund marker and ledger
     /// commit. Failed cleanup leaves the charge and is retryable.
     pub fn discard(&mut self) -> Result<()> {
+        self.discard_with_checkpoint(&|| Ok(()))
+    }
+    /// Inert cleanup with cancellation checkpoints; debt survives any refusal.
+    pub fn discard_with_checkpoint(&mut self, checkpoint: &dyn Fn() -> Result<()>) -> Result<()> {
         if self.refunded {
             return Ok(());
         }
-        self.check()?;
+        if !cleanup::has_intent(&self.root)? {
+            self.check()?;
+        }
         let runs = self.root.parent().unwrap();
         let run = self.root.file_name().unwrap().to_str().unwrap();
         let (_lock, mut ledger) = storage_ledger(runs)?;
@@ -531,20 +546,13 @@ impl MemberShard {
         if ledger["entries"][run] != self.row {
             return Err(fail("compiler_storage_reservation_changed"));
         }
-        if self.file.is_some() {
-            fs::remove_file(self.path()).map_err(|_| fail("member_shard_cleanup_failed"))?;
-            self.file = None;
-            self.file_identity = None;
-        }
-        let _removed = match fs::remove_dir(self.root.join("stage-shards")) {
-            Ok(()) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false, // retry after unlink/fsync interruption
-            Err(_) => return Err(fail("member_shard_cleanup_failed")),
-        };
+        cleanup::retire(&self.root, &self.record, &self.row, checkpoint)?;
+        self.file = None;
+        self.file_identity = None;
         sync_dir(&self.root)?;
         private_state::store(
             &self.root.join(REFUND),
-            &json!({"protocol":"mycelium.member_shard_refund.v1","reservation":self.row}),
+            &json!({"protocol":"mycelium.member_shard_refund.v2","reservation":self.row}),
             private_state::private_json_limit().map_err(state)?,
         )
         .map_err(state)?;
@@ -598,5 +606,9 @@ pub(super) fn refund_matches(runs: &Path, run: &str, row: &Value) -> bool {
     let Ok(max) = private_state::private_json_limit() else {
         return false;
     };
-    matches!(private_state::load(&root.join(REFUND), max), Ok(Some(v)) if v.get("protocol") == Some(&json!("mycelium.member_shard_refund.v1")) && v.get("reservation") == Some(row))
+    let Ok(Some(record)) = private_state::load(&root.join(RECORD), max) else {
+        return false;
+    };
+    cleanup::proven(&root, &Value::Object(record), row).is_ok()
+        && matches!(private_state::load(&root.join(REFUND), max), Ok(Some(v)) if v.get("protocol") == Some(&json!("mycelium.member_shard_refund.v2")) && v.get("reservation") == Some(row))
 }

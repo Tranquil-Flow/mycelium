@@ -24,7 +24,7 @@ router = { path = "../router" }
 base64 = "=0.22.1"
 ed25519-dalek = "=2.2.0"
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
-rustix = { version = "=1.1.4", features = ["process"] }
+rustix = { version = "=1.1.4", features = ["process", "fs"] }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "=0.8.4"
 rustls-pki-types = "=1.15.1"

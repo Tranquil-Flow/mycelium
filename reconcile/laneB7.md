@@ -1,4 +1,28 @@
-# Lane B7 — phase-2 precursor: member shard byte custody
+# Lane B7 — pairing-bound member custody; serving still incomplete
+
+## B7b review repair (supersedes precursor cleanup claims below)
+
+Branch `lane/b7b-serving`, base `8c9b00f`. REVIEW-laneB7-precursor R1/R2
+were reproduced as deterministic failures and repaired before serving work.
+Missing shard/file paths no longer authorize cleanup or refund after restart.
+A v2 durable cleanup intent binds the original file, stage directory and B3 row.
+Cleanup uses pinned directory descriptors, no-follow relative opens and exclusive
+capture. It verifies the captured inode and truncates ONLY that descriptor;
+there is no pathname unlink of a data file. The zero-byte original inode remains
+as `member-shard-retired.bin` audit evidence, plus intent/refund metadata. Only
+empty-directory removal uses unlinkat(AT_REMOVEDIR). Foreign swapped bytes are
+restored without overwrite when possible, otherwise preserved with full debt.
+The v2 refund requires the real zero-byte tombstone, matching intent, original
+owner and absent stage directory; v1 missing-path refunds fail closed.
+Tests cover moved file/directory on restart, swaps at the last cleanup checkpoint,
+four interruption phases, stale replacement-ledger recovery, and a replaced
+retirement inode. Focused storage + member tests and api clippy passed;
+full gates are pending at this commit.
+Ruling 10: existing rustix dependency enables its fs feature; no new package,
+lockfile change, reserved behavior or artifact-v1 wire change. Private cleanup
+records are explicitly v2. This is inert cleanup, NOT serving-worker leave.
+
+## Historical precursor (claims qualified by the repair above)
 
 Base: `1bb931978f08799c97e09bb6da012145e2058a9f`; branch `lane/b7-two-node-serving`.
 Disk blocker cleared (39 GiB at resume). This is NOT the requested serving journey.

@@ -62,6 +62,16 @@ impl Fixture {
         )
         .unwrap()
     }
+    fn resume(&self, run: &str) -> Result<MemberShard, api::compiler_inputs::Error> {
+        MemberShard::resume(
+            &self.root,
+            run,
+            "node-0",
+            &self.transfer,
+            &self.recipe,
+            self.recipe["node_plan_digest"].as_str().unwrap(),
+        )
+    }
     fn charge(&self) -> u64 {
         let v: Value = serde_json::from_slice(
             &fs::read(self.root.join("chain-runs/compiler-storage.private.json")).unwrap(),
@@ -239,6 +249,148 @@ fn replacing_stage_directory_with_symlink_never_deletes_foreign_bytes() {
     receive.discard().unwrap();
 }
 
+#[test]
+fn restart_cannot_refund_a_moved_file_or_directory() {
+    for directory in [false, true] {
+        let f = Fixture::new();
+        let mut shard = f.begin("moved");
+        shard.write_chunk(0, &f.bytes).unwrap();
+        let path = shard.path();
+        let original = if directory {
+            path.parent().unwrap().to_owned()
+        } else {
+            path.clone()
+        };
+        let moved = f.root.join("moved-owned");
+        drop(shard);
+        fs::rename(&original, &moved).unwrap();
+        let result = f.resume("moved").and_then(|mut s| s.discard());
+        assert!(result.is_err(), "absence is not cleanup evidence");
+        assert_eq!(f.charge(), f.bytes.len() as u64);
+        assert_eq!(
+            fs::read(if directory {
+                moved.join(path.file_name().unwrap())
+            } else {
+                moved.clone()
+            })
+            .unwrap(),
+            f.bytes
+        );
+    }
+}
+#[test]
+fn cleanup_checkpoint_directory_and_final_file_swap_preserve_foreign_bytes() {
+    use std::{cell::Cell, os::unix::fs::PermissionsExt};
+    for directory in [false, true] {
+        let f = Fixture::new();
+        let mut shard = f.begin("racing");
+        shard.write_chunk(0, &f.bytes).unwrap();
+        let path = shard.path();
+        let stages = path.parent().unwrap().to_owned();
+        let foreign = f.root.join("foreign");
+        fs::create_dir(&foreign).unwrap();
+        let foreign_file = foreign.join(path.file_name().unwrap());
+        fs::write(&foreign_file, b"foreign sentinel").unwrap();
+        fs::set_permissions(&foreign_file, fs::Permissions::from_mode(0o600)).unwrap();
+        let moved = f.root.join("moved");
+        let once = Cell::new(false);
+        let result = shard.discard_with_checkpoint(&|| {
+            if !once.replace(true) {
+                if directory {
+                    fs::rename(&stages, &moved).unwrap();
+                    std::os::unix::fs::symlink(&foreign, &stages).unwrap();
+                } else {
+                    fs::rename(&path, &moved).unwrap();
+                    fs::rename(&foreign_file, &path).unwrap();
+                }
+            }
+            Ok(())
+        });
+        assert!(result.is_err());
+        if directory {
+            assert_eq!(fs::read(&foreign_file).unwrap(), b"foreign sentinel");
+        } else {
+            assert!(
+                fs::read(&path).is_ok_and(|b| b == b"foreign sentinel")
+                    || fs::read(stages.parent().unwrap().join("member-shard-retired.bin"))
+                        .is_ok_and(|b| b == b"foreign sentinel")
+            );
+        }
+        assert_eq!(f.charge(), f.bytes.len() as u64);
+    }
+}
+#[test]
+fn interrupted_retirement_resumes_from_durable_inode_evidence() {
+    use std::cell::Cell;
+    for stop_at in 1..=4 {
+        let f = Fixture::new();
+        let mut shard = f.begin("interrupted");
+        shard.write_chunk(0, &f.bytes).unwrap();
+        let path = shard.path();
+        let count = Cell::new(0);
+        assert_eq!(
+            shard
+                .discard_with_checkpoint(&|| {
+                    count.set(count.get() + 1);
+                    if count.get() == stop_at {
+                        Err(api::compiler_inputs::Error("injected_crash"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .unwrap_err()
+                .0,
+            "injected_crash"
+        );
+        assert_eq!(f.charge(), f.bytes.len() as u64);
+        drop(shard);
+        let mut resumed = f.resume("interrupted").unwrap();
+        assert!(resumed.write_chunk(0, &f.bytes[..1]).is_err());
+        resumed.discard().unwrap();
+        assert!(!path.exists());
+        assert_eq!(f.charge(), 0);
+        drop(resumed);
+        f.resume("interrupted").unwrap().discard().unwrap();
+        let retired = path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("member-shard-retired.bin");
+        assert_eq!(fs::metadata(retired).unwrap().len(), 0);
+    }
+}
+#[test]
+fn completed_retirement_recovers_refund_ledger_interruption_but_not_replaced_tombstone() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let mut shard = f.begin("ledger-interrupted");
+    shard.write_chunk(0, &f.bytes).unwrap();
+    let ledger = f.root.join("chain-runs/compiler-storage.private.json");
+    let charged = fs::read(&ledger).unwrap();
+    let owner = shard.path().parent().unwrap().parent().unwrap().to_owned();
+    shard.discard().unwrap();
+    drop(shard);
+    let replacement = f
+        .root
+        .join("chain-runs/.compiler-storage.private.json.0123456789abcdef0123456789abcdef.tmp");
+    fs::copy(&ledger, &replacement).unwrap();
+    fs::write(&ledger, &charged).unwrap();
+    let mut resumed = f.resume("ledger-interrupted").unwrap();
+    assert!(!replacement.exists());
+    assert_eq!(f.charge(), f.bytes.len() as u64);
+    resumed.discard().unwrap();
+    drop(resumed);
+    assert_eq!(f.charge(), 0);
+    // Even a previously real refund marker cannot authenticate another inode.
+    let retired = owner.join("member-shard-retired.bin");
+    fs::rename(&retired, owner.join("moved-retired")).unwrap();
+    fs::write(&retired, b"").unwrap();
+    fs::set_permissions(&retired, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&ledger, &charged).unwrap();
+    assert!(f.resume("ledger-interrupted").is_err());
+    assert_eq!(f.charge(), f.bytes.len() as u64);
+}
 #[test]
 fn drop_keeps_debt_and_exclusive_custody_can_resume() {
     let f = Fixture::new();
