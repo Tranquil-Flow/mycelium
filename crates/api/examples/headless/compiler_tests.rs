@@ -6,6 +6,16 @@ use api::compiler_inputs::{self, InputArtifact};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+fn storage_policy(root: &Path, bytes: u64) {
+    resource_policy::write(
+        root,
+        &json!({"peer_visibility":true,"power":"ac_only",
+        "storage_bytes":bytes,"network":"unmetered_only","background":false,
+        "diagnostics":false,"thermal":"stop_on_serious"}),
+    )
+    .unwrap();
+}
+
 struct Fixture {
     root: PathBuf,
     source: api::serving_source::Prepared,
@@ -21,6 +31,7 @@ impl Fixture {
         ));
         fs::create_dir(&root).unwrap();
         let root = root.canonicalize().unwrap();
+        storage_policy(&root, 4_000_000_000);
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../planner/tests/fixtures/source-slices.json"
         ))
@@ -81,6 +92,9 @@ impl Fixture {
         }
     }
     fn emit(&self) -> InputArtifact {
+        self.emit_run("source-boundary")
+    }
+    fn emit_run(&self, run: &str) -> InputArtifact {
         let nodes: Vec<_> = self
             .request
             .node_ids
@@ -96,10 +110,10 @@ impl Fixture {
             .iter()
             .map(|n| json!({"node_id":n,"host_id":format!("controlled-{n}")}))
             .collect();
-        compiler_inputs::emit(&self.root, "source-boundary", &self.request.deployment_id, 0,
+        compiler_inputs::emit(&self.root, run, &self.request.deployment_id, 0,
             &self.request, &self.source,
             &json!({"protocol":"mycelium.qwen_live_topology.v1","nodes":nodes}),
-            &json!({"run_id":"source-boundary","deployment_id":self.request.deployment_id,"observations":observations}),
+            &json!({"run_id":run,"deployment_id":self.request.deployment_id,"observations":observations}),
             &json!({}), &self.members.values().cloned().collect::<Vec<_>>()).unwrap()
     }
 }
@@ -256,6 +270,172 @@ fn actual_compile_port_without_admitted_observation_never_becomes_ready() {
 }
 
 #[test]
+fn repeated_shard_runs_cannot_exceed_retained_storage_consent() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    for index in 0..8 {
+        let mut first = f.emit_run(&format!("quota-{index}"));
+        first.produce_stage_shards(&f.members, 0.0).unwrap();
+        drop(first);
+    }
+    let mut second = f.emit_run("quota-overflow");
+    assert_eq!(
+        second.produce_stage_shards(&f.members, 0.0).unwrap_err().0,
+        "compiler_storage_quota_exceeded"
+    );
+    assert!(!second.root().join("stage-shards").exists());
+}
+
+#[test]
+fn interrupted_shard_write_keeps_exact_reservation_and_blocks_new_bytes() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    storage_policy(&f.root, 100_000_000);
+    let artifact = f.emit_run("interrupted");
+    let files: BTreeMap<_, _> = f.source.manifest["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let n = r["path"].as_str().unwrap();
+            (
+                n.to_owned(),
+                fs::File::open(f.source.source_root.join(n)).unwrap(),
+            )
+        })
+        .collect();
+    let source_path = f.source.source_root.join(files.keys().next().unwrap());
+    let original = fs::read(&source_path).unwrap();
+    let manifest = Value::Object(f.source.manifest.clone());
+    let mut held = None;
+    let mut exact = 0;
+    let output = artifact.root().join("stage-shards");
+    let result = planner::source_plan::producer::emit_stage_shards(
+        &f.request,
+        &f.request,
+        planner::source_plan::PreparedSource {
+            manifest: &manifest,
+            manifest_digest: &f.source.manifest_digest,
+            files: &files,
+            checkpoint: &|| Ok(()),
+        },
+        &output,
+        &mut |bytes| {
+            held = Some(artifact.reserve_stage_output(bytes).unwrap());
+            exact = bytes;
+            // Real IO interruption after input verification/reservation: the
+            // writer emits its header, then encounters truncated source bytes.
+            fs::OpenOptions::new()
+                .write(true)
+                .open(&source_path)
+                .unwrap()
+                .set_len(0)
+                .unwrap();
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "slice_source_truncated");
+    let written: u64 = fs::read_dir(&output)
+        .unwrap()
+        .map(|e| e.unwrap().metadata().unwrap().len())
+        .sum();
+    assert!(written > 0 && written < exact);
+    fs::write(source_path, original).unwrap();
+    drop(held); // No refund, including an abrupt process loss before complete().
+    drop(artifact);
+    let ledger: Value = serde_json::from_slice(
+        &fs::read(f.root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(ledger["entries"]["interrupted"]["bytes"], exact);
+    assert_eq!(
+        ledger["entries"]["interrupted"]["phase"],
+        "cleanup_required"
+    );
+    let next = f.emit_run("after-interruption");
+    assert_eq!(
+        next.reserve_stage_output(100_000_000 - exact + 1)
+            .unwrap_err()
+            .0,
+        "compiler_storage_quota_exceeded"
+    );
+    assert!(!next.root().join("stage-shards").exists());
+}
+
+#[test]
+fn shard_storage_requires_consent_and_refuses_untracked_outputs_or_busy_ledger() {
+    use std::os::unix::fs::DirBuilderExt;
+    let f = Fixture::new();
+    let artifact = f.emit_run("storage-guards");
+    fs::remove_file(f.root.join(resource_policy::FILE)).unwrap();
+    assert_eq!(
+        artifact.reserve_stage_output(1).unwrap_err().0,
+        "compiler_storage_consent_required"
+    );
+    storage_policy(&f.root, 100_000_000);
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(f.root.join("chain-runs/compiler-storage.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    assert_eq!(
+        artifact.reserve_stage_output(1).unwrap_err().0,
+        "compiler_storage_busy"
+    );
+    drop(lock);
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(artifact.root().join("stage-shards"))
+        .unwrap();
+    assert_eq!(
+        artifact.reserve_stage_output(1).unwrap_err().0,
+        "compiler_storage_untracked_output"
+    );
+    assert!(artifact.root().join("stage-shards").exists());
+}
+
+#[test]
+fn compiler_cancellation_reaches_manifest_hash_and_artifact_revalidation() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let checks = std::cell::Cell::new(0);
+    let source = api::local_manifest::LocalModelSource {
+        root: f.source.source_root.clone(),
+        model_id: f.request.model_id.clone(),
+        requested_revision: f.source.manifest["requested_revision"]
+            .as_str()
+            .unwrap()
+            .into(),
+        resolved_commit: f.request.resolved_commit.clone(),
+        tokenizer_assets: Ok(Vec::new()),
+    };
+    let result = api::local_manifest::compile_local_model_manifest_checked(&source, &|| {
+        checks.set(checks.get() + 1);
+        if checks.get() == 3 {
+            Err(api::local_manifest::CompileError("compiler_stopped".into()))
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(result.unwrap_err().0, "compiler_stopped");
+    assert_eq!(checks.get(), 3);
+    let mut artifact = f.emit_run("cancel-revalidation");
+    artifact.produce_stage_shards(&f.members, 0.0).unwrap();
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    artifact.bind_cancellation(cancel.clone()).unwrap();
+    cancel.store(true, Ordering::SeqCst);
+    assert_eq!(
+        artifact
+            .validate_stage_shards(&f.members, 0.0)
+            .unwrap_err()
+            .0,
+        "compiler_stopped"
+    );
+    assert!(artifact.root().join("stage-shards").exists());
+}
+
+#[test]
 fn stage_shard_artifact_reopens_real_bytes_and_rejects_tampering() {
     for mutation in ["payload", "document", "symlink", "source", "member"] {
         let mut f = Fixture::new();
@@ -401,10 +581,68 @@ fn stage_sharded_worker_retains_real_bytes_but_refuses_native_challenge() {
     worker_boundary(true);
 }
 
+/// Full-size source admission is deliberately opt-in. This is the acceptance RED
+/// for the missing native producer, not a model-free fixture made executable.
+#[test]
+#[ignore = "requires local Qwen3-0.6B + Metal"]
+fn local_qwen3_two_stage_compiler_produces_native_handoff() {
+    let mut f = Fixture::new();
+    let snapshot = PathBuf::from(std::env::var("HOME").unwrap()).join(
+        ".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca",
+    );
+    // Copies dereference HF links into fixture-owned regular files. Neither the
+    // cache nor its blobs are written; Fixture::drop removes the copies on RED.
+    for entry in fs::read_dir(&f.source.source_root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    for name in [
+        "config.json",
+        "model.safetensors",
+        "tokenizer.json",
+        "tokenizer_config.json",
+    ] {
+        fs::copy(snapshot.join(name), f.source.source_root.join(name)).unwrap();
+    }
+    let manifest =
+        api::local_manifest::compile_local_model_manifest(&api::local_manifest::LocalModelSource {
+            root: f.source.source_root.clone(),
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            requested_revision: "main".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            tokenizer_assets: Ok(Vec::new()),
+        })
+        .unwrap();
+    f.source.manifest_digest = planner::bound::manifest_digest_ref(&manifest).unwrap();
+    f.source.source_bytes = manifest["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["size_bytes"].as_u64().unwrap())
+        .sum();
+    f.source.manifest = manifest.as_object().unwrap().clone();
+    f.request.model_id = "Qwen/Qwen3-0.6B".into();
+    f.request.resolved_commit = "c1899de289a04d12100db370d81485cdf75e47ca".into();
+    f.request.node_ids = vec!["node-0".into(), "node-1".into()];
+    f.request.managed_layer_ranges = vec![[0, 14], [14, 28]];
+    f.request.layer_split = json!({"stages":[
+        {"node_id":"node-0","start":0,"end":14},
+        {"node_id":"node-1","start":14,"end":28}
+    ]});
+    // Whole-source two-stage loading is supported by the existing native
+    // backend; byte-shard loading is a separate currently unsupported boundary.
+    f.request.stage_sharded = false;
+    worker_fixture(f, true);
+}
+
 fn worker_boundary(stage_sharded: bool) {
-    use api::installation_descriptor::{self, Member, Paths, Source};
     let mut f = Fixture::new();
     f.request.stage_sharded = stage_sharded;
+    worker_fixture(f, false);
+}
+
+fn worker_fixture(f: Fixture, require_native: bool) {
+    use api::installation_descriptor::{self, Member, Paths, Source};
+    let stage_sharded = f.request.stage_sharded;
     let core = Arc::new(Mutex::new(load_core(f.root.join("host")).unwrap()));
     let mut host = HeadlessHost {
         core: core.clone(),
@@ -416,6 +654,7 @@ fn worker_boundary(stage_sharded: bool) {
             .unwrap(),
     )
     .unwrap();
+    storage_policy(&f.root.join("host"), 4_000_000_000);
     let seed = core.lock().unwrap().seed.clone().unwrap();
     let run = "a13-b2-qwen-20261029T100000Z";
     let deployment = &f.request.deployment_id;
@@ -544,23 +783,58 @@ fn worker_boundary(stage_sharded: bool) {
         + std::time::Duration::from_millis(
             BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis(),
         );
-    loop {
+    let result = loop {
         match compiler.poll_build() {
             BuildPoll::Pending => {
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::yield_now();
             }
-            BuildPoll::Done(Err(error)) => {
-                assert_eq!(
-                    error.code_or("missing"),
-                    "native_challenge_producer_unavailable"
-                );
-                break;
-            }
-            BuildPoll::Done(Ok(_)) => panic!("metadata must not become BuildOutput"),
+            BuildPoll::Done(result) => break result,
         }
-    }
+    };
     let output = f.root.join("host/chain-runs").join(run);
+    if require_native {
+        // Close the real seed before the expected RED assertion, not only on
+        // GREEN. No fixture-owned model copies survive this assertion's unwind.
+        compiler.teardown().unwrap();
+        seed.close();
+        let built = result.expect("real Qwen3 source must reach native BuildOutput");
+        let mut pins = api::compiled_handoff::Pins::new();
+        for name in [
+            "compile-start.private.json",
+            "compile-complete.private.json",
+            "template.json",
+            "topology.json",
+            "observations.json",
+            "layer-split.json",
+            "compiled/operator-plan.json",
+            "compiled/build-report.json",
+            "compiled/local-challenge-checkpoint.json",
+            "compiled/compilation-cache.json",
+        ] {
+            use sha2::{Digest, Sha256};
+            let bytes = fs::read(output.join(name)).unwrap();
+            pins.insert(
+                name.into(),
+                api::compiled_handoff::Pin {
+                    bytes: bytes.len() as u64,
+                    sha256: format!("{:x}", Sha256::digest(&bytes)),
+                },
+            );
+        }
+        let handoff = api::compiled_handoff::CompiledHandoff::open(&output, &pins).unwrap();
+        handoff.revalidate().unwrap();
+        assert_eq!(handoff.nodes().len(), f.request.node_ids.len());
+        assert_eq!(
+            protocol::canonical::digest(handoff.plan()).unwrap(),
+            built.operator_plan_digest
+        );
+        return;
+    }
+    assert_eq!(
+        result.unwrap_err().code_or("missing"),
+        "native_challenge_producer_unavailable"
+    );
     let name = if stage_sharded {
         "source-shards.private.json"
     } else {

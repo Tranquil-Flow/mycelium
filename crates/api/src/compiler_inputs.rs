@@ -117,8 +117,30 @@ pub struct InputArtifact {
     documents: BTreeMap<String, Value>,
     source: Prepared,
     request: BuildRequest,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl InputArtifact {
+    pub fn bind_cancellation(
+        &mut self,
+        token: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<()> {
+        if self.cancel.is_some() {
+            return Err(Error("compiler_already_started"));
+        }
+        self.cancel = Some(token);
+        self.checkpoint()
+    }
+    fn checkpoint(&self) -> Result<()> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            Err(Error("compiler_stopped"))
+        } else {
+            Ok(())
+        }
+    }
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -214,6 +236,7 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             self.documents["compile-start.private.json"]["epoch"]
                 .as_u64()
@@ -233,7 +256,7 @@ impl InputArtifact {
     }
     fn source_files(&self) -> Result<(Value, BTreeMap<String, fs::File>)> {
         self.validate()?;
-        let manifest = crate::local_manifest::compile_local_model_manifest(
+        let manifest = crate::local_manifest::compile_local_model_manifest_checked(
             &crate::local_manifest::LocalModelSource {
                 root: self.source.source_root.clone(),
                 model_id: self.request.model_id.clone(),
@@ -244,8 +267,18 @@ impl InputArtifact {
                 resolved_commit: self.request.resolved_commit.clone(),
                 tokenizer_assets: Ok(Vec::new()),
             },
+            &|| {
+                self.checkpoint()
+                    .map_err(|e| crate::local_manifest::CompileError(e.0.into()))
+            },
         )
-        .map_err(|_| Error("compiler_model_changed"))?;
+        .map_err(|e| {
+            if e.0 == "compiler_stopped" {
+                Error("compiler_stopped")
+            } else {
+                Error("compiler_model_changed")
+            }
+        })?;
         if manifest != Value::Object(self.source.manifest.clone()) {
             return Err(Error("compiler_model_changed"));
         }
@@ -263,6 +296,83 @@ impl InputArtifact {
             );
         }
         Ok((manifest, files))
+    }
+
+    /// Durable coordinator-local reservation. Dropping it does NOT release the
+    /// charge: interrupted writes and even reservation-before-crash remain owed.
+    pub fn reserve_stage_output(&self, bytes: u64) -> Result<ShardReservation> {
+        self.validate()?;
+        let runs = self
+            .root
+            .parent()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let host = runs
+            .parent()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let (_lock, mut ledger) = storage_ledger(runs)?;
+        let cap = crate::preferences::resource_policy::read(host)
+            .map_err(|_| Error("compiler_storage_consent_required"))?
+            .and_then(|p| p["storage_bytes"].as_u64())
+            .filter(|n| *n > 0)
+            .ok_or(Error("compiler_storage_consent_required"))?;
+        let cap = match crate::preferences::standing_consent::load(host)
+            .map_err(|_| Error("compiler_storage_consent_required"))?
+        {
+            Some(grant) => {
+                if grant["state"] != "granted" {
+                    return Err(Error("compiler_storage_consent_required"));
+                }
+                cap.min(
+                    grant["caps"]["storage_bytes"]
+                        .as_u64()
+                        .ok_or(Error("compiler_storage_consent_required"))?,
+                )
+            }
+            None => cap, // Owner preparation is bounded by its explicit resource policy.
+        };
+        let entries = ledger["entries"]
+            .as_object_mut()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let (retained, materialized) = storage_inventory(runs, entries)?;
+        let run = self
+            .root
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        let total = retained
+            .checked_add(bytes)
+            .ok_or(Error("compiler_storage_quota_exceeded"))?;
+        if bytes == 0 || entries.len() >= MAX_RETAINED_SHARD_RUNS || total > cap {
+            return Err(Error("compiler_storage_quota_exceeded"));
+        }
+        if entries.contains_key(run) {
+            return Err(Error("compiler_storage_run_reserved"));
+        }
+        let reserve =
+            budgets::BudgetId::PyFinalMyceliumLiveLocalPreparerArtifactDiskReserveBytesL50C0
+                .bytes()
+                .map_err(|_| Error("budget_unavailable"))?
+                .get();
+        let free = storage_free_bytes(runs)?;
+        // Inventory precedes statvfs: production writers only append to new,
+        // exclusively created files, so the sampled allocation is already absent
+        // from free space. Retain unwritten promises, including concurrent writers.
+        if total
+            .checked_sub(materialized)
+            .and_then(|need| need.checked_add(reserve))
+            .is_none_or(|need| need > free)
+        {
+            return Err(Error("compiler_storage_headroom_exceeded"));
+        }
+        let row = json!({"bytes":bytes,"run_dev":self.directory_identity.0,
+            "run_ino":self.directory_identity.1,"phase":"cleanup_required"});
+        entries.insert(run.into(), row.clone());
+        store_storage_ledger(runs, &ledger)?;
+        Ok(ShardReservation {
+            runs: runs.into(),
+            run: run.into(),
+            row,
+        })
     }
 
     /// Real source-byte sharding only; no stage load, quantization or native proof.
@@ -284,6 +394,7 @@ impl InputArtifact {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err(Error("compiler_directory_invalid")),
         }?;
+        let mut reservation = None;
         let produced = planner::source_plan::producer::emit_stage_shards(
             &self.request,
             &self.request,
@@ -291,10 +402,21 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             &self.root.join("stage-shards"),
+            &mut |bytes| {
+                reservation = Some(
+                    self.reserve_stage_output(bytes)
+                        .map_err(|e| planner::Error::new(e.0))?,
+                );
+                Ok(())
+            },
         )
         .map_err(|e| Error(e.code))?;
+        reservation
+            .ok_or(Error("compiler_storage_reservation_missing"))?
+            .complete()?;
         let document = json!({"protocol":"mycelium.source_stage_shards.v1",
             "state":"bytes_only","route_ready":false,
             "run_id":self.documents["compile-start.private.json"]["run_id"],
@@ -348,6 +470,7 @@ impl InputArtifact {
                 manifest: &manifest,
                 manifest_digest: &self.source.manifest_digest,
                 files: &source_files,
+                checkpoint: &|| self.checkpoint().map_err(|e| planner::Error::new(e.0)),
             },
             planner::source_plan::EmittedShards {
                 files: &files,
@@ -407,6 +530,7 @@ impl InputArtifact {
     /// Detect a replacement or tampered file before the next producer consumes
     /// it. Never reopen by public digest alone or reconstitute successful state.
     pub fn validate(&self) -> Result<()> {
+        self.checkpoint()?;
         let metadata =
             fs::symlink_metadata(&self.root).map_err(|_| Error("compiler_inputs_changed"))?;
         if !metadata.is_dir() || (metadata.dev(), metadata.ino()) != self.directory_identity {
@@ -430,6 +554,287 @@ impl InputArtifact {
         }
         Ok(())
     }
+}
+
+// Bounded retained output slots. Full ledgers refuse; no automatic deletion,
+// adoption, refund-on-Drop, or deletion of files based on a public pathname.
+const MAX_RETAINED_SHARD_RUNS: usize = 8;
+const STORAGE_LEDGER: &str = "compiler-storage.private.json";
+const STORAGE_LOCK: &str = "compiler-storage.lock";
+
+#[cfg(test)]
+std::thread_local! {
+    static STORAGE_FREE_BYTES: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+fn storage_free_bytes(runs: &Path) -> Result<u64> {
+    #[cfg(test)]
+    if let Some(bytes) = STORAGE_FREE_BYTES.with(|free| free.get()) {
+        return Ok(bytes);
+    }
+    crate::acquisition::disk_free_bytes(runs).map_err(|_| Error("compiler_storage_probe_failed"))
+}
+
+#[derive(Debug)]
+pub struct ShardReservation {
+    runs: PathBuf,
+    run: String,
+    row: Value,
+}
+impl ShardReservation {
+    pub fn complete(self) -> Result<()> {
+        let (_lock, mut ledger) = storage_ledger(&self.runs)?;
+        let entries = ledger["entries"]
+            .as_object_mut()
+            .ok_or(Error("compiler_storage_ledger_invalid"))?;
+        storage_inventory(&self.runs, entries)?;
+        if entries.get(&self.run) != Some(&self.row) {
+            return Err(Error("compiler_storage_reservation_changed"));
+        }
+        let actual = shard_output_bytes(&self.runs.join(&self.run).join("stage-shards"))?;
+        if Some(actual) != self.row["bytes"].as_u64() {
+            return Err(Error("compiler_storage_output_size_changed"));
+        }
+        entries
+            .get_mut(&self.run)
+            .ok_or(Error("compiler_storage_reservation_changed"))?["phase"] = json!("retained");
+        store_storage_ledger(&self.runs, &ledger)
+    }
+}
+fn shard_output_bytes(path: &Path) -> Result<u64> {
+    shard_output_usage(path).map(|(bytes, _)| bytes)
+}
+fn shard_output_usage(path: &Path) -> Result<(u64, u64)> {
+    let directory =
+        fs::symlink_metadata(path).map_err(|_| Error("compiler_storage_output_changed"))?;
+    if !directory.is_dir()
+        || directory.mode() & 0o7777 != 0o700
+        || directory.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(Error("compiler_storage_output_changed"));
+    }
+    let mut total = 0u64;
+    let mut materialized = 0u64;
+    let mut count = 0;
+    for entry in fs::read_dir(path).map_err(|_| Error("compiler_storage_inventory_failed"))? {
+        let entry = entry.map_err(|_| Error("compiler_storage_inventory_failed"))?;
+        count += 1;
+        let meta = fs::symlink_metadata(entry.path())
+            .map_err(|_| Error("compiler_storage_inventory_failed"))?;
+        if count > MAX_HOSTS
+            || !meta.is_file()
+            || meta.nlink() != 1
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.mode() & 0o7777 != 0o600
+        {
+            return Err(Error("compiler_storage_output_changed"));
+        }
+        total = total
+            .checked_add(meta.len())
+            .ok_or(Error("compiler_storage_output_changed"))?;
+        // Sparse/unallocated extents are promises, not consumed disk. Blocks are
+        // POSIX 512-byte units; never credit allocation beyond the byte charge.
+        let allocated = meta
+            .blocks()
+            .checked_mul(512)
+            .ok_or(Error("compiler_storage_output_changed"))?;
+        materialized = materialized
+            .checked_add(meta.len().min(allocated))
+            .ok_or(Error("compiler_storage_output_changed"))?;
+    }
+    Ok((total, materialized))
+}
+fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
+    let bad = Error("compiler_storage_ledger_invalid");
+    if entries.len() > MAX_RETAINED_SHARD_RUNS {
+        return Err(bad);
+    }
+    let mut total = 0u64;
+    for (run, row) in entries {
+        if !segment(run) || !matches!(row["phase"].as_str(), Some("retained" | "cleanup_required"))
+        {
+            return Err(bad);
+        }
+        let bytes = row["bytes"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(bad.clone())?;
+        let meta = fs::symlink_metadata(runs.join(run)).map_err(|_| bad.clone())?;
+        if !meta.is_dir()
+            || meta.mode() & 0o7777 != 0o700
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || Some(meta.dev()) != row["run_dev"].as_u64()
+            || Some(meta.ino()) != row["run_ino"].as_u64()
+        {
+            return Err(Error("compiler_storage_owner_changed"));
+        }
+        total = total.checked_add(bytes).ok_or(bad.clone())?;
+    }
+    Ok(total)
+}
+fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<(u64, u64)> {
+    let total = storage_rows(runs, entries)?;
+    let mut materialized = 0u64;
+    let bad = Error("compiler_storage_ledger_invalid");
+    // Legacy B2 partials have no reservation: refuse rather than silently adopt
+    // or fail to account for them. Bound traversal even for metadata-only runs.
+    for (index, entry) in fs::read_dir(runs).map_err(|_| bad.clone())?.enumerate() {
+        if index >= 4096 {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+        let entry = entry.map_err(|_| bad.clone())?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or(bad.clone())?;
+        if matches!(name, STORAGE_LEDGER | STORAGE_LOCK) {
+            continue;
+        }
+        let meta = fs::symlink_metadata(entry.path()).map_err(|_| bad.clone())?;
+        if !meta.is_dir() {
+            return Err(Error("compiler_storage_owner_changed"));
+        }
+        let output = entry.path().join("stage-shards");
+        match fs::symlink_metadata(&output) {
+            Ok(_) => {
+                let row = entries
+                    .get(name)
+                    .ok_or(Error("compiler_storage_untracked_output"))?;
+                let (bytes, allocated) = shard_output_usage(&output)?;
+                if bytes > row["bytes"].as_u64().ok_or(bad.clone())? {
+                    return Err(Error("compiler_storage_output_size_changed"));
+                }
+                materialized = materialized.checked_add(allocated).ok_or(bad.clone())?;
+            }
+            // An unwritten reservation is still fully charged; there is no
+            // materialized output to credit against free space for this run.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(Error("compiler_storage_inventory_failed")),
+        }
+    }
+    Ok((total, materialized))
+}
+fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    directory(runs)?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(runs.join(STORAGE_LOCK))
+        .map_err(|_| Error("compiler_storage_lock_failed"))?;
+    let meta = lock
+        .metadata()
+        .map_err(|_| Error("compiler_storage_lock_failed"))?;
+    if !meta.is_file()
+        || meta.nlink() != 1
+        || meta.mode() & 0o7777 != 0o600
+        || meta.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(Error("compiler_storage_lock_failed"));
+    }
+    lock.try_lock()
+        .map_err(|_| Error("compiler_storage_busy"))?;
+    let ledger = private_state::load(
+        &runs.join(STORAGE_LEDGER),
+        private_state::private_json_limit().map_err(state)?,
+    )
+    .map_err(state)?
+    .map(Value::Object)
+    .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
+    if ledger["protocol"] != "mycelium.compiler_storage.v1" || !ledger["entries"].is_object() {
+        return Err(Error("compiler_storage_ledger_invalid"));
+    }
+    reconcile_storage_temporaries(runs, ledger["entries"].as_object().unwrap())?;
+    Ok((lock, ledger))
+}
+
+/// Discard only a complete private ledger replacement bound to this run owner.
+/// The committed ledger remains authoritative: before reserve's rename no byte
+/// producer has permission to write; before complete's rename its full charge is
+/// already committed. Recovery never adopts outputs or refunds old charges.
+fn reconcile_storage_temporaries(runs: &Path, committed: &Map<String, Value>) -> Result<()> {
+    let bad = Error("compiler_storage_owner_changed");
+    storage_rows(runs, committed)?;
+    let mut stale = Vec::new();
+    for (index, entry) in fs::read_dir(runs).map_err(|_| bad.clone())?.enumerate() {
+        if index >= 4096 {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+        let entry = entry.map_err(|_| bad.clone())?;
+        let name = entry.file_name();
+        let Some(nonce) = name.to_str().and_then(|name| {
+            name.strip_prefix(".compiler-storage.private.json.")?
+                .strip_suffix(".tmp")
+        }) else {
+            continue;
+        };
+        if nonce.len() != 32
+            || !nonce
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(bad);
+        }
+        let path = entry.path();
+        let meta = fs::symlink_metadata(&path).map_err(|_| bad.clone())?;
+        // load uses O_NOFOLLOW and checks private mode, uid, single link, bounded
+        // canonical bytes and opened inode identity. A pathname prefix is NOT ownership.
+        let candidate =
+            private_state::load(&path, private_state::private_json_limit().map_err(state)?)
+                .map_err(|_| bad.clone())?
+                .ok_or(bad.clone())?;
+        let rows = candidate
+            .get("entries")
+            .and_then(Value::as_object)
+            .ok_or(bad.clone())?;
+        if candidate.get("protocol").and_then(Value::as_str) != Some("mycelium.compiler_storage.v1")
+            || rows.is_empty()
+            || rows.len() > committed.len() + 1
+            || committed.iter().any(|(run, row)| {
+                rows.get(run).is_none_or(|next| {
+                    ["bytes", "run_dev", "run_ino"]
+                        .iter()
+                        .any(|key| next[*key] != row[*key])
+                })
+            })
+        {
+            return Err(bad);
+        }
+        storage_rows(runs, rows).map_err(|_| bad.clone())?;
+        stale.push((path, meta));
+        if stale.len() > MAX_RETAINED_SHARD_RUNS {
+            return Err(Error("compiler_storage_inventory_exceeded"));
+        }
+    }
+    // Validate the complete bounded set before unlinking any of it, then recheck
+    // each identity. Never follow a symlink or delete an unrelated replacement.
+    for (path, prior) in &stale {
+        let meta = fs::symlink_metadata(path).map_err(|_| bad.clone())?;
+        if !meta.is_file()
+            || meta.nlink() != 1
+            || meta.mode() & 0o7777 != 0o600
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || (meta.dev(), meta.ino(), meta.len()) != (prior.dev(), prior.ino(), prior.len())
+        {
+            return Err(bad);
+        }
+        fs::remove_file(path).map_err(|_| Error("compiler_storage_recovery_failed"))?;
+    }
+    if !stale.is_empty() {
+        fs::File::open(runs)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| Error("compiler_storage_recovery_failed"))?;
+    }
+    Ok(())
+}
+fn store_storage_ledger(runs: &Path, ledger: &Value) -> Result<()> {
+    private_state::store(
+        &runs.join(STORAGE_LEDGER),
+        ledger,
+        private_state::private_json_limit().map_err(state)?,
+    )
+    .map_err(state)
 }
 
 /// Whole-source producer currently accepts regular snapshot files only. HF blob
@@ -562,6 +967,7 @@ pub fn emit(
         documents,
         source: source.clone(),
         request: request.clone(),
+        cancel: None,
     };
     artifact.validate()?;
     Ok(artifact)
@@ -574,6 +980,10 @@ fn store_documents(root: &Path, documents: &BTreeMap<String, Value>) -> Result<(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "compiler_storage_tests.rs"]
+mod storage_tests;
 
 #[cfg(test)]
 mod tests {

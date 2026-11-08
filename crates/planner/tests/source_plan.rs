@@ -51,10 +51,105 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: &|| Ok(()),
             },
             output,
+            // This bounded byte-layout fixture has no production storage host.
+            &mut |_| Ok(()),
         )
     }
+}
+
+#[test]
+fn cancellation_after_reservation_prevents_shard_writes() {
+    let f = Fixture::new(rows().remove(0));
+    let output = f.root.join("cancelled-output");
+    let stopped = std::cell::Cell::new(false);
+    let result = producer::emit_stage_shards(
+        &f.request,
+        &f.request,
+        PreparedSource {
+            manifest: &f.row["manifest"],
+            manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
+            files: &f.source,
+            checkpoint: &|| {
+                if stopped.get() {
+                    Err(planner::Error::new("compiler_stopped"))
+                } else {
+                    Ok(())
+                }
+            },
+        },
+        &output,
+        &mut |_| {
+            stopped.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "compiler_stopped");
+    assert!(!output.exists());
+}
+
+#[test]
+fn cancellation_interrupts_revalidation_and_partial_output() {
+    use std::cell::Cell;
+    let f = Fixture::new(rows().remove(0));
+    let calls = Cell::new(0);
+    f.build_checked(&f.request, &|| {
+        calls.set(calls.get() + 1);
+        Ok(())
+    })
+    .unwrap();
+    let total = calls.get();
+    assert!(total > 3);
+    for stop in [1, total / 2, total] {
+        calls.set(0);
+        let result = f.build_checked(&f.request, &|| {
+            calls.set(calls.get() + 1);
+            if calls.get() == stop {
+                Err(planner::Error::new("compiler_stopped"))
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(result.unwrap_err().code, "compiler_stopped");
+        assert_eq!(calls.get(), stop);
+    }
+    let armed = Cell::new(false);
+    calls.set(0);
+    let output = f.root.join("partial-cancelled-output");
+    let mut exact = 0;
+    let result = producer::emit_stage_shards(
+        &f.request,
+        &f.request,
+        PreparedSource {
+            manifest: &f.row["manifest"],
+            manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
+            files: &f.source,
+            checkpoint: &|| {
+                if armed.get() {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == 5 {
+                        return Err(planner::Error::new("compiler_stopped"));
+                    }
+                }
+                Ok(())
+            },
+        },
+        &output,
+        &mut |bytes| {
+            exact = bytes;
+            armed.set(true);
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "compiler_stopped");
+    let written: u64 = fs::read_dir(output)
+        .unwrap()
+        .map(|e| e.unwrap().metadata().unwrap().len())
+        .sum();
+    assert!(written > 0 && written < exact);
+    assert_eq!(calls.get(), 5);
 }
 
 // Independent safetensors decoder: compare names, dtypes, shapes and every
@@ -149,6 +244,7 @@ fn real_source_bytes_emit_stage_shards_and_revalidated_slice_recipes() {
                     manifest: &f.row["manifest"],
                     manifest_digest: f.row["manifest_digest"].as_str().unwrap(),
                     files: &f.source,
+                    checkpoint: &|| Ok(()),
                 },
                 EmittedShards {
                     files: &produced.files,
@@ -298,6 +394,13 @@ impl Fixture {
         self.repin_transfers();
     }
     fn build(&self, current: &BuildRequest) -> planner::Result<SliceDocuments> {
+        self.build_checked(current, &|| Ok(()))
+    }
+    fn build_checked(
+        &self,
+        current: &BuildRequest,
+        check: &dyn Fn() -> planner::Result<()>,
+    ) -> planner::Result<SliceDocuments> {
         compile_slices(
             &self.request,
             current,
@@ -305,6 +408,7 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: check,
             },
             EmittedShards {
                 files: &self.shards,
@@ -356,11 +460,96 @@ impl Fixture {
                 manifest: &self.row["manifest"],
                 manifest_digest: self.row["manifest_digest"].as_str().unwrap(),
                 files: &self.source,
+                checkpoint: &|| Ok(()),
             },
             0,
             &json!(roots),
             &json!(runtimes),
         )
+    }
+}
+
+// The pinned Qwen3 snapshot physically stores a redundant tied lm_head tensor.
+// The runtime selects the embedding; only a byte-identical declared alias may
+// be omitted from stage ownership. These are controlled layout bytes, not MLX.
+fn redundant_head_fixture(name: &str, corrupt: bool) -> Fixture {
+    let mut f = Fixture::new(rows().remove(1));
+    let (path, raw) = f.row["source_files"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| name.ends_with(".safetensors"))
+        .map(|(name, value)| (name.clone(), decode(value.as_str().unwrap())))
+        .find(|(_, raw)| tensor_payloads(raw).contains_key("model.embed_tokens.weight"))
+        .unwrap();
+    let length = u64::from_le_bytes(raw[..8].try_into().unwrap()) as usize;
+    let mut header: Value = serde_json::from_slice(&raw[8..8 + length]).unwrap();
+    let mut payload = raw[8 + length..].to_vec();
+    let mut duplicate = tensor_payloads(&raw)["model.embed_tokens.weight"].2.clone();
+    if corrupt {
+        duplicate[0] ^= 1;
+    }
+    let start = payload.len();
+    payload.extend(duplicate);
+    header[name] = header["model.embed_tokens.weight"].clone();
+    header[name]["data_offsets"] = json!([start, payload.len()]);
+    let encoded = serde_json::to_vec(&header).unwrap();
+    let mut rewritten = (encoded.len() as u64).to_le_bytes().to_vec();
+    rewritten.extend(encoded);
+    rewritten.extend(payload);
+    fs::write(f.root.join("source_files").join(&path), &rewritten).unwrap();
+    let record = f.row["manifest"]["files"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["path"] == path)
+        .unwrap();
+    record["size_bytes"] = json!(rewritten.len());
+    record["content_digest"]["value"] = json!(sha(&rewritten).strip_prefix("sha256:").unwrap());
+    f.repin_manifest();
+    f
+}
+
+#[test]
+fn declared_identical_tied_head_is_not_an_unassigned_tensor() {
+    let mut f = redundant_head_fixture("lm_head.weight", false);
+    f.request.stage_sharded = false;
+    let assignments = f
+        .assignments(&f.request)
+        .expect("declared duplicate tied head");
+    for assignment in assignments.assignments {
+        assert!(
+            !assignment["expected_tensor_keys"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("lm_head.weight"))
+        );
+    }
+    f.request.stage_sharded = true;
+    let shards = f.emit_shards(&f.request, &f.root.join("produced")).unwrap();
+    assert_eq!(shards.files.len(), f.request.node_ids.len());
+}
+
+#[test]
+fn redundant_tied_head_must_match_bytes_and_unknown_tensors_still_refuse() {
+    for (name, corrupt, expected) in [
+        (
+            "lm_head.weight",
+            true,
+            "source_plan_redundant_tensor_mismatch",
+        ),
+        ("foreign.weight", false, "source_plan_assignment_mismatch"),
+    ] {
+        let mut f = redundant_head_fixture(name, corrupt);
+        f.request.stage_sharded = false;
+        assert_eq!(f.assignments(&f.request).unwrap_err().code, expected);
+        f.request.stage_sharded = true;
+        let output = f.root.join("produced");
+        assert_eq!(
+            f.emit_shards(&f.request, &output).unwrap_err().code,
+            expected
+        );
+        assert!(!output.exists());
     }
 }
 

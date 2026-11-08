@@ -54,7 +54,11 @@ pub mod private_state {
         {
             return Err(invalid);
         }
-        let mut file = File::open(path).map_err(|_| invalid)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|_| invalid)?;
         let opened = file.metadata().map_err(|_| invalid)?;
         if (opened.dev(), opened.ino()) != (meta.dev(), meta.ino()) {
             return Err(invalid);
@@ -94,6 +98,12 @@ pub mod private_state {
             .map(|b| format!("{b:02x}"))
             .collect()
     }
+    #[cfg(test)]
+    std::thread_local! {
+        // Thread-local to keep parallel tests isolated. Panicking here models a
+        // process loss after durable temp write, bypassing ordinary IO cleanup.
+        pub(crate) static BEFORE_RENAME: std::cell::RefCell<Option<fn(&Path)>> = const { std::cell::RefCell::new(None) };
+    }
     /// `_atomic_private_json`: canonical bytes to an exclusive 0600 temporary file, fsync,
     /// rename over `path`, fsync the directory. A failure removes the temporary file.
     pub fn store(path: &Path, document: &Value, max_bytes: u64) -> Result<(), StateError> {
@@ -116,6 +126,12 @@ pub mod private_state {
             file.write_all(&raw)?;
             file.sync_all()?;
             drop(file);
+            #[cfg(test)]
+            BEFORE_RENAME.with(|hook| {
+                if let Some(hook) = hook.borrow().as_ref() {
+                    hook(path);
+                }
+            });
             fs::rename(&temporary, path)?;
             File::open(parent)?.sync_all()
         })();
