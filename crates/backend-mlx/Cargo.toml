@@ -13,6 +13,7 @@ budgets = { path = "../budgets" }
 stage-contract = { path = "../stage-contract" }
 model = { path = "../model" }
 node = { path = "../node" }
+protocol = { path = "../protocol" }
 sha2 = "=0.10.9"
 serde_json = "=1.0.154"
 [dev-dependencies]

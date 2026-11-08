@@ -12,6 +12,7 @@ pub mod process;
 pub mod resources;
 pub mod rpath;
 pub mod source_image;
+pub mod stage_shard;
 #[cfg(feature = "metal")]
 pub use native::{Array, Context};
 #[cfg(feature = "metal")]

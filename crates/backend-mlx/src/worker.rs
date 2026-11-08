@@ -68,7 +68,33 @@ impl Worker {
         limits: Limits,
         generation: u64,
     ) -> Result<Self> {
+        Self::prepare_image(context, descriptor, path, limits, generation, None)
+    }
+    /// Stage-only dense load. Verification is repeated before and after native IO.
+    pub fn prepare_shard(
+        context: Rc<Context>,
+        descriptor: StageDescriptor,
+        path: &Path,
+        limits: Limits,
+        generation: u64,
+        shard: &serde_json::Value,
+    ) -> Result<Self> {
+        crate::stage_shard::verify(path, &descriptor, shard)?;
+        Self::prepare_image(context, descriptor, path, limits, generation, Some(shard))
+    }
+    fn prepare_image(
+        context: Rc<Context>,
+        descriptor: StageDescriptor,
+        path: &Path,
+        limits: Limits,
+        generation: u64,
+        shard: Option<&serde_json::Value>,
+    ) -> Result<Self> {
         context.healthy()?;
+        let verify = || match shard {
+            Some(shard) => crate::stage_shard::verify(path, &descriptor, shard),
+            None => verify_artifact(path, &descriptor),
+        };
         let amount = crate::admission::requirements(&descriptor, limits)?;
         let loaded_bytes = amount.resident.get();
         let config = Config::for_descriptor(&descriptor)?;
@@ -104,7 +130,7 @@ impl Worker {
                 )?;
                 return Ok((BTreeMap::new(), Some(moe)));
             }
-            verify_artifact(path, &descriptor)?;
+            verify()?;
             let wanted = Qwen2::weights(&descriptor)?;
             let path_string = path
                 .to_str()
@@ -118,7 +144,7 @@ impl Worker {
                     .map(|(k, v)| (k, Weight::Float(v)))
                     .collect()
             };
-            verify_artifact(path, &descriptor)?;
+            verify()?;
             Ok((weights, None))
         })();
         let (weights, moe) = match loaded {
