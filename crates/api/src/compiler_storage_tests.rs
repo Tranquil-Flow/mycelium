@@ -163,6 +163,46 @@ fn temporaries(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn member_refund_interrupted_before_ledger_rename_retains_charge_and_recovers() {
+    let f = Fixture::new();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let recipe = &case["node_plans"]["node-0"];
+    let transfer = &case["node_files"]["node-0"][0];
+    let digest = recipe["node_plan_digest"].as_str().unwrap();
+    let mut receive =
+        member_shard::MemberShard::begin(&f.root, "refund", "node-0", transfer, recipe, digest)
+            .unwrap();
+    let path = receive.path();
+    interrupt_before_rename(0, || {
+        receive.discard().unwrap();
+    });
+    assert!(!path.exists());
+    let ledger: Value =
+        serde_json::from_slice(&fs::read(f.root.join("chain-runs").join(STORAGE_LEDGER)).unwrap())
+            .unwrap();
+    assert_eq!(ledger["entries"]["refund"]["bytes"], transfer["size_bytes"]);
+    drop(receive);
+    let mut receive =
+        member_shard::MemberShard::resume(&f.root, "refund", "node-0", transfer, recipe, digest)
+            .unwrap();
+    receive.discard().unwrap();
+    drop(receive);
+    assert!(temporaries(&f.root).is_empty());
+    let ledger: Value =
+        serde_json::from_slice(&fs::read(f.root.join("chain-runs").join(STORAGE_LEDGER)).unwrap())
+            .unwrap();
+    assert!(ledger["entries"].as_object().unwrap().is_empty());
+    let mut receive =
+        member_shard::MemberShard::resume(&f.root, "refund", "node-0", transfer, recipe, digest)
+            .unwrap();
+    receive.discard().unwrap();
+}
+
+#[test]
 fn compiler_storage_accepts_roots_below_a_symlinked_ancestor() {
     let mut f = Fixture::new();
     f.request.stage_sharded = true;
