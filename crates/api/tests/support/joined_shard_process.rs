@@ -332,15 +332,23 @@ fn member_control_channel_is_pinned_signed_and_replay_safe() {
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
 fn product_member_process_pairs_receives_verifies_and_refunds() {
-    process_transfer(false);
+    process_transfer(false, false);
+}
+/// Owner ruling 11: grant renewal during long transfers is deferred, so an
+/// expired grant must fail the transfer clearly (typed code), never silently.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_member_transfer_fails_clearly_when_the_grant_expires() {
+    process_transfer(false, true);
 }
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real stalled QUIC transfer"]
 fn product_member_cancels_stalled_transfer_and_retains_debt_until_discard() {
-    process_transfer(true);
+    process_transfer(true, false);
 }
-fn process_transfer(stall: bool) {
-    let root = std::env::temp_dir().join(format!("b7b-node-{}-{stall}", std::process::id()));
+fn process_transfer(stall: bool, expired: bool) {
+    let root =
+        std::env::temp_dir().join(format!("b7b-node-{}-{stall}-{expired}", std::process::id()));
     fs::create_dir(&root).unwrap();
     let root = fs::canonicalize(root).unwrap();
     let owner = root.join("owner");
@@ -458,7 +466,16 @@ fn process_transfer(stall: bool) {
             grant_limits().unwrap(),
             Arc::new(wrapped),
             serve_limits().unwrap(),
-            Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
+            // `expired`: the source's clock is past any grant the seed can sign.
+            Arc::new(move || {
+                let limits = grant_limits().unwrap();
+                let late = if expired {
+                    limits.max_grant_ttl_ms + 2 * limits.clock_skew_ms + 1
+                } else {
+                    0
+                };
+                (app_host::now() * 1000.0).floor() as u64 + late
+            }),
         )
         .unwrap();
         let connection = host.accept(&clock, deadline()).unwrap();
@@ -545,6 +562,26 @@ fn process_transfer(stall: bool) {
         )
         .unwrap();
         assert_eq!(ledger["entries"], json!({}));
+        node.close();
+        source.join().unwrap();
+        seed.close();
+        fs::remove_dir_all(root).unwrap();
+        return;
+    }
+    if expired {
+        let began = Instant::now();
+        let code = node.refusal();
+        eprintln!("B8 expired grant: {code} after {:?}", began.elapsed());
+        assert!(code.contains("artifact_grant_ineligible"), "{code}");
+        // The failed transfer keeps its byte debt owned until an explicit discard.
+        let ledger: Value = serde_json::from_slice(
+            &fs::read(member_root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ledger["entries"].as_object().unwrap().len(), 1);
+        let next = node.next_op();
+        node.call(json!({"command":"discard","operation_id":next}));
+        finished_rx.recv_timeout(allowance()).unwrap();
         node.close();
         source.join().unwrap();
         seed.close();

@@ -715,10 +715,6 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     signal("-KILL", member_pid);
     let status = fx.nodes[k].wait_exit();
     let reaped_ms = ms(killed);
-    let unreachable = fx.nodes[k]
-        .control
-        .clone()
-        .map(|c| super::member_remote::status(&c, None).err());
     let dead_worker = e.worker_pids[k];
     let worker_gone = wait_workers_gone(&[dead_worker]);
     m16_route::record_stage_exit(&e.handle, k, json!({"process_exited":true,"worker_absent":true,
@@ -728,6 +724,12 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     r.reader.join().unwrap();
     let t = terminal(&all).unwrap().clone();
     let settled_ms = ms(killed);
+    // Remote control: after the kill the signed channel gets no reply (bounded).
+    let unreachable = fx.nodes[k].control.clone().map(|c| {
+        let began = Instant::now();
+        let err = super::member_remote::status(&c, None).err();
+        json!({"error":err,"ms":ms(began)})
+    });
     let survivor_report = fx.nodes[survivor].result_with(allowance());
     if fx.nodes[survivor].local() {
         wait_workers_gone(&[e.worker_pids[survivor]]);
