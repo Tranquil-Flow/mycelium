@@ -248,7 +248,7 @@ function* buildGeometry(L, budget, out = {}) {
   const reg0 = mobile ? 0 : Math.min(W * 0.62, L.textRight + 30),
     rw = W - reg0,
     spots = mobile
-      ? [[0.18 * W, Hh * 0.68], [0.7 * W, Hh * 0.74], [0.42 * W, Hh * 0.92], [W + 10, Hh * 0.96], [0.9 * W, Hh * 0.5]]
+      ? [[0.16 * W, Hh * 0.77], [0.66 * W, Hh * 0.81], [0.4 * W, Hh * 0.95], [W + 10, Hh * 0.93], [0.92 * W, Hh * 0.7]]
       : [[reg0 + 0.15 * rw, Hh * 0.28], [reg0 + 0.5 * rw, Hh * 0.52], [reg0 + 0.85 * rw, Hh * 0.15], [W + 22, Hh * 0.8], [reg0 + 0.28 * rw, Hh * 0.92]];
   const leftColony = !mobile && L.textLeft >= 230;
   if (leftColony) spots.push([L.textLeft * 0.42, Hh * 0.56]);

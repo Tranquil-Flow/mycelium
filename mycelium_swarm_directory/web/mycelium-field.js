@@ -53,7 +53,6 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       q = Math.max(0, Math.min(1, dd / 72));
     return q * q * (3 - 2 * q);
   };
-  const columnAlpha = (x) => 0.55 + 0.45 * marginWeight(x);
   const add = (points, o = {}) => {
     const poly = [points[0].edges ? points[0] : vertex(points[0].x, points[0].y, 0)],
       segments = [];
@@ -138,7 +137,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         break;
       }
     }
-    const alpha = 0.85 * columnAlpha(start.x);
+    const alpha = 0.85; // column weight is applied per chunk when drawn
     const p = add(pts, { width: 0.55, alpha });
     if (hit) fusions.push({ point: hit, parent: p, birth: 0 });
     mainRoots.push(p);
@@ -186,7 +185,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       pts = raw.map((q, i) => ({ x: q.x + ((b.x - last.x) * i) / (raw.length - 1), y: q.y + ((b.y - last.y) * i) / (raw.length - 1) }));
     pts[0] = a;
     pts[pts.length - 1] = b;
-    return add(pts, { width, alpha: 0.7, margin: true });
+    return add(pts, { width, alpha: 0.95, margin: true });
   };
   if (layout.enabled)
     for (const side of [-1, 1]) {
@@ -203,7 +202,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
             o0 = R() * 6.28,
             r0 = Math.abs(gauss(R)) * 4,
             ln = 14 + 70 * Math.pow(R(), 1.5) * (0.6 + 0.4 * Math.cos(hh - fan));
-          const p = add([centre, ...persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 })], { width: 0.22 + R() * 0.14, alpha: 0.42, margin: true });
+          const p = add([centre, ...persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 })], { width: 0.24 + R() * 0.16, alpha: 0.62, margin: true });
           p.hair = true;
         }
         // ...dissolving into a few long sparse hyphae.
@@ -217,8 +216,8 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       const first = knots[0],
         pool = nodes.length ? nodes : [first];
       const source = pool.reduce((a, b) => (Math.hypot(b.x - first.x, b.y - first.y) < Math.hypot(a.x - first.x, a.y - first.y) ? b : a));
-      const route = source === first ? [] : [join(source, first, 1.1)];
-      for (let j = 1; j < knots.length; j++) route.push(join(knots[j - 1], knots[j], 1.05));
+      const route = source === first ? [] : [join(source, first, 1.3)];
+      for (let j = 1; j < knots.length; j++) route.push(join(knots[j - 1], knots[j], 1.25));
       marginRoutes.push({ side, paths: route, knots, source });
       budget() && (yield "margin");
     }
@@ -352,7 +351,7 @@ export function createField({ stage, state, reduce }) {
   }
   x.setTransform(d, 0, 0, d, 0, 0);
   lx.setTransform(d, 0, 0, d, 0, 0);
-  const fieldAlpha = light ? 0.2 : 0.46,
+  const fieldAlpha = light ? 0.24 : 0.62,
     lightMul = light ? 0.62 : 1;
   let scene = hero ? window.__myceliumScene : null,
     field = null,
@@ -378,34 +377,32 @@ export function createField({ stage, state, reduce }) {
       q = Math.max(0, Math.min(1, dd / 72));
     return q * q * (3 - 2 * q);
   };
-  function tracePath(ctx, p, extent) {
-    const pts = p.points;
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i <= Math.ceil(extent); i++) {
-      const a = pts[i - 1],
-        b = pts[i],
-        f = Math.min(1, extent - i + 1);
-      if (!b || f <= 0) break;
-      ctx.lineTo(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
-    }
-    ctx.stroke();
-  }
-  // Tapered strokes in two chunks: proximal and distal.
+  // Chunked strokes: per-chunk column/margin weight (a strand entering a text
+  // column dims there, not by its start point) and a distal taper.
+  const columnWeight = (px) => 0.32 + 0.68 * marginWeight(px);
   function drawStrand(ctx, p, extent, alpha) {
-    const n = p.points.length - 1,
-      cut = Math.min(extent, Math.floor(n * 0.5));
-    const marginMul = p.margin ? marginWeight(p.points[0].x) : 1;
-    if (marginMul <= 0.01) return;
-    ctx.globalAlpha = alpha * marginMul * lightMul;
-    ctx.lineWidth = p.width;
+    const pts = p.points,
+      n = pts.length - 1,
+      end = Math.min(n, extent),
+      CH = 10;
     ctx.lineCap = p.width < 0.55 ? "butt" : "round";
-    if (extent <= cut) return tracePath(ctx, p, extent);
-    tracePath(ctx, { points: p.points.slice(0, cut + 1) }, cut);
-    ctx.globalAlpha = alpha * marginMul * lightMul * p.taper;
-    ctx.lineWidth = p.width * 0.7;
-    const rest = { points: p.points.slice(cut) };
-    tracePath(ctx, rest, extent - cut);
+    for (let i = 0; i < end; i += CH) {
+      const j = Math.min(i + CH, Math.ceil(end)),
+        mid = pts[Math.min(n, (i + j) >> 1)],
+        w = p.margin ? marginWeight(mid.x) : columnWeight(mid.x);
+      if (w <= 0.01) continue;
+      const distal = (i + j) / 2 > n * 0.5;
+      ctx.globalAlpha = alpha * w * lightMul * (distal ? p.taper : 1);
+      ctx.lineWidth = p.width * (distal ? 0.7 : 1);
+      ctx.beginPath();
+      ctx.moveTo(pts[i].x, pts[i].y);
+      for (let k = i + 1; k <= j; k++) {
+        const f = Math.min(1, end - k + 1);
+        if (f <= 0) break;
+        ctx.lineTo(pts[k - 1].x + (pts[k].x - pts[k - 1].x) * f, pts[k - 1].y + (pts[k].y - pts[k - 1].y) * f);
+      }
+      ctx.stroke();
+    }
   }
   function rasterStatic() {
     tile.width = field.width;
@@ -651,6 +648,13 @@ export function createField({ stage, state, reduce }) {
         if (pm.costs.length > 1200) pm.costs.shift();
       }
       Object.assign(hero.dataset, { growthTime: t.toFixed(3), growthAge: A.toFixed(2), live: liveStats?.segs ?? 0, activeTips: liveStats?.active ?? 0 });
+      // Breathing silhouettes belong to mature colonies only (diagnostic regrowth).
+      const breath = document.querySelector(".mycelium-breath"),
+        bo = smooth((A - 55) / 20).toFixed(2);
+      if (breath && breath.dataset.gate !== bo) {
+        breath.dataset.gate = bo;
+        breath.style.opacity = bo;
+      }
     }
     Object.assign(c.dataset, { time: t.toFixed(3), paths: field.strands.length, nodes: field.marginKnots.length, sporeNodes: 0, canvasPixels: c.width * c.height });
   }
