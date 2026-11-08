@@ -8,7 +8,18 @@ member PIDs 90313/90312 owned native workers 90702/91131, received source-derive
 Owner verified enrolled signatures, offer/nonce bindings and the independent
 resident-weight maps. Final native test PASS 1/1, 481.38 s tests / 491.752 s command.
 Wrong-identity, wrong-nonce and discard-while-live controls passed.
-The two-member challenge fixture changes will land as phase (d)'s next commit.
+Phase (c) checkpoint: 34851cc. Phase (d) now qualified in the same run: the
+owner independently verified both enrolled native proofs and drove the two live
+member processes to [151667,198,32313,11], exactly the pinned Python reference.
+An actual member resume advanced generation; the stale signed native proof AND
+stale worker step were refused with joined_shard_member_changed. Native close,
+reap and inert refund measured 109.460 / 92.784 ms, with both ledgers empty and
+all four exact PIDs independently absent. These are NOT public Stop/leave timings.
+The fixture establishes one durable source journal before grant issuance, gates
+connect on source verification/accept readiness, and removes emitted source links
+only after the received shard is verified. It retains the producer charge (no
+retained BuildOutput/refund claim). Peak sampled free disk was 28.173 GiB.
+Source snapshot uses APFS clone; object publication uses hardlinks, not copies.
 Physical route_ready=false. Owner remains a test driver; no M16 chat/Stop/leave.
 
 Ruling 10 / class C: independent private-stdin cancellation ingress requires a

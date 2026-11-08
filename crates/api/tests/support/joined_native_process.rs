@@ -165,6 +165,7 @@ fn qualify(prepare_only: bool) {
     let objects = owner.join("objects");
     fs::create_dir(&objects).unwrap();
     let mut hashes = Vec::new();
+    let mut emitted_paths = Vec::new();
     if prepare_only {
         // Unused emitted file belongs solely to this disposable producer fixture.
         // Its ledger is NOT refunded; no retained BuildOutput is claimed here.
@@ -189,10 +190,21 @@ fn qualify(prepare_only: bool) {
             objects.join(hash.strip_prefix("sha256:").unwrap()),
         )
         .unwrap();
+        emitted_paths.push(
+            artifact.root().join("stage-shards").join(
+                row["path"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("deployment/")
+                    .unwrap(),
+            ),
+        );
         hashes.push(hash.to_owned());
     }
     let (ready_tx, ready_rx) = mpsc::channel();
     let (offer_tx, offer_rx) = mpsc::channel::<Value>();
+    let (accepting_tx, accepting_rx) = mpsc::channel();
+    let (received_tx, received_rx) = mpsc::channel();
     let authority = seed.coordinator.clone();
     let source_root = owner.clone();
     let source_thread = std::thread::spawn(move || {
@@ -223,10 +235,10 @@ fn qualify(prepare_only: bool) {
         )
         .unwrap();
         ready_tx.send((addr, signer.public_key_record())).unwrap();
-        for hash in hashes {
+        for (hash, emitted_path) in hashes.into_iter().zip(emitted_paths) {
             let store = DurableObjects::open(DurableConfig {
                 objects: objects.clone(),
-                state_dir: source_root.join(format!("journal-{}", &hash[7..15])),
+                state_dir: source_root.join("journal"),
                 fence_capacity: B::ArtifactMaxFence.count().unwrap().get() as usize,
                 clock_skew_ms: grant_limits().unwrap().clock_skew_ms,
                 now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
@@ -244,6 +256,7 @@ fn qualify(prepare_only: bool) {
                     }
                 })
                 .unwrap();
+            accepting_tx.send(()).unwrap();
             let offer = offer_rx.recv_timeout(allowance()).unwrap();
             let wrapped = joined_shard::JoinedSource::new(authority.clone(), offer, store).unwrap();
             let service = ArtifactService::new(
@@ -257,6 +270,11 @@ fn qualify(prepare_only: bool) {
             .unwrap();
             let connection = host.accept(&clock, deadline()).unwrap();
             rt.block_on(service.serve_connection(connection)).unwrap();
+            received_rx.recv_timeout(allowance()).unwrap();
+            // Disposable producer only: the received file now has its own verified
+            // bytes. Do not claim a retained output or refund the producer ledger.
+            fs::remove_file(objects.join(hash.strip_prefix("sha256:").unwrap())).unwrap();
+            fs::remove_file(emitted_path).unwrap();
         }
         host.close(&clock, deadline()).unwrap();
         drop(host);
@@ -267,6 +285,9 @@ fn qualify(prepare_only: bool) {
     let mut offers = Vec::new();
     let mut paths = Vec::new();
     for (i, node) in nodes.iter_mut().take(count).enumerate() {
+        // Establish durable journal genesis and verify bytes BEFORE issuing the
+        // grant. Issuing first correctly trips the source ledger-reset fence.
+        accepting_rx.recv_timeout(allowance()).unwrap();
         let offer = joined_shard::issue_with_source(
             &seed.coordinator,
             &registrations[i],
@@ -280,6 +301,7 @@ fn qualify(prepare_only: bool) {
         offer_tx.send(offer.clone()).unwrap();
         node.send(json!({"command":"receive","offer":offer,"source_id":addr.id.to_string(),"source_socket":addr.ip_addrs().next().unwrap()}));
         let received = node.result_with(allowance());
+        received_tx.send(()).unwrap();
         paths.push(PathBuf::from(received["path"].as_str().unwrap()));
         offers.push(offer);
         eprintln!(
@@ -375,6 +397,24 @@ fn qualify(prepare_only: bool) {
         );
         eprintln!("B7c cross-process challenge={tokens:?} == independent reference");
     }
+    // Stale native proof is tested against an ACTUAL seed generation transition,
+    // not a hand-edited signed message or a fabricated enrollment record.
+    let resumed = nodes[0].call(json!({"command":"resume"}));
+    assert!(
+        resumed["generation"].as_u64().unwrap()
+            > registrations[0]["message"]["member"]["generation"]
+                .as_u64()
+                .unwrap()
+    );
+    assert_eq!(
+        native::verify_resident(&seed.coordinator, &offers[0], &nonce, &proofs[0])
+            .unwrap_err()
+            .0,
+        "joined_shard_member_changed"
+    );
+    nodes[0].send(json!({"command":"native_step","tokens":[1],"payload":""}));
+    assert_eq!(nodes[0].refusal(), "joined_shard_member_changed");
+    eprintln!("B7c stale native proof and stale worker step refused after real resume");
     if let Some(path) = std::env::var_os("B7_NATIVE_EVIDENCE") {
         fs::write(
             path,
