@@ -1,0 +1,5 @@
+{
+  "scope": "ignored local Qwen3-0.6B compiler acceptance only; never a product deadline",
+  "timeout_ms": 1800000,
+  "provenance": "laneB3-native-oracle.log: Metal two-stage prepare 253240.808958 ms; complete 64-token oracle 531.11 s. B3 compiler timed out at 355.43 s before its native verdict. This 30-minute test allowance includes repeated source hashing, stages, challenge and final artifact validation."
+}

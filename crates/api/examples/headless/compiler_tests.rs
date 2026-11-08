@@ -662,6 +662,7 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     let mut facts = BTreeMap::new();
     let mut members = BTreeMap::new();
     let mut keys = Vec::new();
+    let mut signers = Vec::new();
     for (i, node) in f.request.node_ids.iter().enumerate() {
         let signer =
             Identity::from_secret(&format!("endpoint-{node}"), &[i as u8 + 70; 32]).unwrap();
@@ -723,6 +724,7 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             .unwrap(),
         );
         keys.push(signer.public_key_record());
+        signers.push((node.clone(), signer));
         members.insert(node.clone(), current);
     }
     let mut hellos = ControlledHellos {
@@ -778,12 +780,64 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     compiler
         .retain_prepared_source(f.source.clone(), &inputs, &observations)
         .unwrap();
+    let started = std::time::Instant::now();
     compiler.start_build(&f.request);
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_millis(
-            BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis(),
-        );
+    let timeout_ms = if require_native {
+        let budget: Value =
+            serde_json::from_str(include_str!("compiler-native-budget.json")).unwrap();
+        budget["timeout_ms"].as_u64().unwrap()
+    } else {
+        BudgetId::ControlTtl.span(Entries::ZERO).unwrap().millis()
+    };
+    let deadline = started + std::time::Duration::from_millis(timeout_ms);
+    // Real model preparation outlives the ordinary lease. Keep the controlled
+    // joined members alive with signed heartbeats, not an enlarged product TTL
+    // or an edited member projection. Exercise this also in the cheap fixtures.
+    let heartbeat_interval = std::time::Duration::from_millis(
+        BudgetId::PyFinalMyceliumSeedCoordinatorKeepaliveIntervalSecondsL182C44
+            .span(Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
+    let mut heartbeat_due = started;
+    let mut sequence = 0_u64;
     let result = loop {
+        if std::time::Instant::now() >= heartbeat_due {
+            sequence += 1;
+            for (node, signer) in &signers {
+                let current = seed.coordinator.member(node).unwrap();
+                let issued = now();
+                let id = format!("b4-heartbeat-{node}-{sequence}");
+                let protocol = protocol::seed_members::HEARTBEAT_PROTOCOL;
+                let message = json!({
+                    "protocol":protocol,"message_id":id,
+                    "swarm_id":seed.coordinator.swarm_id(),
+                    "sender_node_id":node,"sender_endpoint_id":signer.endpoint_id(),
+                    "recipient_node_id":seed.coordinator.seed_node_id(),
+                    "incarnation":current["incarnation"],"generation":current["generation"],
+                    "issued_at":issued,
+                    "expires_at":(issued+ttl).min(current["lease_expires_at"].as_f64().unwrap()),
+                    "heartbeat_sequence":sequence,"lifecycle_state":current["lifecycle_state"],
+                    "route_ready":false,"active_requests":0,"liveness_source":"scheduled_heartbeat",
+                    "activity_receipt_digest":null,"activity_peer_node_id":null
+                });
+                let signed = protocol::membership::sign(
+                    signer,
+                    &message,
+                    seed::coordinator::limits().unwrap(),
+                )
+                .unwrap();
+                seed.coordinator
+                    .receive_member_message(&signed, protocol)
+                    .unwrap();
+                let renewed = seed.coordinator.lease_renewal(node, &id).unwrap();
+                assert_eq!(renewed["message"]["heartbeat_message_id"], id);
+                let after = seed.coordinator.member(node).unwrap();
+                assert_eq!(after["generation"], current["generation"]);
+                assert!(after["lease_expires_at"].as_f64().unwrap() > issued);
+            }
+            heartbeat_due = std::time::Instant::now() + heartbeat_interval;
+        }
         match compiler.poll_build() {
             BuildPoll::Pending => {
                 assert!(std::time::Instant::now() < deadline);
@@ -794,6 +848,10 @@ fn worker_fixture(f: Fixture, require_native: bool) {
     };
     let output = f.root.join("host/chain-runs").join(run);
     if require_native {
+        eprintln!(
+            "native compiler verdict after {:?}: {result:?}",
+            started.elapsed()
+        );
         // Close the real seed before the expected RED assertion, not only on
         // GREEN. No fixture-owned model copies survive this assertion's unwind.
         compiler.teardown().unwrap();
