@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 budgets = { path = "../budgets" }
+stage-contract = { path = "../stage-contract" }
 protocol = { path = "../protocol" }
 planner = { path = "../planner" }
 owner-run = { path = "../owner-run" }

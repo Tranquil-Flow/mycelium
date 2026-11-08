@@ -112,6 +112,11 @@ struct PreparedBuild {
     root: PathBuf,
 }
 
+type FinishedBuild = (
+    api::compiler_inputs::InputArtifact,
+    Option<api::native_compiler::Qualified>,
+);
+
 pub(super) struct Compiler {
     core: Weak<Mutex<Core>>,
     observation: Observation,
@@ -120,7 +125,8 @@ pub(super) struct Compiler {
     failure: Option<PortError>,
     artifact: Option<api::compiler_inputs::InputArtifact>,
     retired: bool,
-    worker: Option<std::thread::JoinHandle<Result<api::compiler_inputs::InputArtifact, PortError>>>,
+    worker: Option<std::thread::JoinHandle<Result<FinishedBuild, PortError>>>,
+    qualified: Option<api::native_compiler::Qualified>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     identity: Option<(String, String)>,
 }
@@ -135,6 +141,7 @@ impl Compiler {
             artifact: None,
             retired: false,
             worker: None,
+            qualified: None,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             identity: None,
         }
@@ -205,6 +212,7 @@ impl Compiler {
         if self.retired && self.identity.as_ref() != Some(&(run.clone(), deployment.clone())) {
             self.prepared = None;
             self.artifact = None;
+            self.qualified = None;
             self.failure = None;
             self.cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
             self.retired = false;
@@ -375,7 +383,7 @@ impl Compiler {
         self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(worker) = self.worker.take() {
             match worker.join() {
-                Ok(Ok(artifact)) => self.artifact = Some(artifact),
+                Ok(Ok((artifact, _))) => self.artifact = Some(artifact),
                 Ok(Err(error)) => self.failure = Some(error),
                 Err(_) => return Err("compiler_worker_panicked".into()),
             }
@@ -384,6 +392,7 @@ impl Compiler {
         // Never delete them (or a foreign replacement) during Stop.
         self.prepared = None;
         self.metadata = None;
+        self.qualified = None;
         if self.identity.is_some() {
             self.failure = Some(failed("compiler_stopped"));
         }
@@ -467,7 +476,34 @@ impl CompilePort for Compiler {
                     artifact.validate_assignments(&check()?, now())?;
                 }
                 artifact.validate_members(&check()?, now())?;
-                Ok(artifact)
+                let seed = core
+                    .upgrade()
+                    .ok_or_else(|| failed("compiler_stopped"))?
+                    .lock()
+                    .map_err(|_| failed("compiler_state_unavailable"))?
+                    .seed
+                    .clone()
+                    .ok_or_else(|| failed("compiler_member_changed"))?;
+                let current = || {
+                    check().map_err(|e| {
+                        api::native_compiler::Error(
+                            if e.code_or("compiler_member_changed") == "compiler_stopped" {
+                                "compiler_stopped"
+                            } else {
+                                "compiler_member_changed"
+                            },
+                        )
+                    })
+                };
+                let qualified = api::native_compiler::build(
+                    &artifact,
+                    seed.coordinator.signer(),
+                    &current,
+                    cancel.clone(),
+                )
+                .map_err(|e| failed(e.0))?;
+                artifact.validate_members(&check()?, now())?;
+                Ok((artifact, qualified))
             });
         match worker {
             Ok(worker) => self.worker = Some(worker),
@@ -480,14 +516,20 @@ impl CompilePort for Compiler {
         }
         if let Some(worker) = self.worker.take() {
             match worker.join() {
-                Ok(Ok(artifact)) => {
+                Ok(Ok((artifact, qualified))) => {
                     self.artifact = Some(artifact);
-                    // Metadata or stage-shard bytes exist; actual loaded-stage
-                    // proofs, challenge tokens and an operator plan still do not.
-                    self.failure = Some(failed("native_challenge_producer_unavailable"));
+                    self.qualified = qualified;
+                    if self.qualified.is_none() {
+                        self.failure = Some(failed("native_challenge_producer_unavailable"));
+                    }
                 }
                 Ok(Err(error)) => self.failure = Some(error),
                 Err(_) => self.failure = Some(failed("compiler_worker_panicked")),
+            }
+        }
+        if self.failure.is_none() {
+            if let Some(qualified) = &self.qualified {
+                return BuildPoll::Done(Ok(qualified.output.clone()));
             }
         }
         BuildPoll::Done(Err(self

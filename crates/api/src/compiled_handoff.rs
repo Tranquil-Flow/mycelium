@@ -11,6 +11,7 @@ use runtime::managed_workflow::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+mod native;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -231,6 +232,11 @@ impl CompiledHandoff {
             check(&mut file, pins.get(name).ok_or_else(bad)?)?;
             docs.insert(name, document(&mut file)?);
             files.insert(name.to_owned(), file);
+        }
+        if docs["compiled/operator-plan.json"]["protocol"]
+            == stage_contract::native_proof::PLAN_PROTOCOL
+        {
+            return native::open_native(&root, pins, &docs, files);
         }
         let plan = &docs["compiled/operator-plan.json"];
         let complete = &docs["compile-complete.private.json"];

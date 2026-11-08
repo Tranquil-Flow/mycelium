@@ -2,7 +2,10 @@
 //! Bounded source-artifact tests. Controlled member/observation documents are
 //! not authenticated hello sessions, native model execution, or BuildOutput.
 use super::*;
+#[path = "native_tamper_tests.rs"]
+mod native_tamper_tests;
 use api::compiler_inputs::{self, InputArtifact};
+use native_tamper_tests::native_handoff_tamper_refusals;
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -852,34 +855,13 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             "native compiler verdict after {:?}: {result:?}",
             started.elapsed()
         );
-        // Close the real seed before the expected RED assertion, not only on
-        // GREEN. No fixture-owned model copies survive this assertion's unwind.
+        // Pins cross from the trusted producer; do not infer admission from the
+        // documents the consumer is supposed to check.
+        let pins = compiler.qualified.as_ref().map(|q| q.pins.clone());
         compiler.teardown().unwrap();
         seed.close();
         let built = result.expect("real Qwen3 source must reach native BuildOutput");
-        let mut pins = api::compiled_handoff::Pins::new();
-        for name in [
-            "compile-start.private.json",
-            "compile-complete.private.json",
-            "template.json",
-            "topology.json",
-            "observations.json",
-            "layer-split.json",
-            "compiled/operator-plan.json",
-            "compiled/build-report.json",
-            "compiled/local-challenge-checkpoint.json",
-            "compiled/compilation-cache.json",
-        ] {
-            use sha2::{Digest, Sha256};
-            let bytes = fs::read(output.join(name)).unwrap();
-            pins.insert(
-                name.into(),
-                api::compiled_handoff::Pin {
-                    bytes: bytes.len() as u64,
-                    sha256: format!("{:x}", Sha256::digest(&bytes)),
-                },
-            );
-        }
+        let pins = pins.expect("qualified producer pins");
         let handoff = api::compiled_handoff::CompiledHandoff::open(&output, &pins).unwrap();
         handoff.revalidate().unwrap();
         assert_eq!(handoff.nodes().len(), f.request.node_ids.len());
@@ -887,6 +869,13 @@ fn worker_fixture(f: Fixture, require_native: bool) {
             protocol::canonical::digest(handoff.plan()).unwrap(),
             built.operator_plan_digest
         );
+        assert_eq!(
+            built.physical_host_ids.len(),
+            1,
+            "one physical Mac, not controlled hello IDs"
+        );
+        assert_eq!(handoff.plan()["route_ready"], false);
+        native_handoff_tamper_refusals(&output, &pins, seed.coordinator.signer(), &handoff);
         return;
     }
     assert_eq!(
