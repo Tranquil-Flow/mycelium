@@ -212,6 +212,20 @@ button {
   pointer-events: none;
   z-index: 0;
 }
+/* Full-DPR static field bands; the renderer moves them with transforms on scroll. */
+.page-mycelium-field {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+  pointer-events: none;
+  z-index: 0;
+}
+.page-mycelium-field canvas {
+  position: absolute;
+  top: 0;
+  will-change: transform;
+}
 
 /* Per-colony breathing: compositor opacity with desynchronised durations. */
 .mycelium-breath {
