@@ -15,6 +15,8 @@ pub mod control;
 pub mod desktop_host;
 pub mod detok;
 pub mod enrollment;
+#[cfg(feature = "metal")]
+pub mod hello_bootstrap;
 #[cfg(feature = "iroh-loopback")]
 pub mod iroh_frames;
 pub mod lifecycle;

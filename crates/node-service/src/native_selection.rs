@@ -59,6 +59,9 @@ pub fn select(
                 Profile::ExplicitF32 => NumericsProfile::MlxExplicitF32,
             };
             let d = match image.model_id.as_str() {
+                "Qwen/Qwen3-0.6B" => {
+                    admission::qwen3_descriptor(range.clone(), embedding, head, profile)?
+                }
                 "Qwen/Qwen3.6-35B-A3B" => {
                     moe_admission::descriptor(range.clone(), embedding, head, profile)?
                 }

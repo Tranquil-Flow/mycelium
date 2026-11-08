@@ -231,7 +231,7 @@ fn observed_identity() -> Result<(Zeroizing<String>, Zeroizing<String>)> {
 fn observed_identity() -> Result<(Zeroizing<String>, Zeroizing<String>)> {
     Err("hello_bootstrap_identity_unavailable")
 }
-fn identity(run: &str) -> Result<(String, String)> {
+pub(crate) fn identity(run: &str) -> Result<(String, String)> {
     let (host, boot) = observed_identity()?;
     Ok(from_observed(run, &host, &boot))
 }

@@ -57,6 +57,29 @@ pub fn native_worker() -> Result<()> {
                     });
                     Ok((json!({"ok":true}), Vec::new(), false))
                 }
+                stage_contract::native_proof::COMMAND => {
+                    use stage_contract::native_proof as proof;
+                    if !payload.is_empty()
+                        || head.as_object().is_none_or(|object| {
+                            object.len() != proof::REQUEST_FIELDS.len()
+                                || proof::REQUEST_FIELDS
+                                    .iter()
+                                    .any(|key| !object.contains_key(*key))
+                        })
+                        || head["protocol"] != proof::REQUEST_PROTOCOL
+                    {
+                        return Err("native_proof_request_invalid".into());
+                    }
+                    let nonce = text(&head, "nonce")?;
+                    if !proof::valid_nonce(nonce) {
+                        return Err("native_proof_request_invalid".into());
+                    }
+                    let proof = stage
+                        .as_ref()
+                        .ok_or("worker_not_prepared")?
+                        .resident_proof(nonce)?;
+                    Ok((json!({"ok":true,"proof":proof}), Vec::new(), false))
+                }
                 "step" => {
                     let input = match head.get("tokens") {
                         Some(tokens) => Input::Tokens(serde_json::from_value(tokens.clone())?),
