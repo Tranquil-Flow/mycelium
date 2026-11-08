@@ -515,7 +515,14 @@ fn wait_workers_gone(pids: &[i32]) -> f64 {
 #[ignore = "real Metal + local Qwen3; B7_MEMBER_BINARY, native pins and resource gate required"]
 fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let mut fx = native_process::setup(2, "b7e-route");
-    let mut evidence = json!({"route_ready":false,"scope":route::SCOPE});
+    // Evidence label: the signed route keeps its protocol scope (class A bytes);
+    // the RUN is labelled by its carrier. A direct-LAN run on one Mac is a
+    // rehearsal of the two-Mac topology, never two-node qualification, and
+    // physical route_ready stays false.
+    let lan_run = super::member_remote::lan().is_some();
+    let mut evidence = json!({"route_ready":false,"physical_route_ready":false,
+        "scope":if lan_run { "lan_two_node_rehearsed" } else { route::SCOPE },
+        "route_scope":route::SCOPE,"carrier":if lan_run { "direct_lan" } else { "loopback" }});
     let oracle: Value =
         serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
     let reference: Vec<u64> = serde_json::from_value(oracle["recorded"]["tokens"].clone()).unwrap();
