@@ -256,6 +256,74 @@ fn native_custody_refuses_changed_consent_caps_before_launch() {
 }
 
 #[test]
+fn cancelled_native_prepare_refuses_before_scanning_partial_custody() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    // No model or executable: partial custody is an independent effect fence.
+    let error = native
+        .prepare(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            &p.root,
+        )
+        .unwrap_err();
+    native.discard().unwrap();
+    assert_eq!(error.0, "compiler_stopped");
+}
+
+#[test]
+fn expired_native_prepare_refuses_before_scanning_partial_custody() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    let error = native
+        .prepare_until(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            &p.root,
+            std::time::Instant::now(),
+        )
+        .unwrap_err();
+    native.discard().unwrap();
+    assert_eq!(error.0, "native_worker_deadline");
+}
+
+#[test]
 fn wrong_signer_endpoint_recipe_and_withdrawn_consent_refuse() {
     let p = Pair::new();
     let mut offer = p.offer();

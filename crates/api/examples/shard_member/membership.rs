@@ -11,6 +11,8 @@ use std::{
 };
 pub struct Membership {
     pub session: Arc<Mutex<Option<Session>>>,
+    root: PathBuf,
+    options: SeedOptions,
     stop: Arc<(Mutex<bool>, Condvar)>,
     error: Arc<Mutex<Option<String>>>,
     thread: Option<JoinHandle<()>>,
@@ -34,6 +36,8 @@ impl Membership {
                 .map_err(|_| "budget_unavailable")?
                 .millis(),
         );
+        let saved_root = root.clone();
+        let saved_options = options.clone();
         let thread = std::thread::spawn(move || {
             loop {
                 let guard = c.0.lock().unwrap();
@@ -62,11 +66,33 @@ impl Membership {
             }
         });
         Ok(Self {
+            root: saved_root,
+            options: saved_options,
             session,
             stop,
             error,
             thread: Some(thread),
         })
+    }
+    pub fn resume(&self, signer: &Identity) -> Result<(), String> {
+        let random = |n| {
+            app_host::random(n)
+                .map(|b| app_host::hex(&b))
+                .unwrap_or_default()
+        };
+        let env = peer::JoinEnv {
+            signer,
+            clock: &app_host::now,
+            random_hex: &random,
+            seed: &self.options,
+        };
+        let mut held = self.session.lock().map_err(|_| "member_renewal_poisoned")?;
+        // No renewal can race the actual seed generation transition.
+        *held = peer::start(&self.root, signer, true, &env)
+            .map_err(|e| e.error.code.to_owned())?
+            .session;
+        peer::renew(&self.root, true, held.as_mut(), &env).map_err(|e| e.code.to_owned())?;
+        Ok(())
     }
     pub fn current(
         &self,

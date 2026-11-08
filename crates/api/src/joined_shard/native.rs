@@ -145,6 +145,44 @@ impl NativeShard {
         cancel: Arc<AtomicBool>,
         forbidden_source: &Path,
     ) -> Result<Value> {
+        let wall = budgets::BudgetId::MemberChosenWall
+            .span(budgets::Entries::ZERO)
+            .map_err(|_| fail("budget_unavailable"))?;
+        self.prepare_until(
+            range,
+            tokens,
+            nonce,
+            signer,
+            current,
+            cancel,
+            forbidden_source,
+            Instant::now() + std::time::Duration::from_millis(wall.millis()).min(self.wall),
+        )
+    }
+    /// One allowance covers custody hashing, launch, prepare and resident proof.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_until(
+        &mut self,
+        range: [usize; 2],
+        tokens: usize,
+        nonce: &str,
+        signer: &Identity,
+        current: &dyn Fn() -> Result<Value>,
+        cancel: Arc<AtomicBool>,
+        forbidden_source: &Path,
+        deadline: Instant,
+    ) -> Result<Value> {
+        let deadline = deadline.min(Instant::now() + self.wall);
+        let checkpoint = || {
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                Err(fail("compiler_stopped"))
+            } else if Instant::now() >= deadline {
+                Err(fail("native_worker_deadline"))
+            } else {
+                Ok(())
+            }
+        };
+        checkpoint()?;
         self.check(current)?;
         if self.worker.is_some()
             || self.started.is_some()
@@ -162,8 +200,10 @@ impl NativeShard {
             return Err(fail("joined_native_identity_mismatch"));
         }
         // Admission is repeated through each bounded verification read.
+        self.started = Some(Instant::now());
         let offer_member = self.received.offer["message"]["member"].clone();
         self.received.shard.verify(&|| {
+            checkpoint()?;
             if current()? != offer_member {
                 return Err(fail("joined_shard_member_changed"));
             }
@@ -194,19 +234,28 @@ impl NativeShard {
             .map_err(native)?
             .ok_or(fail("native_binary_pin_required"))?;
         self.check(current)?;
-        self.started = Some(Instant::now());
+        checkpoint()?;
         self.cleanup_proven = false;
-        self.worker =
-            Some(Worker::start(&config, &prepare, cancel, forbidden_source).map_err(native)?);
+        self.worker = Some(
+            Worker::start_until(
+                &config,
+                &prepare,
+                cancel.clone(),
+                forbidden_source,
+                deadline,
+            )
+            .map_err(native)?,
+        );
         self.check(current)?;
         let worker = self
             .worker
             .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?;
         let (reply, body) = worker
-            .request(
+            .request_until(
                 &json!({"command":proof::COMMAND,"protocol":proof::REQUEST_PROTOCOL,"nonce":nonce}),
                 &[],
+                deadline,
             )
             .map_err(native)?;
         if reply["ok"] != true
@@ -217,6 +266,7 @@ impl NativeShard {
         }
         native_compiler::validate_proof(&reply["proof"], &stage(&prepare), nonce, &reference)
             .map_err(native)?;
+        checkpoint()?;
         self.check(current)?;
         signed(
             signer,
@@ -241,6 +291,35 @@ impl NativeShard {
             .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?
             .request(&command, payload)
+            .map_err(native)?;
+        if reply != json!({"ok":true}) {
+            return Err(fail("native_step_reply_invalid"));
+        }
+        self.check(current)?;
+        Ok(bytes)
+    }
+    /// Operation and consent bounds both apply; a new operator command cannot
+    /// reset the serving worker's granted lifetime.
+    pub fn step_until(
+        &mut self,
+        input: Option<&[u32]>,
+        payload: &[u8],
+        current: &dyn Fn() -> Result<Value>,
+        cancel: Arc<AtomicBool>,
+        deadline: Instant,
+    ) -> Result<Vec<u8>> {
+        self.check(current)?;
+        let end = self.started.ok_or(fail("joined_native_not_prepared"))? + self.wall;
+        self.remaining -= 1;
+        let command = match input {
+            Some(ids) => json!({"command":"step","tokens":ids}),
+            None => json!({"command":"step"}),
+        };
+        let (reply, bytes) = self
+            .worker
+            .as_mut()
+            .ok_or(fail("joined_native_not_prepared"))?
+            .request_controlled(&command, payload, deadline.min(end), cancel)
             .map_err(native)?;
         if reply != json!({"ok":true}) {
             return Err(fail("native_step_reply_invalid"));

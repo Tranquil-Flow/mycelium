@@ -31,7 +31,25 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         source: &Path,
     ) -> Result<Self> {
+        Self::start_until(
+            config,
+            prepare,
+            cancel,
+            source,
+            Instant::now() + duration(BudgetId::MemberChosenWall)?,
+        )
+    }
+    pub(crate) fn start_until(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+        deadline: Instant,
+    ) -> Result<Self> {
         config.verify()?;
+        if Instant::now() >= deadline {
+            return Err(Error("native_worker_deadline"));
+        }
         if cancel.load(Ordering::SeqCst) {
             return Err(Error("compiler_stopped"));
         }
@@ -57,7 +75,7 @@ impl Worker {
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
         let mut worker = Self::from_child(child, client, cancel)?;
-        let (reply, body) = worker.request(prepare, &[])?;
+        let (reply, body) = worker.request_until(prepare, &[], deadline)?;
         if reply != json!({"ok":true}) || !body.is_empty() {
             return Err(Error("native_prepare_reply_invalid"));
         }
@@ -97,7 +115,17 @@ impl Worker {
             Instant::now() + duration(BudgetId::MemberChosenWall)?,
         )
     }
-    fn request_until(
+    pub(crate) fn request_controlled(
+        &mut self,
+        head: &Value,
+        body: &[u8],
+        deadline: Instant,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<(Value, Vec<u8>)> {
+        self.cancel = cancel;
+        self.request_until(head, body, deadline)
+    }
+    pub(crate) fn request_until(
         &mut self,
         head: &Value,
         body: &[u8],

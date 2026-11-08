@@ -1,60 +1,52 @@
-# Lane B7 — member native custody; serving still incomplete
+# Lane B7 — native received-shard preparation qualified; serving incomplete
 
-## B7c uncommitted continuation (current state)
+## Current continuation from 52ae99e (m4/main 0c171da merged)
 
-Branch `lane/b7c-serving` from `ff9a796`. No new phase commit: final native model
-qualification is resource-blocked, and phases d–f are not completed. Working source
-is retained and snapshotted at `../mycelium-m4-program/qualification/laneB7c-uncommitted/`.
-Do not mistake the earlier prepare-only PASS for qualification of the final revision.
+Phase (c) qualified in the real two-member loopback run in scratch/b7d-4:
+member PIDs 90313/90312 owned native workers 90702/91131, received source-derived
+751648856/751651104-byte shards, and returned 155/156 actual resident rows.
+Owner verified enrolled signatures, offer/nonce bindings and the independent
+resident-weight maps. Final native test PASS 1/1, 481.38 s tests / 491.752 s command.
+Wrong-identity, wrong-nonce and discard-while-live controls passed.
+The two-member challenge fixture changes will land as phase (d)'s next commit.
+Physical route_ready=false. Owner remains a test driver; no M16 chat/Stop/leave.
 
-Ruling 10 additive changes: `joined_shard::native::NativeShard` composes received B3
-custody with the existing B6 socket worker; no api→backend compute dependency.
-The new stage-contract `mycelium.joined_native.resident.v1` binds enrolled identity,
-current generation/incarnation, offer, prepare, actual resident proof and member PID.
-Owner verification uses its held seed member row/offer/nonce and independent resident
-map, not the proof's self-declared key. Legacy native and artifact wire bytes unchanged.
-Member renewal runs independently of native computation. Consent changes/regrant
-invalidate custody; no inert refund before explicit successful native close/reap.
-`DurableObjects::verify_bounded` is an opt-in bounded/checkpointed source scan whose
-interrupted result never populates the verified cache. Existing callers unchanged.
-`emit_loopback_qualification` is explicitly non-ready/versioned, with observed child
-PIDs rather than fabricated host identities; normal physical `emit` is unchanged.
-No reserved S1/chat/status/network-cancellation behavior, external package or review
-pin was changed. Trust remains local-worker hygiene, not hostile-code attestation.
+Ruling 10 / class C: independent private-stdin cancellation ingress requires a
+monotonically increasing operation_id; wrong/old IDs cannot cancel another job.
+A stalled real QUIC receive cancels in 502.114 ms, retaining reservation debt
+until explicit inert discard. Its source connection closes while member stays
+alive. A separate current-thread driver previously stopped pumping during stdin,
+hash/native work; the member now owns one background Tokio I/O worker. Existing
+wire/signature formats and native prepare/step/close commands remain unchanged.
+Class A: existing joined-native v1 proof contract is unchanged; private operator
+commands are additive. No reserved S1, packaged chat, status or network-cancel
+implementation changed; no external dependency or lockfile edits.
 
-Earlier b7c-2 prepare-only run: 1 PASS (364.39 s tests / 385.692 s command), received
-751648856 real source-derived bytes, member PID 38814/native PID 38950, 155 resident
-rows, enrolled generation 1. Wrong-identity proof refused; explicit close + inert
-retirement/refund took 137.584458 ms, with worker absent and empty member ledger.
-This is NOT cross-node challenge, M16 chat, public Stop or member leave evidence.
-Later consent guard hardening (behavioral RED→GREEN), contract extraction and extra
-wrong-nonce/live-discard model checks were not part of that earlier native PASS.
+Native prepare now checks cancellation before/through custody hashing and shares
+one operation deadline through prepare and resident proof. Native controlled step
+is bounded by both its operation deadline and the original member consent wall.
+Receive uses one operation deadline, checks cancellation during pending I/O and
+bounded verification, and clones read-only Session snapshots rather than holding
+the renewal mutex across network/hash work. Existing membership renewal remains.
+The legacy ChunkSession::fetch remains unchanged; responsive fetch is additive.
+No claims of interrupting a kernel-blocked filesystem call or native graceful
+cleanup after cancellation: failed native work retains debt fail-closed.
+Artifact-grant renewal is STILL MISSING (membership renewal is not grant renewal).
 
-Final b7c-4 rerun: Metal/member builds PASS; disk guard stopped source production
-BEFORE native launch (exit -15, 30.724 s, minimum sampled 26.999 GiB; 26.997 GiB
-at cleanup, never below 25). No owned lane process/open fixture handle remained;
-only exact disposable `b7c-model-57981` was removed. Its shard-file logical lengths were
-751648856 and 751651104 bytes. Full two-node source+received storage needs 2.800114
-GiB plus overhead; >=29.800114 GiB free is the arithmetic minimum for the 27 GiB
-floor (recommend >=30.5). Full ignored two-member model gate remains NOT RUN.
-Authorized stale executable sweeps reclaimed 29336736 + 46921304 bytes, preserving
-newest-per-stem and all libraries. No unrelated service/cache/model was touched.
+Behavioral REDs: pre-cancel prepare returned member_shard_length_mismatch instead
+of compiler_stopped; source-release-while-member-live timed out; serialized stdin
+returned artifact_source_timeout instead of responding to cancellation. GREEN:
+pre-cancel test, ordinary transfer/release/refund and real stalled-cancel tests.
+The first cancellation fixture retained a Connection past runtime destruction;
+explicitly dropping that owner fixed its socket-rebind assertion (fixture bug).
+Expired-prepare coverage is added characterization, not a claimed pre-fix RED.
 
-Owner is still a test driver. A two-member operator-IPC reference challenge harness
-exists but is unqualified; there is no real M16 carrier executor or Stop/leave flow.
-Stale OFFER uses a real resume test; stale native proof/death/stall remain unqualified.
-No tokens were produced for B7c comparison. Physical route_ready stays false;
-no loopback serving-ready level promoted. Full B7 merge-ready: NO.
-Final non-model gates: merge 1086 PASS/51 skipped (645.583 s tests, 1075.031 s
-command), exit 0, with one nextest LEAK diagnostic on unchanged pure acquisition
-bounds. Focused isolation 5/5 passes without leak; cause UNDETERMINED, original
-full diagnostic retained. JUnit has zero failures/errors. Quick --base m4/main:
-1959/1959 PASS, 135 skipped, 96.437 s tests / 997.818 s command, 18 affected crates,
-no exclusions/re-pin. Headless 28 PASS/4 ignored; default/Metal clippy, fmt, lint
-PASS (command seconds 26.703 / 54.817 / 20.417 / 6.052 / 20.821 respectively).
-Lint 1292 files/0 violations. Final sweep: 9 stale executables/126463952 bytes;
-final disk 28.129 GiB. Exact owned PID and model-fixture-root inventories empty.
-No new phase commit because final native qualification remains blocked; no push.
+Current evidence: scratch/b7d-{1,2,4}. Two failed model attempts are retained:
+first second-member connect Expired; second correctly refused a grant predating
+journal genesis. Neither reached native load. No deadline/guard was weakened.
+Full current-code gates pending; full B7 merge-ready NO. Remaining: genuine
+M16 carrier/graph/tokenizer composition, streamed chat, public bounded Stop and
+leave, death-midstream/stall settlement, artifact-grant renewal. See report.
 
 ## B7b review repair (supersedes precursor cleanup claims below)
 

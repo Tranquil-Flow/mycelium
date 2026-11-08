@@ -384,6 +384,36 @@ impl MemberShard {
         deadline: budgets::MonoInstant,
         checkpoint: &dyn Fn() -> Result<()>,
     ) -> std::result::Result<(), runtime::iroh_artifact::ArtifactError> {
+        self.fetch_chunk_inner(
+            session, envelope, request, grant, deadline, checkpoint, false,
+        )
+    }
+    /// Opt in to checking cancellation/current admission during a stalled read.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_chunk_checked<C: transport::Clock>(
+        &mut self,
+        session: &mut runtime::iroh_artifact::ChunkSession<'_, C>,
+        envelope: &Value,
+        request: &protocol::artifact_grant::ChunkRequest,
+        grant: &protocol::artifact_grant::Grant,
+        deadline: budgets::MonoInstant,
+        checkpoint: &dyn Fn() -> Result<()>,
+    ) -> std::result::Result<(), runtime::iroh_artifact::ArtifactError> {
+        self.fetch_chunk_inner(
+            session, envelope, request, grant, deadline, checkpoint, true,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn fetch_chunk_inner<C: transport::Clock>(
+        &mut self,
+        session: &mut runtime::iroh_artifact::ChunkSession<'_, C>,
+        envelope: &Value,
+        request: &protocol::artifact_grant::ChunkRequest,
+        grant: &protocol::artifact_grant::Grant,
+        deadline: budgets::MonoInstant,
+        checkpoint: &dyn Fn() -> Result<()>,
+        responsive: bool,
+    ) -> std::result::Result<(), runtime::iroh_artifact::ArtifactError> {
         use runtime::iroh_artifact::ArtifactError;
         let local = |e: Error| ArtifactError(e.0.into());
         checkpoint().map_err(local)?;
@@ -404,7 +434,13 @@ impl MemberShard {
         {
             return Err(ArtifactError("member_shard_request_mismatch".into()));
         }
-        let bytes = session.fetch(envelope, request, grant, deadline)?;
+        let bytes = if responsive {
+            session.fetch_checked(envelope, request, grant, deadline, &|| {
+                checkpoint().map_err(local)
+            })?
+        } else {
+            session.fetch(envelope, request, grant, deadline)?
+        };
         checkpoint().map_err(local)?;
         self.write_chunk(request.offset_bytes, &bytes)
             .map_err(local)
