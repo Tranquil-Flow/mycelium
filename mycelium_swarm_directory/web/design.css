@@ -391,6 +391,11 @@ button {
     width: 53%;
   }
 }
+/* Keep the longer positioning lead inside the quiet tablet text column. */
+@media (min-width: 641px) and (max-width: 900px) {
+  .apex-hero .apex-lead { max-width: 34ch; }
+  .apex-hero .apex-demo { max-width: 280px; }
+}
 @media (max-width: 640px) {
   .wrap {
     padding-inline: 18px;
@@ -453,9 +458,10 @@ button {
     min-height: 820px;
   }
   .apex-hero h1 {
-    font-size: 43px;
+    font-size: 38px;
     line-height: 1.06;
-    max-width: 15ch;
+    max-width: none;
+    text-wrap: balance;
   }
   .apex-hero .apex-lead {
     font-size: 14px;

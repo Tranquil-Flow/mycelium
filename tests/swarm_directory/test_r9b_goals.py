@@ -42,6 +42,32 @@ def assert_goal_boundaries(html):
     assert 'Apple silicon Macs' in parser.cards['distributed']['today']
     assert 'other device types are in development' in parser.cards['edge']['today']
 
+def assert_hero_boundary(html):
+    import re
+    lead = re.search(r'<p class="apex-lead">([^<]+)</p>', html).group(1)
+    assert lead == ("We're building the base layer AI needs: inference that's verifiable, "
+                    "private and spread across everyday devices, so anyone can use it, "
+                    "and anyone can help run it.")
+    assert_goal_boundaries(html)
+
+
+def test_owner_approved_apex_positioning():
+    html = HOME.read_text()
+    assert '<h1>AI for everyone, controlled by no one.</h1>' in html
+    assert '>Decentralised AI infrastructure</p>' in html
+    assert '>AI, grown together</p>' in html
+    assert '<title>Mycelium · AI for everyone, controlled by no one</title>' in html
+    assert_hero_boundary(html)
+
+
+@pytest.mark.parametrize('framing', ['', 'We provide ', 'We have built '])
+def test_hero_claims_cannot_lose_future_framing(framing):
+    html = HOME.read_text()
+    assert_hero_boundary(html)
+    with pytest.raises(AssertionError):
+        assert_hero_boundary(html.replace("We're building the base layer", framing + 'the base layer'))
+
+
 def test_goals_have_adjacent_current_release_qualifiers():
     html = HOME.read_text()
     assert 'AI on the devices you already own' in html

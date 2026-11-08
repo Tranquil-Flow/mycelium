@@ -18,7 +18,7 @@ def test_apex_explains_without_identity_or_chat_surface():
         c.request('GET', '/')
         r = c.getresponse(); body = r.read().decode()
         assert r.status == 200
-        assert 'Run AI on devices you trust.' in body and 'This is the first step' in body
+        assert 'AI for everyone, controlled by no one.' in body and 'This is the first step' in body
         assert 'href="https://demo.mycelium.now/chat"' not in body
         assert 'Demo offline' in body and 'Start your own swarm</a>' in body
         assert 'id="demo-chat" class="btn" href="/swarms/#new"' in body
