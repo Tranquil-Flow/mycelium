@@ -24,9 +24,73 @@ function contentBounds(offset = 0) {
   return { left, right, offset, rects: rects.length, enabled: innerWidth >= 1100 && Math.min(left, innerWidth - right) >= 60 };
 }
 
+/** Hyphal knots (r11; refs/hyphal-knots, recipe in design/r11-coordination.md):
+ * tiny tangled balls ON strands and at junctions, in small irregular groups,
+ * rarer in the sparse field than near the margin colonies. Each knot is a few
+ * overlapping soft lobes (never a circle) with short fibres wound tangentially
+ * into it; radius at DPR1 is heavy-tailed, r = 1 + 2u^2.2 (diameter 2-6 px). */
+export function placeKnots({ strands, junctions, marginKnots, layout, w, top, height }) {
+  const R = rng("r11-hyphal-knots"),
+    knots = [];
+  const nearColony = (q) => marginKnots.reduce((m, k) => Math.min(m, Math.hypot(q.x - k.x, q.y - k.y)), Infinity);
+  const make = (p, i, group) => {
+    const a = p.points[Math.max(0, i - 1)],
+      b = p.points[Math.min(p.points.length - 1, i + 1)],
+      q = p.points[i],
+      r = 1 + 2 * Math.pow(R(), 2.2),
+      lobes = [],
+      fibres = [];
+    for (let j = 0, n = 3 + Math.floor(R() * 4); j < n; j++) {
+      const o = R() * 6.283,
+        d = r * (0.2 + R() * 0.4);
+      lobes.push([Math.cos(o) * d, Math.sin(o) * d, r * (0.55 + R() * 0.45)]);
+    }
+    for (let j = 0, n = 3 + Math.floor(R() * 5); j < n; j++) fibres.push([R() * 6.283, (1.5 + R() * 2) * (R() < 0.5 ? -1 : 1), 0.6 + R() * 0.8, 0.8 + R() * 0.5]);
+    knots.push({ x: q.x, y: q.y, r, el: 1 + R() * 0.6, ang: Math.atan2(b.y - a.y, b.x - a.x), lobes, fibres, p, i, group, bright: 0.55 + R() * 0.35 });
+    (p.knots ||= []).push(knots.at(-1));
+  };
+  let groups = 0;
+  const area = w * height,
+    sparseTarget = area / 120000,
+    colonyTarget = marginKnots.length * 2.4;
+  const tryGroup = (p, i) => {
+    const q = p.points[i];
+    if (!q || q.y < top || q.y > top + height) return false;
+    const n = 1 + Math.floor(Math.pow(R(), 1.8) * 4),
+      g = groups++;
+    make(p, i, g);
+    for (let k = 1; k < n; k++) {
+      // Members sit along the same strand 6-30 px apart, irregularly.
+      const j = i + Math.round((R() < 0.5 ? -1 : 1) * (2 + R() * 10));
+      if (j > 0 && j < p.points.length - 1) make(p, j, g);
+    }
+    return true;
+  };
+  // Near colonies: on colony hyphae and their junctions.
+  const colonyCands = junctions.filter((c) => nearColony(c.p.points[c.i]) < 140);
+  for (let k = 0; k < colonyTarget && colonyCands.length; k++) {
+    const c = colonyCands[Math.floor(R() * colonyCands.length)];
+    tryGroup(c.p, c.i);
+  }
+  // Sparse field: mostly at junctions, sometimes mid-strand.
+  const mains = strands.filter((p) => p.static && !p.hair && p.points.length > 12);
+  for (let k = 0, made = 0; made < sparseTarget && k < sparseTarget * 6; k++) {
+    if (R() < 0.7 && junctions.length) {
+      const c = junctions[Math.floor(R() * junctions.length)];
+      if (nearColony(c.p.points[c.i]) < 140) continue;
+      made += tryGroup(c.p, c.i);
+    } else if (mains.length) {
+      const p = mains[Math.floor(R() * mains.length)];
+      made += tryGroup(p, 2 + Math.floor(R() * (p.points.length - 4)));
+    }
+  }
+  return knots;
+}
+
 /** Generator: lays the field into the shared graph; returns the field record. */
 export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, h, top: pageTop = 0, budget = () => false, seedOk = () => true }) {
   const R = rng("r10-sparse-field"),
+    R2 = rng("r11-field-runners"),
     W = document.documentElement.clientWidth || innerWidth,
     height = Math.max(1800, Math.round(innerHeight * 2.4)),
     top = h - 150,
@@ -111,18 +175,18 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   for (let i = 0; i < Math.round(count * 0.3) && heroBand.length; i++) seeds.push({ v: heroBand[Math.floor(R() * heroBand.length)], hero: true });
   for (let i = 0; seeds.length < count && i < count * 6; i++) {
     const s = virtual[Math.floor(R() * virtual.length)],
-      x = R() < 0.5 ? (R() < 0.5 ? R() * Math.max(80, layout.left) : w - R() * Math.max(80, w - layout.right)) : R() * w,
+      x = R() < 0.35 ? (R() < 0.5 ? R() * Math.max(80, layout.left) : w - R() * Math.max(80, w - layout.right)) : R() * w,
       y = top + 40 + R() * (height - 80),
       dd = Math.hypot(x - s.x, y - s.y);
     // Density by distance from sources and columns: margins carry more.
-    if (R() > (0.35 + 0.65 * marginWeight(x)) * (0.5 + 0.5 / (1 + dd / 900))) continue;
+    if (R() > (0.62 + 0.38 * marginWeight(x)) * (0.55 + 0.45 / (1 + dd / 900))) continue;
     seeds.push({ x, y });
   }
   const mainRoots = [];
   for (const seed of seeds) {
     const start = seed.v ?? vertex(seed.x, seed.y, 0),
       heading = flow(start.x, start.y) + gauss(R) * 0.2,
-      len = 200 + R() * 300,
+      len = 220 + R() * 330,
       pts = persistWalk(start, heading, len, R, sparseWalk);
     // Fuse into elongated net cells: a tip meeting an earlier strand joins it.
     let hit = null;
@@ -139,6 +203,8 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     }
     const alpha = 0.85; // column weight is applied per chunk when drawn
     const p = add(pts, { width: 0.55, alpha });
+    p.heroFamily = !!seed.hero;
+    p.introStart = seed.hero ? 0 : R2() * 120; // own field sources start at once (r11 intro)
     if (hit) fusions.push({ point: hit, parent: p, birth: 0 });
     mainRoots.push(p);
     // Acute forks running alongside (2nd order), sometimes a 3rd.
@@ -152,6 +218,8 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         cl = (len - s) * (0.35 + R() * 0.45);
       const c = persistWalk(b, hh + side * (0.26 + R() * 0.26), cl, R, { ...sparseWalk, pull: (x, y, m) => Math.atan2(Math.sin(hh - m), Math.cos(hh - m)) * 0.018 });
       const child = add(c, { width: 0.4, alpha: alpha * 0.8, order: 0 });
+      child.introParent = p;
+      child.introAt = s;
       mainRoots.push(child);
       s += 50 + -Math.log(1 - R()) * 80;
     }
@@ -159,13 +227,14 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   }
   // Living branches: tips that grow, hold and dim in place (never retract).
   const live = [];
-  for (const parent of mainRoots.filter(() => R() < 0.22)) {
+  for (const parent of mainRoots.filter(() => R() < 0.3)) {
     const at = Math.floor(parent.points.length * (0.4 + R() * 0.4)),
       a = parent.points[Math.max(0, at - 1)],
       b = parent.points[at];
     if (!b) continue;
     const hh = Math.atan2(b.y - a.y, b.x - a.x) + (R() < 0.5 ? -1 : 1) * (0.3 + R() * 0.25);
     const branch = add(persistWalk(b, hh, 60 + R() * 90, R, sparseWalk), { width: 0.4, alpha: parent.alpha * 0.9, birth: 1 + R() * 3 });
+    branch.introParent = parent;
     live.push(branch);
     // A live tip meeting another strand fuses there (seamless, no bead).
     const end = branch.points.at(-1),
@@ -185,7 +254,9 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       pts = raw.map((q, i) => ({ x: q.x + ((b.x - last.x) * i) / (raw.length - 1), y: q.y + ((b.y - last.y) * i) / (raw.length - 1) }));
     pts[0] = a;
     pts[pts.length - 1] = b;
-    return add(pts, { width, alpha: 0.95, margin: true });
+    const p = add(pts, { width, alpha: 0.95, margin: true });
+    p.introStart = 0;
+    return p;
   };
   if (layout.enabled)
     for (const side of [-1, 1]) {
@@ -200,10 +271,13 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         for (let j = 0; j < Math.round(150 * marginDensityRatio); j++) {
           const hh = R() < 0.65 ? fan + gauss(R) * 0.9 : R() * 6.28,
             o0 = R() * 6.28,
-            r0 = Math.abs(gauss(R)) * 4,
+            r0 = 3 + Math.abs(gauss(R)) * 8, // a disc of origins: a mat, never a point soma
             ln = 14 + 70 * Math.pow(R(), 1.5) * (0.6 + 0.4 * Math.cos(hh - fan));
-          const p = add([centre, ...persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 })], { width: 0.24 + R() * 0.16, alpha: 0.62, margin: true });
+          const p = add(persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 }), { width: 0.24 + R() * 0.16, alpha: 0.62, margin: true });
           p.hair = true;
+          p.tuft = true;
+          p.marginRoot = centre;
+          p.introStart = R2() * 30;
         }
         // ...dissolving into a few long sparse hyphae.
         for (let j = 0; j < 7; j++) {
@@ -211,6 +285,16 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
           const p = add(persistWalk(centre, hh, 140 + R() * 220, R, { ...sparseWalk, pull: undefined }), { width: 0.45, alpha: 0.75, margin: true });
           mainRoots.push(p);
         }
+        // r11: runners leave the colony for the content column (ref-8 sparse
+        // hyphae flowing inwards), so text sections carry mycelium as in r9.
+        const inward = side < 0 ? 0 : Math.PI;
+        for (let j = 0, n = 4 + Math.floor(R2() * 4); j < n; j++) {
+          const hh = inward + gauss(R2) * 0.6;
+          const p = add(persistWalk(centre, hh, 380 + R2() * 420, R2, { ...sparseWalk, k: 0.016, pull: undefined }), { width: 0.5, alpha: 0.8 });
+          p.runner = true;
+          mainRoots.push(p);
+        }
+        budget() && (yield "margin");
       }
       if (!knots.length) continue;
       const first = knots[0],
@@ -226,7 +310,8 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   // long-running alongside; fusing into the web. No combs, no herringbone.
   const webR = rng("r10-irregular-root-web"),
     orders = { 1: 0, 2: 0, 3: 0 },
-    gaps = [];
+    gaps = [],
+    junctions = [];
   let webFusions = 0,
     lateralCount = 0,
     minLateralsPer100px = Infinity;
@@ -277,6 +362,9 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         }
       }
       const child = add(points, { width: parent.width * (order === 1 ? 0.6 : 0.7), alpha: parent.alpha * (order === 1 ? 0.62 : 0.8), birth: parent.birth ? parent.birth + at * 0.5 : 0, hair: true, order, margin: parent.margin, phase: parent.phase, period: parent.period });
+      child.introParent = parent;
+      child.introAt = arc[at];
+      if (order <= 2 && parent.static) junctions.push({ p: parent, i: at });
       child.marginRoot = parent.marginRoot || parent.points[0];
       child.marginDistance = (parent.marginDistance || 0) + arc[at];
       orders[order]++;
@@ -292,7 +380,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   const rooted = strands.filter((p) => !p.hair && p.points.length > 4);
   for (let i = 0; i < rooted.length; i++) {
     fineWeb(rooted[i], 1);
-    if (i % 20 === 0 && budget()) yield "web";
+    if (budget()) yield "web";
   }
   const mean = gaps.reduce((n, v) => n + v, 0) / Math.max(1, gaps.length),
     spacingCV = Math.sqrt(gaps.reduce((n, v) => n + (v - mean) ** 2, 0) / Math.max(1, gaps.length)) / mean;
@@ -308,12 +396,14 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     }
     power.push(re * re + im * im);
   }
+  yield "knots";
+  const hyphalKnots = placeKnots({ strands, junctions, marginKnots, layout, w, top, height });
   const rootAudit = {
     mainStrands: rooted.length, lateralCount, minLateralsPer100px: Number.isFinite(minLateralsPer100px) ? minLateralsPer100px : 0, loneThreads: rooted.filter((p) => !p.laterals).length,
     web: { orders, spacingCV, spectralPeakFraction: Math.max(...power) / power.reduce((n, v) => n + v, 0), fusions: webFusions, spacingSamples: gaps.length },
   };
   return {
-    strands, fusions, connectors: [], top, height, width: w, left, layout, baseCount, count, rootAudit, marginKnots, marginRoutes, marginDensityRatio, pageTop,
+    strands, fusions, connectors: [], top, height, width: w, left, layout, baseCount, count, rootAudit, marginKnots, marginRoutes, marginDensityRatio, pageTop, hyphalKnots,
     segments: ss.filter((s) => s.field), densityMultiplier: 1.2, flowSources: virtual.length,
   };
 }
@@ -325,6 +415,66 @@ function life(p, t, reduce) {
   // Dims in place over the last 20 s of a period; the laid path never retracts.
   const fade = 1 - smooth((phase - (p.period - 22)) / 20);
   return { extent: Math.max(0, Math.min(p.points.length - 1, local / 0.5)), alpha: p.alpha * Math.max(0, Math.min(1, local / 2)) * fade };
+}
+
+/** Shared load-in contract (design/r11-coordination.md): everything starts at
+ * the first rendered frame and is established by INTRO_MS, with ease-out pacing. */
+export const INTRO_MS = 6000;
+const easeOut = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 3);
+const HERO_EDGE_S = 3.6; // fallback: hero reaches its edges (~0.75 of its 0-4.5 s growth)
+let introUsed = false; // switches (theme, hue, style, resize) never replay the intro
+
+function rgba(colour, a) {
+  const s = colour.trim();
+  let r = 255,
+    g = 255,
+    b = 255;
+  if (s[0] === "#") {
+    const h = s.length === 4 ? s.slice(1).replace(/./g, (c) => c + c) : s.slice(1, 7);
+    [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  } else {
+    const m = s.match(/[\d.]+/g);
+    if (m) [r, g, b] = m.map(Number);
+  }
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+}
+
+/** Fine-hair fuzz on a persistent strand: short acute hairs that curl back
+ * alongside the parent at exponential (aperiodic) spacing. Sub-edge fringe of
+ * a graph edge, like the cord fringe: drawn with its parent, never separately routed. */
+function makeFuzz(p, k) {
+  const r = rng("r11-fuzz-" + k),
+    pts = p.points,
+    n = pts.length,
+    out = [],
+    mean = p.order === 1 ? 12 : 7.5;
+  let s = r() * mean,
+    i = 1;
+  for (;;) {
+    s += -Math.log(1 - r()) * mean;
+    while (i < n - 1 && p.arc[i] < s) i++;
+    if (i >= n - 1) break;
+    const a = pts[i - 1],
+      b = pts[i],
+      h = Math.atan2(b.y - a.y, b.x - a.x),
+      side = r() < 0.5 ? -1 : 1,
+      L = (2.5 + 9 * Math.pow(r(), 1.6)) * (p.order === 1 ? 0.7 : 1),
+      a1 = h + side * (0.35 + r() * 0.5),
+      a2 = a1 - side * (0.15 + r() * 0.35),
+      mx = b.x + Math.cos(a1) * L * 0.5,
+      my = b.y + Math.sin(a1) * L * 0.5;
+    out.push(i, b.x, b.y, mx, my, mx + Math.cos(a2) * L * 0.5, my + Math.sin(a2) * L * 0.5);
+    if (out.length === 7 && s > p.arc[n - 1]) break;
+  }
+  if (!out.length && n > 3) {
+    // A short strand still carries at least one hair (never a bare line).
+    const i = n >> 1,
+      a = pts[i - 1],
+      b = pts[i],
+      h = Math.atan2(b.y - a.y, b.x - a.x) + (r() < 0.5 ? -0.5 : 0.5);
+    out.push(i, b.x, b.y, b.x + Math.cos(h) * 2, b.y + Math.sin(h) * 2, b.x + Math.cos(h - 0.2) * 4, b.y + Math.sin(h - 0.2) * 4);
+  }
+  return new Float32Array(out);
 }
 
 export function createField({ stage, state, reduce }) {
@@ -363,14 +513,28 @@ export function createField({ stage, state, reduce }) {
     lastScroll = NaN,
     lastVersion = -1,
     tileVersion = 0,
-    drawnTile = -1,
     dirty = null,
     liveStrands = [],
     marginSchedules = [],
-    heroInterval = 24;
-  const metrics = (window.__understoryMetrics = { costs: [], frames: 0, paused: false, staticRedraws: 0, liveCosts: [] });
+    heroInterval = 24,
+    colonySprites = new Map(),
+    introEnded = 0,
+    span = { A: 1, H: 1 },
+    tips = [];
+  const metrics = (window.__understoryMetrics = { costs: [], frames: 0, paused: false, staticRedraws: 0, liveCosts: [], fieldCosts: [] });
   const params = new URLSearchParams(location.search);
   if (params.has("t") && Number.isFinite(+params.get("t"))) frozen = +params.get("t");
+  // Intro: only on the first field of a fresh page load (never on switches).
+  let intro =
+    !introUsed && performance.now() < 4000 && !reduce.matches && !document.hidden && frozen === null
+      ? { start: null, heroAt: null, cursor: 0, manual: null }
+      : null;
+  introUsed = true;
+  const introTime = (now = performance.now()) => (!intro ? INTRO_MS / 1000 : intro.manual !== null ? intro.manual / 1000 : intro.start === null ? 0 : (now - intro.start) / 1000);
+  window.MyceliumField = Object.freeze({ INTRO_MS, get introProgress() { return Math.min(1, introTime() / (INTRO_MS / 1000)); } });
+  const firstFrame = (now) => {
+    if (intro && intro.start === null) intro.start = now ?? performance.now();
+  };
 
   const marginWeight = (px) => {
     const l = field.layout;
@@ -379,44 +543,129 @@ export function createField({ stage, state, reduce }) {
       q = Math.max(0, Math.min(1, dd / 72));
     return q * q * (3 - 2 * q);
   };
-  // Chunked strokes: per-chunk column/margin weight (a strand entering a text
-  // column dims there, not by its start point) and a distal taper.
-  const columnWeight = (px) => 0.32 + 0.68 * marginWeight(px);
-  function drawStrand(ctx, p, extent, alpha) {
+  // r11: on the home page the content column carries r9-level mycelium; text is
+  // protected locally by a background-coloured glyph halo (design.css), never
+  // by dimming the whole column. App pages keep the r10 column weight.
+  const apex = document.body.classList.contains("apex"),
+    column = apex ? (light ? 0.4 : 0.7) : 0.32;
+  const columnWeight = (px) => column + (1 - column) * marginWeight(px);
+  const CH = 10;
+  /** Draws points [from, to) of a strand (fractional ends), chunked with a
+   * per-chunk column weight and distal taper fixed by chunk position, so
+   * incremental (intro) and one-shot rasters match. Butt caps throughout: no
+   * alpha beads at joints. Fuzz and knots inside the range are drawn too. */
+  function drawRange(ctx, p, from, to, alpha, detail = false) {
     const pts = p.points,
       n = pts.length - 1,
-      end = Math.min(n, extent),
-      CH = 10;
-    ctx.lineCap = p.width < 0.55 ? "butt" : "round";
-    for (let i = 0; i < end; i += CH) {
-      const j = Math.min(i + CH, Math.ceil(end)),
-        mid = pts[Math.min(n, (i + j) >> 1)],
+      end = Math.min(n, to);
+    if (end <= from) return;
+    ctx.lineCap = "butt";
+    let f = 0;
+    if (detail && !p.fuzz && p.fuzzSeed >= 0) p.fuzz = makeFuzz(p, p.fuzzSeed);
+    const fz = detail ? p.fuzz : null;
+    if (fz) while (f < fz.length && fz[f] < from) f += 7;
+    for (let c0 = Math.floor(from / CH) * CH; c0 < end; c0 += CH) {
+      const j = Math.min(c0 + CH, Math.ceil(end)),
+        i0 = Math.max(c0, from),
+        mid = pts[Math.min(n, c0 + CH / 2)],
         w = p.margin ? marginWeight(mid.x) : columnWeight(mid.x);
-      if (w <= 0.01) continue;
-      const distal = (i + j) / 2 > n * 0.5;
-      ctx.globalAlpha = alpha * w * lightMul * (distal ? p.taper : 1);
+      if (w <= 0.01) {
+        if (fz) while (f < fz.length && fz[f] < j) f += 7;
+        continue;
+      }
+      const distal = c0 + CH / 2 > n * 0.5,
+        ga = alpha * w * lightMul * (distal ? p.taper : 1);
+      ctx.globalAlpha = ga;
       ctx.lineWidth = p.width * (distal ? 0.7 : 1);
       ctx.beginPath();
-      ctx.moveTo(pts[i].x, pts[i].y);
-      for (let k = i + 1; k <= j; k++) {
-        const f = Math.min(1, end - k + 1);
-        if (f <= 0) break;
-        ctx.lineTo(pts[k - 1].x + (pts[k].x - pts[k - 1].x) * f, pts[k - 1].y + (pts[k].y - pts[k - 1].y) * f);
+      const k0 = Math.floor(i0),
+        u = i0 - k0,
+        a0 = pts[k0],
+        b0 = pts[Math.min(n, k0 + 1)];
+      ctx.moveTo(a0.x + (b0.x - a0.x) * u, a0.y + (b0.y - a0.y) * u);
+      for (let k = k0 + 1; k <= j; k++) {
+        const fr = Math.min(1, end - k + 1);
+        if (fr <= 0) break;
+        ctx.lineTo(pts[k - 1].x + (pts[k].x - pts[k - 1].x) * fr, pts[k - 1].y + (pts[k].y - pts[k - 1].y) * fr);
       }
       ctx.stroke();
+      if (fz && f < fz.length && fz[f] < Math.min(j, end)) {
+        ctx.globalAlpha = ga * 0.6;
+        ctx.lineWidth = Math.max(0.28, p.width * 0.55);
+        ctx.beginPath();
+        for (; f < fz.length && fz[f] < Math.min(j, end); f += 7) {
+          ctx.moveTo(fz[f + 1], fz[f + 2]);
+          ctx.quadraticCurveTo(fz[f + 3], fz[f + 4], fz[f + 5], fz[f + 6]);
+        }
+        ctx.stroke();
+      }
     }
+    if (detail && p.knots)
+      for (const k of p.knots) if (k.i >= from && k.i < end && !k.underText) drawKnot(ctx, k, alpha * (p.margin ? marginWeight(k.x) : columnWeight(k.x)) * lightMul);
+  }
+  const knotCore = rgba(light ? glow : core, 1),
+    knotMid = rgba(glow, 0.55),
+    knotEdge = rgba(glow, 0);
+  /** A tangled ball: overlapping soft lobes (no circle path) plus fibres wound
+   * tangentially into it. No arc() anywhere. */
+  function drawKnot(ctx, k, a, boost = 1) {
+    const A = Math.min(1, a * k.bright * 1.7 * boost);
+    if (A <= 0.01 || k.underText) return;
+    ctx.save();
+    ctx.translate(k.x, k.y);
+    ctx.rotate(k.ang);
+    ctx.scale(k.el, 1);
+    ctx.globalAlpha = A;
+    for (const [dx, dy, rr] of k.lobes) {
+      const R1 = rr * 1.7,
+        g = ctx.createRadialGradient(dx, dy, 0, dx, dy, R1);
+      g.addColorStop(0, knotCore);
+      g.addColorStop(0.45, knotMid);
+      g.addColorStop(1, knotEdge);
+      ctx.fillStyle = g;
+      ctx.fillRect(dx - R1, dy - R1, R1 * 2, R1 * 2);
+    }
+    ctx.strokeStyle = light ? glow : core;
+    ctx.lineWidth = 0.32;
+    ctx.globalAlpha = A * 0.75;
+    ctx.beginPath();
+    for (const [o, sweep, rad, len] of k.fibres) {
+      const r0 = k.r * (1.3 + rad),
+        o1 = o + sweep * 0.2 * len,
+        o2 = o + sweep * 0.36 * len;
+      ctx.moveTo(Math.cos(o) * r0, Math.sin(o) * r0);
+      ctx.quadraticCurveTo(Math.cos(o1) * r0 * 0.95, Math.sin(o1) * r0 * 0.95, Math.cos(o2) * k.r * 0.35, Math.sin(o2) * k.r * 0.35);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  const statics = () => field.strands.filter((p) => p.static);
+  function eachShift(p, fn) {
+    for (const shift of [-field.height, 0, field.height]) {
+      if (p.box[3] + shift < field.top || p.box[1] + shift > field.top + field.height) continue;
+      bx.save();
+      bx.translate(0, shift);
+      fn();
+      bx.restore();
+    }
+  }
+  function resetTile() {
+    // Full device-pixel resolution: r9/r10 rastered this tile at CSS pixels and
+    // the DPR transform upscaled it (the blurry sidebars and field).
+    tile.width = Math.ceil(field.width * d);
+    tile.height = Math.ceil(field.height * d);
+    bx.setTransform(d, 0, 0, d, -field.left * d, -field.top * d);
+    bx.clearRect(field.left, field.top, field.width, field.height);
+    bx.strokeStyle = glow;
+    bx.globalCompositeOperation = light ? "source-over" : "lighter";
+    for (const p of field.strands) p.drawn = 0;
   }
   // The static tile is rasterised in bounded slices (no long task); it is
   // presented as it fills, like the hero.
   let rasterJob = 0;
   function rasterStatic() {
-    tile.width = field.width;
-    tile.height = Math.ceil(field.height);
-    bx.setTransform(1, 0, 0, 1, -field.left, -field.top);
-    bx.clearRect(field.left, field.top, field.width, field.height);
-    bx.strokeStyle = glow;
-    bx.globalCompositeOperation = light ? "source-over" : "lighter";
-    const list = field.strands.filter((p) => p.static),
+    resetTile();
+    const list = statics(),
       job = ++rasterJob;
     let i = 0;
     const ch = new MessageChannel();
@@ -424,14 +673,10 @@ export function createField({ stage, state, reduce }) {
       if (disposed || job !== rasterJob) return;
       const t0 = performance.now();
       while (i < list.length && performance.now() - t0 < 8) {
-        const p = list[i++];
-        for (const shift of [-field.height, 0, field.height]) {
-          if (p.box[3] + shift < field.top || p.box[1] + shift > field.top + field.height) continue;
-          bx.save();
-          bx.translate(0, shift);
-          drawStrand(bx, p, p.points.length - 1, p.alpha * fieldAlpha);
-          bx.restore();
-        }
+        const p = list[i++],
+          n = p.points.length - 1;
+        eachShift(p, () => drawRange(bx, p, 0, n, p.alpha * fieldAlpha, true));
+        p.drawn = n;
       }
       tileVersion++;
       if (i < list.length) ch.port2.postMessage(0);
@@ -439,21 +684,172 @@ export function createField({ stage, state, reduce }) {
     };
     ch.port2.postMessage(0);
   }
-  function attach() {
-    field = scene ? scene.field : field;
-    graph = scene ? scene.graph : graph;
+  const indexAt = (p, px) => {
+    const arc = p.arc,
+      n = arc.length - 1;
+    if (px <= 0) return 0;
+    if (px >= arc[n]) return n;
+    let lo = 0,
+      hi = n;
+    while (hi - lo > 1) {
+      const m = (lo + hi) >> 1;
+      if (arc[m] < px) lo = m;
+      else hi = m;
+    }
+    return lo + (px - arc[lo]) / Math.max(1e-6, arc[hi] - arc[lo]);
+  };
+  /** Intro step: grows the static tile incrementally to the current intro
+   * time. Field sources and margin colonies start at t=0; hero-edge
+   * continuations join when the hero reaches its edges. */
+  function introStep(now, unbounded = false) {
+    if (!intro || !field) return;
+    const t = introTime(now);
+    if (intro.heroAt === null) {
+      const hp = window.MyceliumHero?.introProgress;
+      if (typeof hp === "number" ? hp >= 0.75 : t >= HERO_EDGE_S) intro.heroAt = Math.min(t, 5);
+    }
+    const dA = easeOut(t / (INTRO_MS / 1000)) * span.A,
+      dH = intro.heroAt === null ? -1 : easeOut((t - intro.heroAt) / Math.max(0.8, INTRO_MS / 1000 - intro.heroAt)) * span.H;
+    const list = intro.list,
+      t0 = performance.now();
+    let drawn = false,
+      pending = false;
+    tips = [];
+    for (let k = 0; k < list.length; k++) {
+      const p = list[(intro.cursor + k) % list.length],
+        target = indexAt(p, (p.heroFamily ? dH : dA) - p.s0),
+        n = p.points.length - 1;
+      if (target > 0 && target < n) tips.push([p, target]);
+      if (target <= p.drawn + 1e-6) continue;
+      if (!unbounded && performance.now() - t0 > 3.5) {
+        intro.cursor = (intro.cursor + k) % list.length;
+        pending = true;
+        break;
+      }
+      const from = p.drawn;
+      eachShift(p, () => drawRange(bx, p, from, target, p.alpha * fieldAlpha, true));
+      p.drawn = target;
+      drawn = true;
+    }
+    if (drawn) tileVersion++;
+    // At INTRO_MS everything is established (endIntro closes float remainders).
+    if (!pending && t >= INTRO_MS / 1000) endIntro();
+  }
+  function endIntro() {
+    if (!intro) return;
+    if (field) {
+      for (const p of intro.list || statics()) {
+        const n = p.points.length - 1;
+        if (p.drawn < n) {
+          const from = p.drawn;
+          eachShift(p, () => drawRange(bx, p, from, n, p.alpha * fieldAlpha, true));
+          p.drawn = n;
+        }
+      }
+      tileVersion++;
+      c.dataset.tile = "1";
+    }
+    intro = null;
+    tips = [];
+    introEnded = performance.now();
+    c.dataset.intro = "done";
+  }
+  function prepare() {
+    let k = 0;
+    span = { A: 1, H: 1 };
     for (const p of field.strands) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const q of p.points) {
+      const arc = new Float32Array(p.points.length);
+      for (let i = 0; i < p.points.length; i++) {
+        const q = p.points[i];
         if (q.x < x0) x0 = q.x;
         if (q.y < y0) y0 = q.y;
         if (q.x > x1) x1 = q.x;
         if (q.y > y1) y1 = q.y;
+        if (i) arc[i] = arc[i - 1] + Math.hypot(q.x - p.points[i - 1].x, q.y - p.points[i - 1].y);
       }
-      p.box = [x0 - 3, y0 - 3, x1 + 3, y1 + 3];
+      p.box = [x0 - 14, y0 - 14, x1 + 14, y1 + 14]; // fuzz and knots overhang the polyline
+      p.arc = arc;
+      const par = p.introParent;
+      p.heroFamily = !!(p.heroFamily || par?.heroFamily);
+      p.s0 = par ? (par.s0 ?? 0) + (p.introAt ?? 0) : p.introStart ?? 0;
+      const reach = p.s0 + arc[arc.length - 1];
+      if (p.static) span[p.heroFamily ? "H" : "A"] = Math.max(span[p.heroFamily ? "H" : "A"], reach);
+      // Every persistent strand carries fine hairs except the colony tuft hairs (they are the fuzz).
+      // Fuzz is generated lazily on the strand's first raster (no start-up long task).
+      p.fuzzSeed = p.static && (!p.hair || p.order === 1) && !p.tuft ? k : -1;
+      k++;
     }
+  }
+  /** Knots never sit under glyphs: any tiled page copy of a knot that falls in
+   * a (padded) text line box is skipped, since a bright point there would beat
+   * the glyph halo. Recomputed whenever the layout changes. */
+  function markKnotsUnderText() {
+    const range = document.createRange(),
+      rects = [],
+      heroTop = scene ? scene.hero.top : 0,
+      docH = document.documentElement.scrollHeight;
+    for (const root of document.querySelectorAll("main, footer")) {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (!n.nodeValue.trim()) continue;
+        range.selectNodeContents(n);
+        for (const r of range.getClientRects()) if (r.width > 1) rects.push([r.left - 18, r.top + scrollY - 18, r.right + 18, r.bottom + scrollY + 18]);
+      }
+    }
+    let n = 0;
+    for (const k of field.hyphalKnots) {
+      k.underText = false;
+      for (let m = -2; !k.underText && m <= Math.ceil(docH / field.height) + 2; m++) {
+        const py = heroTop + k.y + m * field.height;
+        if (py < -50 || py > docH + 50) continue;
+        k.underText = rects.some((r) => k.x > r[0] && k.x < r[2] && py > r[1] && py < r[3]);
+      }
+      n += k.underText;
+    }
+    return n;
+  }
+  /** Margin colony tufts as small full-DPR sprites, for compositor-cheap breathing. */
+  function colonySprite(knot) {
+    let s = colonySprites.get(knot);
+    if (s) return s;
+    const tufts = field.strands.filter((p) => p.tuft && p.marginRoot === knot);
+    if (!tufts.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of tufts) {
+      x0 = Math.min(x0, p.box[0]);
+      y0 = Math.min(y0, p.box[1]);
+      x1 = Math.max(x1, p.box[2]);
+      y1 = Math.max(y1, p.box[3]);
+    }
+    const cv = document.createElement("canvas"),
+      cx = cv.getContext("2d");
+    cv.width = Math.ceil((x1 - x0) * d);
+    cv.height = Math.ceil((y1 - y0) * d);
+    cx.setTransform(d, 0, 0, d, -x0 * d, -y0 * d);
+    cx.strokeStyle = light ? glow : core;
+    cx.globalCompositeOperation = light ? "source-over" : "lighter";
+    for (const p of tufts) drawRange(cx, p, 0, p.points.length - 1, p.alpha * fieldAlpha);
+    s = { cv, x0, y0, w: x1 - x0, h: y1 - y0, period: 9 + ((knot.x * 7 + knot.y * 13) % 7), phase: (knot.x + knot.y) % 6.28 };
+    colonySprites.set(knot, s);
+    return s;
+  }
+  function attach() {
+    field = scene ? scene.field : field;
+    graph = scene ? scene.graph : graph;
+    prepare();
     liveStrands = field.strands.filter((p) => !p.static);
-    rasterStatic();
+    const knotsHidden = markKnotsUnderText();
+    if (intro && !(intro.start !== null && introTime() >= INTRO_MS / 1000)) {
+      resetTile();
+      intro.list = statics();
+      intro.cursor = 0;
+      c.dataset.intro = "running";
+    } else {
+      intro = null;
+      c.dataset.intro = "skipped";
+      rasterStatic();
+    }
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
       const legs = r.paths.map((p) => {
@@ -469,15 +865,19 @@ export function createField({ stage, state, reduce }) {
       const landing = scene?.routes?.[0]?.landings.find((l) => l.node === r.source.source)?.time || 0;
       return { ...r, legs, period, phase: landing + 3 + side * 9, chosen: new Map() };
     });
+    const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
       paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,
       densityMultiplier: 1.2, baseCount: field.baseCount, count: field.count, sharedGraph: !!scene, connectors: 0, canvasCount: 2, flowSources: field.flowSources,
       ...field.rootAudit, explorerLoneThreads: scene?.graph.explorerAudit?.loneThreads ?? 0, explorerAudit: scene?.graph.explorerAudit,
       marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: 0.75, marginPulseLeak: 135,
       marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,
-      canvasPixels: c.width * c.height, bytes: (2 * c.width * c.height + tile.width * tile.height) * 4,
-
+      canvasPixels: c.width * c.height, bytes: (2 * c.width * c.height + tile.width * tile.height) * 4, tileScale: tile.width / field.width, dpr: d,
+      runners: field.strands.filter((p) => p.runner).length,
+      knots: field.hyphalKnots.length, knotsUnderText: knotsHidden, knotGroups: new Set(field.hyphalKnots.map((k) => k.group)).size, knotRadii: field.hyphalKnots.map((k) => +k.r.toFixed(2)),
+      introMs: INTRO_MS, columnWeight: column,
     };
+    Object.defineProperty(window.__understoryAudit, "fuzz", { enumerable: true, get: fuzzCount });
     // Heavy audits are computed lazily on first read, never during start-up.
     let straightness = null,
       morphology = null;
@@ -491,13 +891,16 @@ export function createField({ stage, state, reduce }) {
         legs: trips.map((s) => ({ side: s.side, y0: base + Math.min(s.leg.p.points[0].y, s.leg.p.points.at(-1).y), y1: base + Math.max(s.leg.p.points[0].y, s.leg.p.points.at(-1).y) })),
       };
     };
+    // Diagnostic seeks show the established field (the intro is a load-in only).
     window.__setUnderstoryTime = (t) => {
+      endIntro();
       frozen = t;
       schedule();
       paint(t, true);
     };
     if (scene) {
       window.__setPulseTime = (t) => {
+        endIntro();
         frozen = t;
         schedule();
         paint(t, true);
@@ -508,7 +911,23 @@ export function createField({ stage, state, reduce }) {
         paint(frozen ?? clock.elapsed, true);
       };
     }
-    window.__paintUnderstory = (t) => paint(t, true);
+    window.__paintUnderstory = (t) => {
+      endIntro();
+      paint(t, true);
+    };
+    /** Capture hook: render the field intro at `ms` (forward seeks are incremental). */
+    window.__setFieldIntro = (ms, t = ms / 1000) => {
+      if (!intro || (intro.manual !== null && ms < intro.manual)) {
+        intro = { start: 0, heroAt: null, cursor: 0, manual: ms, list: statics() };
+        resetTile();
+      }
+      intro.manual = ms;
+      frozen = t;
+      introStep(performance.now(), true);
+      schedule();
+      paint(t, true);
+      return { drawn: field.strands.filter((p) => p.static && p.drawn >= p.points.length - 1).length, statics: intro?.list.length ?? 0, done: !intro };
+    };
     lastVersion = -1;
     paint(frozen ?? clock.elapsed, true);
     c.dataset.ready = "1";
@@ -527,7 +946,7 @@ export function createField({ stage, state, reduce }) {
       if (!leg) {
         const pageY = (q) => (scene ? scene.hero.top : 0) + q.y;
         const k = Math.floor((viewTop - (scene ? scene.hero.top : 0) - field.top) / field.height);
-        const shift = (scene ? 0 : 0) + Math.max(0, k) * field.height;
+        const shift = Math.max(0, k) * field.height;
         leg = s.legs
           .map((l) => ({ l, score: Math.abs((pageY(l.p.points[0]) + pageY(l.p.points.at(-1))) / 2 + shift - (viewTop + viewBottom) / 2) }))
           .sort((a, b) => a.score - b.score)[0].l;
@@ -548,6 +967,9 @@ export function createField({ stage, state, reduce }) {
       scroll = scrollY,
       heroTop = scene ? scene.hero.top : 0,
       oy = heroTop - scroll; // page-space origin of scene coordinates
+    let heroCost = 0;
+    if (intro && (reduced || document.hidden)) endIntro();
+    if (intro && intro.manual === null) introStep(begin);
     // Bakes are batched to 4 s while running (one static redraw per batch at most).
     if (scene?.bakeUntil) frozen !== null || reduced ? scene.bakeUntil(A) : scene.bakeUntil(Math.floor(A / 4) * 4, true);
     const version = (scene ? scene.hero.version : 0) * 1000 + tileVersion;
@@ -561,7 +983,7 @@ export function createField({ stage, state, reduce }) {
       for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
         const y = origin + k * field.height;
         if (y > height || y + field.height < 0) continue;
-        x.drawImage(tile, field.left, y);
+        x.drawImage(tile, field.left, y, tile.width / d, tile.height / d);
       }
       if (scene && origin + 280 > 0 && origin < height) {
         // The field fades in beneath the hero: no horizontal start line.
@@ -594,15 +1016,18 @@ export function createField({ stage, state, reduce }) {
     lx.globalCompositeOperation = light ? "source-over" : "lighter";
     let liveStats = null;
     if (scene?.drawLive && oy < height && oy + scene.hero.H > 0) {
+      const h0 = performance.now();
       lx.save();
       lx.translate(0, oy);
       const hb = [Infinity, Infinity, -Infinity, -Infinity];
       liveStats = scene.drawLive(lx, scene.pulsesOff || reduced ? -1e6 : t, A, hb);
       lx.restore();
       if (hb[0] < Infinity) add(hb[0], hb[1] + oy, hb[2], hb[3] + oy);
+      heroCost = performance.now() - h0;
     }
     const origin = oy + field.top,
-      first = Math.floor(-origin / field.height);
+      first = Math.floor(-origin / field.height),
+      settle = intro ? 0 : smooth((performance.now() - introEnded) / 2500);
     for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
       const y = origin + k * field.height;
       if (y > height || y + field.height < 0) continue;
@@ -610,14 +1035,44 @@ export function createField({ stage, state, reduce }) {
       lx.translate(0, y - field.top);
       lx.strokeStyle = glow;
       const shift = y - field.top;
-      for (const p of liveStrands) {
-        if (p.box[3] + shift < 0 || p.box[1] + shift > height) continue;
-        const v = life(p, t, reduced);
-        if (v.alpha <= 0 || v.extent <= 0) continue;
-        drawStrand(lx, p, v.extent, v.alpha * fieldAlpha);
-        add(p.box[0], p.box[1] + shift, p.box[2], p.box[3] + shift);
+      if (settle > 0)
+        for (const p of liveStrands) {
+          if (p.box[3] + shift < 0 || p.box[1] + shift > height) continue;
+          const v = life(p, t, reduced);
+          if (v.alpha <= 0 || v.extent <= 0) continue;
+          drawRange(lx, p, 0, v.extent, v.alpha * fieldAlpha * settle);
+          add(p.box[0], p.box[1] + shift, p.box[2], p.box[3] + shift);
+        }
+      // Intro: the growing rim is brightest (pulse-like light at every tip).
+      if (intro && tips.length) {
+        lx.strokeStyle = core;
+        lx.lineCap = "butt";
+        for (const [p, at] of tips) {
+          const q = p.points[Math.floor(at)];
+          if (q.y + shift < -20 || q.y + shift > height + 20) continue;
+          const w = p.margin ? marginWeight(q.x) : columnWeight(q.x);
+          if (w <= 0.01) continue;
+          const from = Math.max(0, at - 7);
+          lx.globalAlpha = Math.min(1, (light ? 0.35 : 0.6) * w * lightMul * (p.hair ? 0.6 : 1));
+          lx.lineWidth = p.width * 1.6;
+          lx.beginPath();
+          lx.moveTo(p.points[Math.floor(from)].x, p.points[Math.floor(from)].y);
+          for (let i = Math.floor(from) + 1; i <= Math.floor(at); i++) lx.lineTo(p.points[i].x, p.points[i].y);
+          lx.stroke();
+          add(q.x - 22, q.y + shift - 22, q.x + 22, q.y + shift + 22);
+        }
       }
-      if (!reduced)
+      // Breathing: margin colony mats brighten and settle, de-synchronised.
+      if (!reduced && settle > 0)
+        for (const knot of field.marginKnots) {
+          if (knot.y + shift < -120 || knot.y + shift > height + 120) continue;
+          const s = colonySprite(knot);
+          if (!s) continue;
+          lx.globalAlpha = settle * (light ? 0.18 : 0.32) * (0.5 - 0.5 * Math.cos((t / s.period) * 6.283 + s.phase));
+          lx.drawImage(s.cv, s.x0, s.y0, s.w, s.h);
+          add(s.x0, s.y0 + shift, s.x0 + s.w, s.y0 + s.h + shift);
+        }
+      if (!reduced && !intro)
         for (const trip of marginTrips(t)) {
           lx.strokeStyle = core;
           lx.lineCap = "butt";
@@ -638,11 +1093,18 @@ export function createField({ stage, state, reduce }) {
             lx.lineWidth = 1.1;
             lx.stroke();
           }
+          // Knots on the route brighten as the crest passes.
+          for (const kn of trip.leg.p.knots || []) {
+            const dt = trip.age - (trip.leg.p.arc?.[kn.i] ?? 0) / 80;
+            if (dt < 0 || dt > 5.6) continue;
+            drawKnot(lx, kn, envelope(dt) * gain * marginWeight(kn.x), 1.4);
+          }
           add(trip.leg.p.box[0] - 140, trip.leg.p.box[1] + shift - 140, trip.leg.p.box[2] + 140, trip.leg.p.box[3] + shift + 140);
           const node = trip.leg.p.points.at(-1),
             age = trip.age - trip.leg.duration;
           if (age >= 0 && age < 5) {
             // Short peripheral leak along the receiving tuft's own hyphae.
+            lx.strokeStyle = core;
             for (const p of field.strands) {
               if (!p.margin || (p.marginRoot || p.points[0]) !== node) continue;
               let distance = p.marginDistance || 0;
@@ -680,6 +1142,7 @@ export function createField({ stage, state, reduce }) {
             const v = life(p, t, false);
             if (v.extent < (s.fieldIndex || 0) + 1 || v.alpha <= 0) continue;
           }
+          if (p && p.static && intro && p.drawn < (s.fieldIndex || 0) + 1) continue;
           lx.globalAlpha = envelope(dt) * item.amp * (light ? 0.24 : 0.75);
           add(Math.min(s.a.x, s.b.x) - 3, Math.min(s.a.y, s.b.y) + oy - 3, Math.max(s.a.x, s.b.x) + 3, Math.max(s.a.y, s.b.y) + oy + 3);
           lx.lineWidth = Math.max(0.5, s.width * 1.8);
@@ -696,9 +1159,11 @@ export function createField({ stage, state, reduce }) {
     metrics.frames++;
     metrics.costs.push(cost);
     metrics.liveCosts.push(performance.now() - lb);
+    metrics.fieldCosts.push(cost - heroCost);
     if (metrics.costs.length > 1200) {
       metrics.costs.shift();
       metrics.liveCosts.shift();
+      metrics.fieldCosts.shift();
     }
     if (scene) {
       const pm = window.__pulseMetrics;
@@ -720,6 +1185,7 @@ export function createField({ stage, state, reduce }) {
   }
   function tick(now) {
     raf = 0;
+    firstFrame(now);
     const T = clock.tick(now);
     paint(T);
     schedule();
@@ -746,21 +1212,24 @@ export function createField({ stage, state, reduce }) {
   function buildTick(now) {
     buildRaf = 0;
     if (disposed || field) return;
+    firstFrame(now);
     if (scene) {
-      const T = clock.tick(now),
-        oy = scene.hero.top - scrollY;
+      const oy = scene.hero.top - scrollY;
       if (scene.hero.version !== lastVersion || scrollY !== lastScroll) {
         x.clearRect(0, 0, width, height);
         if (!reduce.matches) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
         lastVersion = scene.hero.version;
         lastScroll = scrollY;
       }
-      void T;
+      clock.tick(now);
     }
     buildRaf = requestAnimationFrame(buildTick);
   }
   const changed = () => {
-    if (document.hidden || reduce.matches) clock.pause();
+    if (document.hidden || reduce.matches) {
+      clock.pause();
+      endIntro(); // hidden tab or reduced motion: the final state immediately
+    }
     if (field) paint(frozen ?? clock.elapsed, true);
     schedule();
   };
@@ -778,6 +1247,7 @@ export function createField({ stage, state, reduce }) {
     });
   } else {
     // Swarms app pages: a standalone field graph, also built in slices.
+    buildRaf = requestAnimationFrame(buildTick);
     const vs = [],
       ss = [],
       paths = [];
@@ -806,6 +1276,7 @@ export function createField({ stage, state, reduce }) {
       if (!r.done) return ch.port2.postMessage(0);
       field = r.value;
       graph = { vs, ss };
+      cancelAnimationFrame(buildRaf);
       attach();
     };
     ch.port2.postMessage(0);
@@ -815,7 +1286,12 @@ export function createField({ stage, state, reduce }) {
     const previous = field.layout;
     field.layout = contentBounds(previous.offset);
     if (window.__understoryAudit) window.__understoryAudit.protectedRects = field.layout.rects;
-    if (previous.left !== field.layout.left || previous.right !== field.layout.right) rasterStatic();
+    const moved = field.hyphalKnots.map((k) => k.underText).join() !== (markKnotsUnderText(), field.hyphalKnots.map((k) => k.underText).join());
+    if (moved || previous.left !== field.layout.left || previous.right !== field.layout.right) {
+      intro = null;
+      colonySprites.clear();
+      rasterStatic();
+    }
   });
   layoutObserver.observe(document.querySelector("main"), { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
   window.addEventListener("scroll", scrolled, { passive: true });
@@ -832,6 +1308,8 @@ export function createField({ stage, state, reduce }) {
     document.removeEventListener("visibilitychange", changed);
     reduce.removeEventListener("change", changed);
     tile.width = tile.height = 0;
+    for (const s of colonySprites.values()) s.cv.width = s.cv.height = 0;
+    colonySprites.clear();
     live.width = live.height = 0;
     live.remove();
   };
