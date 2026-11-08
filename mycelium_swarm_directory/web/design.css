@@ -196,28 +196,13 @@ button {
   pointer-events: none;
   overflow: hidden;
 }
-.art-canvas,
-.pulse-canvas {
+.art-canvas {
+  /* Hidden page-space source raster; sized by the renderer, never visible. */
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
-  mask-image:
-    linear-gradient(
-      90deg,
-      #0000000a 0%,
-      #00000008 36%,
-      #00000044 48%,
-      #000 60%,
-      #000 96%,
-      transparent
-    ),
-    linear-gradient(0deg, transparent, #000 12%, #000 90%, transparent);
-  mask-composite: intersect;
-}
-.pulse-canvas {
-  mix-blend-mode: screen;
 }
 .page-mycelium {
   position: fixed;
@@ -226,14 +211,39 @@ button {
   height: 100%;
   pointer-events: none;
   z-index: 0;
-  opacity: 1;
+}
+.page-mycelium-live {
+  mix-blend-mode: screen;
+}
+/* Per-colony breathing: compositor opacity with desynchronised durations. */
+.mycelium-breath {
+  position: absolute;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.mycelium-breath canvas {
+  position: absolute;
+  opacity: 0;
+  animation: mycelium-breathe 14s ease-in-out infinite;
+}
+.mycelium-breath.paused canvas {
+  animation-play-state: paused;
+}
+@keyframes mycelium-breathe {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.13;
+  }
 }
 @media (prefers-color-scheme: light) {
-  .pulse-canvas {
+  .page-mycelium-live,
+  .mycelium-breath {
     mix-blend-mode: multiply;
-  }
-  .page-mycelium {
-    opacity: 1;
   }
 }
 .apex-now {
@@ -480,17 +490,6 @@ button {
   .hero-art {
     inset-inline: -18px;
   }
-  .art-canvas,
-  .pulse-canvas {
-    mask-image: linear-gradient(
-      0deg,
-      transparent,
-      #000 6%,
-      #000 29%,
-      #00000018 43%,
-      #00000009 100%
-    );
-  }
   .apex-counts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -541,5 +540,9 @@ button {
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;
+  }
+  .mycelium-breath canvas {
+    animation: none;
+    opacity: 0.06;
   }
 }

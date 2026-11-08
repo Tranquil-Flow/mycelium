@@ -8,7 +8,7 @@ def test_dendritic_tips_and_fusions_are_connected_and_fixed(local):
         browser = p.chromium.launch()
         page = browser.new_page(viewport={'width':1440,'height':900})
         page.goto(local['directory'].origin + '/')
-        page.wait_for_function('!!window.__setPulseTime')
+        page.wait_for_selector('#page-mycelium[data-ready="1"]', state='attached', timeout=30000)
         assert page.evaluate('typeof window.__dendriticProbe') == 'function'
         result = page.evaluate('''()=>{
           const before=JSON.stringify(__rootPaths),samples=[];

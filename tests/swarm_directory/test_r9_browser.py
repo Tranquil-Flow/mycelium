@@ -19,6 +19,9 @@ def test_glow_preference_motion_and_reserved_layout(local, width, height, theme)
         expect(page.locator('[data-glow-choice=green]')).to_have_attribute('aria-pressed', 'true')
         assert page.evaluate('localStorage.length') == 0  # no preference until an explicit choice
         expect(page.locator('#hyphae')).to_have_attribute('data-spore-nodes', '0')
+        # R10 builds in idle slices; reduced motion presents only the finished state.
+        expect(page.locator('#hyphae')).to_have_attribute('data-built', '1', timeout=30000)
+        expect(page.locator('#page-mycelium')).to_have_attribute('data-ready', '1', timeout=30000)
         before = page.locator('#hyphae').evaluate('(c)=>c.toDataURL()')
         page.wait_for_timeout(700)
         assert before == page.locator('#hyphae').evaluate('(c)=>c.toDataURL()')

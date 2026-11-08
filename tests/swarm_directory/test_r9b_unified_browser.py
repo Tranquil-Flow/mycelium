@@ -11,7 +11,7 @@ def test_unified_scene_has_reachable_field_and_bounded_buffers(local,theme,width
     with sync_playwright() as p:
         b=p.chromium.launch();c=b.new_context(viewport={'width':width,'height':900},color_scheme=theme)
         c.add_init_script(CLS);page=c.new_page();page.goto(local['directory'].origin+'/')
-        page.wait_for_function('!!window.__myceliumScene && !!window.__setUnderstoryTime')
+        page.wait_for_selector('#page-mycelium[data-ready="1"]', state='attached', timeout=30000)
         result=page.evaluate('''()=>{const s=__myceliumScene;
           const fieldEdges=s.routes.flatMap(r=>r.fieldList).filter(v=>s.graph.ss[v.segment].b.y>s.field.top);
           const oldBytes=__understoryAudit.bytes;document.body.style.minHeight='100000px';scrollTo(0,80000);__setPulseTime(24);

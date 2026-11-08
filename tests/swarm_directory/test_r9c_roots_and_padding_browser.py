@@ -22,19 +22,25 @@ def test_spore_rasters_have_clear_edges_at_icon_and_detail_sizes(local,dpr):
 def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
     with sync_playwright() as p:
         b=p.chromium.launch();page=b.new_page(viewport={'width':width,'height':900})
-        page.goto(local['directory'].origin+'/');page.wait_for_function('!!window.__understoryAudit')
+        page.goto(local['directory'].origin+'/');page.wait_for_selector('#page-mycelium[data-ready="1"]',state='attached',timeout=30000)
         audit=page.evaluate('__understoryAudit')
         assert audit.get('loneThreads')==0,audit
         assert page.evaluate('''()=>__myceliumScene.field.strands.every(p=>p.segments.length===p.points.length-1)'''), 'Every visible field edge must exist in the shared graph'
         assert audit.get('minLateralsPer100px',0)>=4
         assert audit.get('explorerLoneThreads')==0
-        assert audit['straightness']['understory']['whole']['p95']<.995
+        # R10 (D36): the 28 px chord guard is replaced by the two-sided visible-scale
+        # audit. Persistent hyphae may hold their heading end to end, but no
+        # >=150 px window may be ruler-straight, and nothing may scribble.
+        m=audit['morphology'];w=m['window150']
+        assert w['count']>0 and w['above099']/w['count']<.12 and w['max']<.999,w
+        assert m['turningPer100px']['p95']<2.2 and m['uturnsPer1000px']<.05,m
+        assert m['periodicity']['p50']<.35,m
         assert audit.get('marginKnots',0)>0 if width>=1440 else audit.get('marginKnots',0)==0
         assert audit.get('marginDensityRatio')==.4
         # One clock must remain aligned after the hero spends time offscreen.
         page.evaluate('scrollTo(0,1600)');page.wait_for_timeout(350)
         page.evaluate('scrollTo(0,0)');page.wait_for_timeout(150)
-        delta=page.evaluate("Math.abs(Number(document.querySelector('.pulse-canvas').dataset.time)-Number(document.querySelector('#page-mycelium').dataset.time))")
+        delta=page.evaluate("Math.abs(Number(document.querySelector('#hyphae').dataset.growthTime)-Number(document.querySelector('#page-mycelium').dataset.time))")
         assert delta<.08,delta
         pulses=page.evaluate('''()=>Array.from({length:1200},(_,i)=>__marginPulseProbe(i/2))''')
         assert all(len(s['active'])==len(set(s['active'])) for s in pulses)
@@ -51,5 +57,6 @@ def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
             assert all(.85<=r<=1 for r in audit['marginPulseRateRelative'])
         assert audit['marginPulseLeak']==135
         page.set_viewport_size({'width':800,'height':900});page.wait_for_timeout(400)
+        page.wait_for_selector('#page-mycelium[data-ready="1"]',state='attached',timeout=30000)
         assert page.evaluate('__understoryAudit.marginKnots')==0
         b.close()

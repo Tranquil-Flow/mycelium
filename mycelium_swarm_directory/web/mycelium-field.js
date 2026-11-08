@@ -1,360 +1,774 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** One page-space scene. Hero and understory share vertices, edges and pulse
- * arrival routes; only this viewport canvas is visible. The vertical field is a
- * bounded periodic graph, not a document-height bitmap. No scroll parallax. */
-import {rng, dendriteWalk, measurePaths, rootLaterals, sceneClock} from './mycelium-geometry.js';
+/** R10 page compositor and below-fold field. One page-space mycelium: the hero
+ * graph and this field share vertices, edges and pulse routes. The field uses
+ * the sparse (ref-8) vocabulary: long fine hyphae holding their heading along a
+ * low-frequency flow away from the hero, the margin colonies and off-screen
+ * sources, branching acutely into 2nd/3rd orders that run alongside the parent
+ * and occasionally fuse into elongated cells. Density falls with distance from
+ * sources and towards text. Two fixed viewport canvases: a static composite
+ * (redrawn only on scroll or bake) and a live layer (fronts, pulses, blooms).
+ */
+import { rng, gauss, smooth, persistWalk, measurePaths, auditPaths, sceneClock } from "./mycelium-geometry.js";
 
-function contentBounds(offset=0) {
-  const main=document.querySelector('main'),box=main.getBoundingClientRect(),style=getComputedStyle(main);
-  let left=box.left+parseFloat(style.paddingLeft||0),right=box.right-parseFloat(style.paddingRight||0);
-  const rects=[...main.querySelectorAll('.card,.sect,.panel,.hero-copy')].map(e=>e.getBoundingClientRect()).filter(r=>r.width&&r.height);
-  for(const r of rects){left=Math.min(left,r.left);right=Math.max(right,r.right);}
-  return {left,right,offset,rects:rects.length,enabled:innerWidth>=1100&&Math.min(left,innerWidth-right)>=60};
+function contentBounds(offset = 0) {
+  const main = document.querySelector("main"),
+    box = main.getBoundingClientRect(),
+    style = getComputedStyle(main);
+  let left = box.left + parseFloat(style.paddingLeft || 0),
+    right = box.right - parseFloat(style.paddingRight || 0);
+  const rects = [...main.querySelectorAll(".card,.sect,.panel,.hero-copy")].map((e) => e.getBoundingClientRect()).filter((r) => r.width && r.height);
+  for (const r of rects) {
+    left = Math.min(left, r.left);
+    right = Math.max(right, r.right);
+  }
+  return { left, right, offset, rects: rects.length, enabled: innerWidth >= 1100 && Math.min(left, innerWidth - right) >= 60 };
 }
-export function extendFieldGraph({vs,ss,paths,vertex,edge,nodes,w,h}) {
-  const R=rng('r9b-connected-field'), height=Math.max(600,innerHeight*2), top=h-150;
-  const offset=document.getElementById('hyphae')?.getBoundingClientRect().left||0;
-  const layout=contentBounds(offset),left=-offset;w=innerWidth;
-  const baseCount=Math.round(w*height/10000), count=Math.round(baseCount*1.2);
-  const strands=[],fusions=[], all=[];
-  const add=(points,root=null,birth=0,width=.42,alpha=.48)=>{
-    const poly=[points[0]], segments=[];
-    let a=points[0];
-    for(let i=1;i<points.length;i++) {
-      const q=points[i],b=q.edges?q:vertex(q.x,q.y,a.source);
-      const s=edge(a,b,width,alpha,1,-1,birth?birth+(i-1)*.5:0);
-      if(s){s.field=true;segments.push(s);}
-      poly.push(b);a=b;
-    }
-    const p={points:poly,segments,width,alpha,birth,phase:root?.phase??R()*120,
-      period:root?.period??(80+R()*60),static:!birth};
-    for(let i=0;i<segments.length;i++){segments[i].fieldPath=p;segments[i].fieldIndex=i;}
-    strands.push(p);paths.push({kind:'field',points:poly});all.push(...poly);return p;
+
+/** Generator: lays the field into the shared graph; returns the field record. */
+export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, h, top: pageTop = 0, budget = () => false, seedOk = () => true }) {
+  const R = rng("r10-sparse-field"),
+    W = document.documentElement.clientWidth || innerWidth,
+    height = Math.max(1800, Math.round(innerHeight * 2.4)),
+    top = h - 150,
+    layout = contentBounds(0),
+    left = 0;
+  w = W;
+  const baseCount = Math.round((w * height) / 26000),
+    count = Math.round(baseCount * 1.2);
+  const strands = [],
+    fusions = [],
+    grid = new Map(),
+    GC = 8;
+  const gk = (x, y) => ((Math.floor(y / GC) + 8192) << 14) ^ (Math.floor(x / GC) + 8192);
+  const index = (q, p) => {
+    const k = gk(q.x, q.y);
+    let l = grid.get(k);
+    if (!l) grid.set(k, (l = []));
+    l.push({ q, p });
   };
-  // First lay the mature field: sparse persistent headings, not wandering snakes.
-  for(let i=0;i<count;i++) {
-    const start=vertex(left+R()*w,top+R()*height,0);
-    const points=dendriteWalk(start,R()*Math.PI*2,95+R()*110,R);
-    add(points);
-  }
-  const mature=strands.slice(), grid=new Map(),cell=12;
-  for(const p of mature)for(const q of p.points){
-    const k=`${Math.floor(q.x/cell)},${Math.floor(q.y/cell)}`;
-    if(!grid.has(k))grid.set(k,[]);grid.get(k).push({q,p});
-  }
-  // Connections between the hero's actual colonies and the field, not decorative
-  // look-alike lines. A spine visits nearby field vertices and thus joins islands.
-  const connectors=[];
-  for(let lane=0;lane<Math.max(3,Math.round(w/260));lane++) {
-    const targetX=left+(lane+.5)*w/Math.max(3,Math.round(w/260));
-    let a=nodes.length?nodes.reduce((a,b)=>Math.hypot(b.x-targetX,b.y-h)<Math.hypot(a.x-targetX,a.y-h)?b:a):mature[lane%mature.length].points[0];
-    for(let y=top+30;y<top+height;y+=100) {
-      const candidates=all.filter(q=>Math.abs(q.y-y)<60);
-      if(!candidates.length)continue;
-      const b=candidates.reduce((a,b)=>Math.abs(b.x-targetX)<Math.abs(a.x-targetX)?b:a);
-      if(a===b)continue;
-      const length=Math.hypot(b.x-a.x,b.y-a.y),n=Math.max(2,Math.ceil(length/3.5)),points=[a];
-      // Endpoint-conditioned, small nonperiodic turns. Endpoints retain identity.
-      let off=0;const offsets=[0];for(let i=1;i<n;i++){off+=(R()-.5)*7;offsets.push(off);}offsets.push(0);
-      const nx=-(b.y-a.y)/(length||1),ny=(b.x-a.x)/(length||1);
-      for(let i=1;i<n;i++)points.push({x:a.x+(b.x-a.x)*i/n+nx*offsets[i],y:a.y+(b.y-a.y)*i/n+ny*offsets[i]});
-      points.push(b);connectors.push(add(points,null,0,.38,.4));a=b;
-    }
-  }
-  function branch(parent,start,heading,length,birth,width,canFuse=true) {
-    let points=dendriteWalk(start,heading,length,R),hit=null;
-    if(canFuse)for(let j=8;j<points.length;j++) {
-      const q=points[j],near=grid.get(`${Math.floor(q.x/cell)},${Math.floor(q.y/cell)}`)||[];
-      const target=near.find(v=>v.p!==parent&&Math.hypot(v.q.x-q.x,v.q.y-q.y)<5);
-      if(target){points=points.slice(0,j).concat([target.q]);hit=target.q;break;}
-    }
-    const p=add(points,parent,birth,width,.5);
-    if(canFuse) {
-      const at=Math.floor(points.length*(.35+R()*.2)),a=p.points[at-1],b=p.points[at];
-      branch(parent,b,Math.atan2(b.y-a.y,b.x-a.x)+(R()<.5?-.6:.6),22+R()*28,birth+at*.5,width*.65,false);
-    }
-    if(hit) {
-      const a=p.points.at(-2),heading=Math.atan2(hit.y-a.y,hit.x-a.x),arrival=birth+(points.length-1)*.5;
-      fusions.push({point:hit,parent:p,birth:arrival});
-      for(const side of [-1,1])branch(parent,hit,heading+side*.5,24+R()*36,arrival+1,width*.7,false);
-    }
-  }
-  for(const parent of mature) {
-    const at=Math.floor(parent.points.length*(.3+R()*.4)),a=parent.points[at-1],b=parent.points[at];
-    branch(parent,b,Math.atan2(b.y-a.y,b.x-a.x)+(R()<.5?-.6:.6),45+R()*60,1,.3);
-  }
-  // Minor peripheral colonies, connected through real vertices. Never swarm icons.
-  const marginRoutes=[],marginKnots=[],marginDensityRatio=.4;
-  const join=(a,b,width=.9)=>{
-    const raw=dendriteWalk(a,Math.atan2(b.y-a.y,b.x-a.x),Math.hypot(b.x-a.x,b.y-a.y),R),last=raw.at(-1);
-    const points=raw.map((q,i)=>({x:q.x+(b.x-last.x)*i/(raw.length-1),y:q.y+(b.y-last.y)*i/(raw.length-1)}));
-    points[0]=a;points[points.length-1]=b;const p=add(points,null,0,width,.7);p.margin=true;return p;
+  // Column weight: dense in wide side margins, sparse and faint under content.
+  const marginWeight = (x) => {
+    if (!layout.enabled) return 0;
+    const dd = x < layout.left ? layout.left - x : x > layout.right ? x - layout.right : 0,
+      q = Math.max(0, Math.min(1, dd / 72));
+    return q * q * (3 - 2 * q);
   };
-  if(layout.enabled)for(const side of [-1,1]){
-    const px=side<0?layout.left*.42:layout.right+(innerWidth-layout.right)*.58;
-    const knots=[];
-    for(let y=top+135;y<top+height;y+=460){
-      const centre=vertex(px-offset+(R()-.5)*18,y+(R()-.5)*75,0);knots.push(centre);marginKnots.push(centre);
-      for(let j=0;j<Math.round(40*marginDensityRatio);j++){
-        const p=add(dendriteWalk(centre,j*Math.PI*2/16+(R()-.5)*.2,15+R()*30,R),null,0,.22+R()*.18,.7);p.margin=true;
+  const columnAlpha = (x) => 0.55 + 0.45 * marginWeight(x);
+  const add = (points, o = {}) => {
+    const poly = [points[0].edges ? points[0] : vertex(points[0].x, points[0].y, 0)],
+      segments = [];
+    let a = poly[0];
+    for (let i = 1; i < points.length; i++) {
+      const q = points[i],
+        b = q.edges ? q : vertex(q.x, q.y, a.source),
+        s = edge(a, b, o.width ?? 0.45, o.alpha ?? 0.5, 1, -1, o.birth ? o.birth + (i - 1) * 0.5 : 0);
+      if (!s) break;
+      s.field = true;
+      s.explorer = true;
+      segments.push(s);
+      poly.push(b);
+      a = b;
+    }
+    const p = { points: poly, segments, width: o.width ?? 0.45, alpha: o.alpha ?? 0.5, birth: o.birth ?? 0, phase: o.phase ?? R() * 160, period: o.period ?? 110 + R() * 90, static: !o.birth, margin: !!o.margin, hair: !!o.hair, order: o.order ?? 0, taper: o.taper ?? 0.55 };
+    for (let i = 0; i < segments.length; i++) {
+      segments[i].fieldPath = p;
+      segments[i].fieldIndex = i;
+    }
+    strands.push(p);
+    paths.push({ kind: "field", points: poly });
+    for (const q of poly) index(q, p);
+    return p;
+  };
+  // Low-frequency flow (600-900 px): away from the hero and from off-screen sources.
+  const virtual = [
+    { x: -220, y: top + height * (0.2 + R() * 0.2) },
+    { x: w + 220, y: top + height * (0.45 + R() * 0.2) },
+    { x: -220 + (R() < 0.5 ? 0 : w + 440), y: top + height * (0.75 + R() * 0.15) },
+  ];
+  const ph = [R() * 6.28, R() * 6.28, R() * 6.28, R() * 6.28];
+  const flow = (x, y) => {
+    let fx = 0,
+      fy = 0.55;
+    for (const s of virtual) {
+      const dx = x - s.x,
+        dy = y - s.y,
+        dd = Math.hypot(dx, dy) || 1,
+        k = 1 / (1 + dd / 650);
+      fx += (dx / dd) * k;
+      fy += (dy / dd) * k;
+    }
+    const n = 0.55 * Math.sin(x / 740 + ph[0] + Math.sin(y / 910 + ph[1])) + 0.35 * Math.sin(y / 640 + ph[2] + x / 1300);
+    const a = Math.atan2(fy, fx) + n;
+    return a;
+  };
+  const pullFlow = (x, y, mean) => {
+    const f = flow(x, y);
+    return Math.atan2(Math.sin(f - mean), Math.cos(f - mean)) * 0.01;
+  };
+  const sparseWalk = { k: 0.013, run: 60, jit: 0.038, pull: pullFlow };
+  // Sources: hero continuations, virtual edge sources, margin colonies.
+  const seeds = [];
+  const heroBand = nodes.length ? vs.filter((v) => v.y > top + 6 && v.y < h + 200 && v.edges.length > 1 && seedOk(v)) : [];
+  for (let i = 0; i < Math.round(count * 0.3) && heroBand.length; i++) seeds.push({ v: heroBand[Math.floor(R() * heroBand.length)], hero: true });
+  for (let i = 0; seeds.length < count && i < count * 6; i++) {
+    const s = virtual[Math.floor(R() * virtual.length)],
+      x = R() < 0.5 ? (R() < 0.5 ? R() * Math.max(80, layout.left) : w - R() * Math.max(80, w - layout.right)) : R() * w,
+      y = top + 40 + R() * (height - 80),
+      dd = Math.hypot(x - s.x, y - s.y);
+    // Density by distance from sources and columns: margins carry more.
+    if (R() > (0.35 + 0.65 * marginWeight(x)) * (0.5 + 0.5 / (1 + dd / 900))) continue;
+    seeds.push({ x, y });
+  }
+  const mainRoots = [];
+  for (const seed of seeds) {
+    const start = seed.v ?? vertex(seed.x, seed.y, 0),
+      heading = flow(start.x, start.y) + gauss(R) * 0.2,
+      len = 200 + R() * 300,
+      pts = persistWalk(start, heading, len, R, sparseWalk);
+    // Fuse into elongated net cells: a tip meeting an earlier strand joins it.
+    let hit = null;
+    for (let j = 24; j < pts.length; j++) {
+      const q = pts[j],
+        near = grid.get(gk(q.x, q.y)) || [];
+      const t = near.find((c) => Math.hypot(c.q.x - q.x, c.q.y - q.y) < 3.2);
+      if (t && R() < 0.35) {
+        pts.length = j;
+        pts.push(t.q);
+        hit = t.q;
+        break;
       }
     }
-    const first=knots[0];
-    const source=nodes.length?nodes.reduce((a,b)=>Math.hypot(b.x-first.x,b.y-first.y)<Math.hypot(a.x-first.x,a.y-first.y)?b:a):all.reduce((a,b)=>Math.hypot(b.x-first.x,b.y-first.y)<Math.hypot(a.x-first.x,a.y-first.y)?b:a);
-    const route=[join(source,first,1.1)];
-    for(let j=1;j<knots.length;j++)route.push(join(knots[j-1],knots[j],1.05));
-    marginRoutes.push({side,paths:route,knots,source});
+    const alpha = 0.85 * columnAlpha(start.x);
+    const p = add(pts, { width: 0.55, alpha });
+    if (hit) fusions.push({ point: hit, parent: p, birth: 0 });
+    mainRoots.push(p);
+    // Acute forks running alongside (2nd order), sometimes a 3rd.
+    let s = 40 + -Math.log(1 - R()) * 70;
+    while (s < len - 30) {
+      const i = Math.min(p.points.length - 2, Math.round(s / 2.5)),
+        a = p.points[i],
+        b = p.points[i + 1],
+        hh = Math.atan2(b.y - a.y, b.x - a.x),
+        side = R() < 0.5 ? -1 : 1,
+        cl = (len - s) * (0.35 + R() * 0.45);
+      const c = persistWalk(b, hh + side * (0.26 + R() * 0.26), cl, R, { ...sparseWalk, pull: (x, y, m) => Math.atan2(Math.sin(hh - m), Math.cos(hh - m)) * 0.018 });
+      const child = add(c, { width: 0.4, alpha: alpha * 0.8, order: 0 });
+      mainRoots.push(child);
+      s += 50 + -Math.log(1 - R()) * 80;
+    }
+    budget() && (yield "field");
   }
-  const mainRoots=strands.slice();
-  // Poisson-like attachment positions, long acute laterals and two finer orders.
-  // The old equal-arc comb (one 4–15px tick every 18px) read as stripes.
-  const webR=rng('r9-irregular-root-web'),orders={1:0,2:0,3:0},gaps=[];
-  let webFusions=0,lateralCount=0,minLateralsPer100px=Infinity;
-  const webGrid=new Map(),webCell=8;
-  function indexWeb(p){for(const q of p.points){const key=`${Math.floor(q.x/webCell)},${Math.floor(q.y/webCell)}`;
-    if(!webGrid.has(key))webGrid.set(key,[]);webGrid.get(key).push({q,p});}}
-  for(const p of mainRoots)indexWeb(p);
-  function fineWeb(parent,order){
-    const arc=[0];for(let i=1;i<parent.points.length;i++)arc.push(arc.at(-1)+Math.hypot(parent.points[i].x-parent.points[i-1].x,parent.points[i].y-parent.points[i-1].y));
-    const length=arc.at(-1);if(!length)return;
-    const count=order===1?Math.max(2,Math.ceil(length/18)):(length>18?2:1);
-    const positions=Array.from({length:count},()=>length*(.04+webR()*.86)).sort((a,b)=>a-b);
-    parent.laterals=0;
-    for(let k=0;k<positions.length;k++){
-      let at=1;while(at<arc.length-1&&arc[at]<positions[k])at++;
-      const start=parent.points[at],prev=parent.points[at-1],heading=Math.atan2(start.y-prev.y,start.x-prev.x);
-      const spacing=Math.max(6,((positions[k+1]??length)-(positions[k-1]??0))/2);
-      const distance=spacing*(.3+webR()*1.2),side=webR()<.5?-1:1;
-      const angle=heading+side*(Math.PI/12+webR()*Math.PI/6),steps=Math.max(2,Math.ceil(distance/3));
-      let direction=angle,turn=0,points=[start];
-      for(let j=1;j<=steps;j++){
-        turn=turn*.65+(webR()-.5)*.16;
-        direction+=turn-Math.atan2(Math.sin(direction-heading),Math.cos(direction-heading))*.045;
-        const a=points.at(-1),q={x:a.x+Math.cos(direction)*distance/steps,y:a.y+Math.sin(direction)*distance/steps};
-        let hit=null,best=2.4;
-        if(j>steps*.55)for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
-          const near=webGrid.get(`${Math.floor(q.x/webCell)+dx},${Math.floor(q.y/webCell)+dy}`)||[];
-          for(const candidate of near){if(candidate.p===parent||candidate.p.static!==parent.static)continue;
-            const delta=Math.hypot(q.x-candidate.q.x,q.y-candidate.q.y);
-            if(delta<best&&Math.hypot(start.x-candidate.q.x,start.y-candidate.q.y)>5){hit=candidate.q;best=delta;}}
+  // Living branches: tips that grow, hold and dim in place (never retract).
+  const live = [];
+  for (const parent of mainRoots.filter(() => R() < 0.22)) {
+    const at = Math.floor(parent.points.length * (0.4 + R() * 0.4)),
+      a = parent.points[Math.max(0, at - 1)],
+      b = parent.points[at];
+    if (!b) continue;
+    const hh = Math.atan2(b.y - a.y, b.x - a.x) + (R() < 0.5 ? -1 : 1) * (0.3 + R() * 0.25);
+    const branch = add(persistWalk(b, hh, 60 + R() * 90, R, sparseWalk), { width: 0.4, alpha: parent.alpha * 0.9, birth: 1 + R() * 3 });
+    live.push(branch);
+    // A live tip meeting another strand fuses there (seamless, no bead).
+    const end = branch.points.at(-1),
+      near = (grid.get(gk(end.x, end.y)) || []).find((c) => c.p !== branch && c.p !== parent);
+    if (near) fusions.push({ point: end, parent: branch, birth: branch.birth + branch.points.length * 0.5 });
+  }
+  if (!fusions.length && live.length) fusions.push({ point: live[0].points.at(-1), parent: live[0], birth: live[0].birth });
+  yield "field-live";
+
+  // Minor margin colonies: small asymmetric tufts dissolving into ref-8 hyphae.
+  const marginRoutes = [],
+    marginKnots = [],
+    marginDensityRatio = 0.4;
+  const join = (a, b, width = 0.9) => {
+    const raw = persistWalk(a, Math.atan2(b.y - a.y, b.x - a.x), Math.hypot(b.x - a.x, b.y - a.y), R, { k: 0.016, run: 60, jit: 0.025 }),
+      last = raw.at(-1),
+      pts = raw.map((q, i) => ({ x: q.x + ((b.x - last.x) * i) / (raw.length - 1), y: q.y + ((b.y - last.y) * i) / (raw.length - 1) }));
+    pts[0] = a;
+    pts[pts.length - 1] = b;
+    return add(pts, { width, alpha: 0.7, margin: true });
+  };
+  if (layout.enabled)
+    for (const side of [-1, 1]) {
+      const px = side < 0 ? layout.left * 0.45 : layout.right + (w - layout.right) * 0.55,
+        knots = [];
+      for (let y = top + 120 + R() * 120; y < top + height - 60; y += 380 + R() * 360) {
+        const centre = vertex(px + gauss(R) * 14, y + gauss(R) * 30, 0);
+        knots.push(centre);
+        marginKnots.push(centre);
+        // Fan biased along the margin, heavy-tailed lengths: never a 16-ray asterisk.
+        const fan = Math.PI / 2 + gauss(R) * 0.4 + (R() < 0.5 ? Math.PI : 0);
+        for (let j = 0; j < Math.round(150 * marginDensityRatio); j++) {
+          const hh = R() < 0.65 ? fan + gauss(R) * 0.9 : R() * 6.28,
+            o0 = R() * 6.28,
+            r0 = Math.abs(gauss(R)) * 4,
+            ln = 14 + 70 * Math.pow(R(), 1.5) * (0.6 + 0.4 * Math.cos(hh - fan));
+          const p = add([centre, ...persistWalk({ x: centre.x + Math.cos(o0) * r0, y: centre.y + Math.sin(o0) * r0 }, hh, ln, R, { k: 0.014, run: 40, jit: 0.03, step: 2 })], { width: 0.22 + R() * 0.14, alpha: 0.42, margin: true });
+          p.hair = true;
         }
-        points.push(hit||q);if(hit){webFusions++;break;}
+        // ...dissolving into a few long sparse hyphae.
+        for (let j = 0; j < 7; j++) {
+          const hh = fan + gauss(R) * 1.2;
+          const p = add(persistWalk(centre, hh, 140 + R() * 220, R, { ...sparseWalk, pull: undefined }), { width: 0.45, alpha: 0.75, margin: true });
+          mainRoots.push(p);
+        }
       }
-      const child=add(points,parent,parent.birth?parent.birth+at*.5:0,parent.width*(order===1?.55:.66),parent.alpha*(order===1?.6:.8));
-      child.hair=true;child.order=order;child.margin=parent.margin;
-      child.marginRoot=parent.marginRoot||parent.points[0];child.marginDistance=(parent.marginDistance||0)+arc[at];
-      indexWeb(child);orders[order]++;lateralCount++;parent.laterals++;
-      if(order<3&&distance>7)fineWeb(child,order+1);
+      if (!knots.length) continue;
+      const first = knots[0],
+        pool = nodes.length ? nodes : [first];
+      const source = pool.reduce((a, b) => (Math.hypot(b.x - first.x, b.y - first.y) < Math.hypot(a.x - first.x, a.y - first.y) ? b : a));
+      const route = source === first ? [] : [join(source, first, 1.1)];
+      for (let j = 1; j < knots.length; j++) route.push(join(knots[j - 1], knots[j], 1.05));
+      marginRoutes.push({ side, paths: route, knots, source });
+      budget() && (yield "margin");
     }
-    if(order===1){
-      for(let k=1;k<positions.length;k++)gaps.push((positions[k]-positions[k-1])/(length/count));
-      minLateralsPer100px=Math.min(minLateralsPer100px,parent.laterals*100/length);
+
+  // Fine laterals (orders 1-3) at Poisson positions on random sides; acute and
+  // long-running alongside; fusing into the web. No combs, no herringbone.
+  const webR = rng("r10-irregular-root-web"),
+    orders = { 1: 0, 2: 0, 3: 0 },
+    gaps = [];
+  let webFusions = 0,
+    lateralCount = 0,
+    minLateralsPer100px = Infinity;
+  function fineWeb(parent, order) {
+    const arc = [0];
+    for (let i = 1; i < parent.points.length; i++) arc.push(arc.at(-1) + Math.hypot(parent.points[i].x - parent.points[i - 1].x, parent.points[i].y - parent.points[i - 1].y));
+    const length = arc.at(-1);
+    if (!length) return;
+    const n = order === 1 ? Math.max(2, Math.ceil(length / 22)) : length > 18 ? 2 : 1;
+    const positions = Array.from({ length: n }, () => length * (0.04 + webR() * 0.88)).sort((a, b) => a - b);
+    parent.laterals = 0;
+    for (let k = 0; k < positions.length; k++) {
+      let at = 1;
+      while (at < arc.length - 1 && arc[at] < positions[k]) at++;
+      const start = parent.points[at],
+        prev = parent.points[at - 1],
+        heading = Math.atan2(start.y - prev.y, start.x - prev.x),
+        spacing = Math.max(6, ((positions[k + 1] ?? length) - (positions[k - 1] ?? 0)) / 2),
+        distance = spacing * (0.4 + webR() * 1.3),
+        side = webR() < 0.5 ? -1 : 1,
+        angle = heading + side * (Math.PI / 14 + (webR() * Math.PI) / 7),
+        steps = Math.max(2, Math.ceil(distance / 3));
+      let direction = angle,
+        turn = 0;
+      const points = [start];
+      for (let j = 1; j <= steps; j++) {
+        turn = turn * 0.7 + (webR() - 0.5) * 0.1;
+        direction += turn - Math.atan2(Math.sin(direction - heading), Math.cos(direction - heading)) * 0.06;
+        const a = points.at(-1),
+          q = { x: a.x + (Math.cos(direction) * distance) / steps, y: a.y + (Math.sin(direction) * distance) / steps };
+        let hit = null,
+          best = 2.4;
+        if (j > steps * 0.55)
+          for (let dx = -1; dx <= 1; dx++)
+            for (let dy = -1; dy <= 1; dy++)
+              for (const c of grid.get(gk(q.x + dx * GC, q.y + dy * GC)) || []) {
+                if (c.p === parent || c.p.static !== parent.static) continue;
+                const dd = Math.hypot(q.x - c.q.x, q.y - c.q.y);
+                if (dd < best && Math.hypot(start.x - c.q.x, start.y - c.q.y) > 5) {
+                  hit = c.q;
+                  best = dd;
+                }
+              }
+        points.push(hit || q);
+        if (hit) {
+          webFusions++;
+          break;
+        }
+      }
+      const child = add(points, { width: parent.width * (order === 1 ? 0.6 : 0.7), alpha: parent.alpha * (order === 1 ? 0.62 : 0.8), birth: parent.birth ? parent.birth + at * 0.5 : 0, hair: true, order, margin: parent.margin, phase: parent.phase, period: parent.period });
+      child.marginRoot = parent.marginRoot || parent.points[0];
+      child.marginDistance = (parent.marginDistance || 0) + arc[at];
+      orders[order]++;
+      lateralCount++;
+      parent.laterals++;
+      if (order < 3 && distance > 7) fineWeb(child, order + 1);
+    }
+    if (order === 1) {
+      for (let k = 1; k < positions.length; k++) gaps.push((positions[k] - positions[k - 1]) / (length / n));
+      minLateralsPer100px = Math.min(minLateralsPer100px, (parent.laterals * 100) / length);
     }
   }
-  for(const parent of mainRoots)fineWeb(parent,1);
-  const mean=gaps.reduce((n,v)=>n+v,0)/gaps.length;
-  const spacingCV=Math.sqrt(gaps.reduce((n,v)=>n+(v-mean)**2,0)/gaps.length)/mean;
-  // Gap-sequence periodogram: a regular repeating spacing modulation must not
-  // dominate. CV separately rejects the old almost-constant comb spacing.
-  const sample=gaps.slice(0,512),power=[];
-  for(let k=1;k<=64;k++){let re=0,im=0;for(let j=0;j<sample.length;j++){
-    const phase=2*Math.PI*k*j/sample.length;re+=(sample[j]-mean)*Math.cos(phase);im+=(sample[j]-mean)*Math.sin(phase);}
-    power.push(re*re+im*im);}
-  const rootAudit={mainStrands:mainRoots.length,lateralCount,minLateralsPer100px,loneThreads:mainRoots.filter(p=>!p.laterals).length,
-    web:{orders,spacingCV,spectralPeakFraction:Math.max(...power)/power.reduce((n,v)=>n+v,0),fusions:webFusions,spacingSamples:gaps.length}};
-  // Periodic projection below the first tile: paired boundary vertices are
-  // identical under the page-space tile translation. Finite storage at any height.
-  return {strands,fusions,connectors,top,height,width:w,left,layout,baseCount,count,rootAudit,marginKnots,marginRoutes,marginDensityRatio,
-    segments:ss.filter(s=>s.field),densityMultiplier:1.2};
+  const rooted = strands.filter((p) => !p.hair && p.points.length > 4);
+  for (let i = 0; i < rooted.length; i++) {
+    fineWeb(rooted[i], 1);
+    if (i % 20 === 0 && budget()) yield "web";
+  }
+  const mean = gaps.reduce((n, v) => n + v, 0) / Math.max(1, gaps.length),
+    spacingCV = Math.sqrt(gaps.reduce((n, v) => n + (v - mean) ** 2, 0) / Math.max(1, gaps.length)) / mean;
+  const sample = gaps.slice(0, 512),
+    power = [];
+  for (let k = 1; k <= 64; k++) {
+    let re = 0,
+      im = 0;
+    for (let j = 0; j < sample.length; j++) {
+      const phase = (2 * Math.PI * k * j) / sample.length;
+      re += (sample[j] - mean) * Math.cos(phase);
+      im += (sample[j] - mean) * Math.sin(phase);
+    }
+    power.push(re * re + im * im);
+  }
+  const rootAudit = {
+    mainStrands: rooted.length, lateralCount, minLateralsPer100px: Number.isFinite(minLateralsPer100px) ? minLateralsPer100px : 0, loneThreads: rooted.filter((p) => !p.laterals).length,
+    web: { orders, spacingCV, spectralPeakFraction: Math.max(...power) / power.reduce((n, v) => n + v, 0), fusions: webFusions, spacingSamples: gaps.length },
+  };
+  return {
+    strands, fusions, connectors: [], top, height, width: w, left, layout, baseCount, count, rootAudit, marginKnots, marginRoutes, marginDensityRatio, pageTop,
+    segments: ss.filter((s) => s.field), densityMultiplier: 1.2, flowSources: virtual.length,
+  };
 }
 
-function life(p,t,reduce) {
-  if(p.static||reduce)return {extent:p.points.length-1,alpha:p.alpha};
-  const phase=(t*1.2+p.phase)%p.period,local=phase-5-p.birth;
-  const retire=Math.max(0,Math.min(1,(phase-(p.period-18))/12));
-  return {extent:Math.max(0,Math.min(p.points.length-1,local/.5)),retire,
-    alpha:retire>=1?0:p.alpha*Math.max(0,Math.min(1,local/2))};
+function life(p, t, reduce) {
+  if (p.static || reduce) return { extent: p.points.length - 1, alpha: p.alpha };
+  const phase = (t * 1.2 + p.phase) % p.period,
+    local = phase - 5 - p.birth;
+  // Dims in place over the last 20 s of a period; the laid path never retracts.
+  const fade = 1 - smooth((phase - (p.period - 22)) / 20);
+  return { extent: Math.max(0, Math.min(p.points.length - 1, local / 0.5)), alpha: p.alpha * Math.max(0, Math.min(1, local / 2)) * fade };
 }
-export function createField({stage,state,reduce}) {
-  const c=document.getElementById('page-mycelium'),x=c.getContext('2d'),
-    tile=document.createElement('canvas'),bx=tile.getContext('2d');
-  const hero=document.getElementById('hyphae'),scene=hero?window.__myceliumScene:null;
-  const css=getComputedStyle(stage),light=state.theme==='light',glow=css.getPropertyValue('--glow').trim(),core=css.getPropertyValue('--core').trim();
-  const width=Math.round(innerWidth),height=Math.round(innerHeight),d=Math.min(devicePixelRatio||1,2);
-  c.width=width*d;c.height=height*d;x.scale(d,d);
-  let graph=scene?.graph,field=scene?.field;
-  if(!field) {
-    const vs=[],ss=[],paths=[];
-    const vertex=(x,y,source=0)=>{const v={x,y,source,id:vs.length,edges:[]};vs.push(v);return v;};
-    const edge=(a,b,width,alpha,tone,cord,birth)=>{const s={id:ss.length,a,b,width,alpha,tone,cord,birth,len:Math.hypot(b.x-a.x,b.y-a.y)};ss.push(s);a.edges.push(s.id);b.edges.push(s.id);return s;};
-    field=extendFieldGraph({vs,ss,paths,vertex,edge,nodes:[],w:width,h:150});graph={vs,ss};
+
+export function createField({ stage, state, reduce }) {
+  const c = document.getElementById("page-mycelium"),
+    x = c.getContext("2d");
+  const live = document.createElement("canvas");
+  live.className = "page-mycelium page-mycelium-live";
+  live.setAttribute("aria-hidden", "true");
+  c.after(live);
+  const lx = live.getContext("2d");
+  const tile = document.createElement("canvas"),
+    bx = tile.getContext("2d");
+  const hero = document.getElementById("hyphae"),
+    css = getComputedStyle(stage),
+    light = state.theme === "light",
+    glow = css.getPropertyValue("--glow").trim(),
+    core = css.getPropertyValue("--core").trim();
+  const width = Math.round(document.documentElement.clientWidth || innerWidth),
+    height = Math.round(innerHeight),
+    d = Math.min(devicePixelRatio || 1, 2);
+  for (const k of [c, live]) {
+    k.width = width * d;
+    k.height = height * d;
   }
-  tile.width=field.width;tile.height=Math.ceil(field.height);
-  const fieldAlpha=light?.17:.4,sharedClock=scene?.clock||sceneClock();
-  const marginWeight=x=>{const l=field.layout,px=x+l.offset;if(!l.enabled)return 0;const distance=px<l.left?l.left-px:px>l.right?px-l.right:0;const q=Math.max(0,Math.min(1,distance/72));return q*q*(3-2*q);};
-  const marginGradients=new WeakMap();
-  function marginGradient(ctx){
-    if(marginGradients.has(ctx))return marginGradients.get(ctx);
-    const gradient=ctx.createLinearGradient(-field.layout.offset,0,width-field.layout.offset,0);
-    // Smooth spatial attenuation on a connected stroke, not overlapping round
-    // caps whose double alpha produced a bead at every ~3.5px graph vertex.
-    for(let i=0;i<=128;i++){
-      const rgb=glow.startsWith('#')?parseInt(glow.slice(1),16):0;
-      gradient.addColorStop(i/128,`rgba(${rgb>>16},${rgb>>8&255},${rgb&255},${marginWeight(i*width/128-field.layout.offset)})`);
-    }
-    marginGradients.set(ctx,gradient);return gradient;
-  }
-  function drawPath(ctx,p,extent,retire=0){
-    const style=ctx.strokeStyle,join=ctx.lineJoin;
-    if(p.margin){ctx.strokeStyle=marginGradient(ctx);ctx.lineJoin='round';}
-    tracePath(ctx,p,extent,retire);ctx.strokeStyle=style;ctx.lineJoin=join;
-  }
-  function tracePath(ctx,p,extent,retire=0) {
-    if(retire>0){
-      // Fixed laid edges dim from tip to root; the root never slides forwards.
-      const alpha=ctx.globalAlpha,front=(1-retire)*(p.points.length-1),solid=Math.max(0,Math.min(extent,front-3));
-      drawPath(ctx,p,solid);
-      for(let i=Math.floor(solid)+1;i<=Math.min(Math.ceil(extent),Math.ceil(front+3));i++){
-        const a=p.points[i-1],b=p.points[i];if(!b)continue;
-        ctx.globalAlpha=alpha*Math.max(0,Math.min(1,(front+3-i)/6));
-        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
-      }ctx.globalAlpha=alpha;return;
-    }
-    ctx.beginPath();ctx.moveTo(p.points[0].x,p.points[0].y);
-    for(let i=1;i<=Math.ceil(extent);i++) {
-      const a=p.points[i-1],b=p.points[i],f=Math.min(1,extent-i+1);
-      if(!b||f<=0)break;ctx.lineTo(a.x+(b.x-a.x)*f,a.y+(b.y-a.y)*f);
+  x.setTransform(d, 0, 0, d, 0, 0);
+  lx.setTransform(d, 0, 0, d, 0, 0);
+  const fieldAlpha = light ? 0.2 : 0.46,
+    lightMul = light ? 0.62 : 1;
+  let scene = hero ? window.__myceliumScene : null,
+    field = null,
+    graph = null,
+    disposed = false,
+    raf = 0,
+    frozen = null,
+    clock = scene?.clock || sceneClock(),
+    lastScroll = NaN,
+    lastVersion = -1,
+    tileVersion = 0,
+    drawnTile = -1,
+    marginSchedules = [],
+    heroInterval = 24;
+  const metrics = (window.__understoryMetrics = { costs: [], frames: 0, paused: false, staticRedraws: 0, liveCosts: [] });
+  const params = new URLSearchParams(location.search);
+  if (params.has("t") && Number.isFinite(+params.get("t"))) frozen = +params.get("t");
+
+  const marginWeight = (px) => {
+    const l = field.layout;
+    if (!l.enabled) return 0;
+    const dd = px < l.left ? l.left - px : px > l.right ? px - l.right : 0,
+      q = Math.max(0, Math.min(1, dd / 72));
+    return q * q * (3 - 2 * q);
+  };
+  function tracePath(ctx, p, extent) {
+    const pts = p.points;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i <= Math.ceil(extent); i++) {
+      const a = pts[i - 1],
+        b = pts[i],
+        f = Math.min(1, extent - i + 1);
+      if (!b || f <= 0) break;
+      ctx.lineTo(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
     }
     ctx.stroke();
   }
-  function rasterStatic(){
-  bx.setTransform(1,0,0,1,-field.left,-field.top);bx.clearRect(field.left,field.top,field.width,field.height);bx.lineCap='round';bx.strokeStyle=glow;
-  for(const p of field.strands.filter(p=>p.static)) {
-    bx.globalAlpha=p.alpha*fieldAlpha;bx.lineWidth=p.width;
-    for(const shift of [-field.height,0,field.height]){bx.save();bx.translate(0,shift);drawPath(bx,p,p.points.length-1);bx.restore();}
+  // Tapered strokes in two chunks: proximal and distal.
+  function drawStrand(ctx, p, extent, alpha) {
+    const n = p.points.length - 1,
+      cut = Math.min(extent, Math.floor(n * 0.5));
+    const marginMul = p.margin ? marginWeight(p.points[0].x) : 1;
+    if (marginMul <= 0.01) return;
+    ctx.globalAlpha = alpha * marginMul * lightMul;
+    ctx.lineWidth = p.width;
+    ctx.lineCap = p.width < 0.55 ? "butt" : "round";
+    if (extent <= cut) return tracePath(ctx, p, extent);
+    tracePath(ctx, { points: p.points.slice(0, cut + 1) }, cut);
+    ctx.globalAlpha = alpha * marginMul * lightMul * p.taper;
+    ctx.lineWidth = p.width * 0.7;
+    const rest = { points: p.points.slice(cut) };
+    tracePath(ctx, rest, extent - cut);
   }
-
-  }
-  rasterStatic();
-  const heroInterval=scene?Math.max(14.4,...scene.routes.map(r=>r.arrivalMax+5)):24;
-  const marginSchedules=field.marginRoutes.map((r,side)=>{
-    const legs=r.paths.map(p=>{let distance=0;const segments=p.segments.map(s=>{const start=distance;distance+=s.len;return {s,arrival:start/80};});return {p,segments,duration:distance/80};});
-    const period=Math.max(38,heroInterval/ .9,...legs.map(l=>l.duration+12));
-    const landing=scene?.routes[0]?.landings.find(l=>l.node===r.source.source)?.time||0;
-    return {...r,legs,period,phase:landing+3+side*9};
-  });
-  function marginTrips(t){return marginSchedules.flatMap(s=>{
-    const elapsed=t-s.phase;if(elapsed<0)return [];
-    const cycle=Math.floor(elapsed/s.period),age=elapsed%s.period,leg=s.legs[cycle%s.legs.length];
-    return age<leg.duration+5?[{...s,leg,age}]:[];
-  });}
-  window.__marginPulseProbe=t=>({active:marginTrips(t).map(s=>s.side),periods:marginSchedules.map(s=>s.period),intensity:.75,heroInterval});
-  let raf=0,last=0,clock=0,frozen=null,disposed=false;
-  window.__understoryMetrics={costs:[],frames:0,paused:false};
-  window.__understoryAudit={paths:field.strands.length,branches:field.strands.filter(p=>!p.static).length,
-    fusions:field.fusions.length,nodes:field.marginKnots.length,sporeNodes:0,densityMultiplier:1.2,baseCount:field.baseCount,count:field.count,
-    sharedGraph:!!scene,connectors:field.connectors.length,canvasCount:2,
-    ...field.rootAudit,explorerLoneThreads:scene?.graph.explorerAudit?.loneThreads??0,
-    explorerAudit:scene?.graph.explorerAudit,marginKnots:field.marginKnots.length,marginDensityRatio:field.marginDensityRatio,marginPulseIntensity:.75,marginPulseLeak:135,marginPulsePeriods:marginSchedules.map(s=>s.period),marginPulseRateRelative:marginSchedules.map(s=>heroInterval/s.period),protectedRects:field.layout.rects,
-    canvasPixels:c.width*c.height,bytes:(c.width*c.height+tile.width*tile.height)*4,
-    straightness:measurePaths(field.strands.filter(p=>!p.hair).map(p=>({kind:'understory',points:p.points})))};
-  function paint(seconds) {
-    if(disposed)return;
-    const begin=performance.now(),t=reduce.matches?32:seconds,scroll=window.scrollY;
-    const box=hero?.getBoundingClientRect(),ox=box?.left??0,oy=box?box.top:0;
-    x.clearRect(0,0,width,height);
-    if(scene && oy<height && oy+hero.height/d>0) {
-      // Composite the existing full-DPR hero rasters onto the ONE visible scene.
-      // Smooth mask has no rectangular cut at the old hero boundary.
-      x.save();x.translate(ox,oy);x.globalCompositeOperation='source-over';
-      for(const layer of hero.parentElement.querySelectorAll('canvas')) {
-        x.globalAlpha=Number(layer.style.opacity||1);x.drawImage(layer,0,0,hero.width/d,hero.height/d);
+  function rasterStatic() {
+    tile.width = field.width;
+    tile.height = Math.ceil(field.height);
+    bx.setTransform(1, 0, 0, 1, -field.left, -field.top);
+    bx.clearRect(field.left, field.top, field.width, field.height);
+    bx.strokeStyle = glow;
+    bx.globalCompositeOperation = light ? "source-over" : "lighter";
+    for (const p of field.strands.filter((p) => p.static))
+      for (const shift of [-field.height, 0, field.height]) {
+        bx.save();
+        bx.translate(0, shift);
+        drawStrand(bx, p, p.points.length - 1, p.alpha * fieldAlpha);
+        bx.restore();
       }
-      x.globalAlpha=1;x.globalCompositeOperation='destination-in';
-      const mask=x.createLinearGradient(0,0,hero.width/d,0);
-      if(width<600){mask.addColorStop(0,'#fff');mask.addColorStop(1,'#fff');}
-      else{mask.addColorStop(0,'#ffffff08');mask.addColorStop(.36,'#ffffff08');mask.addColorStop(.6,'#fff');mask.addColorStop(1,'#fff');}
-      x.fillStyle=mask;x.fillRect(0,0,hero.width/d,hero.height/d);
-      const vertical=x.createLinearGradient(0,0,0,hero.height/d);
-      for(const [at,a] of (width<600?[[0,.03],[.5,.04],[.7,1],[.88,1],[1,0]]:[[0,0],[.12,1],[.78,1],[1,0]]))vertical.addColorStop(at,`rgba(255,255,255,${a})`);
-      x.fillStyle=vertical;x.fillRect(0,0,hero.width/d,hero.height/d);
-      x.restore();
+    tileVersion++;
+  }
+  function attach() {
+    field = scene ? scene.field : field;
+    graph = scene ? scene.graph : graph;
+    rasterStatic();
+    heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
+    marginSchedules = field.marginRoutes.map((r, side) => {
+      const legs = r.paths.map((p) => {
+        let distance = 0;
+        const segments = p.segments.map((s) => {
+          const start = distance;
+          distance += s.len;
+          return { s, arrival: start / 80 };
+        });
+        return { p, segments, duration: distance / 80 };
+      });
+      const period = Math.max(heroInterval / 0.9, ...legs.map((l) => l.duration + 8));
+      const landing = scene?.routes?.[0]?.landings.find((l) => l.node === r.source.source)?.time || 0;
+      return { ...r, legs, period, phase: landing + 3 + side * 9, chosen: new Map() };
+    });
+    window.__understoryAudit = {
+      paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,
+      densityMultiplier: 1.2, baseCount: field.baseCount, count: field.count, sharedGraph: !!scene, connectors: 0, canvasCount: 2, flowSources: field.flowSources,
+      ...field.rootAudit, explorerLoneThreads: scene?.graph.explorerAudit?.loneThreads ?? 0, explorerAudit: scene?.graph.explorerAudit,
+      marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: 0.75, marginPulseLeak: 135,
+      marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,
+      canvasPixels: c.width * c.height, bytes: (2 * c.width * c.height + tile.width * tile.height) * 4,
+      straightness: measurePaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))),
+      morphology: auditPaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))).understory,
+    };
+    window.__marginPulseProbe = (t) => {
+      const trips = marginTrips(t),
+        base = (scene ? scene.hero.top : 0) + Math.max(0, Math.floor((scrollY - (scene ? scene.hero.top : 0) - field.top) / field.height)) * field.height;
+      return {
+        active: trips.map((s) => s.side), periods: marginSchedules.map((s) => s.period), intensity: 0.75, heroInterval,
+        legs: trips.map((s) => ({ side: s.side, y0: base + Math.min(s.leg.p.points[0].y, s.leg.p.points.at(-1).y), y1: base + Math.max(s.leg.p.points[0].y, s.leg.p.points.at(-1).y) })),
+      };
+    };
+    window.__setUnderstoryTime = (t) => {
+      frozen = t;
+      schedule();
+      paint(t, true);
+    };
+    if (scene) {
+      window.__setPulseTime = (t) => {
+        frozen = t;
+        schedule();
+        paint(t, true);
+      };
+      window.__setGrowthAge = (age, { pulses = true } = {}) => {
+        scene.startAge = age - (frozen ?? clock.elapsed);
+        scene.pulsesOff = !pulses;
+        paint(frozen ?? clock.elapsed, true);
+      };
     }
-    // Tile copies are page-anchored. Scrolling never slides roots relative to UI.
-    const origin=scene?oy+field.top:-scroll;
-    const first=Math.floor((scroll-(scene?oy+scroll+field.top:0))/field.height);
-    for(let k=Math.max(scene?0:-Infinity,first-1);k<=first+2;k++) {
-      const y=origin+k*field.height;
-      if(y>height||y+field.height<0)continue;
-      x.drawImage(tile,ox+field.left,y);
-      x.save();x.translate(ox,(scene?oy:0)+k*field.height-(scene?0:scroll+field.top));
-      x.strokeStyle=glow;x.lineCap='round';
-      for(const p of field.strands.filter(p=>!p.static)) {
-        const v=life(p,t,reduce.matches);if(v.alpha<=0||v.extent<=0)continue;
-        x.globalAlpha=v.alpha*fieldAlpha;x.lineWidth=p.width;drawPath(x,p,v.extent,v.retire);
+    window.__paintUnderstory = (t) => paint(t, true);
+    lastVersion = -1;
+    paint(frozen ?? clock.elapsed, true);
+    c.dataset.ready = "1";
+    schedule();
+  }
+  function marginTrips(t) {
+    const viewTop = scrollY,
+      viewBottom = scrollY + innerHeight;
+    return marginSchedules.flatMap((s) => {
+      const elapsed = t - s.phase;
+      if (elapsed < 0 || !s.legs.length) return [];
+      const cycle = Math.floor(elapsed / s.period),
+        age = elapsed % s.period;
+      // Pick the leg crossing the current viewport when the trip starts.
+      let leg = s.chosen.get(cycle);
+      if (!leg) {
+        const pageY = (q) => (scene ? scene.hero.top : 0) + q.y;
+        const k = Math.floor((viewTop - (scene ? scene.hero.top : 0) - field.top) / field.height);
+        const shift = (scene ? 0 : 0) + Math.max(0, k) * field.height;
+        leg = s.legs
+          .map((l) => ({ l, score: Math.abs((pageY(l.p.points[0]) + pageY(l.p.points.at(-1))) / 2 + shift - (viewTop + viewBottom) / 2) }))
+          .sort((a, b) => a.score - b.score)[0].l;
+        s.chosen.set(cycle, leg);
+        if (s.chosen.size > 8) s.chosen.delete(s.chosen.keys().next().value);
       }
-      for(const f of field.fusions) {
-        const v=life({...f.parent,birth:f.birth},t,reduce.matches);if(v.extent<=0)continue;
-        x.globalAlpha=v.alpha*fieldAlpha;x.fillStyle=core;x.beginPath();x.arc(f.point.x,f.point.y,.9,0,Math.PI*2);x.fill();
+      return age < leg.duration + 5 ? [{ ...s, leg, age }] : [];
+    });
+  }
+  const envelope = (dt) => (dt < 1.4 ? Math.sin(((dt / 1.4) * Math.PI) / 2) ** 2 : Math.cos((((dt - 1.4) / 4.2) * Math.PI) / 2) ** 2) * 0.7;
+
+  function paint(T, force = false) {
+    if (disposed || !field) return;
+    const begin = performance.now(),
+      reduced = reduce.matches,
+      t = reduced ? 32 : T,
+      A = scene ? (reduced ? 1e5 : scene.startAge + t) : 0,
+      scroll = scrollY,
+      heroTop = scene ? scene.hero.top : 0,
+      oy = heroTop - scroll; // page-space origin of scene coordinates
+    if (scene?.bakeUntil) scene.bakeUntil(A);
+    const version = (scene ? scene.hero.version : 0) * 1000 + tileVersion;
+    // ---- static composite: only on scroll or newly baked material ----
+    if (force || scroll !== lastScroll || version !== lastVersion) {
+      x.clearRect(0, 0, width, height);
+      x.globalCompositeOperation = "source-over";
+      x.globalAlpha = 1;
+      if (scene && oy < height && oy + scene.hero.H > 0) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
+      x.globalCompositeOperation = light ? "source-over" : "lighter";
+      const origin = oy + field.top,
+        first = Math.floor(-origin / field.height);
+      for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
+        const y = origin + k * field.height;
+        if (y > height || y + field.height < 0) continue;
+        x.drawImage(tile, field.left, y);
       }
-      // One calm node-to-node trip per side, on the same graph. Subsequent
-      // legs start from the previous receiving colony, not independent flashes.
-      if(!reduce.matches)for(const trip of marginTrips(t)){
-        x.strokeStyle=core;x.lineCap='butt';
-        for(const item of trip.leg.segments){
-          const dt=trip.age-item.arrival;if(dt<0||dt>4.2)continue;
-          const env=dt<1.05?Math.sin(dt/1.05*Math.PI/2)**2:Math.cos((dt-1.05)/3.15*Math.PI/2)**2;
-          const s=item.s;x.globalAlpha=env*.75*(light?.2:.65)*marginWeight((s.a.x+s.b.x)/2);
-          x.lineWidth=Math.max(.45,s.width*1.6);x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();
-        }
-        const node=trip.leg.p.points.at(-1),age=trip.age-trip.leg.duration;
-        if(age>=0&&age<5){
-          const env=Math.sin(age/5*Math.PI)**2;
-          x.globalAlpha=env*.75*(light?.2:.65)*marginWeight(node.x);x.fillStyle=core;
-          x.beginPath();x.arc(node.x,node.y,1.4,0,Math.PI*2);x.fill();
-          // Short peripheral leak follows attached roots and their lateral hairs.
-          for(const p of field.strands){if(!p.margin||(p.marginRoot||p.points[0])!==node)continue;
-            let distance=p.marginDistance||0;
-            for(const s of p.segments){const dt=age-distance/35;distance+=s.len;if(distance>135||dt<0||dt>3)continue;
-              x.globalAlpha=Math.sin(dt/3*Math.PI)**2*.75*(light?.2:.65)*Math.exp(-distance/67.5)*marginWeight(s.a.x);
-              x.lineWidth=Math.max(.25,s.width*1.5);x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();}
+      x.globalCompositeOperation = "source-over";
+      lastScroll = scroll;
+      lastVersion = version;
+      metrics.staticRedraws++;
+    }
+    // ---- live layer ----
+    const lb = performance.now();
+    lx.clearRect(0, 0, width, height);
+    lx.globalCompositeOperation = light ? "source-over" : "lighter";
+    let liveStats = null;
+    if (scene?.drawLive && oy < height && oy + scene.hero.H > 0) {
+      lx.save();
+      lx.translate(0, oy);
+      liveStats = scene.drawLive(lx, scene.pulsesOff || reduced ? -1e6 : t, A);
+      lx.restore();
+    }
+    const origin = oy + field.top,
+      first = Math.floor(-origin / field.height);
+    for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
+      const y = origin + k * field.height;
+      if (y > height || y + field.height < 0) continue;
+      lx.save();
+      lx.translate(0, y - field.top);
+      lx.strokeStyle = glow;
+      for (const p of field.strands) {
+        if (p.static) continue;
+        const v = life(p, t, reduced);
+        if (v.alpha <= 0 || v.extent <= 0) continue;
+        drawStrand(lx, p, v.extent, v.alpha * fieldAlpha);
+      }
+      if (!reduced)
+        for (const trip of marginTrips(t)) {
+          lx.strokeStyle = core;
+          lx.lineCap = "butt";
+          const gain = 0.75 * (light ? 0.34 : 0.85);
+          for (const item of trip.leg.segments) {
+            const dt = trip.age - item.arrival;
+            if (dt < 0 || dt > 5.6) continue;
+            const s = item.s,
+              mw = marginWeight((s.a.x + s.b.x) / 2),
+              env = envelope(dt);
+            lx.globalAlpha = env * gain * mw * 0.3;
+            lx.lineWidth = 4;
+            lx.beginPath();
+            lx.moveTo(s.a.x, s.a.y);
+            lx.lineTo(s.b.x, s.b.y);
+            lx.stroke();
+            lx.globalAlpha = env * gain * mw;
+            lx.lineWidth = 1.1;
+            lx.stroke();
+          }
+          const node = trip.leg.p.points.at(-1),
+            age = trip.age - trip.leg.duration;
+          if (age >= 0 && age < 5) {
+            // Short peripheral leak along the receiving tuft's own hyphae.
+            for (const p of field.strands) {
+              if (!p.margin || (p.marginRoot || p.points[0]) !== node) continue;
+              let distance = p.marginDistance || 0;
+              for (const s of p.segments) {
+                const dt = age - distance / 35;
+                distance += s.len;
+                if (distance > 135 || dt < 0 || dt > 3) continue;
+                lx.globalAlpha = Math.sin((dt / 3) * Math.PI) ** 2 * gain * Math.exp(-distance / 67.5) * marginWeight(s.a.x);
+                lx.lineWidth = Math.max(0.3, s.width * 1.5);
+                lx.beginPath();
+                lx.moveTo(s.a.x, s.a.y);
+                lx.lineTo(s.b.x, s.b.y);
+                lx.stroke();
+              }
+            }
           }
         }
-      }
-      x.restore();
+      lx.restore();
     }
-    if(scene) {
-      // The same connector edges start in hero colonies; draw their above-tile
-      // portions too. Both ends are real vertices in the pulse route graph.
-      x.save();x.translate(ox,oy);x.strokeStyle=glow;x.lineCap='round';
-      x.save();x.beginPath();x.rect(-1000,-10000,width+2000,10000+field.top);x.clip();
-      for(const p of field.connectors){x.globalAlpha=fieldAlpha*p.alpha;x.lineWidth=p.width;drawPath(x,p,p.points.length-1);}
-      x.restore();
-      // Full-DPR pulse leakage along actual graph arrival times, not a second
-      // independent animation. New tips glow only after they have been laid.
-      if(!reduce.matches)for(const trip of scene.activeTrips(t)) {
-        for(const item of trip.route.fieldList) {
-          const s=graph.ss[item.segment],dt=trip.age-item.arrival;
-          if(dt<0||dt>4.2)continue;
-          const env=dt<1.05?Math.sin(dt/1.05*Math.PI/2)**2:Math.cos((dt-1.05)/3.15*Math.PI/2)**2;
-          const p=s.fieldPath,v=p?life(p,t,false):null;
-          if(p&&!p.static&&(v.extent<(s.fieldIndex||0)+1||v.alpha<=0))continue;
-          x.globalAlpha=env*item.amp*(light?.2:.65)*(p?.margin?marginWeight((s.a.x+s.b.x)/2)*.5:1);x.strokeStyle=core;x.lineWidth=Math.max(.5,s.width*1.8);
-          x.beginPath();x.moveTo(s.a.x,s.a.y);x.lineTo(s.b.x,s.b.y);x.stroke();
+    // Hero pulses leak into field threads along their actual arrival times.
+    if (scene?.activeTrips && !reduced && !scene.pulsesOff) {
+      lx.save();
+      lx.translate(0, oy);
+      lx.strokeStyle = core;
+      lx.lineCap = "butt";
+      for (const trip of scene.activeTrips(t))
+        for (const item of trip.route.fieldList) {
+          const s = graph.ss[item.segment],
+            dt = trip.age - item.arrival;
+          if (dt < 0 || dt > 5.6) continue;
+          const sy = (s.a.y + s.b.y) / 2 + oy;
+          if (sy < -20 || sy > height + 20) continue;
+          const p = s.fieldPath;
+          if (p && !p.static) {
+            const v = life(p, t, false);
+            if (v.extent < (s.fieldIndex || 0) + 1 || v.alpha <= 0) continue;
+          }
+          lx.globalAlpha = envelope(dt) * item.amp * (light ? 0.24 : 0.75);
+          lx.lineWidth = Math.max(0.5, s.width * 1.8);
+          lx.beginPath();
+          lx.moveTo(s.a.x, s.a.y);
+          lx.lineTo(s.b.x, s.b.y);
+          lx.stroke();
         }
-      }
-      x.restore();
-
+      lx.restore();
     }
-    Object.assign(c.dataset,{time:t.toFixed(2),paths:field.strands.length,nodes:field.marginKnots.length,sporeNodes:0,canvasPixels:c.width*c.height});
-    const m=window.__understoryMetrics;m.frames++;m.costs.push(performance.now()-begin);if(m.costs.length>1200)m.costs.shift();
+    lx.globalAlpha = 1;
+    const cost = performance.now() - begin;
+    metrics.frames++;
+    metrics.costs.push(cost);
+    metrics.liveCosts.push(performance.now() - lb);
+    if (metrics.costs.length > 1200) {
+      metrics.costs.shift();
+      metrics.liveCosts.shift();
+    }
+    if (scene) {
+      const pm = window.__pulseMetrics;
+      if (pm) {
+        pm.frames++;
+        pm.costs.push(cost);
+        if (pm.costs.length > 1200) pm.costs.shift();
+      }
+      Object.assign(hero.dataset, { growthTime: t.toFixed(3), growthAge: A.toFixed(2), live: liveStats?.segs ?? 0, activeTips: liveStats?.active ?? 0 });
+    }
+    Object.assign(c.dataset, { time: t.toFixed(3), paths: field.strands.length, nodes: field.marginKnots.length, sporeNodes: 0, canvasPixels: c.width * c.height });
   }
-  function tick(now){raf=0;clock=sharedClock.tick(now);last=now;paint(clock);schedule();}
-  function schedule(){const moving=!disposed&&!reduce.matches&&!document.hidden&&frozen===null;window.__understoryMetrics.paused=!moving;if(moving&&!raf)raf=requestAnimationFrame(tick);else if(!moving){cancelAnimationFrame(raf);raf=0;last=0;}}
-  const changed=()=>{if(document.hidden||reduce.matches)sharedClock.pause();paint(frozen??clock);schedule();},scrolled=()=>paint(frozen??clock);
-  window.__setUnderstoryTime=t=>{frozen=t;schedule();paint(t);};window.__paintUnderstory=paint;
-  const layoutObserver=new MutationObserver(()=>{const previous=field.layout;field.layout=contentBounds(previous.offset);window.__understoryAudit.protectedRects=field.layout.rects;if(previous.left!==field.layout.left||previous.right!==field.layout.right){marginGradients.delete(bx);marginGradients.delete(x);rasterStatic();}});
-  layoutObserver.observe(document.querySelector('main'),{subtree:true,childList:true,attributes:true,attributeFilter:['hidden']});
-  paint(0);schedule();window.addEventListener('scroll',scrolled,{passive:true});document.addEventListener('visibilitychange',changed);reduce.addEventListener('change',changed);
-  return ()=>{disposed=true;layoutObserver.disconnect();cancelAnimationFrame(raf);window.removeEventListener('scroll',scrolled);document.removeEventListener('visibilitychange',changed);reduce.removeEventListener('change',changed);tile.width=tile.height=0;};
+  function tick(now) {
+    raf = 0;
+    const T = clock.tick(now);
+    paint(T);
+    schedule();
+  }
+  function schedule() {
+    const moving = !disposed && !!field && !reduce.matches && !document.hidden && frozen === null;
+    metrics.paused = !moving;
+    const pm = window.__pulseMetrics;
+    if (pm) {
+      pm.paused = !moving;
+      pm.reason = reduce.matches ? "reduced-motion" : document.hidden ? "hidden" : frozen !== null ? "frozen" : !field ? "building" : "running";
+    }
+    const box = document.querySelector(".mycelium-breath");
+    if (box) box.classList.toggle("paused", !moving);
+    if (box && frozen !== null) scene?.freezeBreath?.(frozen);
+    if (moving && !raf) raf = requestAnimationFrame(tick);
+    else if (!moving) {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+  }
+  // Progressive presentation while the scene builds: blit the static raster as it fills.
+  let buildRaf = 0;
+  function buildTick(now) {
+    buildRaf = 0;
+    if (disposed || field) return;
+    if (scene) {
+      const T = clock.tick(now),
+        oy = scene.hero.top - scrollY;
+      if (scene.hero.version !== lastVersion || scrollY !== lastScroll) {
+        x.clearRect(0, 0, width, height);
+        if (!reduce.matches) x.drawImage(scene.hero.canvas, 0, oy, scene.hero.W, scene.hero.H);
+        lastVersion = scene.hero.version;
+        lastScroll = scrollY;
+      }
+      void T;
+    }
+    buildRaf = requestAnimationFrame(buildTick);
+  }
+  const changed = () => {
+    if (document.hidden || reduce.matches) clock.pause();
+    if (field) paint(frozen ?? clock.elapsed, true);
+    schedule();
+  };
+  const scrolled = () => {
+    if (!field) return;
+    if (frozen !== null || reduce.matches) paint(frozen ?? clock.elapsed);
+    else schedule();
+  };
+  if (scene) {
+    buildRaf = requestAnimationFrame(buildTick);
+    scene.onReady(() => {
+      if (disposed) return;
+      cancelAnimationFrame(buildRaf);
+      attach();
+    });
+  } else {
+    // Swarms app pages: a standalone field graph, also built in slices.
+    const vs = [],
+      ss = [],
+      paths = [];
+    const vertex = (vx, vy, source = 0) => {
+      const v = { x: vx, y: vy, source, id: vs.length, edges: [] };
+      vs.push(v);
+      return v;
+    };
+    const edge = (a, b, w, al, tone, cord, birth) => {
+      const s = { id: ss.length, a, b, width: w, alpha: al, tone, cord, birth, len: Math.hypot(b.x - a.x, b.y - a.y) };
+      ss.push(s);
+      a.edges.push(s.id);
+      b.edges.push(s.id);
+      return s;
+    };
+    let start = performance.now();
+    const budget = () => (performance.now() - start > 8 ? ((start = performance.now()), true) : false);
+    const gen = extendFieldGraph({ vs, ss, paths, vertex, edge, nodes: [], w: width, h: 150, budget });
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      if (disposed) return;
+      const t0 = performance.now();
+      let r;
+      do r = gen.next();
+      while (!r.done && performance.now() - t0 < 9);
+      if (!r.done) return ch.port2.postMessage(0);
+      field = r.value;
+      graph = { vs, ss };
+      attach();
+    };
+    ch.port2.postMessage(0);
+  }
+  const layoutObserver = new MutationObserver(() => {
+    if (!field) return;
+    const previous = field.layout;
+    field.layout = contentBounds(previous.offset);
+    if (window.__understoryAudit) window.__understoryAudit.protectedRects = field.layout.rects;
+    if (previous.left !== field.layout.left || previous.right !== field.layout.right) rasterStatic();
+  });
+  layoutObserver.observe(document.querySelector("main"), { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden"] });
+  window.addEventListener("scroll", scrolled, { passive: true });
+  document.addEventListener("visibilitychange", changed);
+  reduce.addEventListener("change", changed);
+  schedule();
+  return () => {
+    disposed = true;
+    c.dataset.ready = "0";
+    layoutObserver.disconnect();
+    cancelAnimationFrame(raf);
+    cancelAnimationFrame(buildRaf);
+    window.removeEventListener("scroll", scrolled);
+    document.removeEventListener("visibilitychange", changed);
+    reduce.removeEventListener("change", changed);
+    tile.width = tile.height = 0;
+    live.width = live.height = 0;
+    live.remove();
+  };
 }
