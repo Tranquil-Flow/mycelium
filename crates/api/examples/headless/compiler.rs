@@ -527,10 +527,10 @@ impl CompilePort for Compiler {
                 Err(_) => self.failure = Some(failed("compiler_worker_panicked")),
             }
         }
-        if self.failure.is_none() {
-            if let Some(qualified) = &self.qualified {
-                return BuildPoll::Done(Ok(qualified.output.clone()));
-            }
+        if self.failure.is_none()
+            && let Some(qualified) = &self.qualified
+        {
+            return BuildPoll::Done(Ok(qualified.output.clone()));
         }
         BuildPoll::Done(Err(self
             .failure
