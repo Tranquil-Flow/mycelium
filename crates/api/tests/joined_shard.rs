@@ -13,6 +13,8 @@ use std::{
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
+#[path = "support/joined_native_process.rs"]
+mod native_process;
 #[path = "support/joined_shard_process.rs"]
 mod process;
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -212,6 +214,115 @@ fn actual_resume_fences_an_old_offer_before_any_new_bytes() {
     assert_eq!(fs::metadata(shard.path()).unwrap().len(), 0);
     shard.discard().unwrap();
 }
+#[test]
+fn native_custody_refuses_changed_consent_caps_before_launch() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    standing_consent::withdraw(&p.member_root, app_host::now()).unwrap();
+    let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
+    standing_consent::grant(&p.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":2_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}), &policy, app_host::now(), Some(16_000_000_000)).unwrap();
+    let binding = p.session.binding().unwrap();
+    standing_consent::bind(&p.member_root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).unwrap();
+    // Invalid range is a second, independent effect fence: this RED can never launch.
+    assert_eq!(
+        native
+            .prepare(
+                [0, 0],
+                1,
+                "00112233445566778899aabbccddeeff",
+                &p.signer,
+                &|| p
+                    .session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid")),
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                &p.root
+            )
+            .unwrap_err()
+            .0,
+        "joined_native_consent_changed"
+    );
+    native.discard().unwrap();
+}
+
+#[test]
+fn cancelled_native_prepare_refuses_before_scanning_partial_custody() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    // No model or executable: partial custody is an independent effect fence.
+    let error = native
+        .prepare(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            &p.root,
+        )
+        .unwrap_err();
+    native.discard().unwrap();
+    assert_eq!(error.0, "compiler_stopped");
+}
+
+#[test]
+fn expired_native_prepare_refuses_before_scanning_partial_custody() {
+    let p = Pair::new();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    let error = native
+        .prepare_until(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            &p.root,
+            std::time::Instant::now(),
+        )
+        .unwrap_err();
+    native.discard().unwrap();
+    assert_eq!(error.0, "native_worker_deadline");
+}
+
 #[test]
 fn wrong_signer_endpoint_recipe_and_withdrawn_consent_refuse() {
     let p = Pair::new();

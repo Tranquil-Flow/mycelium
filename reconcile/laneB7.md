@@ -1,4 +1,73 @@
-# Lane B7 — pairing-bound member custody; serving still incomplete
+# Lane B7 — native received-shard preparation qualified; serving incomplete
+
+## Current continuation from 52ae99e (m4/main 0c171da merged)
+
+Phase (c) qualified in the real two-member loopback run in scratch/b7d-4:
+member PIDs 90313/90312 owned native workers 90702/91131, received source-derived
+751648856/751651104-byte shards, and returned 155/156 actual resident rows.
+Owner verified enrolled signatures, offer/nonce bindings and the independent
+resident-weight maps. Final native test PASS 1/1, 481.38 s tests / 491.752 s command.
+Wrong-identity, wrong-nonce and discard-while-live controls passed.
+Phase (c) checkpoint: 34851cc. Phase (d) now qualified in the same run: the
+owner independently verified both enrolled native proofs and drove the two live
+member processes to [151667,198,32313,11], exactly the pinned Python reference.
+An actual member resume advanced generation; the stale signed native proof AND
+stale worker step were refused with joined_shard_member_changed. Native close,
+reap and inert refund measured 109.460 / 92.784 ms, with both ledgers empty and
+all four exact PIDs independently absent. These are NOT public Stop/leave timings.
+The fixture establishes one durable source journal before grant issuance, gates
+connect on source verification/accept readiness, and removes emitted source links
+only after the received shard is verified. It retains the producer charge (no
+retained BuildOutput/refund claim). Minimum sampled free disk was 28.173 GiB.
+Source snapshot uses APFS clone; object publication uses hardlinks, not copies.
+Physical route_ready=false. Owner remains a test driver; no M16 chat/Stop/leave.
+
+Ruling 10 / class C: independent private-stdin cancellation ingress requires a
+monotonically increasing operation_id; wrong/old IDs cannot cancel another job.
+A stalled real QUIC receive cancels in 502.114 ms, retaining reservation debt
+until explicit inert discard. Its source connection closes while member stays
+alive. A separate current-thread driver previously stopped pumping during stdin,
+hash/native work; the member now owns one background Tokio I/O worker. Existing
+wire/signature formats and native prepare/step/close commands remain unchanged.
+Class A: existing joined-native v1 proof contract is unchanged; private operator
+commands are additive. No reserved S1, packaged chat, status or network-cancel
+implementation changed; no external dependency or lockfile edits.
+
+Native prepare now checks cancellation before/through custody hashing and shares
+one operation deadline through prepare and resident proof. Native controlled step
+is bounded by both its operation deadline and the original member consent wall.
+Receive uses one operation deadline, checks cancellation during pending I/O and
+bounded verification, and clones read-only Session snapshots rather than holding
+the renewal mutex across network/hash work. Existing membership renewal remains.
+The legacy ChunkSession::fetch remains unchanged; responsive fetch is additive.
+No claims of interrupting a kernel-blocked filesystem call or native graceful
+cleanup after cancellation: failed native work retains debt fail-closed.
+Artifact-grant renewal is STILL MISSING (membership renewal is not grant renewal).
+
+Behavioral REDs: pre-cancel prepare returned member_shard_length_mismatch instead
+of compiler_stopped; source-release-while-member-live timed out; serialized stdin
+returned artifact_source_timeout instead of responding to cancellation. GREEN:
+pre-cancel test, ordinary transfer/release/refund and real stalled-cancel tests.
+The first cancellation fixture retained a Connection past runtime destruction;
+explicitly dropping that owner fixed its socket-rebind assertion (fixture bug).
+Expired-prepare coverage is added characterization, not a claimed pre-fix RED.
+
+Current evidence: scratch/b7d-{1,2,4}. Two failed model attempts are retained:
+first second-member connect Expired; second correctly refused a grant predating
+journal genesis. Neither reached native load. No deadline/guard was weakened.
+Current-code gates at acd194d: six-package merge 1088/1088 PASS (52 skipped;
+728.841 s command / 340.891 s tests), quick --base m4/main 1961/1961 PASS
+(136 skipped; 818.228 s command / 96.373 s tests), headless 28 PASS / 4 ignored
+(20.256 s), default/Metal clippy PASS (40.762 / 14.231 s), fmt PASS (4.113 s),
+lint PASS (1293 files, zero violations; 14.340 s). No LEAK diagnostic recurred.
+Both new pre-cancel and expired-prepare controls executed in merge and passed.
+No owned runner/member/native PIDs, lane-target processes or model fixtures remain.
+Evidence: ../mycelium-m4-program/qualification/laneB7d-acd194d/ (71 raw files,
+hash manifest and exact cleanup receipt). Full B7 merge-ready NO. Remaining:
+genuine M16 carrier/graph/tokenizer composition, streamed chat, public bounded
+Stop and leave, death-midstream/stall settlement, artifact-grant renewal. The
+CONTINUATION.md describes the actual missing producer and cleanup-ownership seams;
+these are unfinished implementation, not fabricated proof or a permission blocker.
 
 ## B7b review repair (supersedes precursor cleanup claims below)
 

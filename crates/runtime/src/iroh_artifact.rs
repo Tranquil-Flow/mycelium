@@ -50,6 +50,14 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
             limits,
         })
     }
+    /// Retire only this acquisition connection. The host must keep its runtime
+    /// pumping and later close its endpoint to prove socket release. This is not
+    /// a native cleanup or peer-acknowledgment receipt.
+    pub fn finish(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            connection.close(0u32.into(), b"artifact acquisition finished");
+        }
+    }
     pub fn fetch(
         &mut self,
         envelope: &serde_json::Value,
@@ -63,12 +71,38 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
         }
         result
     }
+    /// Additive cancellation-aware fetch; interruption retires the connection,
+    /// never retries a partially consumed stream or publishes received bytes.
+    pub fn fetch_checked(
+        &mut self,
+        envelope: &serde_json::Value,
+        request: &ChunkRequest,
+        grant: &Grant,
+        deadline: MonoInstant,
+        checkpoint: &dyn Fn() -> Result<(), ArtifactError>,
+    ) -> Result<Vec<u8>, ArtifactError> {
+        let result = self.fetch_once_checked(envelope, request, grant, deadline, Some(checkpoint));
+        if result.is_err() {
+            self.finish();
+        }
+        result
+    }
     fn fetch_once(
         &self,
         envelope: &serde_json::Value,
         request: &ChunkRequest,
         grant: &Grant,
         deadline: MonoInstant,
+    ) -> Result<Vec<u8>, ArtifactError> {
+        self.fetch_once_checked(envelope, request, grant, deadline, None)
+    }
+    fn fetch_once_checked(
+        &self,
+        envelope: &serde_json::Value,
+        request: &ChunkRequest,
+        grant: &Grant,
+        deadline: MonoInstant,
+        checkpoint: Option<&dyn Fn() -> Result<(), ArtifactError>>,
     ) -> Result<Vec<u8>, ArtifactError> {
         use crate::iroh_host::outside_runtime;
         let fail = |s: &str| ArtifactError(s.into());
@@ -98,7 +132,11 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
                     .and_then(|b| n.checked_add(b))
             })
             .ok_or_else(|| fail("artifact_source_response_invalid"))?;
+        if let Some(check) = checkpoint {
+            check()?;
+        }
         let raw = self.runtime.block_on(async {
+            let exchange = async {
             let wait = || self.limits.wait(self.clock, deadline);
             let (mut send, mut recv) = tokio::time::timeout(wait()?, connection.open_bi())
                 .await
@@ -114,7 +152,22 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
                 .await
                 .map_err(|_| fail("artifact_source_timeout"))?
                 .map_err(|_| fail("artifact_source_response_invalid"))
+            };
+            let Some(check) = checkpoint else { return exchange.await; };
+            let interval = budgets::BudgetId::RegistryPoll.span(budgets::Entries::ZERO)
+                .map_err(|_| fail("budget_unavailable"))?;
+            tokio::pin!(exchange);
+            loop {
+                check()?;
+                tokio::select! {
+                    result = &mut exchange => break result,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(interval.millis())) => {}
+                }
+            }
         })?;
+        if let Some(check) = checkpoint {
+            check()?;
+        }
         self.limits.wait(self.clock, deadline)?;
         let (header, data) = decode_response(&raw, self.limits.header_bytes)?;
         if header["status"] != "ok" {

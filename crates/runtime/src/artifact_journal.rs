@@ -256,6 +256,59 @@ impl DurableObjects {
             state: Mutex::new(state),
         })
     }
+    /// Opt-in bounded verification before publishing immutable large objects.
+    /// Existing callers retain their behavior. Checkpoints may enforce absolute
+    /// deadlines/cancellation; interrupted scans never populate the verified cache.
+    pub fn verify_bounded(
+        &self,
+        digest: &str,
+        checkpoint: &dyn Fn() -> Result<(), ArtifactError>,
+    ) -> Result<u64, ArtifactError> {
+        use sha2::{Digest, Sha256};
+        let hex = digest
+            .strip_prefix("sha256:")
+            .filter(|h| {
+                h.len() == 64
+                    && h.bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            })
+            .ok_or_else(|| error("artifact_object_digest_invalid"))?;
+        checkpoint()?;
+        let mut file =
+            File::open(self.root.join(hex)).map_err(|_| error("artifact_object_unavailable"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| error("artifact_object_unavailable"))?;
+        if !metadata.is_file() {
+            return Err(error("artifact_object_unavailable"));
+        }
+        let cap = budgets::BudgetId::PyMyceliumA13MacosSliceAcquisitionMaxSegmentBytesL63
+            .bytes()
+            .map_err(|_| error("budget_unavailable"))?
+            .get() as usize;
+        let mut buffer = vec![0; cap];
+        let mut hash = Sha256::new();
+        let mut size = 0_u64;
+        loop {
+            checkpoint()?;
+            let n = file
+                .read(&mut buffer)
+                .map_err(|_| error("artifact_object_unavailable"))?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+            size = size
+                .checked_add(n as u64)
+                .ok_or_else(|| error("artifact_object_unavailable"))?;
+        }
+        checkpoint()?;
+        if size != metadata.len() || format!("{:x}", hash.finalize()) != hex {
+            return Err(error("artifact_source_chunk_unverified"));
+        }
+        self.lock().verified.insert(hex.into(), size);
+        Ok(size)
+    }
     /// Where the admission journal lives (for operators and tests).
     pub fn journal_path(&self) -> Option<PathBuf> {
         self.lock()

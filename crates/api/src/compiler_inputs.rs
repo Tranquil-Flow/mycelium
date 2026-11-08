@@ -42,6 +42,26 @@ pub fn validate_hosts(document: &Value, facts: usize) -> Result<()> {
     Ok(())
 }
 
+fn validate_loopback_processes(document: &Value, facts: usize) -> Result<()> {
+    let rows = document["observations"]
+        .as_array()
+        .ok_or(Error("loopback_process_observation_invalid"))?;
+    let pids: BTreeSet<_> = rows
+        .iter()
+        .filter_map(|r| r["process_id"].as_u64().filter(|p| *p > 0))
+        .collect();
+    if document["scope"] != "loopback_process_qualification"
+        || document["route_ready"] != false
+        || rows.len() < MIN_HOSTS
+        || rows.len() > MAX_HOSTS
+        || rows.len() != facts
+        || pids.len() != rows.len()
+    {
+        return Err(Error("loopback_process_observation_invalid"));
+    }
+    Ok(())
+}
+
 /// Exact sorted projection of authenticated installation facts. The activation
 /// endpoint is the decoded key, not the member's protocol endpoint label.
 pub fn topology(facts: &BTreeMap<String, Value>) -> Result<Value> {
@@ -908,6 +928,64 @@ pub fn emit(
     keys: &Value,
     members: &[Value],
 ) -> Result<InputArtifact> {
+    emit_mode(
+        root,
+        run,
+        deployment,
+        epoch,
+        request,
+        source,
+        topology,
+        observations,
+        keys,
+        members,
+        false,
+    )
+}
+
+/// Explicit one-host process qualification. It never satisfies the physical-host
+/// admission in `emit`; its stored prefix is versioned and route_ready is false.
+#[allow(clippy::too_many_arguments)]
+pub fn emit_loopback_qualification(
+    root: &Path,
+    run: &str,
+    deployment: &str,
+    epoch: u64,
+    request: &BuildRequest,
+    source: &Prepared,
+    topology: &Value,
+    observations: &Value,
+    keys: &Value,
+    members: &[Value],
+) -> Result<InputArtifact> {
+    emit_mode(
+        root,
+        run,
+        deployment,
+        epoch,
+        request,
+        source,
+        topology,
+        observations,
+        keys,
+        members,
+        true,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn emit_mode(
+    root: &Path,
+    run: &str,
+    deployment: &str,
+    epoch: u64,
+    request: &BuildRequest,
+    source: &Prepared,
+    topology: &Value,
+    observations: &Value,
+    keys: &Value,
+    members: &[Value],
+    loopback: bool,
+) -> Result<InputArtifact> {
     if !segment(run) || !segment(deployment) {
         return Err(Error("managed_control_identifier_invalid"));
     }
@@ -917,7 +995,11 @@ pub fn emit(
     {
         return Err(Error("compiler_observation_changed"));
     }
-    validate_hosts(observations, request.node_ids.len())?;
+    if loopback {
+        validate_loopback_processes(observations, request.node_ids.len())?;
+    } else {
+        validate_hosts(observations, request.node_ids.len())?;
+    }
     let nodes = topology["nodes"]
         .as_array()
         .ok_or(Error("compiler_topology_invalid"))?;
@@ -968,7 +1050,11 @@ pub fn emit(
     let documents = BTreeMap::from([
         (
             "compile-start.private.json".into(),
-            json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch}),
+            if loopback {
+                json!({"protocol":"mycelium.chain_compile_start.loopback.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"scope":"loopback_process_qualification","route_ready":false})
+            } else {
+                json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch})
+            },
         ),
         ("topology.json".into(), topology.clone()),
         ("observations.json".into(), observations.clone()),
@@ -1052,6 +1138,33 @@ mod tests {
         assert!(root.is_dir());
         fs::remove_file(link).unwrap();
         fs::remove_dir(root).unwrap();
+    }
+
+    #[test]
+    fn loopback_process_observations_never_satisfy_physical_admission() {
+        // Pure shape controls, not physical/native evidence. The model gate uses
+        // the exact child PIDs observed through owned process handles.
+        let doc = json!({"scope":"loopback_process_qualification","route_ready":false,
+            "observations":[{"node_id":"a","process_id":1},{"node_id":"b","process_id":2}]});
+        assert_eq!(validate_loopback_processes(&doc, 2), Ok(()));
+        assert_eq!(
+            validate_hosts(&doc, 2),
+            Err(Error("two_distinct_hosts_required"))
+        );
+        for key in ["scope", "route_ready", "observations"] {
+            let mut bad = doc.clone();
+            bad.as_object_mut().unwrap().remove(key);
+            assert_eq!(
+                validate_loopback_processes(&bad, 2),
+                Err(Error("loopback_process_observation_invalid"))
+            );
+        }
+        let mut bad = doc.clone();
+        bad["observations"][1]["process_id"] = json!(1);
+        assert!(validate_loopback_processes(&bad, 2).is_err());
+        let mut bad = doc;
+        bad["route_ready"] = json!(true);
+        assert!(validate_loopback_processes(&bad, 2).is_err());
     }
 
     #[test]

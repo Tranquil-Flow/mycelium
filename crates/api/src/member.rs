@@ -82,7 +82,7 @@ fn ttl() -> f64 {
         .map_or(0.0, |s| s.millis() as f64 / 1000.0)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Session {
     node_id: String,
     swarm_id: String,

@@ -14,6 +14,7 @@ use protocol::{
 use runtime::sidecar_artifact::grant_limits;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+pub mod native;
 mod source;
 pub use source::JoinedSource;
 type Result<T> = std::result::Result<T, Error>;
@@ -336,6 +337,19 @@ impl JoinedShard {
         self.shard
             .verify(&|| admit(&self.root, session, signer, carrier, &self.offer, now()).map(drop))
     }
+    pub fn verify_checked(
+        &mut self,
+        session: &Session,
+        signer: &Identity,
+        carrier: &Identity,
+        now: &dyn Fn() -> f64,
+        checkpoint: &dyn Fn() -> Result<()>,
+    ) -> Result<()> {
+        self.shard.verify(&|| {
+            checkpoint()?;
+            admit(&self.root, session, signer, carrier, &self.offer, now()).map(drop)
+        })
+    }
     /// Signed carrier fetch with live pairing/consent checks on both sides of I/O.
     #[allow(clippy::too_many_arguments)]
     pub fn fetch_chunk<C: transport::Clock>(
@@ -348,7 +362,32 @@ impl JoinedShard {
         now: &dyn Fn() -> f64,
         deadline: budgets::MonoInstant,
     ) -> std::result::Result<(), runtime::iroh_artifact::ArtifactError> {
+        self.fetch_chunk_checked(
+            link,
+            request,
+            session,
+            signer,
+            carrier,
+            now,
+            deadline,
+            &|| Ok(()),
+        )
+    }
+    /// Independent operation fence, serviced during transport and before writes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_chunk_checked<C: transport::Clock>(
+        &mut self,
+        link: &mut runtime::iroh_artifact::ChunkSession<'_, C>,
+        request: &ag::ChunkRequest,
+        session: &Session,
+        signer: &Identity,
+        carrier: &Identity,
+        now: &dyn Fn() -> f64,
+        deadline: budgets::MonoInstant,
+        checkpoint: &dyn Fn() -> Result<()>,
+    ) -> std::result::Result<(), runtime::iroh_artifact::ArtifactError> {
         use runtime::iroh_artifact::ArtifactError;
+        checkpoint().map_err(|e| ArtifactError(e.0.into()))?;
         let grant = admit(&self.root, session, signer, carrier, &self.offer, now())
             .map_err(|e| ArtifactError(e.0.into()))?;
         let envelope = ag::sign_chunk_request(
@@ -365,7 +404,8 @@ impl JoinedShard {
         )
         .map_err(|e| ArtifactError(e.0.into()))?;
         self.shard
-            .fetch_chunk(link, &envelope, request, &grant, deadline, &|| {
+            .fetch_chunk_checked(link, &envelope, request, &grant, deadline, &|| {
+                checkpoint()?;
                 admit(&self.root, session, signer, carrier, &self.offer, now()).map(drop)
             })
     }

@@ -1,0 +1,465 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Real two-process shard loader/challenge qualification. Owner remains a test
+//! driver; observation placement is controlled, native proofs/tokens are not.
+use super::process::Node;
+use super::*;
+use api::{compiler_inputs, joined_shard::native};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use budgets::{BudgetId as B, Entries};
+use runtime::{
+    artifact_journal::{DurableConfig, DurableObjects},
+    iroh_artifact_source::ArtifactService,
+    iroh_host::LoopbackHost,
+    sidecar_artifact::{grant_limits, serve_limits},
+};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    sync::{Arc, mpsc},
+    time::{Duration, Instant},
+};
+use transport::{Channel, Clock};
+fn allowance() -> Duration {
+    Duration::from_millis(B::MemberChosenWall.span(Entries::ZERO).unwrap().millis())
+}
+struct Root(PathBuf);
+impl Drop for Root {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+fn clone_file(source: &Path, target: &Path) {
+    // APFS copy-on-write: never write model cache or allocate another full copy.
+    assert!(
+        std::process::Command::new("/bin/cp")
+            .arg("-c")
+            .arg(source.canonicalize().unwrap())
+            .arg(target)
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+fn pair(node: &mut Node, root: &Path, seed: &app_host::SeedRuntime<app_host::Unmanaged>) -> Value {
+    let request = node.call(json!({"command":"pair_request"}));
+    let (signer, _, _) = app_host::identity_in(root, app_host::SEED_IDENTITY_FILE).unwrap();
+    let issuer = handoff::Coordinator {
+        signer,
+        swarm_id: seed.coordinator.swarm_id().into(),
+        seed_url: seed.seed_url.clone(),
+    };
+    let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    let handoff=handoff::approve_pairing(root,true,Some(&issuer),&request,&json!(ttl),&json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),app_host::now(),&handoff::Entropy::os).unwrap();
+    let registration=node.call(json!({"command":"accept","handoff":handoff.to_value(),"ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed.address}));
+    node.call(json!({"command":"consent","device_memory_bytes":16_000_000_000u64,
+        "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
+        "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}));
+    registration
+}
+#[test]
+#[ignore = "real Metal + local Qwen3; explicit B7_MEMBER_BINARY and native binary pins required"]
+fn two_member_processes_prepare_received_shards_and_match_reference() {
+    qualify(false);
+}
+#[test]
+#[ignore = "real Metal received-shard prepare only; not two-node challenge"]
+fn member_process_prepares_received_shard_and_verifies_enrolled_proof() {
+    qualify(true);
+}
+fn qualify(prepare_only: bool) {
+    let count = if prepare_only { 1 } else { 2 };
+    let resource_gate = std::env::var_os("B7_RESOURCE_GATE")
+        .expect("explicit local resource preflight script required");
+    let began = Instant::now();
+    let path = std::env::temp_dir().join(format!("b7c-model-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    let root = Root(path.canonicalize().unwrap());
+    let owner = root.0.join("owner");
+    fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b7c-model", None).unwrap();
+    let mut member_roots = [root.0.join("member0"), root.0.join("member1")];
+    let mut nodes = [Node::start(&member_roots[0]), Node::start(&member_roots[1])];
+    let mut registrations: Vec<_> = nodes.iter_mut().map(|n| pair(n, &owner, &seed)).collect();
+    if registrations[0]["message"]["member"]["node_id"]
+        .as_str()
+        .unwrap()
+        > registrations[1]["message"]["member"]["node_id"]
+            .as_str()
+            .unwrap()
+    {
+        registrations.swap(0, 1);
+        nodes.swap(0, 1);
+        member_roots.swap(0, 1);
+    }
+    let ids: Vec<String> = registrations
+        .iter()
+        .map(|r| r["message"]["member"]["node_id"].as_str().unwrap().into())
+        .collect();
+    eprintln!(
+        "B7c paired {} {} elapsed={:?}",
+        nodes[0].child.id(),
+        nodes[1].child.id(),
+        began.elapsed()
+    );
+    let cache = PathBuf::from(
+        std::env::var_os("MYCELIUM_QWEN3_SNAPSHOT").expect("explicit local snapshot"),
+    );
+    let source = root.0.join("snapshot");
+    fs::create_dir(&source).unwrap();
+    for file in ["config.json", "model.safetensors"] {
+        clone_file(&cache.join(file), &source.join(file));
+    }
+    let manifest =
+        api::local_manifest::compile_local_model_manifest(&api::local_manifest::LocalModelSource {
+            root: source.clone(),
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            requested_revision: "main".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            tokenizer_assets: Ok(Vec::new()),
+        })
+        .unwrap();
+    let prepared = api::serving_source::Prepared {
+        source_root: source.clone(),
+        manifest_digest: planner::bound::manifest_digest_ref(&manifest).unwrap(),
+        source_bytes: manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["size_bytes"].as_u64().unwrap())
+            .sum(),
+        manifest: manifest.as_object().unwrap().clone(),
+    };
+    resource_policy::write(&owner,&json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"})).unwrap();
+    let ranges = vec![[0, 14], [14, 28]];
+    let build = planner::chain_compile::BuildRequest {
+        model_id: "Qwen/Qwen3-0.6B".into(),
+        resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+        deployment_id: "12345678-1234-5678-9234-abcdefabcdef".into(),
+        route_label: "a13",
+        stage_sharded: true,
+        compilation_cache_key: "b7c-source-qualification".into(),
+        node_ids: ids.clone(),
+        managed_layer_ranges: ranges.clone(),
+        layer_split: json!({"stages":ids.iter().zip(&ranges).map(|(id,r)|json!({"node_id":id,"start":r[0],"end":r[1]})).collect::<Vec<_>>()}),
+    };
+    let members: BTreeMap<_, _> = ids
+        .iter()
+        .map(|id| (id.clone(), seed.coordinator.member(id).unwrap()))
+        .collect();
+    let mut artifact=compiler_inputs::emit_loopback_qualification(&owner,"b7c-source",&build.deployment_id,0,&build,&prepared,
+        &json!({"protocol":"mycelium.qwen_live_topology.v1","nodes":ids.iter().map(|id|json!({"node_id":id,"staging_root":owner,"runtime_backend":"mlx"})).collect::<Vec<_>>()}),
+        &json!({"run_id":"b7c-source","deployment_id":build.deployment_id,"scope":"loopback_process_qualification","route_ready":false,"observations":ids.iter().zip(&nodes).map(|(id,node)|json!({"node_id":id,"process_id":node.child.id()})).collect::<Vec<_>>()}),
+        &json!({}), &members.values().cloned().collect::<Vec<_>>()).unwrap();
+    artifact
+        .produce_stage_shards(&members, app_host::now())
+        .unwrap();
+    let document: Value = serde_json::from_slice(
+        &fs::read(artifact.root().join("source-shards.private.json")).unwrap(),
+    )
+    .unwrap();
+    eprintln!("B7c source shards elapsed={:?}", began.elapsed());
+    let objects = owner.join("objects");
+    fs::create_dir(&objects).unwrap();
+    let mut hashes = Vec::new();
+    let mut emitted_paths = Vec::new();
+    if prepare_only {
+        // Unused emitted file belongs solely to this disposable producer fixture.
+        // Its ledger is NOT refunded; no retained BuildOutput is claimed here.
+        let unused = document["node_files"][&ids[1]][0]["path"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("deployment/")
+            .unwrap();
+        fs::remove_file(artifact.root().join("stage-shards").join(unused)).unwrap();
+    }
+    for id in ids.iter().take(count) {
+        let row = &document["node_files"][id][0];
+        let hash = row["content_digest"].as_str().unwrap();
+        fs::hard_link(
+            artifact.root().join("stage-shards").join(
+                row["path"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("deployment/")
+                    .unwrap(),
+            ),
+            objects.join(hash.strip_prefix("sha256:").unwrap()),
+        )
+        .unwrap();
+        emitted_paths.push(
+            artifact.root().join("stage-shards").join(
+                row["path"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("deployment/")
+                    .unwrap(),
+            ),
+        );
+        hashes.push(hash.to_owned());
+    }
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let (offer_tx, offer_rx) = mpsc::channel::<Value>();
+    let (accepting_tx, accepting_rx) = mpsc::channel();
+    let (received_tx, received_rx) = mpsc::channel();
+    let authority = seed.coordinator.clone();
+    let source_root = owner.clone();
+    let source_thread = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let clock = api::managed_carrier::HostClock::default();
+        let deadline = || {
+            clock
+                .monotonic()
+                .checked_add(B::MemberChosenWall.span(Entries::ZERO).unwrap())
+                .unwrap()
+        };
+        let mut host = LoopbackHost::bind_protocols(
+            &rt,
+            &clock,
+            deadline(),
+            iroh::SecretKey::generate(),
+            &[Channel::ArtifactChunk],
+        )
+        .unwrap();
+        let addr = host.address().unwrap();
+        let socket = *addr.ip_addrs().next().unwrap();
+        let signer = Identity::from_secret(
+            &addr.id.to_string(),
+            &app_host::random(32).unwrap().try_into().unwrap(),
+        )
+        .unwrap();
+        ready_tx.send((addr, signer.public_key_record())).unwrap();
+        for (hash, emitted_path) in hashes.into_iter().zip(emitted_paths) {
+            let store = DurableObjects::open(DurableConfig {
+                objects: objects.clone(),
+                state_dir: source_root.join("journal"),
+                fence_capacity: B::ArtifactMaxFence.count().unwrap().get() as usize,
+                clock_skew_ms: grant_limits().unwrap().clock_skew_ms,
+                now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
+            })
+            .unwrap();
+            let end = Instant::now() + allowance();
+            store
+                .verify_bounded(&hash, &|| {
+                    if Instant::now() < end {
+                        Ok(())
+                    } else {
+                        Err(runtime::iroh_artifact::ArtifactError(
+                            "source_verify_deadline".into(),
+                        ))
+                    }
+                })
+                .unwrap();
+            accepting_tx.send(()).unwrap();
+            let offer = offer_rx.recv_timeout(allowance()).unwrap();
+            let wrapped = joined_shard::JoinedSource::new(authority.clone(), offer, store).unwrap();
+            let service = ArtifactService::new(
+                Identity::from_secret(signer.endpoint_id(), &signer.secret_bytes()).unwrap(),
+                authority.signer().public_key_record(),
+                grant_limits().unwrap(),
+                Arc::new(wrapped),
+                serve_limits().unwrap(),
+                Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
+            )
+            .unwrap();
+            let connection = host.accept(&clock, deadline()).unwrap();
+            rt.block_on(service.serve_connection(connection)).unwrap();
+            received_rx.recv_timeout(allowance()).unwrap();
+            // Disposable producer only: the received file now has its own verified
+            // bytes. Do not claim a retained output or refund the producer ledger.
+            fs::remove_file(objects.join(hash.strip_prefix("sha256:").unwrap())).unwrap();
+            fs::remove_file(emitted_path).unwrap();
+        }
+        host.close(&clock, deadline()).unwrap();
+        drop(host);
+        drop(rt);
+        assert!(std::net::UdpSocket::bind(socket).is_ok());
+    });
+    let (addr, key) = ready_rx.recv_timeout(allowance()).unwrap();
+    let mut offers = Vec::new();
+    let mut paths = Vec::new();
+    for (i, node) in nodes.iter_mut().take(count).enumerate() {
+        // Establish durable journal genesis and verify bytes BEFORE issuing the
+        // grant. Issuing first correctly trips the source ledger-reset fence.
+        accepting_rx.recv_timeout(allowance()).unwrap();
+        let offer = joined_shard::issue_with_source(
+            &seed.coordinator,
+            &registrations[i],
+            &format!("b7c-transfer-{i}"),
+            &document["node_files"][&ids[i]][0],
+            &document["node_slice_plans"][&ids[i]],
+            &addr.id.to_string(),
+            &key,
+        )
+        .unwrap();
+        offer_tx.send(offer.clone()).unwrap();
+        node.send(json!({"command":"receive","offer":offer,"source_id":addr.id.to_string(),"source_socket":addr.ip_addrs().next().unwrap()}));
+        let received = node.result_with(allowance());
+        received_tx.send(()).unwrap();
+        paths.push(PathBuf::from(received["path"].as_str().unwrap()));
+        offers.push(offer);
+        eprintln!(
+            "B7c received node={i} bytes={} elapsed={:?}",
+            received["received_bytes"],
+            began.elapsed()
+        );
+    }
+    source_thread.join().unwrap();
+    let nonce = app_host::hex(&app_host::random(16).unwrap());
+    let reference: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let prompt: Vec<u32> =
+        serde_json::from_value(reference["recorded"]["workload"]["prompt_ids"].clone()).unwrap();
+    let mut proofs = Vec::new();
+    for (i, node) in nodes.iter_mut().take(count).enumerate() {
+        // Source emission/transport can take minutes; refresh admission here,
+        // immediately before EACH native load, not only at harness launch.
+        let gate = std::process::Command::new("python3")
+            .arg(&resource_gate)
+            .args(["--memory-gb", "6", "--duration-s"])
+            .arg(allowance().as_secs().to_string())
+            .arg("--json")
+            .output()
+            .unwrap();
+        eprintln!(
+            "B7c pre-native resource gate node={i}: {}",
+            String::from_utf8_lossy(&gate.stdout)
+        );
+        assert!(
+            gate.status.success(),
+            "resource admission refused before native launch"
+        );
+        node.send(json!({"command":"prepare_native","range":ranges[i],"tokens":prompt.len()+64,"nonce":nonce,"forbidden_source":source}));
+        let signed = node.result_with(allowance());
+        let proof =
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &signed).unwrap();
+        assert_ne!(proof["worker_pid"], node.child.id());
+        assert_eq!(signed["message"]["member_pid"], node.child.id());
+        eprintln!(
+            "B7c native node={i} pid={} rows={} elapsed={:?}",
+            proof["worker_pid"],
+            proof["weights"].as_object().unwrap().len(),
+            began.elapsed()
+        );
+        let stranger = Identity::from_secret(
+            "unrelated-endpoint",
+            &app_host::random(32).unwrap().try_into().unwrap(),
+        )
+        .unwrap();
+        let mut wrong = signed.clone();
+        wrong["verification_key"] = stranger.public_key_record();
+        wrong["signature"] = stranger.sign(&wrong["message"]).unwrap();
+        assert!(
+            native::verify_resident(&seed.coordinator, &offers[i], &nonce, &wrong).is_err(),
+            "wrong identity proof"
+        );
+        let mut wrong_nonce = nonce.clone();
+        wrong_nonce.replace_range(..1, if nonce.starts_with('0') { "1" } else { "0" });
+        assert_eq!(
+            native::verify_resident(&seed.coordinator, &offers[i], &wrong_nonce, &signed)
+                .unwrap_err()
+                .0,
+            "native_proof_binding_mismatch"
+        );
+        node.send(json!({"command":"discard"}));
+        assert_eq!(node.refusal(), "joined_native_cleanup_required");
+        assert!(paths[i].exists(), "live compute must retain shard custody");
+        proofs.push(signed);
+    }
+    if !prepare_only {
+        let mut input = prompt;
+        let mut tokens = Vec::new();
+        for _ in 0..stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS {
+            let mut payload = Vec::new();
+            for (i, node) in nodes.iter_mut().take(count).enumerate() {
+                node.send(json!({"command":"native_step","tokens":if i==0 {json!(input)}else{Value::Null},"payload":STANDARD.encode(&payload)}));
+                let response = node.result_with(allowance());
+                payload = STANDARD
+                    .decode(response["payload"].as_str().unwrap())
+                    .unwrap();
+            }
+            let token = native::greedy(&payload).unwrap();
+            tokens.push(token);
+            input = vec![token];
+        }
+        assert_eq!(
+            json!(tokens),
+            json!(
+                &reference["recorded"]["tokens"].as_array().unwrap()
+                    [..stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS]
+            )
+        );
+        eprintln!("B7c cross-process challenge={tokens:?} == independent reference");
+    }
+    // Stale native proof is tested against an ACTUAL seed generation transition,
+    // not a hand-edited signed message or a fabricated enrollment record.
+    let resumed = nodes[0].call(json!({"command":"resume"}));
+    assert!(
+        resumed["generation"].as_u64().unwrap()
+            > registrations[0]["message"]["member"]["generation"]
+                .as_u64()
+                .unwrap()
+    );
+    assert_eq!(
+        native::verify_resident(&seed.coordinator, &offers[0], &nonce, &proofs[0])
+            .unwrap_err()
+            .0,
+        "joined_shard_member_changed"
+    );
+    nodes[0].send(json!({"command":"native_step","tokens":[1],"payload":""}));
+    assert_eq!(nodes[0].refusal(), "joined_shard_member_changed");
+    eprintln!("B7c stale native proof and stale worker step refused after real resume");
+    if let Some(path) = std::env::var_os("B7_NATIVE_EVIDENCE") {
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(
+                &json!({"prepare_only":prepare_only,"proofs":proofs,"offers":offers}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    for (i, node) in nodes.iter_mut().take(count).enumerate() {
+        let start = Instant::now();
+        let cleanup = node.call(json!({"command":"native_close"}));
+        assert_eq!(cleanup["context_closed"], true);
+        node.call(json!({"command":"discard"}));
+        assert!(!paths[i].exists());
+        let ledger: Value = serde_json::from_slice(
+            &fs::read(member_roots[i].join("chain-runs/compiler-storage.private.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ledger["entries"], json!({}));
+        let pid = proofs[i]["message"]["proof"]["worker_pid"]
+            .as_i64()
+            .unwrap() as i32;
+        assert!(
+            !std::process::Command::new("/bin/kill")
+                .args(["-0", &pid.to_string()])
+                .output()
+                .unwrap()
+                .status
+                .success(),
+            "worker must be reaped"
+        );
+        eprintln!(
+            "B7c native close + inert refund node={i} elapsed={:?}",
+            start.elapsed()
+        );
+        node.close();
+    }
+    for node in nodes.iter_mut().skip(count) {
+        node.close();
+    }
+    seed.close();
+    eprintln!(
+        "B7c total elapsed={:?}; operator IPC challenge only, NOT M16 chat/Stop",
+        began.elapsed()
+    );
+}

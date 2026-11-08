@@ -19,14 +19,14 @@ use transport::{Channel, Clock};
 fn allowance() -> Duration {
     Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis())
 }
-struct Node {
-    child: Child,
+pub(super) struct Node {
+    pub(super) child: Child,
     replies: mpsc::Receiver<Value>,
     reader: Option<std::thread::JoinHandle<()>>,
     done: bool,
 }
 impl Node {
-    fn start(root: &std::path::Path) -> Self {
+    pub(super) fn start(root: &std::path::Path) -> Self {
         let exe = std::env::var_os("B7_MEMBER_BINARY")
             .expect("build api --example shard_member and set B7_MEMBER_BINARY");
         let mut child = Command::new(exe)
@@ -54,21 +54,29 @@ impl Node {
             done: false,
         }
     }
-    fn send(&mut self, v: Value) {
+    pub(super) fn send(&mut self, v: Value) {
         let input = self.child.stdin.as_mut().unwrap();
         writeln!(input, "{v}").unwrap();
         input.flush().unwrap();
     }
-    fn result(&self) -> Value {
-        let v = self.replies.recv_timeout(allowance()).unwrap();
+    pub(super) fn result_with(&self, timeout: Duration) -> Value {
+        let v = self.replies.recv_timeout(timeout).unwrap();
         assert_eq!(v["ok"], true, "{v}");
         v["result"].clone()
     }
-    fn call(&mut self, v: Value) -> Value {
+    pub(super) fn refusal(&self) -> String {
+        let value = self.replies.recv_timeout(allowance()).unwrap();
+        assert_eq!(value["ok"], false, "{value}");
+        value["code"].as_str().unwrap().to_owned()
+    }
+    fn result(&self) -> Value {
+        self.result_with(allowance())
+    }
+    pub(super) fn call(&mut self, v: Value) -> Value {
         self.send(v);
         self.result()
     }
-    fn close(&mut self) {
+    pub(super) fn close(&mut self) {
         self.call(json!({"command":"close"}));
         self.child.stdin.take();
         let end = Instant::now() + allowance();
@@ -100,7 +108,15 @@ impl Drop for Node {
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
 fn product_member_process_pairs_receives_verifies_and_refunds() {
-    let root = std::env::temp_dir().join(format!("b7b-node-{}", std::process::id()));
+    process_transfer(false);
+}
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real stalled QUIC transfer"]
+fn product_member_cancels_stalled_transfer_and_retains_debt_until_discard() {
+    process_transfer(true);
+}
+fn process_transfer(stall: bool) {
+    let root = std::env::temp_dir().join(format!("b7b-node-{}-{stall}", std::process::id()));
     fs::create_dir(&root).unwrap();
     let root = fs::canonicalize(root).unwrap();
     let owner = root.join("owner");
@@ -170,6 +186,8 @@ fn product_member_process_pairs_receives_verifies_and_refunds() {
     let seed_owner = seed.coordinator.clone();
     let (ready_tx, ready_rx) = mpsc::channel();
     let (offer_tx, offer_rx) = tokio::sync::oneshot::channel();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let (stalled_tx, stalled_rx) = mpsc::channel();
     let source = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -220,7 +238,24 @@ fn product_member_process_pairs_receives_verifies_and_refunds() {
         )
         .unwrap();
         let connection = host.accept(&clock, deadline()).unwrap();
-        rt.block_on(service.serve_connection(connection)).unwrap();
+        if stall {
+            rt.block_on(async {
+                let (_send, mut recv) = connection.accept_bi().await.unwrap();
+                let raw = recv
+                    .read_to_end(serve_limits().unwrap().wire.request_bytes.get() as usize)
+                    .await
+                    .unwrap();
+                assert!(!raw.is_empty());
+                stalled_tx.send(()).unwrap();
+                tokio::time::timeout(allowance(), connection.closed())
+                    .await
+                    .unwrap();
+            });
+            drop(connection);
+        } else {
+            rt.block_on(service.serve_connection(connection)).unwrap();
+        }
+        finished_tx.send(()).unwrap();
         host.close(&clock, deadline()).unwrap();
         drop(host);
         drop(rt);
@@ -240,7 +275,54 @@ fn product_member_process_pairs_receives_verifies_and_refunds() {
     )
     .unwrap();
     offer_tx.send(offer.clone()).unwrap();
-    let result=node.call(json!({"command":"receive","offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
+    node.send(json!({"command":"receive","operation_id":1,"offer":offer,"source_id":address.id.to_string(),"source_socket":address.ip_addrs().next().unwrap()}));
+    if stall {
+        stalled_rx.recv_timeout(allowance()).unwrap();
+        let wrong = node.call(json!({"command":"cancel_operation","operation_id":2}));
+        assert_eq!(wrong["cancel_requested"], false);
+        let began = Instant::now();
+        node.send(json!({"command":"cancel_operation","operation_id":1}));
+        // Acknowledgment and operation result may race; inspect both identities.
+        let replies: Vec<_> = (0..2)
+            .map(|_| node.replies.recv_timeout(allowance()).unwrap())
+            .collect();
+        assert!(
+            replies
+                .iter()
+                .any(|v| v["result"]["cancel_requested"] == true)
+        );
+        assert!(
+            replies
+                .iter()
+                .any(|v| v["code"] == "member_operation_cancelled")
+        );
+        assert!(began.elapsed() < allowance());
+        eprintln!("B7 stalled receive cancel={:?}", began.elapsed());
+        finished_rx.recv_timeout(allowance()).unwrap();
+        let ledger: Value = serde_json::from_slice(
+            &fs::read(member_root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ledger["entries"].as_object().unwrap().len(),
+            1,
+            "cancel is not refund"
+        );
+        node.send(json!({"command":"pair_request","operation_id":1}));
+        assert_eq!(node.refusal(), "operator_operation_id_invalid");
+        node.call(json!({"command":"discard","operation_id":2}));
+        let ledger: Value = serde_json::from_slice(
+            &fs::read(member_root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ledger["entries"], json!({}));
+        node.close();
+        source.join().unwrap();
+        seed.close();
+        fs::remove_dir_all(root).unwrap();
+        return;
+    }
+    let result = node.result();
     assert_eq!(result["pid"], node.child.id());
     assert_ne!(node.child.id(), std::process::id());
     assert_eq!(result["node_id"], member["node_id"]);
@@ -248,6 +330,9 @@ fn product_member_process_pairs_receives_verifies_and_refunds() {
     assert_eq!(result["route_ready"], false);
     let path = PathBuf::from(result["path"].as_str().unwrap());
     assert_eq!(fs::read(&path).unwrap(), bytes);
+    // A received shard must release its transfer connection while the member
+    // remains alive, not rely on process exit or the source's idle timeout.
+    let released = finished_rx.recv_timeout(allowance());
     node.call(json!({"command":"discard"}));
     assert!(!path.exists());
     let ledger: Value = serde_json::from_slice(
@@ -259,4 +344,8 @@ fn product_member_process_pairs_receives_verifies_and_refunds() {
     source.join().unwrap();
     seed.close();
     fs::remove_dir_all(root).unwrap();
+    assert!(
+        released.is_ok(),
+        "transfer release while member alive: {released:?}"
+    );
 }
