@@ -303,15 +303,22 @@ pub fn emit_stage_shards(
         headers.push(bytes);
     }
     let io = || Error::new("stage_shard_output_invalid");
-    let parent = output.parent().ok_or_else(io)?;
-    if parent.canonicalize().map_err(|_| io())? != parent
-        || output.file_name().is_none_or(|n| {
-            n.to_str()
-                .is_none_or(|s| s.is_empty() || s.starts_with('.'))
-        })
+    // The caller owns this trusted root; its spelling may include legitimate
+    // ancestor links (macOS /var, a relocated home). Resolve it once, then use
+    // only the canonical root plus a single new directory component below it.
+    let parent = output
+        .parent()
+        .ok_or_else(io)?
+        .canonicalize()
+        .map_err(|_| io())?;
+    let name = output.file_name().ok_or_else(io)?;
+    if name
+        .to_str()
+        .is_none_or(|s| s.is_empty() || s.starts_with('.'))
     {
         return Err(io());
     }
+    let output = parent.join(name);
     // Headers and selected payloads determine the exact complete output size.
     // The host must durably charge this BEFORE the first output mutation; a
     // failed/interrupted write retains the reservation, never an implicit refund.
@@ -330,8 +337,13 @@ pub fn emit_stage_shards(
     (source.checkpoint)()?;
     fs::DirBuilder::new()
         .mode(0o700)
-        .create(output)
+        .create(&output)
         .map_err(|_| io())?;
+    // mkdir refuses even dangling links; inspect without following before
+    // creating the exclusively owned regular files (create_new is no-follow).
+    if !fs::symlink_metadata(&output).map_err(|_| io())?.is_dir() {
+        return Err(io());
+    }
     let mut files = BTreeMap::new();
     let mut node_files = BTreeMap::new();
     for (i, ((node, names), header)) in nodes.iter().zip(&selected).zip(&headers).enumerate() {

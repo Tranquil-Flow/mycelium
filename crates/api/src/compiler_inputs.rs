@@ -843,6 +843,8 @@ fn store_storage_ledger(runs: &Path, ledger: &Value) -> Result<()> {
 fn open_source_file(root: &Path, name: &str) -> Result<fs::File> {
     use std::{os::unix::fs::OpenOptionsExt, path::Component};
     let bad = Error("compiler_source_path_invalid");
+    // emit retained a canonical root. This is a replacement check, not a
+    // restriction on the caller's original configuration path spelling.
     if fs::canonicalize(root).map_err(|_| bad.clone())? != root {
         return Err(bad);
     }
@@ -925,10 +927,14 @@ pub fn emit(
     {
         return Err(Error("compiler_inputs_changed"));
     }
-    let canonical_root = fs::canonicalize(root).map_err(|_| Error("compiler_directory_invalid"))?;
-    if canonical_root != root {
-        return Err(Error("compiler_directory_invalid"));
-    }
+    // Configuration roots may have symlinked ancestors. Resolve them once at
+    // admission, before creating descendants, and retain only physical paths.
+    // Never canonicalize chain-runs, run directories or source file suffixes:
+    // directory/open_source_file must still refuse links BELOW these roots.
+    let root = fs::canonicalize(root).map_err(|_| Error("compiler_directory_invalid"))?;
+    let mut source = source.clone();
+    source.source_root =
+        fs::canonicalize(&source.source_root).map_err(|_| Error("compiler_source_path_invalid"))?;
     // Do not silently adopt a symlink or an output belonging to an earlier run.
     let runs = root.join("chain-runs");
     directory(&runs)?;
