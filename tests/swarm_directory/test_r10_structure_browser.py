@@ -57,12 +57,20 @@ def test_two_sided_morphology_structure_and_soft_edges(local, width):
             assert a['paths'] >= 5, (kind, a['paths'])
             w = a['window150']
             # Not ruler-straight at visible scale (>=150 px windows) ...
-            assert w['above099'] / w['count'] < 0.12 and w['max'] < 0.999, (kind, w)
+            # (The sparse vocabulary deliberately includes some nearly straight long
+            # runs, so its share of >0.99 windows may be higher; none is ruler-straight.)
+            limit = 0.2 if kind in ('sparse', 'field') else 0.12
+            assert w['above099'] / w['count'] < limit and w['max'] < 0.999, (kind, w)
             assert a['window250']['max'] < 0.997, (kind, a['window250'])
             # ... and not scribbled or wave-like.
             assert a['turningPer100px']['p95'] < 2.2, (kind, a['turningPer100px'])
             assert a['uturnsPer1000px'] < 0.05, (kind, a['uturnsPer1000px'])
             assert a['periodicity']['p50'] < 0.35, (kind, a['periodicity'])
+            if kind in ('sparse', 'field'):
+                # ... nor uniformly curvy: strands differ in turning rate and
+                # some carry one or two strong bends (owner: no uniform arcs).
+                assert a['strandTurnCV'] >= 0.19, (kind, a['strandTurnCV'])  # 6405a6fa: 0.15-0.18
+                assert a['bendContrast']['p95'] >= 3.5, (kind, a['bendContrast'])
         cords = page.evaluate('__cordAudit')
         links = [c for c in cords if c['link']]
         assert links and all(30 <= c['fibres'] <= 40 and 8 <= c['w0'] <= 12 and 1.8 <= c['w1'] <= 2.6 for c in links), links

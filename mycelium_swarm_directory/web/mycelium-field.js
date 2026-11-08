@@ -104,7 +104,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     const f = flow(x, y);
     return Math.atan2(Math.sin(f - mean), Math.cos(f - mean)) * 0.01;
   };
-  const sparseWalk = { k: 0.013, run: 60, jit: 0.038, pull: pullFlow };
+  const sparseWalk = { k: 0.013, run: 60, jit: 0.038, pull: pullFlow, vary: true };
   // Sources: hero continuations, virtual edge sources, margin colonies.
   const seeds = [];
   const heroBand = nodes.length ? vs.filter((v) => v.y > top + 6 && v.y < h + 200 && v.edges.length > 1 && seedOk(v)) : [];

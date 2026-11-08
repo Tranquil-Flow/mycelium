@@ -52,21 +52,59 @@ function setup(c) {
  *  opts: step, k (max curvature rad/px), run (mean run px), jit, restore,
  *        pull(x,y,meanHeading,arc)->dMean, straightMax
  */
+/** Slow regional persistence field (0.35-1.65): curvature varies by region. */
+function regionGain(x, y) {
+  return Math.max(0.35, Math.min(1.65, 1 + 0.45 * Math.sin(x / 410 + 1.3) * Math.sin(y / 530 + 0.7) + 0.2 * Math.sin((x + y) / 260 + 2.1)));
+}
 function persistWalk(p, heading, len, R, opts = {}) {
   const ds0 = opts.step ?? 2.5,
     n = Math.max(2, Math.ceil(len / ds0)),
     ds = len / n,
     // Per-strand curvature scale and run length: varied by strand and region.
-    kmax = (opts.k ?? 0.016) * (0.7 + R() * 0.6),
+    floor = 0.45,
+    pull = opts.pull;
+  let kmax = (opts.k ?? 0.016) * (0.7 + R() * 0.6),
     run = (opts.run ?? 60) * (0.7 + R() * 0.6),
     jit = opts.jit ?? 0.03,
     restore = opts.restore ?? 0.008,
-    floor = 0.45,
-    pull = opts.pull,
-    straightMax = opts.straightMax ?? 0.982,
-    guards = [100, 150, 250, 400].map((a) => Math.round(a / ds)),
+    straightMax = opts.straightMax ?? 0.982;
+  const guards = [100, 150, 250, 400].map((a) => Math.round(a / ds)),
     // The first point keeps its identity: a walk from a graph vertex stays connected.
     points = [p];
+  // Varied strands (sparse vocabulary): per-strand style and regional persistence,
+  // so the field is not a population of similar gentle arcs.
+  const events = [],
+    kBase = kmax;
+  if (opts.vary) {
+    const reg = regionGain(p.x, p.y),
+      u = R();
+    kmax *= 0.3 + 0.7 * reg;
+    straightMax = Math.min(straightMax, 0.972);
+    run /= Math.sqrt(0.3 + 0.7 * reg);
+    if (u < 0.16) {
+      // long, nearly (never ruler-) straight runs
+      kmax *= 0.75;
+      run *= 1.6;
+      jit *= 0.75;
+      straightMax = 0.975;
+    } else if (u < 0.6) {
+      // one or two strong bends on an otherwise calm strand
+      kmax *= 0.65;
+      const nb = R() < 0.55 ? 1 : 2;
+      for (let b = 0; b < nb; b++) {
+        const span = 25 + R() * 30;
+        events.push({ at: len * (0.12 + 0.76 * R()), span, k: ((R() < 0.5 ? -1 : 1) * (0.55 + R() * 0.6)) / span });
+      }
+    } else if (u < 0.8) {
+      // restless strands: tighter, shorter curvature runs
+      kmax *= 1.7;
+      run *= 0.55;
+    } else if (u < 0.88) {
+      // an occasional kink (a lost branch scar)
+      kmax *= 0.85;
+      events.push({ at: len * (0.2 + 0.6 * R()), span: 0, kink: (R() < 0.5 ? -1 : 1) * (0.22 + R() * 0.28) });
+    }
+  }
   let mean = heading,
     h = heading,
     sign = R() < 0.5 ? -1 : 1,
@@ -87,9 +125,19 @@ function persistWalk(p, heading, len, R, opts = {}) {
       next = i + Math.max(6, (-Math.log(1 - R()) * run) / ds);
     }
     k += (kt - k) * 0.15;
+    let extra = 0;
+    for (const e of events) {
+      const s = i * ds;
+      if (e.span && s >= e.at && s < e.at + e.span) extra += e.k;
+      else if (!e.span && !e.done && s >= e.at) {
+        h += e.kink;
+        e.done = true;
+        cool = i + 30;
+      }
+    }
     if (pull) mean += pull(points[i - 1].x, points[i - 1].y, mean, i * ds);
     const dev = Math.atan2(Math.sin(h - mean), Math.cos(h - mean));
-    h += (k - dev * restore) * ds + gauss(R) * jit;
+    h += (k + extra - dev * restore) * ds + gauss(R) * jit;
     const a = points[i - 1];
     points.push({ x: a.x + Math.cos(h) * ds, y: a.y + Math.sin(h) * ds });
     // Visible-scale anti-ruler guard: an O(1) chord test per window length;
@@ -100,7 +148,7 @@ function persistWalk(p, heading, len, R, opts = {}) {
         const b = points[i - w];
         if (Math.hypot(points[i].x - b.x, points[i].y - b.y) / (w * ds) > straightMax) {
           sign = dev > 0 ? -1 : 1;
-          kt = sign * kmax * (0.8 + 0.4 * R());
+          kt = sign * Math.max(kmax, kBase * 0.8) * (0.8 + 0.4 * R());
           next = i + Math.max(16, run / ds);
           cool = i + 30;
           break;
@@ -196,7 +244,7 @@ function auditPaths(paths, opts = {}) {
   const minLength = opts.minLength ?? 150,
     groups = {};
   for (const { kind, points } of paths) {
-    const g = (groups[kind] ??= { paths: 0, length: 0, windows: [], turning: [], uturns: 0, spectral: [] });
+    const g = (groups[kind] ??= { paths: 0, length: 0, windows: [], turning: [], uturns: 0, spectral: [], strandTurn: [], bendContrast: [] });
     if (points.length < 2) continue;
     const q = resample(points, 5),
       length = (q.length - 1) * 5;
@@ -217,6 +265,20 @@ function auditPaths(paths, opts = {}) {
       let s = 0;
       for (let i = a; i < a + 20; i++) s += Math.abs(dh[i]);
       g.turning.push(s);
+    }
+    if (length >= 150) {
+      // Curvature variety: per-strand mean turning (rad/100 px) and bend
+      // contrast (strongest 50 px window over the strand's median window).
+      const tot = dh.reduce((s, v) => s + Math.abs(v), 0);
+      g.strandTurn.push((tot * 100) / length);
+      const wins = [];
+      for (let a = 0; a + 10 <= dh.length; a += 2) {
+        let s = 0;
+        for (let i = a; i < a + 10; i++) s += dh[i];
+        wins.push(Math.abs(s));
+      }
+      wins.sort((x, y) => x - y);
+      g.bendContrast.push(wins.at(-1) / Math.max(0.02, wins[wins.length >> 1]));
     }
     for (let a = 0; a + 9 <= dh.length; a++) {
       let s = 0;
@@ -261,6 +323,13 @@ function auditPaths(paths, opts = {}) {
           turningPer100px: quantiles(g.turning),
           uturnsPer1000px: g.length ? (g.uturns * 1000) / g.length : 0,
           periodicity: quantiles(g.spectral),
+          strandTurn: quantiles(g.strandTurn),
+          strandTurnCV: (() => {
+            const v = g.strandTurn,
+              m = v.reduce((a, b) => a + b, 0) / Math.max(1, v.length);
+            return m ? Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / Math.max(1, v.length)) / m : 0;
+          })(),
+          bendContrast: quantiles(g.bendContrast),
         },
       ];
     }),
@@ -327,4 +396,4 @@ function sceneClock() {
     },
   };
 }
-export { rng, gauss, hash01, smooth, setup, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock };
+export { rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock };
