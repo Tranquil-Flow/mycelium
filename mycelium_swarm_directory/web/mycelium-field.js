@@ -364,6 +364,8 @@ export function createField({ stage, state, reduce }) {
     lastVersion = -1,
     tileVersion = 0,
     drawnTile = -1,
+    dirty = null,
+    liveStrands = [],
     marginSchedules = [],
     heroInterval = 24;
   const metrics = (window.__understoryMetrics = { costs: [], frames: 0, paused: false, staticRedraws: 0, liveCosts: [] });
@@ -404,6 +406,9 @@ export function createField({ stage, state, reduce }) {
       ctx.stroke();
     }
   }
+  // The static tile is rasterised in bounded slices (no long task); it is
+  // presented as it fills, like the hero.
+  let rasterJob = 0;
   function rasterStatic() {
     tile.width = field.width;
     tile.height = Math.ceil(field.height);
@@ -411,18 +416,43 @@ export function createField({ stage, state, reduce }) {
     bx.clearRect(field.left, field.top, field.width, field.height);
     bx.strokeStyle = glow;
     bx.globalCompositeOperation = light ? "source-over" : "lighter";
-    for (const p of field.strands.filter((p) => p.static))
-      for (const shift of [-field.height, 0, field.height]) {
-        bx.save();
-        bx.translate(0, shift);
-        drawStrand(bx, p, p.points.length - 1, p.alpha * fieldAlpha);
-        bx.restore();
+    const list = field.strands.filter((p) => p.static),
+      job = ++rasterJob;
+    let i = 0;
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      if (disposed || job !== rasterJob) return;
+      const t0 = performance.now();
+      while (i < list.length && performance.now() - t0 < 8) {
+        const p = list[i++];
+        for (const shift of [-field.height, 0, field.height]) {
+          if (p.box[3] + shift < field.top || p.box[1] + shift > field.top + field.height) continue;
+          bx.save();
+          bx.translate(0, shift);
+          drawStrand(bx, p, p.points.length - 1, p.alpha * fieldAlpha);
+          bx.restore();
+        }
       }
-    tileVersion++;
+      tileVersion++;
+      if (i < list.length) ch.port2.postMessage(0);
+      else c.dataset.tile = "1";
+    };
+    ch.port2.postMessage(0);
   }
   function attach() {
     field = scene ? scene.field : field;
     graph = scene ? scene.graph : graph;
+    for (const p of field.strands) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const q of p.points) {
+        if (q.x < x0) x0 = q.x;
+        if (q.y < y0) y0 = q.y;
+        if (q.x > x1) x1 = q.x;
+        if (q.y > y1) y1 = q.y;
+      }
+      p.box = [x0 - 3, y0 - 3, x1 + 3, y1 + 3];
+    }
+    liveStrands = field.strands.filter((p) => !p.static);
     rasterStatic();
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
@@ -446,9 +476,13 @@ export function createField({ stage, state, reduce }) {
       marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: 0.75, marginPulseLeak: 135,
       marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,
       canvasPixels: c.width * c.height, bytes: (2 * c.width * c.height + tile.width * tile.height) * 4,
-      straightness: measurePaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))),
-      morphology: auditPaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))).understory,
+
     };
+    // Heavy audits are computed lazily on first read, never during start-up.
+    let straightness = null,
+      morphology = null;
+    Object.defineProperty(window.__understoryAudit, "straightness", { enumerable: true, get: () => (straightness ??= measurePaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points })))) });
+    Object.defineProperty(window.__understoryAudit, "morphology", { enumerable: true, get: () => (morphology ??= auditPaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))).understory) });
     window.__marginPulseProbe = (t) => {
       const trips = marginTrips(t),
         base = (scene ? scene.hero.top : 0) + Math.max(0, Math.floor((scrollY - (scene ? scene.hero.top : 0) - field.top) / field.height)) * field.height;
@@ -514,7 +548,8 @@ export function createField({ stage, state, reduce }) {
       scroll = scrollY,
       heroTop = scene ? scene.hero.top : 0,
       oy = heroTop - scroll; // page-space origin of scene coordinates
-    if (scene?.bakeUntil) scene.bakeUntil(A);
+    // Bakes are batched to 4 s while running (one static redraw per batch at most).
+    if (scene?.bakeUntil) frozen !== null || reduced ? scene.bakeUntil(A) : scene.bakeUntil(Math.floor(A / 4) * 4, true);
     const version = (scene ? scene.hero.version : 0) * 1000 + tileVersion;
     // ---- static composite: only on scroll or newly baked material ----
     if (force || scroll !== lastScroll || version !== lastVersion) {
@@ -537,14 +572,25 @@ export function createField({ stage, state, reduce }) {
     }
     // ---- live layer ----
     const lb = performance.now();
-    lx.clearRect(0, 0, width, height);
+    // Dirty-rect live layer: clear only what was drawn last frame.
+    const box = [Infinity, Infinity, -Infinity, -Infinity];
+    const add = (x0, y0, x1, y1) => {
+      if (x0 < box[0]) box[0] = x0;
+      if (y0 < box[1]) box[1] = y0;
+      if (x1 > box[2]) box[2] = x1;
+      if (y1 > box[3]) box[3] = y1;
+    };
+    if (force) lx.clearRect(0, 0, width, height);
+    else if (dirty) lx.clearRect(dirty[0] - 2, dirty[1] - 2, dirty[2] - dirty[0] + 4, dirty[3] - dirty[1] + 4);
     lx.globalCompositeOperation = light ? "source-over" : "lighter";
     let liveStats = null;
     if (scene?.drawLive && oy < height && oy + scene.hero.H > 0) {
       lx.save();
       lx.translate(0, oy);
-      liveStats = scene.drawLive(lx, scene.pulsesOff || reduced ? -1e6 : t, A);
+      const hb = [Infinity, Infinity, -Infinity, -Infinity];
+      liveStats = scene.drawLive(lx, scene.pulsesOff || reduced ? -1e6 : t, A, hb);
       lx.restore();
+      if (hb[0] < Infinity) add(hb[0], hb[1] + oy, hb[2], hb[3] + oy);
     }
     const origin = oy + field.top,
       first = Math.floor(-origin / field.height);
@@ -554,11 +600,13 @@ export function createField({ stage, state, reduce }) {
       lx.save();
       lx.translate(0, y - field.top);
       lx.strokeStyle = glow;
-      for (const p of field.strands) {
-        if (p.static) continue;
+      const shift = y - field.top;
+      for (const p of liveStrands) {
+        if (p.box[3] + shift < 0 || p.box[1] + shift > height) continue;
         const v = life(p, t, reduced);
         if (v.alpha <= 0 || v.extent <= 0) continue;
         drawStrand(lx, p, v.extent, v.alpha * fieldAlpha);
+        add(p.box[0], p.box[1] + shift, p.box[2], p.box[3] + shift);
       }
       if (!reduced)
         for (const trip of marginTrips(t)) {
@@ -581,6 +629,7 @@ export function createField({ stage, state, reduce }) {
             lx.lineWidth = 1.1;
             lx.stroke();
           }
+          add(trip.leg.p.box[0] - 140, trip.leg.p.box[1] + shift - 140, trip.leg.p.box[2] + 140, trip.leg.p.box[3] + shift + 140);
           const node = trip.leg.p.points.at(-1),
             age = trip.age - trip.leg.duration;
           if (age >= 0 && age < 5) {
@@ -623,6 +672,7 @@ export function createField({ stage, state, reduce }) {
             if (v.extent < (s.fieldIndex || 0) + 1 || v.alpha <= 0) continue;
           }
           lx.globalAlpha = envelope(dt) * item.amp * (light ? 0.24 : 0.75);
+          add(Math.min(s.a.x, s.b.x) - 3, Math.min(s.a.y, s.b.y) + oy - 3, Math.max(s.a.x, s.b.x) + 3, Math.max(s.a.y, s.b.y) + oy + 3);
           lx.lineWidth = Math.max(0.5, s.width * 1.8);
           lx.beginPath();
           lx.moveTo(s.a.x, s.a.y);
@@ -632,6 +682,7 @@ export function createField({ stage, state, reduce }) {
       lx.restore();
     }
     lx.globalAlpha = 1;
+    dirty = box[0] < Infinity ? box : null;
     const cost = performance.now() - begin;
     metrics.frames++;
     metrics.costs.push(cost);

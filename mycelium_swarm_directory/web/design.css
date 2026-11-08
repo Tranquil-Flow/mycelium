@@ -212,16 +212,13 @@ button {
   pointer-events: none;
   z-index: 0;
 }
-.page-mycelium-live {
-  mix-blend-mode: screen;
-}
+
 /* Per-colony breathing: compositor opacity with desynchronised durations. */
 .mycelium-breath {
   position: absolute;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  mix-blend-mode: screen;
 }
 .mycelium-breath canvas {
   position: absolute;
@@ -238,12 +235,6 @@ button {
   }
   50% {
     opacity: 0.13;
-  }
-}
-@media (prefers-color-scheme: light) {
-  .page-mycelium-live,
-  .mycelium-breath {
-    mix-blend-mode: multiply;
   }
 }
 .apex-now {

@@ -11,10 +11,10 @@
 import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock } from "./mycelium-geometry.js";
 import { extendFieldGraph } from "./mycelium-field.js";
 
-export const START_AGE = 95; // visitors arrive to a mature core with living rims
+export const START_AGE = 110; // visitors arrive to a mature core with living rims
 const RIM = 1.5, // front brightness boost (D8)
   RIM_TAU = 4.5,
-  RIM_WIN = 15, // seconds a laid segment keeps its rim glow before baking
+  RIM_WIN = 20, // seconds a laid segment keeps its rim glow before baking
   CAP = 560000,
   CHUNK = 6;
 const geometryCache = new Map();
@@ -183,7 +183,14 @@ function* buildGeometry(L, budget, out = {}) {
         s.alpha = av[i];
       }
     }
-    Object.assign(P, { pts: poly, points: poly, arcs, len, w: wv, a: av, done: o.t0 + len / o.v, fused: !!fused });
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (const q of poly) {
+      if (q.x < bx0) bx0 = q.x;
+      if (q.y < by0) by0 = q.y;
+      if (q.x > bx1) bx1 = q.x;
+      if (q.y > by1) by1 = q.y;
+    }
+    Object.assign(P, { box: [bx0 - 2, by0 - 2, bx1 + 2, by1 + 2], pts: poly, points: poly, arcs, len, w: wv, a: av, done: o.t0 + len / o.v, fused: !!fused });
     for (const q of poly) if (q.owner === undefined) index(q, P.id);
     paths.push(P);
     if (P.unit >= 0) units[P.unit].paths.push(P);
@@ -550,8 +557,8 @@ function* buildGeometry(L, budget, out = {}) {
     // The distal continuation (and its forks) is a recycling unit far from the core.
     const end = trunk.pts.at(-1),
       eh = Math.atan2(end.y - trunk.pts.at(-3).y, end.x - trunk.pts.at(-3).x),
-      cont = hypha(end, eh, total - trunkLen, sparse({ kind: "explorer", t0: trunk.done, v: 4.4, unit: unitId, source: from.source, w0: 0.42 }), 2);
-    if (cont) explorerRoots.push(cont);
+      cont = hypha(end, eh, total - trunkLen, sparse({ kind: "explorer", t0: trunk.done, v: 4.4, unit: unitId, source: from.source, w0: 0.42 }), 1);
+    void cont;
     budget() && (yield "explorer");
   }
   // Fine laterals on explorers (random sides, Poisson spacing): no lone hairlines.
@@ -622,6 +629,28 @@ export function createHero(canvas, { stage, state, reduce }) {
   function strokePath(ctx, P, sTo, mul, A) {
     const pts = P.pts,
       n = pts.length;
+    // Held recycling paths: one cached stroke instead of per-chunk work.
+    if (P.unit >= 0 && A !== undefined && sTo >= P.len && A - P.done > RIM_WIN) {
+      if (!P.path2d) {
+        P.path2d = new Path2D();
+        P.path2d.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < n; i++) P.path2d.lineTo(pts[i].x, pts[i].y);
+        let a = 0,
+          w = 0;
+        for (let i = 0; i < n; i++) {
+          a += P.a[i];
+          w += P.w[i];
+        }
+        P.meanA = a / n;
+        P.meanW = w / n;
+      }
+      ctx.globalAlpha = Math.min(1, P.meanA * mul * lightAlpha);
+      ctx.lineWidth = P.meanW;
+      ctx.lineCap = "butt";
+      ctx.strokeStyle = P.tone ? palette.core : palette.glow;
+      ctx.stroke(P.path2d);
+      return;
+    }
     let lastCap = "";
     for (let i = 0; i < n - 1; i += CHUNK) {
       if (P.arcs[i] >= sTo) break;
@@ -751,12 +780,18 @@ export function createHero(canvas, { stage, state, reduce }) {
     for (const P of g.livePool) {
       const { age, fade } = unitClock(P, g.units, A);
       if (age < P.t0 || fade <= 0) continue;
-      if (P.bt <= A || P.baked) continue;
+      if (P.baked) continue;
       out.push({ P, age, fade });
     }
     return out;
   }
-  function drawLive(ctx, A, g) {
+  function grow(box, b) {
+    if (b[0] < box[0]) box[0] = b[0];
+    if (b[1] < box[1]) box[1] = b[1];
+    if (b[2] > box[2]) box[2] = b[2];
+    if (b[3] > box[3]) box[3] = b[3];
+  }
+  function drawLive(ctx, A, g, box) {
     let active = 0,
       segs = 0;
     for (const { P, age, fade } of liveAt(A, g)) {
@@ -764,8 +799,12 @@ export function createHero(canvas, { stage, state, reduce }) {
       if (extent < P.len) active++;
       strokePath(ctx, P, extent, fade, age);
       segs += P.pts.length;
+      grow(box, P.box);
     }
-    if (!bake.coresDrawn) drawCores(ctx, g, A);
+    if (!bake.coresDrawn) {
+      drawCores(ctx, g, A);
+      grow(box, [0, 0, L.W, L.H]);
+    }
     return { active, segs };
   }
 
@@ -1027,7 +1066,7 @@ export function createHero(canvas, { stage, state, reduce }) {
   }
   const metrics = (window.__pulseMetrics = { costs: [], frames: 0, maxConcurrent: 0, maxRipples: 0, paused: true, reason: "building", activeBuckets: 0 });
 
-  function drawPulses(ctx, T, A, g, sched) {
+  function drawPulses(ctx, T, A, g, sched, box) {
     let drawn = 0,
       active = 0;
     const t = ((T % sched.period) + sched.period) % sched.period;
@@ -1047,7 +1086,10 @@ export function createHero(canvas, { stage, state, reduce }) {
         if (env < 0.012) continue;
         bucket.ensureImages();
         ctx.globalAlpha = env * Math.exp((-i * r.step * 38) / 2000);
-        for (const tile of bucket.images) ctx.drawImage(tile.image, tile.x, tile.y, tile.image.width / d, tile.image.height / d);
+        for (const tile of bucket.images) {
+          ctx.drawImage(tile.image, tile.x, tile.y, tile.image.width / d, tile.image.height / d);
+          grow(box, [tile.x, tile.y, tile.x + tile.image.width / d, tile.y + tile.image.height / d]);
+        }
         drawn++;
       }
       // Laid-late segments glow as strokes, and only once grown.
@@ -1061,6 +1103,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           { age: local, fade } = P ? unitClock(P, g.units, A) : { age: A, fade: 1 };
         if (fade < 0.5 || (P && (local - P.t0) * P.v < P.arcs[s.index + 1])) continue;
         ctx.globalAlpha = envelope(dt) * item.amp * (light ? 0.3 : 0.8) * fade;
+        grow(box, [Math.min(s.a.x, s.b.x) - 2, Math.min(s.a.y, s.b.y) - 2, Math.max(s.a.x, s.b.x) + 2, Math.max(s.a.y, s.b.y) + 2]);
         ctx.lineWidth = Math.max(0.45, s.width * 1.5);
         ctx.beginPath();
         ctx.moveTo(s.a.x, s.a.y);
@@ -1080,6 +1123,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           if (!im) continue;
           ctx.globalAlpha = gain * (light ? 0.34 : 0.7);
           ctx.drawImage(im, b.box[0], b.box[1], b.box[2] - b.box[0], b.box[3] - b.box[1]);
+          grow(box, b.box);
           drawn++;
         }
       }
@@ -1143,7 +1187,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       const A = START_AGE + scene.clock.elapsed;
       for (; progress < out.paths.length; progress++) {
         const P = out.paths[progress];
-        if (P.unit < 0 && P.done + RIM_WIN <= A) bakePath(P);
+        if (P.unit < 0 && P.done <= A) bakePath(P);
       }
       if (!bake.coresDrawn && out.colonies) {
         drawCores(sx, out, A);
@@ -1199,8 +1243,18 @@ export function createHero(canvas, { stage, state, reduce }) {
     };
     // Bake the remaining mature state in slices; reduced motion presents once.
     const A0 = reduce.matches ? 1e5 : START_AGE + scene.clock.elapsed;
+    // At load, everything already fully grown is baked at once (rim glow is for
+    // fronts that grow while watched); only still-growing paths stay live.
     await run((function* () {
       let n = 0;
+      for (const P of g.paths)
+        if (!P.baked && Number.isFinite(P.bt) && P.done <= A0) {
+          bakePath(P);
+          if (++n % 150 === 0) {
+            if (!reduce.matches) scene.hero.version++;
+            yield "bake-grown";
+          }
+        }
       while (bake.next < bake.order.length && bake.order[bake.next].bt <= A0) {
         bakePath(bake.order[bake.next].P);
         bake.next++;
@@ -1233,12 +1287,13 @@ export function createHero(canvas, { stage, state, reduce }) {
       graph: { vs: g.vs, ss: g.ss, nodes: g.nodes, cords: g.linkCords, explorerAudit: g.explorerAudit, units: g.units, paths: g.paths },
       field: g.field,
       routes: g.routes,
-      drawLive(ctx, T, A) {
-        const s = drawLive(ctx, A, g);
-        const p = T < -1e5 ? 0 : drawPulses(ctx, T, A, g, sched);
+      drawLive(ctx, T, A, box) {
+        const s = drawLive(ctx, A, g, box);
+        const p = T < -1e5 ? 0 : drawPulses(ctx, T, A, g, sched, box);
         return { ...s, pulses: p };
       },
-      bakeUntil: (A) => bakeUntil(A, g),
+      // Batched (running) bakes never move backwards; exact seeks may rebuild.
+      bakeUntil: (A, batched = false) => (batched && A <= bake.age ? false : bakeUntil(A, g)),
       liveCount: (A) => liveAt(A, g).length,
       freezeBreath,
       pulseEnvelope: envelope,
@@ -1246,7 +1301,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       unitClock: (P, A) => unitClock(P, g.units, A),
     });
     window.__growthGeometry = { nodes: g.nodes.map((n) => ({ x: n.x, y: n.y, id: n.source })), cords: g.linkCords.map((c) => ({ from: c.a.source, to: c.b.source, length: c.length })), segments: g.ss.length };
-    window.__rootPaths = g.paths.filter((P) => P.pts.length >= 9 && P.kind !== "hair").slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }));
+    let rootPaths = null;
+    Object.defineProperty(window, "__rootPaths", { configurable: true, get: () => (rootPaths ??= g.paths.filter((P) => P.pts.length >= 9 && P.kind !== "hair").slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }))) });
     window.__fusionEvents = g.paths.filter((P) => P.fused).slice(0, 2000).map((P) => ({ x: P.pts.at(-1).x, y: P.pts.at(-1).y, birth: P.done, degree: P.pts.at(-1).edges.length }));
     window.__dendriticProbe = (T) => {
       const A = START_AGE + T;
