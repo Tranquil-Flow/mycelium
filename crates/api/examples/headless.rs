@@ -2480,7 +2480,8 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
     fs::create_dir_all(&root).map_err(|e| format!("state_root:{e}"))?;
     fs::set_permissions(&root, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .map_err(|e| format!("state_root_mode:{e}"))?;
-    let authority = Authority::load(root.clone()).map_err(str::to_owned)?;
+    let authority = Authority::load(root).map_err(str::to_owned)?;
+    let root = authority.root.clone();
     let mut core = Core {
         relay: OwnerRelay::new(&root, relay_hooks),
         authority,
@@ -2630,7 +2631,8 @@ mod handoff_tests;
 
 fn run() -> Result<(), String> {
     let root = state_root()?;
-    let core: Shared = Arc::new(Mutex::new(load_core(root.clone())?));
+    let core: Shared = Arc::new(Mutex::new(load_core(root)?));
+    let root = core.lock().map_err(|_| "core_poisoned")?.root.clone();
     resume_membership(&core)?;
     // `DemoApp.start` -> `authority.start()`: an owner with a swarm brings its seed back.
     let cell = CoreCell(core.clone());
