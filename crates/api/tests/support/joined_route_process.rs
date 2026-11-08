@@ -664,12 +664,22 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
 
     // (f) Carrier stall: freeze a LOCAL member process mid-stream (the final
     // stage when both are local; on two Macs, the member on the owner's Mac).
-    let k = if fx.nodes[1].local() { 1 } else { 0 };
+    // Pairing order is random on two Macs, so either stage may be the local one;
+    // `B8_FAULT_STAGE=0|1` forces the faulted stage when both are local.
+    let k = match std::env::var("B8_FAULT_STAGE").ok().as_deref() {
+        Some("0") => 0,
+        Some("1") => 1,
+        _ if fx.nodes[1].local() => 1,
+        _ => 0,
+    };
     let survivor = 1 - k;
     assert!(
         fx.nodes[k].local(),
         "fault phases need one member on this host"
     );
+    eprintln!("B8 fault phases on stage {k} (local); survivor stage {survivor}");
+    evidence["fault_stage"] = json!({"faulted":k,"survivor":survivor,
+        "survivor_local":fx.nodes[survivor].local()});
     let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
     let e = open_epoch(&mut fx, 3, &proofs, &secret, &codec, &addrs);
     let r = submit(&e);
