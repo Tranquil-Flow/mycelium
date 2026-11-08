@@ -18,7 +18,7 @@ impl Drop for Root {
 fn fixture(tag: &str) -> (Root, Shared, Arc<SeedRuntime>) {
     let root = Root::new(tag);
     let core = Arc::new(Mutex::new(load_core(root.0.clone()).unwrap()));
-    let seed = Arc::new(start_seed(&root.0, "swarm-lifetime", None).unwrap());
+    let seed = Arc::new(start_seed(&core.lock().unwrap().root, "swarm-lifetime", None).unwrap());
     {
         let mut c = core.lock().unwrap();
         c.running = true;
