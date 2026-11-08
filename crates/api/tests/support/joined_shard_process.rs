@@ -19,14 +19,14 @@ use transport::{Channel, Clock};
 fn allowance() -> Duration {
     Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis())
 }
-struct Node {
-    child: Child,
+pub(super) struct Node {
+    pub(super) child: Child,
     replies: mpsc::Receiver<Value>,
     reader: Option<std::thread::JoinHandle<()>>,
     done: bool,
 }
 impl Node {
-    fn start(root: &std::path::Path) -> Self {
+    pub(super) fn start(root: &std::path::Path) -> Self {
         let exe = std::env::var_os("B7_MEMBER_BINARY")
             .expect("build api --example shard_member and set B7_MEMBER_BINARY");
         let mut child = Command::new(exe)
@@ -54,21 +54,29 @@ impl Node {
             done: false,
         }
     }
-    fn send(&mut self, v: Value) {
+    pub(super) fn send(&mut self, v: Value) {
         let input = self.child.stdin.as_mut().unwrap();
         writeln!(input, "{v}").unwrap();
         input.flush().unwrap();
     }
-    fn result(&self) -> Value {
-        let v = self.replies.recv_timeout(allowance()).unwrap();
+    pub(super) fn result_with(&self, timeout: Duration) -> Value {
+        let v = self.replies.recv_timeout(timeout).unwrap();
         assert_eq!(v["ok"], true, "{v}");
         v["result"].clone()
     }
-    fn call(&mut self, v: Value) -> Value {
+    pub(super) fn refusal(&self) -> String {
+        let value = self.replies.recv_timeout(allowance()).unwrap();
+        assert_eq!(value["ok"], false, "{value}");
+        value["code"].as_str().unwrap().to_owned()
+    }
+    fn result(&self) -> Value {
+        self.result_with(allowance())
+    }
+    pub(super) fn call(&mut self, v: Value) -> Value {
         self.send(v);
         self.result()
     }
-    fn close(&mut self) {
+    pub(super) fn close(&mut self) {
         self.call(json!({"command":"close"}));
         self.child.stdin.take();
         let end = Instant::now() + allowance();

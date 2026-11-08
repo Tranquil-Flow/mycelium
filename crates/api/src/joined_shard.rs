@@ -14,6 +14,7 @@ use protocol::{
 use runtime::sidecar_artifact::grant_limits;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+pub mod native;
 mod source;
 pub use source::JoinedSource;
 type Result<T> = std::result::Result<T, Error>;

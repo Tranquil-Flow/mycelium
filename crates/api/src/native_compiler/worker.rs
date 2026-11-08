@@ -19,13 +19,13 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .millis(),
     ))
 }
-pub(super) struct Worker {
+pub(crate) struct Worker {
     child: Option<Child>,
     link: Link,
     cancel: Arc<AtomicBool>,
 }
 impl Worker {
-    pub(super) fn start(
+    pub(crate) fn start(
         config: &Config,
         prepare: &Value,
         cancel: Arc<AtomicBool>,
@@ -84,13 +84,13 @@ impl Worker {
             cancel,
         })
     }
-    pub(super) fn pid(&self) -> Result<u32> {
+    pub(crate) fn pid(&self) -> Result<u32> {
         self.child
             .as_ref()
             .map(Child::id)
             .ok_or(Error("native_worker_closed"))
     }
-    pub(super) fn request(&mut self, head: &Value, body: &[u8]) -> Result<(Value, Vec<u8>)> {
+    pub(crate) fn request(&mut self, head: &Value, body: &[u8]) -> Result<(Value, Vec<u8>)> {
         self.request_until(
             head,
             body,
@@ -142,7 +142,7 @@ impl Worker {
         }
         Ok((reply, body))
     }
-    pub(super) fn close(mut self) -> Result<Value> {
+    pub(crate) fn close(mut self) -> Result<Value> {
         let (reply, body) = self.request(&json!({"command":"close"}), &[])?;
         if !body.is_empty()
             || reply["ok"] != true
@@ -198,7 +198,7 @@ impl Drop for Worker {
     }
 }
 
-pub(super) fn greedy(raw: &[u8]) -> Result<u32> {
+pub(crate) fn greedy(raw: &[u8]) -> Result<u32> {
     if raw.get(..8) != Some(b"MYAC\x01\x03\x03\x01") || raw.len() < 28 {
         return Err(Error("native_logits_invalid"));
     }

@@ -22,7 +22,7 @@ use std::{
     time::Instant,
 };
 pub mod shard_sandbox;
-mod worker;
+pub(crate) mod worker;
 
 #[derive(Debug, Clone)]
 pub struct Error(pub &'static str);
@@ -89,12 +89,12 @@ pub(crate) fn file_pin(path: &Path) -> Result<Pin> {
         sha256: format!("{:x}", hash.finalize()),
     })
 }
-struct Config {
+pub(crate) struct Config {
     binary: PathBuf,
     pin: Pin,
 }
 impl Config {
-    fn from_environment() -> Result<Option<Self>> {
+    pub(crate) fn from_environment() -> Result<Option<Self>> {
         let Some(binary) = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY") else {
             return Ok(None);
         };

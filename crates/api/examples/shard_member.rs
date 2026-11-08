@@ -3,8 +3,8 @@
 //! no serving/route-ready claim. The process owns pairing, QUIC and B3 custody.
 use api::{
     app_host,
+    joined_shard::native::NativeShard,
     joined_shard::{self, JoinedShard},
-    member::Session,
     peer,
     preferences::{resource_policy, standing_consent},
     seed::SeedOptions,
@@ -18,6 +18,10 @@ use std::{
     path::PathBuf,
 };
 use transport::{Channel, Clock};
+#[path = "shard_member/membership.rs"]
+mod membership;
+use membership::Membership;
+use std::sync::{Arc, atomic::AtomicBool};
 type Result<T> = std::result::Result<T, String>;
 fn main() {
     if let Err(code) = run() {
@@ -58,7 +62,8 @@ fn run() -> Result<()> {
     let addr = host.address().map_err(|e| format!("{e:?}"))?;
     let carrier = Identity::from_secret(&addr.id.to_string(), &signer.secret_bytes())
         .map_err(|_| "identity_failed")?;
-    let mut session: Option<Session> = None;
+    let mut session: Option<Membership> = None;
+    let mut native: Option<NativeShard> = None;
     let mut shard: Option<JoinedShard> = None;
     let mut input = std::io::stdin().lock();
     let cap = api::preferences::private_state::private_json_limit().map_err(|e| e.0.to_owned())?;
@@ -118,9 +123,20 @@ fn run() -> Result<()> {
                     .map_err(|e| e.code.to_owned())?;
                 peer::renew(&root, true, accepted.session.as_mut(), &env)
                     .map_err(|e| e.code.to_owned())?;
-                session = accepted.session;
+                session = Some(Membership::new(
+                    accepted.session.ok_or("session_missing")?,
+                    root.clone(),
+                    &signer,
+                    options,
+                )?);
+                let held = session
+                    .as_ref()
+                    .ok_or("session_missing")?
+                    .session
+                    .lock()
+                    .map_err(|_| "session_poisoned")?;
                 joined_shard::register(
-                    session.as_ref().ok_or("session_missing")?,
+                    held.as_ref().ok_or("session_missing")?,
                     &signer,
                     &carrier,
                     app_host::now(),
@@ -128,7 +144,13 @@ fn run() -> Result<()> {
                 .map_err(|e| e.0.to_owned())
             }
             "consent" => {
-                let session = session.as_ref().ok_or("not_joined")?;
+                let held = session
+                    .as_ref()
+                    .ok_or("not_joined")?
+                    .session
+                    .lock()
+                    .map_err(|_| "session_poisoned")?;
+                let session = held.as_ref().ok_or("not_joined")?;
                 resource_policy::write(&root, &request["policy"]).map_err(|e| e.code.to_owned())?;
                 standing_consent::grant(
                     &root,
@@ -143,7 +165,7 @@ fn run() -> Result<()> {
                 Ok(json!({"consent":"granted"}))
             }
             "receive" => {
-                if shard.is_some() {
+                if shard.is_some() || native.is_some() {
                     return Err("shard_already_owned".into());
                 }
                 let session = session.as_ref().ok_or("not_joined")?;
@@ -161,8 +183,20 @@ fn run() -> Result<()> {
                 }
                 // Retain custody BEFORE any fallible carrier work; failures keep debt.
                 shard = Some(
-                    JoinedShard::begin(&root, session, &signer, &carrier, offer, app_host::now())
-                        .map_err(|e| e.0.to_owned())?,
+                    JoinedShard::begin(
+                        &root,
+                        session
+                            .session
+                            .lock()
+                            .map_err(|_| "session_poisoned")?
+                            .as_ref()
+                            .ok_or("not_joined")?,
+                        &signer,
+                        &carrier,
+                        offer,
+                        app_host::now(),
+                    )
+                    .map_err(|e| e.0.to_owned())?,
                 );
                 let receive = shard.as_mut().unwrap();
                 let connection = host
@@ -190,7 +224,9 @@ fn run() -> Result<()> {
                     .get();
                 let mut offset = 0;
                 while offset < size {
-                    let length = cap.min(size - offset);
+                    let length = cap
+                        .min(protocol::artifact_grant::MAX_CHUNK_BYTES)
+                        .min(size - offset);
                     let chunk = ChunkRequest {
                         request_id: format!("chunk-{offset}"),
                         source_endpoint_id: source.to_string(),
@@ -205,7 +241,12 @@ fn run() -> Result<()> {
                         .fetch_chunk(
                             &mut link,
                             &chunk,
-                            session,
+                            session
+                                .session
+                                .lock()
+                                .map_err(|_| "session_poisoned")?
+                                .as_ref()
+                                .ok_or("not_joined")?,
                             &signer,
                             &carrier,
                             &app_host::now,
@@ -215,13 +256,78 @@ fn run() -> Result<()> {
                     offset += length;
                 }
                 receive
-                    .verify(session, &signer, &carrier, &app_host::now)
+                    .verify(
+                        session
+                            .session
+                            .lock()
+                            .map_err(|_| "session_poisoned")?
+                            .as_ref()
+                            .ok_or("not_joined")?,
+                        &signer,
+                        &carrier,
+                        &app_host::now,
+                    )
                     .map_err(|e| e.0.to_owned())?;
                 Ok(
-                    json!({"received_bytes":size,"path":receive.path(),"node_id":session.node_id(),"generation":session.generation(),"route_ready":false,"pid":std::process::id()}),
+                    json!({"received_bytes":size,"path":receive.path(),"node_id":session.current(&signer).map_err(|e| e.0.to_owned())?["node_id"],"generation":session.current(&signer).map_err(|e| e.0.to_owned())?["generation"],"route_ready":false,"pid":std::process::id()}),
                 )
             }
+            "prepare_native" => {
+                if native.is_none() {
+                    native = Some(
+                        NativeShard::new(shard.take().ok_or("shard_required")?)
+                            .map_err(|e| e.0.to_owned())?,
+                    );
+                }
+                let member = session.as_ref().ok_or("not_joined")?;
+                let range = serde_json::from_value(request["range"].clone())
+                    .map_err(|_| "range_invalid")?;
+                let tokens = request["tokens"].as_u64().ok_or("tokens_invalid")? as usize;
+                let nonce = request["nonce"].as_str().ok_or("nonce_invalid")?;
+                let source = PathBuf::from(
+                    request["forbidden_source"]
+                        .as_str()
+                        .ok_or("source_invalid")?,
+                );
+                native
+                    .as_mut()
+                    .unwrap()
+                    .prepare(
+                        range,
+                        tokens,
+                        nonce,
+                        &signer,
+                        &|| member.current(&signer),
+                        Arc::new(AtomicBool::new(false)),
+                        &source,
+                    )
+                    .map_err(|e| e.0.to_owned())
+            }
+            "native_step" => {
+                use base64::Engine;
+                let member = session.as_ref().ok_or("not_joined")?;
+                let input: Option<Vec<u32>> = serde_json::from_value(request["tokens"].clone())
+                    .map_err(|_| "tokens_invalid")?;
+                let payload = base64::engine::general_purpose::STANDARD
+                    .decode(request["payload"].as_str().ok_or("payload_invalid")?)
+                    .map_err(|_| "payload_invalid")?;
+                let bytes = native
+                    .as_mut()
+                    .ok_or("native_required")?
+                    .step(input.as_deref(), &payload, &|| member.current(&signer))
+                    .map_err(|e| e.0.to_owned())?;
+                Ok(json!({"payload":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+            }
+            "native_close" => native
+                .as_mut()
+                .ok_or("native_required")?
+                .close()
+                .map_err(|e| e.0.to_owned()),
             "discard" => {
+                if let Some(compute) = native.as_mut() {
+                    compute.discard().map_err(|e| e.0.to_owned())?;
+                }
+                native = None;
                 if let Some(receive) = shard.as_mut() {
                     receive.discard().map_err(|e| e.0.to_owned())?;
                 }
