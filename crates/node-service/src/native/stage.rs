@@ -48,22 +48,63 @@ impl NativeStage {
         id: &str,
         generation: u64,
     ) -> Result<Self> {
+        Self::prepare_image(path, selected, memory, id, generation, None)
+    }
+    pub fn prepare_shard(
+        path: &Path,
+        image: &crate::native_selection::AssignedImage,
+        memory: u64,
+        tokens: u32,
+        id: &str,
+        generation: u64,
+        shard: &Value,
+    ) -> Result<Self> {
+        let selected = crate::native_selection::select(
+            Some(image),
+            image.layers.clone(),
+            image.total_layers,
+            memory,
+            tokens,
+        )?;
+        Self::prepare_image(path, selected, memory, id, generation, Some(shard))
+    }
+    fn prepare_image(
+        path: &Path,
+        selected: crate::native_selection::Selection,
+        memory: u64,
+        id: &str,
+        generation: u64,
+        shard: Option<&Value>,
+    ) -> Result<Self> {
         pressure()?;
         let request = admission::digest_hex(id)?;
-        selected.verify_source(path)?;
+        match shard {
+            Some(shard) => backend_mlx::stage_shard::verify(path, &selected.descriptor, shard)?,
+            None => selected.verify_source(path)?,
+        }
         // Source verification can take time. Recheck pressure before native allocation.
         pressure()?;
         let descriptor = selected.descriptor;
         let limits = selected.limits;
         let range = descriptor.layers.clone();
         let context = Context::new(usize::try_from(memory)?, 0)?;
-        let mut worker = Worker::prepare(
-            context.clone(),
-            descriptor.clone(),
-            path,
-            limits,
-            generation,
-        )?;
+        let mut worker = match shard {
+            Some(shard) => Worker::prepare_shard(
+                context.clone(),
+                descriptor.clone(),
+                path,
+                limits,
+                generation,
+                shard,
+            )?,
+            None => Worker::prepare(
+                context.clone(),
+                descriptor.clone(),
+                path,
+                limits,
+                generation,
+            )?,
+        };
         let binding = Binding {
             descriptor,
             request,

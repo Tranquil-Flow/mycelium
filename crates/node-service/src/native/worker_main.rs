@@ -27,7 +27,7 @@ pub fn native_worker() -> Result<()> {
         let command = text(&head, "command")?.to_owned();
         let outcome = (|| -> Result<(Value, Vec<u8>, bool)> {
             match command.as_str() {
-                "prepare" => {
+                "prepare" | stage_contract::native_shard::COMMAND => {
                     if stage.is_some() {
                         return Err("worker_already_prepared".into());
                     }
@@ -37,8 +37,15 @@ pub fn native_worker() -> Result<()> {
                     let memory = number(&head, "memory")?;
                     let tokens = u32::try_from(number(&head, "tokens")?)?;
                     // stage_image is PRIVATE metadata, not an external plan extension.
+                    let mut legacy = head.clone();
+                    if command == stage_contract::native_shard::COMMAND {
+                        legacy
+                            .as_object_mut()
+                            .ok_or("native_shard_binding_mismatch")?
+                            .remove("shard");
+                    }
                     let image = crate::native_selection::assigned_image(
-                        &head,
+                        &legacy,
                         range.clone(),
                         total,
                         memory,
@@ -48,6 +55,20 @@ pub fn native_worker() -> Result<()> {
                     let id = text(&head, "id")?;
                     let generation = number(&head, "generation")?;
                     stage = Some(match image {
+                        Some(image) if command == stage_contract::native_shard::COMMAND => {
+                            NativeStage::prepare_shard(
+                                path,
+                                &image,
+                                memory,
+                                tokens,
+                                id,
+                                generation,
+                                &head["shard"],
+                            )?
+                        }
+                        None if command == stage_contract::native_shard::COMMAND => {
+                            return Err("native_shard_binding_mismatch".into());
+                        }
                         Some(image) => NativeStage::prepare_assigned(
                             path, &image, memory, tokens, id, generation,
                         )?,
@@ -105,7 +126,13 @@ pub fn native_worker() -> Result<()> {
             }
             Err(error) => {
                 // Say why, then die: a worker that failed a command is not reused.
-                if let Err(send) = link.send(&json!({"error":error.to_string()}), &[]) {
+                let mut refusal = json!({"error":error.to_string()});
+                if command == stage_contract::native_shard::COMMAND
+                    && let Some(error) = error.downcast_ref::<stage_contract::Error>()
+                {
+                    refusal["code"] = json!(error.phase);
+                }
+                if let Err(send) = link.send(&refusal, &[]) {
                     eprintln!("native worker could not report {error}: {send}");
                 }
                 return Err(error);

@@ -235,6 +235,8 @@ impl CompiledHandoff {
         }
         if docs["compiled/operator-plan.json"]["protocol"]
             == stage_contract::native_proof::PLAN_PROTOCOL
+            || docs["compiled/operator-plan.json"]["protocol"]
+                == stage_contract::native_shard::PLAN_PROTOCOL
         {
             return native::open_native(&root, pins, &docs, files);
         }

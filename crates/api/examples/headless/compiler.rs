@@ -469,8 +469,11 @@ impl CompilePort for Compiler {
                 )?;
                 artifact.bind_cancellation(cancel.clone())?;
                 if request.stage_sharded {
+                    // The producer already independently recompiles and reopens
+                    // its recipes before returning. Do not immediately repeat
+                    // the model-sized scan with no intervening asynchronous work.
                     artifact.produce_stage_shards(&check()?, now())?;
-                    artifact.validate_stage_shards(&check()?, now())?;
+                    artifact.produce_assignments(&check()?, now())?;
                 } else {
                     artifact.produce_assignments(&check()?, now())?;
                     artifact.validate_assignments(&check()?, now())?;
