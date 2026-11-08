@@ -12,11 +12,25 @@ import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measure
 import { extendFieldGraph } from "./mycelium-field.js";
 
 export const START_AGE = 110; // visitors arrive to a mature core with living rims
+// r11 load-in: the hero grows out from its nodes over the first INTRO_S seconds
+// (shared contract with the field lane), then runs at the normal rate.
+export const INTRO_MS = 6000;
+const INTRO_S = INTRO_MS / 1000,
+  INTRO_POW = 1.6;
+let introPlayed = false; // module state: theme/hue/style re-mounts never replay
 const RIM = 1.5, // front brightness boost (D8)
   RIM_TAU = 4.5,
   RIM_WIN = 20, // seconds a laid segment keeps its rim glow before baking
   CAP = 760000,
   CHUNK = 6;
+// r11 density between 6405a6fa and 02e3dcad (see D46).
+const COTTON = 1700,
+  COTTON_POW = 1.05,
+  MAT = 1800,
+  // Persistent fuzz: hairs per px of persistent strand (owner: like pulse growth).
+  FUZZ_RATE = 1 / 9,
+  CORD_W0 = 5, // link cords 5-7 px at the colony (r10: 8-12): always under the mat core
+  CORD_A = 0.16;
 const geometryCache = new Map();
 
 /** Text-safe density field in scene coordinates (1 away from text, FLOOR in it). */
@@ -256,7 +270,7 @@ function* buildGeometry(L, budget, out = {}) {
     rw = W - reg0,
     spots = mobile
       ? [[0.16 * W, Hh * 0.77], [0.66 * W, Hh * 0.81], [0.4 * W, Hh * 0.95], [W + 10, Hh * 0.93], [0.92 * W, Hh * 0.7]]
-      : [[reg0 + 0.15 * rw, Hh * 0.28], [reg0 + 0.5 * rw, Hh * 0.52], [reg0 + 0.85 * rw, Hh * 0.15], [W + 22, Hh * 0.8], [reg0 + 0.28 * rw, Hh * 0.92]];
+      : [[reg0 + 0.15 * rw, Hh * 0.28], [reg0 + 0.5 * rw, Hh * 0.52], [reg0 + 0.85 * rw, Hh * 0.15], [W - 34, Hh * 0.8], [reg0 + 0.28 * rw, Hh * 0.92]];
   const leftColony = !mobile && L.textLeft >= 230;
   if (leftColony) spots.push([L.textLeft * 0.42, Hh * 0.56]);
   const nodes = spots.map(([x, y], i) => {
@@ -281,7 +295,7 @@ function* buildGeometry(L, budget, out = {}) {
     };
   });
   // Smooth per-sector front speed: coherent but irregular advancing rims.
-  Object.assign(out, { paths, colonies, protect, nodes });
+  Object.assign(out, { paths, colonies, protect, nodes, units });
   const sectorSpeed = (c, h) => c.vel * (1 + 0.16 * Math.sin(h + c.phases[0]) + 0.1 * Math.sin(2 * h + c.phases[1]) + 0.06 * Math.sin(3 * h + c.phases[2]));
   yield "layout";
 
@@ -329,7 +343,9 @@ function* buildGeometry(L, budget, out = {}) {
       const outward = (x, y, mean) => Math.atan2(Math.sin(Math.atan2(y - sb.y, x - sb.x) - mean), Math.cos(Math.atan2(y - sb.y, x - sb.x) - mean)) * 0.005;
       const radial = (x, y) => {
         const r = Math.hypot(x - sb.x, y - sb.y) / sb.R;
-        return r < 0.35 ? 0.82 + 0.18 * (r / 0.35) : 1; // dimmer interior (senescence)
+        // r11: a defined (not dimmed) matted centre; still no point soma.
+        // r11: a defined matted centre without a convergence point (no soma).
+        return r < 0.35 ? 0.62 + 0.42 * smooth(r / 0.35) : r < 0.75 ? 1 : 1 - 0.25 * smooth((r - 0.75) / 0.5);
       };
       const P = hypha(start, h, reach, {
         kind: "colony", source: c.i, sub: sb.k, t0: sb.t + r0 / v, v, w0: 0.5, w1: 0.17, wp: 0.8, a0: 0.36, a1: 0.13, tone: R() < 0.16 ? 1 : 0,
@@ -356,11 +372,13 @@ function* buildGeometry(L, budget, out = {}) {
   // attached to laid vertices (graph-connected), density falling outwards.
   const fuzzR = rng("r10-colony-cotton");
   for (const c of colonies) {
-    const count = Math.round((mobile ? 1000 : 2300) * (c.R0 / R0) * (0.8 + 0.25 * c.subW));
+    // r11: fewer, more central cotton hairs: a defined, densely matted colony
+    // centre (always denser than any cord leaving it) with dark space around.
+    const count = Math.round((mobile ? 800 : COTTON) * (c.R0 / R0) * (0.8 + 0.25 * c.subW));
     for (let k = 0; k < count; k++) {
       const sb = pickSub(c, fuzzR),
         th = fuzzR() < 0.6 ? sb.fan + gauss(fuzzR) * c.spread * 1.1 : fuzzR() * 6.28,
-        rr = sb.R * shapeR(c, th, sb) * Math.pow(fuzzR(), 0.75) * 0.95,
+        rr = sb.R * shapeR(c, th, sb) * Math.pow(fuzzR(), COTTON_POW) * 0.9,
         at = nearest(sb.x + Math.cos(th) * rr, sb.y + Math.sin(th) * rr, 7, (v) => v.owner !== undefined && v.owner >= 0 && v.source === c.i);
       if (!at) continue;
       const u = Math.min(1, rr / sb.R),
@@ -399,7 +417,7 @@ function* buildGeometry(L, budget, out = {}) {
           sb = sa + span;
         if (islands.some((q) => sa < q.sb + 20 && sb > q.sa - 20)) continue;
         const ways = R() < 0.6 ? 2 : 3;
-        islands.push({ sa, sb, ways, amp: 4 + R() * 4.5, skew: Array.from({ length: ways }, () => 0.7 + R() * 0.6), follow: Math.floor(R() * ways) });
+        islands.push({ sa, sb, ways, amp: 3.6 + R() * 4, skew: Array.from({ length: ways }, () => 0.7 + R() * 0.6), follow: Math.floor(R() * ways) });
       }
     }
     const eye = (q, s) => (s <= q.sa || s >= q.sb ? 0 : Math.pow(Math.sin((Math.PI * (s - q.sa)) / (q.sb - q.sa)), 0.75));
@@ -410,7 +428,7 @@ function* buildGeometry(L, budget, out = {}) {
         for (const q of islands) off += binOffset(q, q.follow, arcC[i]);
         if (off) centre[i] = { x: centre[i].x + ncx[i] * off, y: centre[i].y + ncy[i] * off };
       }
-    const spine = lay(centre, { kind: "cord-centre", cord: id, t0: o.t0, v: o.v, w0: 0.7, w1: 0.4, a0: 0.3, a1: 0.2, tone: 1, source: from.source, unit: o.unit });
+    const spine = lay(centre, { kind: "cord-centre", cord: id, t0: o.t0, v: o.v, w0: 0.7, w1: 0.45, a0: 0.3, a1: 0.2, tone: 1, source: from.source, unit: o.unit });
     if (!spine) return null;
     const C = { id, a: from, b: spine.pts.at(-1), spine, length: spine.len, poly: spine.pts };
     cords.push(C);
@@ -432,7 +450,7 @@ function* buildGeometry(L, budget, out = {}) {
       // Fibres emerge from the mat, not from one point at the node.
       let s0 = Math.min(Lc * 0.5, (o.emerge ?? 0) * (0.6 + 0.8 * R()) + Lc * 0.3 * Math.pow(R(), 2.2));
       const
-        s1 = Lc * (1 - 0.45 * Math.pow(R(), 2.4)),
+        s1 = Lc * (1 - (o.link ? 0.06 + 0.5 * Math.pow(R(), 1.3) : 0.45 * Math.pow(R(), 2.4))),
         delay = (f / F) * o.accrete + R() * 3,
         pts = [];
       let u = (R() - 0.5) * 1.6,
@@ -469,10 +487,10 @@ function* buildGeometry(L, budget, out = {}) {
       if (pts.length < 3) continue;
       const startAt = along(spine, s0);
       pts[0] = startAt.v; // fibres attach to the centre line: reachable by pulses
-      const fw = 0.24 + R() * 0.36;
+      const fw = 0.22 + R() * 0.28;
       const P = lay(pts, {
-        kind: "cord-fibre", cord: -1, group: id, s0, t0: o.t0 + s0 / o.v + delay, v: o.v, w0: fw * 1.2, w1: fw * 0.65, a0: 0.13 + R() * 0.11, a1: 0.07,
-        tone: f % 6 === 0 ? 1 : 0, source: from.source, unit: o.unit,
+        kind: "cord-fibre", cord: -1, group: id, s0, t0: o.t0 + s0 / o.v + delay, v: o.v, w0: fw * 1.15, w1: fw * 0.65, a0: CORD_A + R() * 0.07, a1: 0.06,
+        tone: f % 9 === 0 ? 1 : 0, source: from.source, unit: o.unit,
       });
       if (P && R() < 0.7) fringe(P, (1 / 15) * o.fringe, { len: 10, maxLen: 40, w: 0.19, a: 0.24 });
       budget() && (yield "fibre");
@@ -534,7 +552,7 @@ function* buildGeometry(L, budget, out = {}) {
       if (!src) continue;
       const tv = o.v * 0.8,
         tl = Math.hypot(at.v.x - src.x, at.v.y - src.y);
-      yield* cord(src, at.v, { meet: at.v, tributary: true, braid: false, emerge: 0, t0: Math.max(o.t0, at.t - tl / tv + 6), v: tv, unit: o.unit, w0: 3 + R() * 1.6, w1: 1.4, fibres: 7 + Math.floor(R() * 6), accrete: 14, fringe: 0.8, web: 0.5, brush: false });
+      yield* cord(src, at.v, { meet: at.v, tributary: true, braid: false, emerge: 0, t0: Math.max(o.t0, at.t - tl / tv + 6), v: tv, unit: o.unit, w0: 2.4 + R() * 1.1, w1: 1.2, fibres: 6 + Math.floor(R() * 5), accrete: 14, fringe: 1, web: 0.4, brush: false });
     }
     return C;
   }
@@ -556,7 +574,7 @@ function* buildGeometry(L, budget, out = {}) {
       const dist = Math.hypot(meet.x - from.x, meet.y - from.y),
         v = 6.2 * (0.9 + R() * 0.2),
         t0 = C0.start + 7;
-      halves.push(yield* cord(from, meetV, { meet: meetV, emerge: C0.R0 * 0.22, t0, v, w0: 8 + R() * 4, w1: 2.2, fibres: 32 + Math.floor(R() * 9), accrete: 40, fringe: 1, web: 1.6, brush: false, tribs: 1 }));
+      halves.push(yield* cord(from, meetV, { meet: meetV, emerge: C0.R0 * 0.22, t0, v, w0: CORD_W0 + R() * 2, w1: 1.6, fibres: 22 + Math.floor(R() * 7), accrete: 40, fringe: 1.2, web: 0.55, brush: false, tribs: 1, link: true }));
       void dist;
       void other;
     }
@@ -574,7 +592,7 @@ function* buildGeometry(L, budget, out = {}) {
         at = along(C.spine, s),
         h = at.h + (R() < 0.5 ? -1 : 1) * (0.3 + R() * 0.3),
         l = 90 + R() * 130;
-      yield* cord(at.v, { x: at.v.x + Math.cos(h) * l, y: at.v.y + Math.sin(h) * l }, { t0: at.t + 6, v: 5.2, w0: 4 + R() * 2, w1: 1.4, fibres: 14 + Math.floor(R() * 8), accrete: 30, fringe: 1.2, web: 0.6, brush: true });
+      yield* cord(at.v, { x: at.v.x + Math.cos(h) * l, y: at.v.y + Math.sin(h) * l }, { t0: at.t + 6, v: 5.2, w0: 3 + R() * 1.4, w1: 1.2, fibres: 11 + Math.floor(R() * 6), accrete: 30, fringe: 1.3, web: 0.45, brush: true });
     }
     budget() && (yield "tributary");
   }
@@ -586,7 +604,7 @@ function* buildGeometry(L, budget, out = {}) {
       let best = null;
       for (let trial = 0; trial < 14; trial++) {
         const h = R() * 6.28,
-          l = (mobile ? 110 : 170) + R() * (mobile ? 100 : 170);
+          l = (mobile ? 110 : 200) + R() * (mobile ? 100 : 180);
         let score = 0;
         for (let s = 40; s <= l; s += 40) {
           const x = c.node.x + Math.cos(h) * s,
@@ -601,7 +619,7 @@ function* buildGeometry(L, budget, out = {}) {
       const at = { x: c.node.x + Math.cos(best.h) * best.l, y: c.node.y + Math.sin(best.h) * best.l };
       const unit = units.push({ id: units.length, paths: [], kind: "dead-end" }) - 1;
       units[unit].period = 1e9; // dead-end cords persist; their explorers recycle
-      yield* cord(c.node, at, { emerge: c.R0 * 0.22, t0: c.start + 18 + R() * 30, v: 4.8, w0: 5 + R() * 2.5, w1: 1.3, fibres: 16 + Math.floor(R() * 8), accrete: 45, fringe: 1.6, web: 1.4, brush: true });
+      yield* cord(c.node, at, { emerge: c.R0 * 0.22, t0: c.start + 18 + R() * 30, v: 4.8, w0: 3.5 + R() * 1.5, w1: 1.2, fibres: 13 + Math.floor(R() * 6), accrete: 45, fringe: 1.6, web: 0.9, brush: true });
       budget() && (yield "dead-end");
     }
   }
@@ -610,13 +628,13 @@ function* buildGeometry(L, budget, out = {}) {
   // ---- dense-zone mat: fine anastomosing cobweb around colonies and along cords ----
   const matR = rng("r10-dense-mat");
   const anchorsFor = cords.flatMap((C) => C.spine.pts.filter((_, i) => i % 3 === 0).map((v) => ({ v, h: null, C })));
-  const matCount = mobile ? 1400 : 3600;
+  const matCount = mobile ? 1000 : MAT;
   for (let k = 0; k < matCount; k++) {
     let start, h, t0, src;
-    if (matR() < 0.55) {
+    if (matR() < 0.7) {
       const c = colonies[Math.floor(matR() * colonies.length)],
         a = matR() * 6.28,
-        r = c.R0 * (0.25 + 0.95 * Math.sqrt(matR()));
+        r = c.R0 * (0.12 + 0.85 * Math.pow(matR(), 0.75));
       start = nearest(c.node.x + Math.cos(a) * r, c.node.y + Math.sin(a) * r, 10, (v) => v.owner !== undefined && v.owner >= 0);
       if (!start) continue;
       h = Math.atan2(start.y - c.node.y, start.x - c.node.x) + gauss(matR) * 0.7;
@@ -643,13 +661,13 @@ function* buildGeometry(L, budget, out = {}) {
   }
   // ---- sparse ref-8 vocabulary: long fine explorers from rims and cords into gaps ----
   const sparse = (o) => ({
-    w0: 0.62, w1: 0.24, a0: 0.34, a1: 0.13, tone: 0, explorer: true, fuse: 2.2, thin: 0.25, below: 0,
+    w0: 0.6, w1: 0.24, a0: 0.3, a1: 0.12, tone: 0, explorer: true, fuse: 2.2, thin: 0.25, below: 0,
     walk: { k: 0.016, run: 60, jit: 0.038, vary: true }, forkMean: 58, forkAngle: [0.26, 0.5], forkLag: 3, firstFork: 30, alongside: true, ...o,
   });
   const explorerRoots = [];
   const sources = [];
-  for (const C of cords) for (let k = 0; k < (mobile ? 3 : 6); k++) sources.push({ C, s: C.length * (0.15 + 0.8 * R()) });
-  for (const c of colonies) for (let k = 0; k < (mobile ? 5 : 10); k++) sources.push({ c, h: R() * 6.28 });
+  for (const C of cords) for (let k = 0; k < 2; k++) sources.push({ C, s: C.length * (0.15 + 0.8 * R()) });
+  for (const c of colonies) for (let k = 0; k < (mobile ? 3 : 4); k++) sources.push({ c, h: R() * 6.28 });
   for (const src of sources) {
     let start, h, t0, from;
     if (src.C) {
@@ -665,7 +683,7 @@ function* buildGeometry(L, budget, out = {}) {
       t0 = (from.birth || c.start) + 4;
     }
     start = from;
-    const total = (mobile ? 200 : 320) + R() * (mobile ? 160 : 330),
+    const total = (mobile ? 200 : 260) + R() * (mobile ? 160 : 270),
       trunkLen = total * (0.45 + R() * 0.15),
       unitId = units.push({ id: units.length, paths: [], kind: "explorer" }) - 1;
     const trunk = hypha(start, h, trunkLen, sparse({ kind: "explorer", t0, v: 4.4, source: from.source, w0: 0.66, w1: 0.42, a1: 0.24, fuseAfter: 1e9 }), 1);
@@ -687,6 +705,121 @@ function* buildGeometry(L, budget, out = {}) {
     });
   }, fineR);
   yield "explorers";
+  // ---- r11 persistent fuzz: every persistent strand carries short, fine, acute
+  // hairs at about the density the pulse makes visible (owner: no bare lines).
+  for (const P of paths.slice()) {
+    if (P.fringed || P.len < 24) continue;
+    const k = P.kind;
+    let rate = 0;
+    if (k === "explorer") rate = FUZZ_RATE * 1.15;
+    else if (k === "web" || k === "brush") rate = FUZZ_RATE * 1.35;
+    else if (k === "mat") rate = FUZZ_RATE * 0.9;
+    else if (k === "cord-fibre") rate = R() < 0.4 ? FUZZ_RATE * 0.8 : 0;
+    if (!rate) continue;
+    P.fringed = true;
+    fringe(P, rate, { len: 6.5, maxLen: 20, w: 0.19, a: 0.3 });
+    budget() && (yield "fuzz");
+  }
+  // ---- r11 hyphal knots: small tangled balls ON strands and cords and inside
+  // mats, in small irregular groups (shared recipe: r11-coordination.md). The
+  // wound fibres are graph edges (a passing pulse lights them); soft lobes are
+  // drawn with the fibres once they are laid.
+  const knotR = rng("r11-hyphal-knots"),
+    knots = [];
+  function knot(v, h, t0, src, primordium = false) {
+    const r = primordium ? 2.5 + knotR() * 1.5 : 1 + 2 * Math.pow(knotR(), 2.2),
+      el = primordium ? 1.4 + knotR() * 0.6 : 1 + knotR() * 0.6,
+      off = (knotR() - 0.5) * r * 0.7,
+      c = { x: v.x - Math.sin(h) * off, y: v.y + Math.cos(h) * off },
+      K = { x: c.x, y: c.y, r, el, h, v: v.id, t0, source: src, primordium, lobes: [], fibres: 0 };
+    const nl = 3 + Math.floor(knotR() * 4);
+    for (let i = 0; i < nl; i++) {
+      const a = knotR() * 6.28,
+        d = r * (0.2 + knotR() * 0.4);
+      K.lobes.push({ x: c.x + Math.cos(a) * d * el, y: c.y + Math.sin(a) * d, rx: r * (0.6 + knotR() * 0.4) * el, ry: r * (0.6 + knotR() * 0.4), a: 0.55 + knotR() * 0.35 });
+    }
+    const nf = 3 + Math.floor(knotR() * 5);
+    let first = null;
+    for (let f = 0; f < nf; f++) {
+      // A wound fibre: leaves the host strand, curls tangentially around the
+      // ball (curvature 0.6-1.4 rad per r), and the first two exit again.
+      const kappa = ((0.6 + knotR() * 0.8) / r) * (knotR() < 0.5 ? -1 : 1),
+        arc = r * (1.5 + knotR() * 2) * (primordium ? 1.6 : 1),
+        exit = f < 2 ? r * (2 + knotR() * 3) : 0,
+        ds = Math.min(0.7, r / 3),
+        pts = [v];
+      let x = v.x,
+        y = v.y,
+        hh = h + (knotR() < 0.5 ? 0 : Math.PI) + gauss(knotR) * 0.5;
+      for (let s = 0; s < arc + exit; s += ds) {
+        const inBall = s < arc,
+          dx = c.x - x,
+          dy = c.y - y,
+          dd = Math.hypot(dx, dy);
+        hh += (inBall ? kappa : kappa * 0.12) * ds;
+        if (inBall && dd > r * 1.1) hh += Math.atan2(Math.sin(Math.atan2(dy, dx) - hh), Math.cos(Math.atan2(dy, dx) - hh)) * 0.35;
+        x += Math.cos(hh) * ds;
+        y += Math.sin(hh) * ds;
+        pts.push({ x, y });
+      }
+      const P = lay(pts, { kind: "knot-hair", t0: t0 + f * 0.6, v: 1.2, w0: primordium ? 0.46 : 0.38, w1: 0.26, a0: 0.46, a1: 0.3, tone: f % 3 === 0 ? 1 : 0, source: src, cord: -1 });
+      if (!P) continue;
+      K.fibres++;
+      if (!first) first = P;
+      P.fringed = true;
+    }
+    if (!first) return null;
+    first.knot = K;
+    K.path = first;
+    knots.push(K);
+    return K;
+  }
+  const group = (anchor, h, t0, src, pick) => {
+    const n = 1 + Math.floor(Math.pow(knotR(), 1.6) * 4);
+    for (let i = 0; i < n; i++) {
+      const v = i ? pick(6 + knotR() * 24) : anchor;
+      if (v) knot(v, h, t0 + i * (1 + knotR() * 3), src);
+    }
+  };
+  for (const C of cords) {
+    if ((C.tributary || !C.link) && knotR() < 0.6) continue;
+    let s = C.length * 0.15 + -Math.log(1 - knotR()) * 320;
+    while (s < C.length - 12) {
+      const at = along(C.spine, s);
+      group(at.v, at.h, at.t + 14 + knotR() * 26, at.v.source, (d) => along(C.spine, Math.min(C.length, s + d)).v);
+      s += 170 + -Math.log(1 - knotR()) * 420;
+    }
+  }
+  for (const c of colonies) {
+    const groups = (mobile ? 1 : 1) + Math.floor(knotR() * 3);
+    for (let k = 0; k < groups; k++) {
+      const a = knotR() * 6.28,
+        r = c.R0 * (0.25 + 0.75 * knotR()),
+        x = c.node.x + Math.cos(a) * r,
+        y = c.node.y + Math.sin(a) * r,
+        junction = (v) => v.owner !== undefined && v.owner >= 0 && v.source === c.i && v.edges.length >= 3,
+        v = nearest(x, y, 12, junction) || nearest(x, y, 8, (q) => q.owner !== undefined && q.owner >= 0);
+      if (!v) continue;
+      group(v, a + Math.PI / 2, c.start + 24 + knotR() * 30, c.i, (d) => {
+        const b = knotR() * 6.28;
+        return nearest(v.x + Math.cos(b) * d, v.y + Math.sin(b) * d, 8, junction);
+      });
+    }
+    // Rare elongated primordia inside the mat (owner): a few, never beads.
+    const prim = knotR() < 0.45 ? 1 : 0;
+    for (let k = 0; k < prim; k++) {
+      const a = knotR() * 6.28,
+        r = c.R0 * (0.2 + 0.4 * knotR()),
+        v = nearest(c.node.x + Math.cos(a) * r, c.node.y + Math.sin(a) * r, 10, (q) => q.owner !== undefined && q.owner >= 0 && q.source === c.i);
+      if (v) knot(v, a + gauss(knotR) * 0.6, c.start + 40 + knotR() * 30, c.i, true);
+    }
+  }
+  for (const P of explorerRoots)
+    if (knotR() < 0 && P.len > 80) { // r11: no knots out in the dark gaps
+      const at = along(P, P.len * (0.2 + 0.6 * knotR()));
+      group(at.v, at.h, at.t + 10 + knotR() * 20, P.pts[0].source, (d) => along(P, Math.min(P.len, P.len * 0.2 + d)).v);
+    }
+  yield "knots";
   // Recycle units: per-unit period and phase from independent hashes.
   for (const u of units) {
     if (!u.paths.length) continue;
@@ -695,7 +828,7 @@ function* buildGeometry(L, budget, out = {}) {
     if (u.kind === "explorer") u.period = u.grow + 30 + hash01(u.id * 7 + 3) * 80;
   }
   return {
-    vs, ss, paths, units, nodes, colonies, cords, linkCords, vertex, edge, fusions, explorerRoots, explorerAudit, L, protect,
+    vs, ss, paths, units, nodes, colonies, cords, linkCords, vertex, edge, fusions, explorerRoots, explorerAudit, L, protect, knots,
   };
 }
 
@@ -798,6 +931,30 @@ export function createHero(canvas, { stage, state, reduce }) {
       }
       ctx.stroke();
     }
+    if (P.knot && sTo >= P.len) drawKnot(ctx, P.knot, mul);
+  }
+  /** A hyphal knot's soft core: overlapping gradient lobes (no arc(), never a
+   * perfect circle); its wound fibres are ordinary strokes. */
+  function drawKnot(ctx, K, mul = 1) {
+    const save = ctx.globalAlpha;
+    for (const l of K.lobes) {
+      const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 1.6 * Math.max(l.rx, l.ry));
+      g.addColorStop(0, palette.core);
+      g.addColorStop(0.3, palette.glow);
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.globalAlpha = Math.min(1, l.a * 0.2 * mul * (light ? 0.75 : 1));
+      ctx.fillStyle = g;
+      ctx.save();
+      // Elongated along the host strand: scale about the lobe centre.
+      ctx.translate(l.x, l.y);
+      ctx.rotate(K.h);
+      ctx.scale(l.rx / Math.max(l.rx, l.ry), l.ry / Math.max(l.rx, l.ry));
+      ctx.translate(-l.x, -l.y);
+      const e = 1.6 * Math.max(l.rx, l.ry);
+      ctx.fillRect(l.x - e, l.y - e, 2 * e, 2 * e);
+      ctx.restore();
+    }
+    ctx.globalAlpha = save;
   }
   function drawCores(ctx, g, A) {
     // A broad soft glow over the colony centre (20-40 px), never a point soma.
@@ -811,7 +968,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       grad.addColorStop(0, palette.glow);
       grad.addColorStop(0.45, palette.glow);
       grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.globalAlpha = (light ? 0.07 : 0.12) * grow * p;
+      ctx.globalAlpha = (light ? 0.08 : 0.15) * grow * p;
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
@@ -863,49 +1020,157 @@ export function createHero(canvas, { stage, state, reduce }) {
     return false;
   };
 
-  // ---- baking: mature paths enter the static raster once ----
-  const bake = { order: [], next: 0, age: -Infinity, live: [], liveSet: new Set(), count: 0 };
-  function bakeTime(P) {
-    return P.unit >= 0 && scene.geometry.units[P.unit].period < 1e8 ? Infinity : P.done + RIM_WIN;
+  // ---- r11 incremental growth raster ----
+  // Every non-recycling path grows straight into the static raster, one piece
+  // per frame (tip-only, never retracting): the load-in intro and the living
+  // rims share one mechanism. The page compositor re-presents the static raster
+  // only when the hero version changes (every frame during the intro, every
+  // 4 s of scene age afterwards); the not-yet-presented tail and a bright rim
+  // head per growing tip are drawn on the live layer.
+  const HEAD = 16, // px of rim glow behind each growing tip
+    HEAD_CAP = 7000;
+  const growth = { age: -Infinity, scan: 0, pending: [], active: [], recent: [], commit: null, presentKey: null, coresDrawn: false, changed: false };
+  function growable(P, g) {
+    return !(P.unit >= 0 && g.units[P.unit]?.kind === "explorer");
   }
-  function bakeUntil(A, g) {
-    if (A < bake.age) {
-      // Backward diagnostic seek: rebuild the raster from scratch.
-      sx.save();
-      sx.setTransform(1, 0, 0, 1, 0, 0);
-      sx.clearRect(0, 0, canvas.width, canvas.height);
-      sx.restore();
-      bake.next = 0;
-      bake.coresDrawn = false;
-      for (const P of g.paths) P.baked = false;
-      // Earlier ages: every path not yet baked by then must be able to grow live.
-      if (A < g.poolAge) {
-        g.livePool = g.paths.filter((P) => P.bt > A - 1);
-        g.poolAge = A;
+  function resetGrowth(g) {
+    sx.save();
+    sx.setTransform(1, 0, 0, 1, 0, 0);
+    sx.clearRect(0, 0, canvas.width, canvas.height);
+    sx.restore();
+    for (const P of g.paths) P.drawn = P.presented = P.pi = 0;
+    growth.pending = g.paths.filter((P) => growable(P, g));
+    growth.scan = g.paths.length;
+    growth.active = [];
+    growth.recent = [];
+    growth.commit = null;
+    growth.coresDrawn = false;
+    growth.age = -Infinity;
+  }
+  const lerpAt = (P, m, s) => {
+    const a = P.pts[m],
+      b = P.pts[Math.min(P.pts.length - 1, m + 1)],
+      span = P.arcs[m + 1] - P.arcs[m] || 1,
+      f = Math.max(0, Math.min(1, (s - P.arcs[m]) / span));
+    return [a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f];
+  };
+  /** Adds the arc range [s0, s1] of P to quantised stroke groups (CHUNK-wise
+   * taper, as in strokePath). `mul` scales alpha; `core` forces the core tone. */
+  function addPiece(groups, P, s0, s1, mul = 1, core = false) {
+    const pts = P.pts,
+      arcs = P.arcs,
+      n = pts.length;
+    if (n < 2 || s1 <= s0) return;
+    let i = 0;
+    while (i < n - 2 && arcs[i + 1] <= s0) i++;
+    let cur = lerpAt(P, i, s0);
+    for (;;) {
+      const c0 = Math.floor(i / CHUNK) * CHUNK,
+        chunkEnd = Math.min(n - 1, c0 + CHUNK),
+        stop = Math.min(s1, arcs[chunkEnd]),
+        mid = (c0 + chunkEnd) >> 1,
+        alpha = Math.min(1, P.a[mid] * mul * lightAlpha);
+      let k = i + 1;
+      if (alpha >= 0.004) {
+        const key = (core || P.tone ? 1 : 0) * 1e6 + Math.round(alpha * 120) * 1000 + Math.round(P.w[mid] * 20);
+        let path = groups.get(key);
+        if (!path) groups.set(key, (path = new Path2D()));
+        path.moveTo(cur[0], cur[1]);
+        while (k <= chunkEnd && arcs[k] < stop) path.lineTo(pts[k].x, pts[k].y), k++;
+        const end = lerpAt(P, k - 1, stop);
+        path.lineTo(end[0], end[1]);
+      } else while (k <= chunkEnd && arcs[k] < stop) k++;
+      if (stop >= s1 - 1e-9 || chunkEnd >= n - 1) return;
+      i = chunkEnd;
+      cur = [pts[chunkEnd].x, pts[chunkEnd].y];
+    }
+  }
+  function flushPieces(ctx, groups) {
+    ctx.lineCap = "butt";
+    for (const [key, path] of groups) {
+      ctx.strokeStyle = key >= 1e6 ? palette.core : palette.glow;
+      ctx.globalAlpha = Math.floor((key % 1e6) / 1000) / 120;
+      ctx.lineWidth = (key % 1000) / 20;
+      ctx.stroke(path);
+    }
+    groups.clear();
+    ctx.globalAlpha = 1;
+  }
+  const bakeGroups = new Map(),
+    liveGroups = new Map();
+  /** Grow every started path to scene age A in the static raster. With a
+   * deadline the work is resumable (returns false until A is complete). */
+  function growStep(A, g, deadline = 0) {
+    if (A < growth.age - 1e-6) resetGrowth(g);
+    const paths = g.paths;
+    for (; growth.scan < paths.length; growth.scan++) {
+      const P = paths[growth.scan];
+      P.drawn = P.presented = P.pi = 0;
+      if (growable(P, g)) growth.pending.push(P);
+    }
+    let w = 0;
+    for (const P of growth.pending) {
+      if (P.t0 <= A) growth.active.push(P);
+      else growth.pending[w++] = P;
+    }
+    growth.pending.length = w;
+    const act = growth.active,
+      done = [];
+    let k = 0,
+      i = 0,
+      broke = false;
+    for (; i < act.length; i++) {
+      const P = act[i],
+        e = Math.min(P.len, (A - P.t0) * P.v);
+      if (e > P.drawn + 1e-6) {
+        addPiece(bakeGroups, P, P.drawn, e);
+        P.drawn = e;
+        growth.changed = true;
+      }
+      if (P.drawn >= P.len - 1e-6) done.push(P);
+      else act[k++] = P;
+      if (deadline && (i & 63) === 63 && performance.now() > deadline) {
+        i++;
+        broke = true;
+        break;
       }
     }
-    let changed = false;
-    while (bake.next < bake.order.length && bake.order[bake.next].bt <= A) {
-      bakePath(bake.order[bake.next].P);
-      bake.next++;
-      changed = true;
+    for (; i < act.length; i++) act[k++] = act[i];
+    act.length = k;
+    sx.globalCompositeOperation = light ? "source-over" : "lighter";
+    flushPieces(sx, bakeGroups);
+    for (const P of done) {
+      if (P.knot) drawKnot(sx, P.knot);
+      growth.recent.push(P);
     }
-    if (!bake.coresDrawn && A >= Math.max(...g.colonies.map((c) => c.start)) + 6) {
+    if (!growth.coresDrawn && A >= Math.max(...g.colonies.map((c) => c.start)) + 40) {
       drawCores(sx, g, A);
-      bake.coresDrawn = true;
-      changed = true;
+      growth.coresDrawn = growth.changed = true;
     }
-    bake.age = A;
-    if (changed) scene.hero.version++;
-    return changed;
+    if (!broke) growth.age = A;
+    return !broke;
   }
-  // Live paths: started, not yet baked (fronts + rim), plus recycling units.
+  /** Present the static raster (compositor redraw); the live tail of what was
+   * presented is dropped on the NEXT frame, after the compositor has redrawn. */
+  function present() {
+    if (!growth.changed) return false;
+    growth.changed = false;
+    scene.hero.version++;
+    growth.commit = growth.active.map((P) => [P, P.drawn]).concat(growth.recent.map((P) => [P, P.len]));
+    growth.recent = [];
+    return true;
+  }
+  function commitPresented() {
+    if (!growth.commit) return;
+    for (const [P, e] of growth.commit) P.presented = Math.max(P.presented, e);
+    growth.commit = null;
+  }
+  // Recycling paths (distal explorer units) are drawn live: they fade and regrow.
   function liveAt(A, g) {
     const out = [];
     for (const P of g.livePool) {
       const { age, fade } = unitClock(P, g.units, A);
       if (age < P.t0 || fade <= 0) continue;
-      if (P.baked) continue;
       out.push({ P, age, fade });
     }
     return out;
@@ -916,7 +1181,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     if (b[2] > box[2]) box[2] = b[2];
     if (b[3] > box[3]) box[3] = b[3];
   }
-  function drawLive(ctx, A, g, box) {
+  function drawLive(ctx, A, g, box, intro) {
     let active = 0,
       segs = 0;
     for (const { P, age, fade } of liveAt(A, g)) {
@@ -926,16 +1191,31 @@ export function createHero(canvas, { stage, state, reduce }) {
       segs += P.pts.length;
       grow(box, P.box);
     }
-    if (!bake.coresDrawn) {
-      drawCores(ctx, g, A);
-      grow(box, [0, 0, L.W, L.H]);
-    }
-    return { active, segs };
+    // Unpresented tails at base alpha, then the rim: brightest at the tip.
+    const rim = intro ? 1.25 : 0.9;
+    let heads = 0;
+    for (const list of [growth.active, growth.recent])
+      for (const P of list) {
+        const e = P.drawn;
+        if (e <= 0) continue;
+        if (P.presented < e) addPiece(liveGroups, P, P.presented, e);
+        if (list === growth.active && heads < HEAD_CAP) {
+          heads++;
+          addPiece(liveGroups, P, Math.max(0, e - HEAD), Math.max(0, e - HEAD * 0.45), rim * 0.55, true);
+          addPiece(liveGroups, P, Math.max(0, e - HEAD * 0.45), e, rim, true);
+        }
+        grow(box, P.box);
+      }
+    active += growth.active.length;
+    flushPieces(ctx, liveGroups);
+    return { active, segs, heads };
   }
 
   // ---- arrival bloom: radial bands, the ring travels outward to the rim ----
   function* makeBlooms(g, out) {
-    const edges = [0, 0.3, 0.55, 0.8, 1.05, 1.4];
+    // r11: finer bands so the arrival bloom is a travelling ripple; the
+    // innermost band (r < 0.2 R0) never lights on its own (no disc).
+    const edges = [0, 0.2, 0.32, 0.44, 0.56, 0.68, 0.8, 0.92, 1.05, 1.2, 1.4];
     const blooms = g.colonies.map((c) => ({
       node: c.node,
       R0: c.R0,
@@ -954,7 +1234,9 @@ export function createHero(canvas, { stage, state, reduce }) {
         const q = P.pts[i],
           r = Math.hypot(q.x - nx, q.y - ny) / R0;
         if (r >= 1.4) continue;
-        const b = bl.bands[r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.8 ? 2 : r < 1.05 ? 3 : 4];
+        let bi = 0;
+        while (bi < edges.length - 2 && r >= edges[bi + 1]) bi++;
+        const b = bl.bands[bi];
         b.segs.push([P.pts[i - 1], q, P.w[i], P.a[i]]);
         const bx = b.box;
         if (q.x < bx[0]) bx[0] = q.x;
@@ -967,7 +1249,8 @@ export function createHero(canvas, { stage, state, reduce }) {
     out.blooms = blooms;
   }
   // Segments grouped by quantised alpha/width into a few Path2D strokes.
-  function paintSegs(x, segs, colour, alphaMul, widthAdd) {
+  /** Segments grouped by quantised alpha/width into a few cached Path2D strokes. */
+  function segGroups(segs, alphaMul, widthAdd) {
     const groups = new Map();
     for (const [a, q, w, al] of segs) {
       const ka = Math.min(15, Math.round(Math.min(1, al * alphaMul) * 15)),
@@ -979,26 +1262,25 @@ export function createHero(canvas, { stage, state, reduce }) {
       path.moveTo(a.x, a.y);
       path.lineTo(q.x, q.y);
     }
+    return [...groups].map(([key, path]) => ({ alpha: Math.floor(key / 64) / 15, width: (key % 64) / 5, path }));
+  }
+  function strokeGroups(x, groups, colour, mul = 1) {
     x.strokeStyle = colour;
     x.lineCap = "butt";
-    for (const [key, path] of groups) {
-      x.globalAlpha = Math.floor(key / 64) / 15;
-      x.lineWidth = (key % 64) / 5;
-      x.stroke(path);
+    for (const g of groups) {
+      x.globalAlpha = Math.min(1, g.alpha * mul);
+      x.lineWidth = g.width;
+      x.stroke(g.path);
     }
   }
-  function bandImage(b) {
-    if (b.image || !b.segs.length) return b.image;
-    const [x0, y0, x1, y1] = b.box,
-      im = document.createElement("canvas");
-    im.width = Math.max(1, Math.ceil((x1 - x0) * d));
-    im.height = Math.max(1, Math.ceil((y1 - y0) * d));
-    const x = im.getContext("2d");
-    x.setTransform(d, 0, 0, d, -x0 * d, -y0 * d);
-    x.globalCompositeOperation = light ? "source-over" : "lighter";
-    paintSegs(x, b.segs, palette.core, 1.4, 0.15);
-    b.image = im;
-    return im;
+  function paintSegs(x, segs, colour, alphaMul, widthAdd) {
+    strokeGroups(x, segGroups(segs, alphaMul, widthAdd), colour);
+  }
+  // r11: bloom bands are cached vector groups stroked at full DPR (the r10
+  // per-band bitmaps covered whole annulus boxes: up to ~25 MB each).
+  function bandGroups(b) {
+    if (!b.segs.length) return null;
+    return (b.groups ??= segGroups(b.segs, 1.4, 0.15));
   }
 
   // ---- pulses: graph-routed arrival bands over the new geometry ----
@@ -1009,7 +1291,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       SLOW = 22,
       LAMBDA = 300,
       CUTOFF = 650,
-      STEP = 0.3;
+      STEP = 0.3,
+      RSTEP = 4;
     const resident = new Map(),
       cacheStats = { bytes: 0, peakBytes: 0, buckets: 0, limit: 32, misses: 0, evictions: 0 };
     window.__signalCacheStats = cacheStats;
@@ -1052,6 +1335,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           }
         }
         const buckets = new Map(),
+          residue = new Map(),
           list = [];
         let count = 0, highwayCount = 0, fineCount = 0, maxFine = 0;
         let seen = 0;
@@ -1072,6 +1356,24 @@ export function createHero(canvas, { stage, state, reduce }) {
           // Only segments already mature on arrival enter cached sprites;
           // later growth glows as live strokes once it has been laid.
           if (s.field || s.birth > START_AGE - 5 || (s.path && s.path.unit >= 0 && g.units[s.path.unit].period < 1e8)) continue;
+          if (!highway) {
+            // r11 growth residue: coarse arrival bands x near/far from the cord.
+            const far = dd >= 160 ? 1 : 0,
+              band = Math.floor(arrival / RSTEP),
+              rk = band * 2 + far,
+              rlevel = Math.min(2, Math.floor(amp * 3)),
+              tk = `${Math.floor((s.a.x + s.b.x) / 2 / 128)},${Math.floor((s.a.y + s.b.y) / 2 / 128)}|${rlevel}|${s.explorer ? 1 : 0}`;
+            let layer = residue.get(rk);
+            if (!layer) residue.set(rk, (layer = { band, far, arrival: (band + 0.5) * RSTEP, items: new Map(), images: null, bytes: 0 }));
+            let it = layer.items.get(tk);
+            if (!it) layer.items.set(tk, (it = { path: new Path2D(), bounds: [Infinity, Infinity, -Infinity, -Infinity], amp: (rlevel + 0.6) / 3, explorer: !!s.explorer, end: null }));
+            const rb = it.bounds;
+            rb[0] = Math.min(rb[0], s.a.x, s.b.x); rb[1] = Math.min(rb[1], s.a.y, s.b.y);
+            rb[2] = Math.max(rb[2], s.a.x, s.b.x); rb[3] = Math.max(rb[3], s.a.y, s.b.y);
+            if (it.end !== s.a) it.path.moveTo(s.a.x, s.a.y);
+            it.path.lineTo(s.b.x, s.b.y);
+            it.end = s.b;
+          }
           const index = Math.floor(arrival / STEP),
             tileX = Math.floor((s.a.x + s.b.x) / 2 / 96),
             tileY = Math.floor((s.a.y + s.b.y) / 2 / 96),
@@ -1159,7 +1461,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           from: poly[0].source, to: destination.source, cord: cord.id, reverse,
           landings: g.nodes.map((n) => ({ node: n.source, time: at[n.id] })).filter((n) => Number.isFinite(n.time)),
           duration: at[destination.id], buckets, count, highway: highwayCount, fine: fineCount, maxFine,
-          arrivalMin, arrivalMax, list, step: STEP,
+          arrivalMin, arrivalMax, list, step: STEP, residue: [...residue.values()].sort((a, b) => a.arrival - b.arrival),
         });
         yield "route-done";
       }
@@ -1174,7 +1476,8 @@ export function createHero(canvas, { stage, state, reduce }) {
   function schedule(routes) {
     const R = rng("r10-breath-trips"),
       trips = [];
-    let start = 2.5,
+    // r11: the first trip departs after the load-in intro.
+    let start = 2.5 + INTRO_S,
       from = 0,
       previous = -1;
     for (let i = 0; i < 90; i++) {
@@ -1191,10 +1494,106 @@ export function createHero(canvas, { stage, state, reduce }) {
   }
   const metrics = (window.__pulseMetrics = { costs: [], frames: 0, maxConcurrent: 0, maxRipples: 0, paused: true, reason: "building", activeBuckets: 0 });
 
+  // ---- r11 growth residue: what a pulse lit lingers faintly, then retreats
+  // from the far edges back toward the nodes. Bounded: an LRU of tile bitmaps
+  // per (arrival band x near/far) layer; never accumulates across trips. ----
+  const RES = 0.15,
+    RES_HOLD = 2,
+    RES_BACK = 0.2,
+    RES_FAR = 3,
+    RES_FADE = 6;
+  const residueCache = new Map(),
+    residueStats = (window.__residueStats = { bytes: 0, peakBytes: 0, layers: 0, limit: 64, misses: 0, drawn: 0 });
+  function residueImages(layer) {
+    if (layer.images) {
+      residueCache.delete(layer);
+      residueCache.set(layer, true);
+      return layer.images;
+    }
+    while (residueCache.size >= residueStats.limit) {
+      const old = residueCache.keys().next().value;
+      residueCache.delete(old);
+      residueStats.bytes -= old.bytes;
+      for (const t of old.images) t.image.width = t.image.height = 0;
+      old.images = null;
+      old.bytes = 0;
+    }
+    const tiles = new Map();
+    for (const [k, it] of layer.items) {
+      const tile = k.split("|")[0];
+      if (!tiles.has(tile)) tiles.set(tile, []);
+      tiles.get(tile).push(it);
+    }
+    layer.images = [];
+    layer.bytes = 0;
+    for (const items of tiles.values()) {
+      let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+      for (const it of items) {
+        l = Math.min(l, it.bounds[0]);
+        t = Math.min(t, it.bounds[1]);
+        r = Math.max(r, it.bounds[2]);
+        b = Math.max(b, it.bounds[3]);
+      }
+      l = Math.floor(l) - 2;
+      t = Math.floor(t) - 2;
+      r = Math.ceil(r) + 2;
+      b = Math.ceil(b) + 2;
+      const image = document.createElement("canvas");
+      image.width = Math.ceil((r - l) * d);
+      image.height = Math.ceil((b - t) * d);
+      const x = image.getContext("2d");
+      x.setTransform(d, 0, 0, d, -l * d, -t * d);
+      x.lineCap = "butt";
+      x.globalCompositeOperation = light ? "source-over" : "lighter";
+      x.strokeStyle = palette.glow;
+      for (const it of items) {
+        x.globalAlpha = it.amp * (light ? 0.5 : 0.9);
+        x.lineWidth = it.explorer ? 0.7 : 0.5;
+        x.stroke(it.path);
+      }
+      layer.images.push({ image, x: l, y: t, w: r - l, h: b - t });
+      layer.bytes += image.width * image.height * 4;
+    }
+    residueCache.set(layer, true);
+    residueStats.bytes += layer.bytes;
+    residueStats.peakBytes = Math.max(residueStats.peakBytes, residueStats.bytes);
+    residueStats.layers = residueCache.size;
+    residueStats.misses++;
+    return layer.images;
+  }
+  // Residue alpha of one layer at trip age: rises as the crest passes, holds,
+  // then fades latest-reached (far edge) first, back toward the source node.
+  function residueAlpha(r, layer, age) {
+    const rise = smooth((age - layer.arrival - 0.6) / 2.6);
+    if (rise <= 0) return 0;
+    const F = r.arrivalMax + RES_HOLD + (r.arrivalMax - layer.arrival) * RES_BACK - layer.far * RES_FAR;
+    return RES * rise * (1 - smooth((age - F) / RES_FADE));
+  }
+  const residueEnd = (r) => r.arrivalMax + RES_HOLD + (r.arrivalMax - r.arrivalMin) * RES_BACK + RES_FADE;
+  function drawResidue(ctx, t, sched, box) {
+    let drawn = 0;
+    for (const trip of sched.trips) {
+      const age = t - trip.start;
+      if (age < 0 || age > residueEnd(trip.route)) continue;
+      for (const layer of trip.route.residue) {
+        const a = residueAlpha(trip.route, layer, age);
+        if (a < 0.008) continue;
+        ctx.globalAlpha = a;
+        for (const tile of residueImages(layer)) {
+          ctx.drawImage(tile.image, tile.x, tile.y, tile.w, tile.h);
+          grow(box, [tile.x, tile.y, tile.x + tile.w, tile.y + tile.h]);
+        }
+        drawn++;
+      }
+    }
+    residueStats.drawn = drawn;
+    return drawn;
+  }
   function drawPulses(ctx, T, A, g, sched, box) {
     let drawn = 0,
       active = 0;
     const t = ((T % sched.period) + sched.period) % sched.period;
+    drawResidue(ctx, t, sched, box);
     const trip = sched.trips.filter((p) => t >= p.start && t < p.start + p.route.arrivalMax + TAIL).at(-1);
     if (trip) {
       active = 1;
@@ -1236,18 +1635,21 @@ export function createHero(canvas, { stage, state, reduce }) {
         ctx.stroke();
       }
       for (const landing of r.landings) {
+        // r11: no bloom at the departing node (that read as a disc lighting up
+        // before the ripple); the pulse leaves as the ripple along the hyphae.
+        if (landing.time < 1.5) continue;
         const landed = age - landing.time;
         if (landed < 0 || landed >= 7) continue;
         const bloom = scene.blooms[landing.node],
-          front = (landed / 4.8) * 1.45; // ring radius in R0 units
+          front = 0.2 + (landed / 4.8) * 1.25; // ring radius in R0 units
         for (const b of bloom.bands) {
+          if (!b.r0) continue; // the core band never lights as a whole
           const mid = (b.r0 + b.r1) / 2,
-            gain = Math.exp(-(((mid - front) / 0.32) ** 2)) * (0.55 + 0.45 * Math.min(1, mid)) * smooth((7 - landed) / 2);
+            gain = Math.exp(-(((mid - front) / 0.16) ** 2)) * smooth((landed - 0.15) / 0.6) * (0.55 + 0.45 * Math.min(1, mid)) * smooth((7 - landed) / 2);
           if (gain < 0.02) continue;
-          const im = bandImage(b);
-          if (!im) continue;
-          ctx.globalAlpha = gain * (light ? 0.34 : 0.7);
-          ctx.drawImage(im, b.box[0], b.box[1], b.box[2] - b.box[0], b.box[3] - b.box[1]);
+          const groups = bandGroups(b);
+          if (!groups) continue;
+          strokeGroups(ctx, groups, palette.core, gain * (light ? 0.34 : 0.7));
           grow(box, b.box);
           drawn++;
         }
@@ -1269,7 +1671,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     document.getElementById("page-mycelium")?.after(breathBox);
     const R = rng("r10-breath-phase");
     for (const b of scene.blooms) {
-      const segs = b.bands.slice(0, 4).flatMap((x) => x.segs);
+      const segs = b.bands.filter((x) => x.r0 >= 0.32 && x.r1 <= 1.05).flatMap((x) => x.segs);
       if (!segs.length) continue;
       const r = b.R0 * 1.05,
         im = document.createElement("canvas"),
@@ -1279,7 +1681,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       const x = im.getContext("2d");
       x.setTransform(d, 0, 0, d, -(b.node.x - r) * d, -(b.node.y - r) * d);
       x.globalCompositeOperation = light ? "source-over" : "lighter";
-      paintSegs(x, segs, palette.glow, 1.2, 0);
+      paintSegs(x, segs, palette.glow, 0.7, 0);
       Object.assign(im.style, { left: b.node.x - r + "px", top: b.node.y - r + "px", width: size + "px", height: size + "px", animationDuration: (11 + R() * 7).toFixed(2) + "s", animationDelay: (-R() * 18).toFixed(2) + "s" });
       im.dataset.colony = b.node.source;
       breathBox.append(im);
@@ -1297,33 +1699,62 @@ export function createHero(canvas, { stage, state, reduce }) {
   }
 
   // ---- build orchestration ----
-  function bakePath(P) {
-    if (P.baked) return;
-    strokePath(sx, P, Infinity, 1);
-    P.baked = true;
+  // r11 load-in intro: the first mount on a page grows the hero out from its
+  // nodes over INTRO_S seconds of the shared clock (eased out: fast early
+  // spread, gentle settle). Re-mounts (theme/hue/style), reduced motion and
+  // tabs hidden at load show the established state at once.
+  const intro = { on: !introPlayed && !reduce.matches && !document.hidden, skipAt: null, override: null };
+  introPlayed = true;
+  function ageAt(t) {
+    if (intro.override !== null) return intro.override + t;
+    if (!intro.on) return START_AGE + t;
+    if (intro.skipAt !== null) return START_AGE + Math.max(0, t - intro.skipAt);
+    if (t >= INTRO_S) return START_AGE + (t - INTRO_S);
+    return START_AGE * (1 - Math.pow(1 - Math.max(0, t) / INTRO_S, INTRO_POW));
   }
+  const introRunning = () => intro.on && intro.override === null && intro.skipAt === null && scene.clock.elapsed < INTRO_S + 0.25;
+  scene.ageAt = ageAt;
+  scene.intro = intro;
+  // Compositors that predate ageAt read startAge (A = startAge + t); the
+  // __setGrowthAge diagnostic assigns it, which pins the age mapping.
+  Object.defineProperty(scene, "startAge", {
+    configurable: true,
+    enumerable: true,
+    get: () => (intro.override !== null ? intro.override : ageAt(scene.clock.elapsed) - scene.clock.elapsed),
+    set: (v) => {
+      intro.override = v;
+    },
+  });
+  scene.introProgress = () => Math.max(0, Math.min(1, ageAt(scene.clock.elapsed) / START_AGE));
+  window.MyceliumHero = { INTRO_MS, introProgress: () => (window.__myceliumScene === scene && !scene.disposed ? scene.introProgress() : 1) };
+  const onHidden = () => {
+    // A tab hidden mid-intro returns to the established state, not a replay.
+    if (document.hidden && introRunning()) intro.skipAt = scene.clock.elapsed;
+  };
+  document.addEventListener("visibilitychange", onHidden);
+  const buildOut = {};
+  let introRaf = 0,
+    frame = 0;
+  // Until the compositor attaches, the hero drives its own growth frames.
+  function introFrame(now) {
+    introRaf = 0;
+    if (disposed || scene.ready) return;
+    scene.clock.tick(now);
+    const g = scene.geometry || buildOut;
+    if (g.paths && g.colonies && g.units && !reduce.matches) {
+      commitPresented();
+      growStep(ageAt(scene.clock.elapsed), g, performance.now() + 8);
+      present();
+    }
+    if (!scene.timings.firstPaint) scene.timings.firstPaint = performance.now() - begun;
+    introRaf = requestAnimationFrame(introFrame);
+  }
+  introRaf = requestAnimationFrame(introFrame);
   (async () => {
     let g = geometryCache.get(L.key);
-    const out = {};
-    // Progressive first paint: already-mature paths are baked as they are laid.
-    let progress = 0;
-    const paint = () => {
-      if (reduce.matches || !out.paths) return;
-      const A = START_AGE + scene.clock.elapsed;
-      for (; progress < out.paths.length; progress++) {
-        const P = out.paths[progress];
-        if (P.unit < 0 && P.done <= A) bakePath(P);
-      }
-      if (!bake.coresDrawn && out.colonies) {
-        drawCores(sx, out, A);
-        bake.coresDrawn = true;
-      }
-      scene.hero.version++;
-      if (!scene.timings.firstPaint) scene.timings.firstPaint = performance.now() - begun;
-    };
     if (!g) {
       sliceStart = performance.now();
-      g = await run(buildGeometry(L, budget, out), paint);
+      g = await run(buildGeometry(L, budget, buildOut));
       scene.timings.geometry = performance.now() - begun;
       if (disposed) return;
       g.field = await run(extendFieldGraph({
@@ -1345,19 +1776,21 @@ export function createHero(canvas, { stage, state, reduce }) {
       geometryCache.set(L.key, g);
     } else {
       // Palette/theme switch reuses geometry; palette-bound sprites are redrawn lazily.
-      for (const P of g.paths) P.baked = false;
-      for (const r of g.routes)
+      resetGrowth(g);
+      for (const r of g.routes) {
         for (const b of r.buckets.values()) {
           for (const t of b.images || []) t.image.width = t.image.height = 0;
           b.images = [];
         }
+        for (const l of r.residue || []) {
+          for (const t of l.images || []) t.image.width = t.image.height = 0;
+          l.images = null;
+        }
+      }
     }
     if (disposed) return;
     scene.geometry = g;
-    for (const P of g.paths) P.bt = bakeTime(P);
-    g.livePool = g.paths.filter((P) => P.bt > START_AGE - 1);
-    g.poolAge = START_AGE - 1;
-    bake.order = g.paths.filter((P) => Number.isFinite(P.bt)).map((P) => ({ P, bt: P.bt })).sort((a, b) => a.bt - b.bt);
+    g.livePool = g.paths.filter((P) => !growable(P, g));
     const bloomOut = {};
     await run(makeBlooms(g, bloomOut));
     scene.blooms = bloomOut.blooms;
@@ -1367,35 +1800,18 @@ export function createHero(canvas, { stage, state, reduce }) {
       const e = ((t % sched.period) + sched.period) % sched.period;
       return sched.trips.map((trip) => ({ route: trip.route, age: e - trip.start })).filter((x) => x.age >= 0 && x.age <= x.route.arrivalMax + TAIL);
     };
-    // Bake the remaining mature state in slices; reduced motion presents once.
-    const A0 = reduce.matches ? 1e5 : START_AGE + scene.clock.elapsed;
-    // At load, everything already fully grown is baked at once (rim glow is for
-    // fronts that grow while watched); only still-growing paths stay live.
-    await run((function* () {
-      let n = 0;
-      for (const P of g.paths)
-        if (!P.baked && Number.isFinite(P.bt) && P.done <= A0) {
-          bakePath(P);
-          if (++n % 150 === 0) {
-            if (!reduce.matches) scene.hero.version++;
-            yield "bake-grown";
-          }
+    // Without an intro the established state is grown in bounded slices.
+    if (!intro.on || reduce.matches) {
+      const A0 = reduce.matches ? 1e5 : ageAt(scene.clock.elapsed);
+      await run((function* () {
+        while (!growStep(A0, g, performance.now() + 8)) {
+          if (!reduce.matches) present(), commitPresented();
+          yield "grow";
         }
-      while (bake.next < bake.order.length && bake.order[bake.next].bt <= A0) {
-        bakePath(bake.order[bake.next].P);
-        bake.next++;
-        if (++n % 150 === 0) {
-          if (!reduce.matches) scene.hero.version++;
-          yield "bake";
-        }
-      }
-    })());
-    if (!bake.coresDrawn) {
-      drawCores(sx, g, A0);
-      bake.coresDrawn = true;
+      })());
+      present();
+      commitPresented();
     }
-    bake.age = A0;
-    scene.hero.version++;
     if (disposed) return;
     if (!reduce.matches) await run(makeBreath(g));
     scene.timings.complete = performance.now() - begun;
@@ -1414,13 +1830,30 @@ export function createHero(canvas, { stage, state, reduce }) {
       field: g.field,
       routes: g.routes,
       drawLive(ctx, T, A, box) {
-        const s = drawLive(ctx, A, g, box);
+        // The previous present has been composited: drop its live tails.
+        commitPresented();
+        const running = introRunning();
+        frame++;
+        growStep(A, g, performance.now() + 10);
+        const key = running ? frame : Math.floor(A / 4);
+        if (key !== growth.presentKey) {
+          growth.presentKey = key;
+          present();
+        }
+        const s = drawLive(ctx, A, g, box, running);
         const p = T < -1e5 ? 0 : drawPulses(ctx, T, A, g, sched, box);
         return { ...s, pulses: p };
       },
-      // Batched (running) bakes never move backwards; exact seeks may rebuild.
-      bakeUntil: (A, batched = false) => (batched && A <= bake.age ? false : bakeUntil(A, g)),
-      liveCount: (A) => liveAt(A, g).length,
+      // Running frames grow in drawLive; exact (frozen/diagnostic) ages grow
+      // here in full, and backward seeks rebuild the raster.
+      bakeUntil: (A, batched = false) => {
+        if (batched) return false;
+        growStep(A, g);
+        const changed = present();
+        commitPresented();
+        return changed;
+      },
+      liveCount: (A) => liveAt(A, g).length + growth.active.length,
       freezeBreath,
       pulseEnvelope: envelope,
       pulseTail: TAIL,
@@ -1430,7 +1863,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     let rootPaths = null;
     Object.defineProperty(window, "__rootPaths", {
       configurable: true,
-      get: () => (rootPaths ??= g.paths.filter((P) => P.pts.length >= 9 && P.kind !== "hair").slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }))),
+      get: () => (rootPaths ??= g.paths.filter((P) => P.pts.length >= 9 && !/hair/.test(P.kind)).slice(0, 4000).map((P) => ({ kind: P.kind, points: P.pts.map((v) => [v.x, v.y]) }))),
       // Another renderer (staging style toggle) may assign a plain value.
       set: (v) => Object.defineProperty(window, "__rootPaths", { value: v, writable: true, configurable: true, enumerable: true }),
     });
@@ -1438,14 +1871,14 @@ export function createHero(canvas, { stage, state, reduce }) {
     window.__dendriticProbe = (T) => {
       const A = START_AGE + T;
       let activeTips = 0;
-      for (const P of g.livePool) {
+      for (const P of g.paths) {
         const { age, fade } = unitClock(P, g.units, A);
         if (fade > 0 && age >= P.t0 && (age - P.t0) * P.v < P.len) activeTips++;
       }
       const fused = g.paths.filter((P) => P.fused && unitClock(P, g.units, A).age >= P.done);
       // No tip retraction: drawn extent never decreases between frames while visible.
       let regressingTips = 0;
-      for (const P of g.livePool) {
+      for (const P of g.paths) {
         const a = unitClock(P, g.units, A),
           b = unitClock(P, g.units, A + 1 / 60);
         if (a.fade < 0.8 || b.fade < 0.8) continue;
@@ -1456,6 +1889,93 @@ export function createHero(canvas, { stage, state, reduce }) {
       return { activeTips, regressingTips, fusions: fused.length, connectedSplits: fused.filter((P) => P.pts.at(-1).edges.length >= 3).length };
     };
     window.__cordAudit = g.cords.map((C) => ({ id: C.id, link: C.link, fibres: C.fibres, w0: C.width0, w1: C.width1, length: C.length, brush: C.brush }));
+    // r11 item 3: fuzz along persistent strands (hairs whose base lies on the strand).
+    window.__fuzzAudit = () => {
+      const hairs = new Map();
+      for (const P of g.paths) {
+        if (!/hair/.test(P.kind) || P.kind === "knot-hair") continue;
+        const o = P.pts[0].owner;
+        if (o >= 0) hairs.set(o, (hairs.get(o) || 0) + 1);
+      }
+      const out = {};
+      for (const P of g.paths) {
+        if (!/^(explorer|web|brush|mat|colony)$/.test(P.kind) || P.len < 60) continue;
+        (out[P.kind] ??= []).push(((hairs.get(P.id) || 0) * 100) / P.len);
+      }
+      return Object.fromEntries(Object.entries(out).map(([k, v]) => {
+        v.sort((a, b) => a - b);
+        return [k, { strands: v.length, bare: v.filter((x) => x === 0).length, p10: v[Math.floor(v.length * 0.1)], p50: v[v.length >> 1] }];
+      }));
+    };
+    // r11 item 7: hyphal knots (positions, radii, host colony distance).
+    window.__knotAudit = () =>
+      g.knots.map((K) => {
+        const c = g.colonies.reduce((a, b) => (Math.hypot(b.node.x - K.x, b.node.y - K.y) < Math.hypot(a.node.x - K.x, a.node.y - K.y) ? b : a));
+        return { x: K.x, y: K.y, r: K.r, el: K.el, primordium: K.primordium, fibres: K.fibres, lobes: K.lobes.length, colonyDistance: Math.hypot(c.node.x - K.x, c.node.y - K.y) / c.R0, onGraph: g.vs[K.v]?.edges.length >= 2 };
+      });
+    // r11 item 4: residue alpha per layer of a route at a trip age.
+    scene.residueProbe = (routeIndex, age) => {
+      const r = g.routes[routeIndex];
+      return { end: residueEnd(r), arrivalMax: r.arrivalMax, layers: r.residue.map((l) => ({ arrival: l.arrival, far: l.far, alpha: residueAlpha(r, l, age), tiles: l.items.size })) };
+    };
+    // r11 item 2: colonies are always the densest mats. Local density = mean
+    // linear luminance of the baked raster in 24x24 CSS px windows; a colony's
+    // core window is compared with every window along every cord beyond the
+    // colony mats (and peak brightness, p98, with the same windows).
+    window.__colonyDensity = () => {
+      const W = canvas.width,
+        H = canvas.height,
+        data = sx.getImageData(0, 0, W, H).data,
+        lin = new Float32Array(256);
+      for (let i = 0; i < 256; i++) {
+        const v = i / 255;
+        lin[i] = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      }
+      const win = (x, y, half = 12) => {
+        const x0 = Math.max(0, Math.round((x - half) * d)),
+          x1 = Math.min(W, Math.round((x + half) * d)),
+          y0 = Math.max(0, Math.round((y - half) * d)),
+          y1 = Math.min(H, Math.round((y + half) * d)),
+          vals = [];
+        for (let yy = y0; yy < y1; yy++)
+          for (let xx = x0; xx < x1; xx++) {
+            const k = (yy * W + xx) * 4;
+            // getImageData is un-premultiplied: the composite over black is rgb x alpha.
+            vals.push((0.2126 * lin[data[k]] + 0.7152 * lin[data[k + 1]] + 0.0722 * lin[data[k + 2]]) * (data[k + 3] / 255));
+          }
+        if (!vals.length) return { mean: 0, p98: 0 };
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        vals.sort((a, b) => a - b);
+        return { mean, p98: vals[Math.floor(vals.length * 0.98)] };
+      };
+      const colonies = g.colonies.map((c) => {
+        // The densest 24 px window within 0.25 R0 of the colony centre.
+        let best = { mean: 0, p98: 0 };
+        for (let a = 0; a < 6.28; a += 0.785)
+          for (const f of [0, 0.12, 0.24]) {
+            const w = win(c.node.x + Math.cos(a) * f * c.R0, c.node.y + Math.sin(a) * f * c.R0);
+            if (w.mean > best.mean) best = w;
+            if (!f) break;
+          }
+        return { colony: c.i, R0: c.R0, coreWidth: 0.5 * c.R0, core: best, visible: c.node.x > 12 && c.node.x < L.W - 12 && c.node.y > 12 && c.node.y < L.H - 12 };
+      });
+      const cords = g.cords.map((C) => {
+        let max = { mean: 0, p98: 0 },
+          at = null;
+        for (let s = 0; s < C.length; s += 8) {
+          const v = C.spine.pts[Math.min(C.spine.pts.length - 1, Math.round((s / C.length) * (C.spine.pts.length - 1)))];
+          // Within 0.85 R0 a cord is still emerging from (part of) the mat.
+          if (g.colonies.some((c) => Math.hypot(v.x - c.node.x, v.y - c.node.y) < 0.85 * c.R0)) continue;
+          if (v.x < 0 || v.x > L.W || v.y < 0 || v.y > L.H) continue;
+          const w = win(v.x, v.y);
+          if (w.mean > max.mean) max = { ...w, p98: Math.max(max.p98, w.p98) };
+          else max.p98 = Math.max(max.p98, w.p98);
+          if (w.mean >= max.mean) at = [v.x, v.y];
+        }
+        return { cord: C.id, link: C.link, from: C.a.source, w0: C.width0, max, at };
+      });
+      return { colonies, cords };
+    };
     // Growth receipts by scene age: coherent colony fronts and cord accretion.
     window.__growthAudit = (A) => {
       const colonies = g.colonies.map((c) => {
@@ -1487,7 +2007,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     };
     window.__growthProbe = (T) => {
       const A = START_AGE + T;
-      return { age: A, live: liveAt(A, g).length, baked: bake.next, units: g.units.length };
+      return { age: A, live: liveAt(A, g).length, growing: growth.active.length, units: g.units.length };
     };
     window.__darkGapProbe = () => {
       const w = L.W,
@@ -1516,10 +2036,13 @@ export function createHero(canvas, { stage, state, reduce }) {
   return () => {
     disposed = true;
     job = null;
+    cancelAnimationFrame(introRaf);
+    document.removeEventListener("visibilitychange", onHidden);
     channel.port1.onmessage = null;
     breathBox?.remove();
-    for (const b of scene.blooms || []) for (const x of b.bands) if (x.image) x.image.width = x.image.height = 0;
     for (const r of scene.routes || []) for (const b of r.buckets.values()) for (const t of b.images || []) t.image.width = t.image.height = 0;
+    for (const layer of residueCache.keys()) for (const t of layer.images || []) t.image.width = t.image.height = 0;
+    for (const layer of residueCache.keys()) layer.images = null;
     if (window.__myceliumScene === scene) scene.disposed = true;
   };
 }

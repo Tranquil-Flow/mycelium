@@ -73,7 +73,9 @@ def test_two_sided_morphology_structure_and_soft_edges(local, width):
                 assert a['bendContrast']['p95'] >= 3.5, (kind, a['bendContrast'])
         cords = page.evaluate('__cordAudit')
         links = [c for c in cords if c['link']]
-        assert links and all(30 <= c['fibres'] <= 40 and 8 <= c['w0'] <= 12 and 1.8 <= c['w1'] <= 2.6 for c in links), links
+        # r11 (owner): nodes are always the densest mats, so link cords are
+        # thinner bundles than r10's 30-40 fibres at 8-12 px (D46).
+        assert links and all(22 <= c['fibres'] <= 28 and 5 <= c['w0'] <= 7 and 1.4 <= c['w1'] <= 1.8 for c in links), links
         assert any(c['brush'] for c in cords if not c['link'])
         # D4: page-space geometry reaches the right edge; no empty band or clip line.
         cols = page.evaluate('''()=>{const c=document.getElementById('hyphae'),x=c.getContext('2d'),w=c.width,h=c.height,
