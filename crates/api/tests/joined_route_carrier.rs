@@ -23,7 +23,7 @@ use api::{
 use budgets::{BudgetId as B, Entries};
 use protocol::identity::Identity;
 use runtime::{
-    iroh_host::LoopbackHost,
+    iroh_host::{LanPolicy, LoopbackHost},
     m16_ledger::{IdSource, LeaseClock},
     m16_router_contracts::{PyReal, RequestContext},
 };
@@ -196,7 +196,24 @@ impl Member {
         self.log.lock().unwrap().released
     }
 }
+/// How a member stage server binds its carrier endpoint.
+enum Bind {
+    Loopback,
+    Lan(iroh::SecretKey, std::net::IpAddr, LanPolicy),
+}
+type Live = Arc<dyn Fn() -> Result<Value, Error> + Send + Sync>;
 fn member(member: Value, offer: Value, last: bool, script: Script, proof: String) -> Member {
+    let fixed: Live = Arc::new(move || Ok(member.clone()));
+    member_at(Bind::Loopback, fixed, offer, last, script, proof)
+}
+fn member_at(
+    bind: Bind,
+    live: Live,
+    offer: Value,
+    last: bool,
+    script: Script,
+    proof: String,
+) -> Member {
     let log = Arc::new(Mutex::new(Log::default()));
     let (addr_tx, addr_rx) = mpsc::channel();
     let (route_tx, route_rx) = mpsc::channel::<Value>();
@@ -214,7 +231,19 @@ fn member(member: Value, offer: Value, last: bool, script: Script, proof: String
                 .checked_add(id.span(Entries::ZERO).unwrap())
                 .unwrap()
         };
-        let mut host = LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap();
+        let mut host = match bind {
+            Bind::Loopback => LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap(),
+            Bind::Lan(secret, interface, policy) => LoopbackHost::bind_lan(
+                &rt,
+                &clock,
+                until(B::RouterClose),
+                secret,
+                &[transport::Channel::Router],
+                interface,
+                policy,
+            )
+            .unwrap(),
+        };
         let addr = host.address().unwrap();
         addr_tx
             .send((addr.id, *addr.ip_addrs().next().unwrap()))
@@ -227,7 +256,7 @@ fn member(member: Value, offer: Value, last: bool, script: Script, proof: String
             script,
             log: shared,
         };
-        let current = || Ok(member.clone());
+        let current = || live();
         let report = serve::serve(
             &serve::Serve {
                 host: &host,
@@ -271,7 +300,6 @@ struct Route {
 /// M16 service whose host follows the carrier; one request submitted.
 fn route(scripts: [Script; 2], max_new_tokens: u64) -> Route {
     let seed = Identity::from_secret("test-seed", &[7; 32]).unwrap();
-    let owner = iroh::SecretKey::generate();
     let rows: Vec<Value> = ["node-a", "node-b"]
         .iter()
         .map(|n| {
@@ -280,12 +308,47 @@ fn route(scripts: [Script; 2], max_new_tokens: u64) -> Route {
         })
         .collect();
     let offers: Vec<Value> = (0..2).map(|i| json!({"controlled_offer":i})).collect();
-    let proof = |i: usize| digest(&json!({"controlled_proof":i}));
     let [first, second] = scripts;
     let members = vec![
         member(rows[0].clone(), offers[0].clone(), false, first, proof(0)),
         member(rows[1].clone(), offers[1].clone(), true, second, proof(1)),
     ];
+    let peers: Vec<StagePeer> = members
+        .iter()
+        .zip(&rows)
+        .map(|(m, r)| StagePeer {
+            node_id: r["node_id"].as_str().unwrap().into(),
+            endpoint: m.endpoint,
+            socket: m.socket,
+            generation: 1,
+        })
+        .collect();
+    assemble(
+        &seed,
+        "swarm",
+        &rows,
+        &offers,
+        members,
+        max_new_tokens,
+        |m, owner| RouteExecutor::connect(m, owner, peers, Arc::new(|_| Some(1)), Arc::new(Text)),
+    )
+    .unwrap()
+}
+fn proof(i: usize) -> String {
+    digest(&json!({"controlled_proof":i}))
+}
+/// Sign the route with `seed`, hand it to the members, connect the owner carrier
+/// and submit one request through the M16 service.
+fn assemble(
+    seed: &Identity,
+    swarm: &str,
+    rows: &[Value],
+    offers: &[Value],
+    members: Vec<Member>,
+    max_new_tokens: u64,
+    connect: impl FnOnce(Value, iroh::SecretKey) -> Result<(RouteExecutor, RouteHandle), PublicError>,
+) -> Result<Route, PublicError> {
+    let owner = iroh::SecretKey::generate();
     let stage = |i: usize, start: u64, end: u64| {
         json!({"stage_index":i,"placement_id":format!("{}:{start}-{end}",rows[i]["node_id"].as_str().unwrap()),
         "member":rows[i],"carrier_endpoint_id":members[i].endpoint.to_string(),"run":format!("run-{i}"),
@@ -293,7 +356,7 @@ fn route(scripts: [Script; 2], max_new_tokens: u64) -> Route {
         "worker_pid":100+i,"tokens":99,"memory":4_000_000_000u64})
     };
     let now = app_host::now();
-    let message = json!({"protocol":route::ROUTE,"swarm_id":"swarm",
+    let message = json!({"protocol":route::ROUTE,"swarm_id":swarm,
         "deployment_id":"12345678-1234-5678-9234-abcdefabcdef","deployment_epoch":7,"topology_version":7,
         "model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
         "manifest_digest":digest(&json!("manifest")),"owner_endpoint_id":owner.public().to_string(),
@@ -304,19 +367,14 @@ fn route(scripts: [Script; 2], max_new_tokens: u64) -> Route {
     for m in &members {
         m.route.send(envelope.clone()).unwrap();
     }
-    let peers = members
-        .iter()
-        .zip(&rows)
-        .map(|(m, r)| StagePeer {
-            node_id: r["node_id"].as_str().unwrap().into(),
-            endpoint: m.endpoint,
-            socket: m.socket,
-            generation: 1,
-        })
-        .collect();
-    let currentness: Currentness = Arc::new(|_| Some(1));
-    let (executor, handle) =
-        RouteExecutor::connect(message.clone(), owner, peers, currentness, Arc::new(Text)).unwrap();
+    let (executor, handle) = match connect(message.clone(), owner) {
+        Ok(connected) => connected,
+        Err(e) => {
+            // Members never saw an owner: they end at their accept deadline.
+            drop(members);
+            return Err(e);
+        }
+    };
     let runtime = m16_route::runtime(
         &message,
         Arc::new(Wall),
@@ -340,14 +398,14 @@ fn route(scripts: [Script; 2], max_new_tokens: u64) -> Route {
         .submit(submission(&message, max_new_tokens))
         .unwrap();
     let (id, token) = (accepted.request_id, accepted.session_token);
-    Route {
+    Ok(Route {
         message,
         service,
         handle,
         members,
         id,
         token,
-    }
+    })
 }
 fn submission(message: &Value, max_new_tokens: u64) -> Value {
     json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":max_new_tokens,
@@ -512,4 +570,424 @@ fn stage_stalled_past_the_close_budget_is_settled_by_redial() {
     let reports = r.finish();
     assert_eq!(reports[1]["ack_delivered"], false);
     assert!(reports[1]["redial_ack_ms"].is_number(), "{:?}", reports[1]);
+}
+
+// ---- Direct-LAN carrier over REAL pairing: seed rows, sessions, offers, signed adverts.
+use api::{
+    handoff, joined_shard,
+    joined_shard::carrier::{self, VerifiedCarrier},
+    member::Session,
+    peer,
+    preferences::{resource_policy, standing_consent},
+};
+use std::{net::IpAddr, path::PathBuf};
+static NEXT: AtomicU64 = AtomicU64::new(0);
+struct Paired {
+    signer: Identity,
+    carrier: Identity,
+    secret: iroh::SecretKey,
+    session: Session,
+    offer: Value,
+}
+struct Swarm {
+    root: PathBuf,
+    seed: app_host::SeedRuntime<app_host::Unmanaged>,
+    members: Vec<Paired>,
+}
+impl Drop for Swarm {
+    fn drop(&mut self) {
+        self.seed.close();
+        if let Err(e) = std::fs::remove_dir_all(&self.root) {
+            eprintln!("swarm root cleanup: {e}");
+        }
+    }
+}
+fn swarm() -> Swarm {
+    let root = std::env::temp_dir().join(format!(
+        "b8-lan-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let root = std::fs::canonicalize(root).unwrap();
+    let owner = root.join("owner");
+    std::fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b8-lan-swarm", None).unwrap();
+    let (seed_signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let source_key = iroh::SecretKey::generate();
+    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
+    let mut members = Vec::new();
+    for i in 0..2 {
+        let member_root = root.join(format!("member{i}"));
+        std::fs::create_dir(&member_root).unwrap();
+        let request = app_host::build_pair_request(&member_root, &member_root).unwrap();
+        let (signer, _, _) = app_host::identity(&member_root).unwrap();
+        let issuer = handoff::Coordinator {
+            signer: Identity::from_secret(seed_signer.endpoint_id(), &seed_signer.secret_bytes())
+                .unwrap(),
+            swarm_id: "b8-lan-swarm".into(),
+            seed_url: seed.seed_url.clone(),
+        };
+        let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
+            .span(Entries::ZERO)
+            .unwrap()
+            .millis()
+            / 1000;
+        let approved = handoff::approve_pairing(&owner, true, Some(&issuer), &request.to_value(), &json!(ttl),
+            &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
+            app_host::now(), &handoff::Entropy::os).unwrap();
+        let options = seed.options();
+        let random = |n| app_host::hex(&app_host::random(n).unwrap());
+        let env = peer::JoinEnv {
+            signer: &signer,
+            clock: &app_host::now,
+            random_hex: &random,
+            seed: &options,
+        };
+        let mut accepted =
+            peer::accept_handoff(&member_root, true, &approved.to_value(), &env).unwrap();
+        peer::renew(&member_root, true, accepted.session.as_mut(), &env).unwrap();
+        let session = accepted.session.unwrap();
+        let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
+        resource_policy::write(&member_root, &policy).unwrap();
+        standing_consent::grant(&member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}), &policy, app_host::now(), Some(16_000_000_000)).unwrap();
+        let binding = session.binding().unwrap();
+        standing_consent::bind(&member_root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).unwrap();
+        let secret = iroh::SecretKey::generate();
+        let carrier =
+            Identity::from_secret(&secret.public().to_string(), &signer.secret_bytes()).unwrap();
+        let registration =
+            joined_shard::register(&session, &signer, &carrier, app_host::now()).unwrap();
+        let mut recipe = case["node_plans"]["node-0"].clone();
+        recipe["node_id"] = json!(session.node_id());
+        recipe.as_object_mut().unwrap().remove("node_plan_digest");
+        recipe["node_plan_digest"] = json!(digest(&recipe));
+        let transfer = case["node_files"]["node-0"][0].clone();
+        let offer = joined_shard::issue(
+            &seed.coordinator,
+            &registration,
+            &format!("b8-lan-transfer-{i}"),
+            &transfer,
+            &recipe,
+            &source,
+        )
+        .unwrap();
+        members.push(Paired {
+            signer,
+            carrier,
+            secret,
+            session,
+            offer,
+        });
+    }
+    // Route stages in node-id order, like the owner producer.
+    members.sort_by(|a, b| a.session.node_id().cmp(b.session.node_id()));
+    Swarm {
+        root,
+        seed,
+        members,
+    }
+}
+impl Swarm {
+    fn live(&self, i: usize) -> Value {
+        let m = &self.members[i];
+        m.session
+            .shard_identity(&m.signer, app_host::now())
+            .unwrap()
+    }
+    fn advert(&self, i: usize, addrs: &[std::net::SocketAddr]) -> Value {
+        let m = &self.members[i];
+        carrier::advertise(&m.session, &m.signer, &m.carrier, addrs, app_host::now()).unwrap()
+    }
+    fn verify(
+        &self,
+        i: usize,
+        advert: &Value,
+        policy: &LanPolicy,
+    ) -> Result<VerifiedCarrier, String> {
+        carrier::verify(
+            &self.seed.coordinator,
+            &self.members[i].offer,
+            advert,
+            policy,
+            app_host::now(),
+        )
+        .map_err(|e| e.0.to_owned())
+    }
+    /// Stage servers bound on `interface`; returns members + their verified carriers.
+    fn serve_lan(
+        &self,
+        interface: IpAddr,
+        policy: &LanPolicy,
+        tokens: &[u32],
+    ) -> (Vec<Member>, Vec<VerifiedCarrier>) {
+        let mut out = Vec::new();
+        let mut verified = Vec::new();
+        for i in 0..2 {
+            let m = &self.members[i];
+            let (session, signer) = (
+                m.session.clone(),
+                Identity::from_secret(m.signer.endpoint_id(), &m.signer.secret_bytes()).unwrap(),
+            );
+            let live: Live = Arc::new(move || {
+                session
+                    .shard_identity(&signer, app_host::now())
+                    .map_err(|_| Error("test_member_invalid"))
+            });
+            let served = member_at(
+                Bind::Lan(m.secret.clone(), interface, policy.clone()),
+                live,
+                m.offer.clone(),
+                i == 1,
+                if i == 1 {
+                    scripted(tokens)
+                } else {
+                    Script::default()
+                },
+                proof(i),
+            );
+            assert_eq!(served.endpoint, m.secret.public(), "registered carrier key");
+            verified.push(
+                self.verify(i, &self.advert(i, &[served.socket]), policy)
+                    .unwrap(),
+            );
+            out.push(served);
+        }
+        (out, verified)
+    }
+    fn route(
+        &self,
+        members: Vec<Member>,
+        connect: impl FnOnce(
+            Value,
+            iroh::SecretKey,
+        ) -> Result<(RouteExecutor, RouteHandle), PublicError>,
+    ) -> Result<Route, PublicError> {
+        let (signer, _, _) =
+            app_host::identity_in(&self.root.join("owner"), app_host::SEED_IDENTITY_FILE).unwrap();
+        let rows = [self.live(0), self.live(1)];
+        let offers = [self.members[0].offer.clone(), self.members[1].offer.clone()];
+        assemble(
+            &signer,
+            self.seed.coordinator.swarm_id(),
+            &rows,
+            &offers,
+            members,
+            4,
+            connect,
+        )
+    }
+}
+fn currentness(s: &Swarm) -> Currentness {
+    let coordinator = s.seed.coordinator.clone();
+    Arc::new(move |node: &str| {
+        coordinator
+            .member(node)
+            .ok()
+            .and_then(|r| r["generation"].as_u64())
+    })
+}
+fn lan_streams(interface: IpAddr, policy: LanPolicy) {
+    let s = swarm();
+    let (members, verified) = s.serve_lan(interface, &policy, &[5, 9, 3, 7]);
+    for (m, v) in members.iter().zip(&verified) {
+        assert_eq!(v.addrs(), &[m.socket], "dials exactly the signed address");
+        assert_eq!(m.socket.ip(), interface);
+    }
+    let current = currentness(&s);
+    let r = s
+        .route(members, |m, owner| {
+            RouteExecutor::connect_lan(
+                m,
+                owner,
+                verified,
+                interface,
+                policy,
+                current,
+                Arc::new(Text),
+            )
+        })
+        .unwrap();
+    r.pump_until(span(B::WorkerStartup), |r| r.terminal().is_some());
+    assert_eq!(r.terminal().as_deref(), Some("completed"), "{}", r.state());
+    assert_eq!(r.handle.state.lock().unwrap().tokens, vec![5, 9, 3, 7]);
+    let reports = r.finish();
+    assert!(
+        reports.iter().all(|v| v["ack_delivered"] == true),
+        "{reports:?}"
+    );
+}
+#[test]
+fn lan_carrier_streams_over_signed_addresses_on_explicit_loopback() {
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    lan_streams(loopback, LanPolicy::with_explicit(vec![loopback]).unwrap());
+}
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn lan_carrier_streams_over_signed_addresses_on_the_real_interface() {
+    let interface: IpAddr = std::env::var("MYCELIUM_LAN_IP").unwrap().parse().unwrap();
+    lan_streams(interface, LanPolicy::private_only());
+}
+#[test]
+fn lan_advertisement_must_be_enrolled_registered_fresh_and_allow_listed() {
+    let s = swarm();
+    let policy = LanPolicy::private_only();
+    let ok: std::net::SocketAddr = "192.168.7.20:41000".parse().unwrap();
+    assert!(s.verify(0, &s.advert(0, &[ok]), &policy).is_ok());
+    // Wrong peer key: a stranger signs a carrier claim for this member.
+    let stranger = Identity::from_secret(s.members[0].signer.endpoint_id(), &[77; 32]).unwrap();
+    let mut forged = s.advert(0, &[ok]);
+    forged["verification_key"] = stranger.public_key_record();
+    forged["signature"] = stranger.sign(&forged["message"]).unwrap();
+    assert_eq!(
+        s.verify(0, &forged, &policy).unwrap_err(),
+        "joined_shard_signature_invalid"
+    );
+    // Another member's (validly signed) advert is signed by a different enrolled key.
+    assert_eq!(
+        s.verify(0, &s.advert(1, &[ok]), &policy).unwrap_err(),
+        "joined_shard_signature_invalid"
+    );
+    // The enrolled key cannot re-point its registered carrier to another endpoint.
+    let m = &s.members[0];
+    let elsewhere = Identity::from_secret(
+        &iroh::SecretKey::generate().public().to_string(),
+        &m.signer.secret_bytes(),
+    )
+    .unwrap();
+    let repointed =
+        carrier::advertise(&m.session, &m.signer, &elsewhere, &[ok], app_host::now()).unwrap();
+    assert_eq!(
+        s.verify(0, &repointed, &policy).unwrap_err(),
+        "joined_carrier_identity_mismatch"
+    );
+    // Public / CGNAT addresses are refused unless explicitly configured.
+    for public in ["8.8.8.8:41000", "100.84.252.4:41000"] {
+        let advert = s.advert(0, &[public.parse().unwrap()]);
+        assert_eq!(
+            s.verify(0, &advert, &policy).unwrap_err(),
+            "joined_carrier_address_refused"
+        );
+    }
+    let tailnet = LanPolicy::with_explicit(vec!["100.84.252.4".parse().unwrap()]).unwrap();
+    assert!(
+        s.verify(
+            0,
+            &s.advert(0, &["100.84.252.4:41000".parse().unwrap()]),
+            &tailnet
+        )
+        .is_ok()
+    );
+    // Tampering with the signed address list breaks the enrolled signature.
+    let mut moved = s.advert(0, &[ok]);
+    moved["message"]["direct_addrs"] = json!(["192.168.7.21:41000"]);
+    assert_eq!(
+        s.verify(0, &moved, &policy).unwrap_err(),
+        "joined_shard_signature_invalid"
+    );
+}
+#[test]
+fn lan_carrier_refuses_mitm_keys_unexpected_peers_and_public_interfaces() {
+    let s = swarm();
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    // MITM: member 1's advert is validly signed, but its address is held by an
+    // endpoint with a different key; the owner's pinned dial must fail.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = HostClock::default();
+    let until = |id: B| {
+        clock
+            .monotonic()
+            .checked_add(id.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
+    let mut mitm = LoopbackHost::bind_lan(
+        &rt,
+        &clock,
+        until(B::RouterClose),
+        iroh::SecretKey::generate(),
+        &[transport::Channel::Router],
+        loopback,
+        policy.clone(),
+    )
+    .unwrap();
+    let mitm_socket = *mitm.address().unwrap().ip_addrs().next().unwrap();
+    let (members, mut verified) = s.serve_lan(loopback, &policy, &[5]);
+    verified[1] = s.verify(1, &s.advert(1, &[mitm_socket]), &policy).unwrap();
+    let current = currentness(&s);
+    let began = Instant::now();
+    let refused = std::thread::scope(|scope| {
+        let mitm_side = scope.spawn(|| mitm.accept(&clock, until(B::SidecarLocalHandshake)));
+        let refused = s
+            .route(members, |m, owner| {
+                RouteExecutor::connect_lan(
+                    m,
+                    owner,
+                    verified,
+                    loopback,
+                    policy.clone(),
+                    current,
+                    Arc::new(Text),
+                )
+            })
+            .err()
+            .unwrap();
+        assert!(
+            mitm_side.join().unwrap().is_err(),
+            "MITM never completes a session"
+        );
+        refused
+    });
+    assert_eq!(refused.code, "joined_route_connect_failed");
+    assert!(
+        began.elapsed() < span(B::WorkerStartup),
+        "refused within the connect budget"
+    );
+    mitm.close(&clock, until(B::RouterClose)).unwrap();
+    // Unexpected peer: a verified carrier for the wrong stage is refused before dialing.
+    let (members, verified) = s.serve_lan(loopback, &policy, &[5]);
+    let swapped = vec![verified[1].clone(), verified[0].clone()];
+    let current = currentness(&s);
+    let refused = s
+        .route(members, |m, owner| {
+            RouteExecutor::connect_lan(
+                m,
+                owner,
+                swapped,
+                loopback,
+                policy.clone(),
+                current,
+                Arc::new(Text),
+            )
+        })
+        .err()
+        .unwrap();
+    assert_eq!(refused.code, "joined_route_peer_mismatch");
+    // A public owner interface is refused even with verified carriers.
+    let (members, verified) = s.serve_lan(loopback, &policy, &[5]);
+    let current = currentness(&s);
+    let refused = s
+        .route(members, |m, owner| {
+            RouteExecutor::connect_lan(
+                m,
+                owner,
+                verified,
+                "8.8.8.8".parse().unwrap(),
+                policy.clone(),
+                current,
+                Arc::new(Text),
+            )
+        })
+        .err()
+        .unwrap();
+    assert_eq!(refused.code, "joined_route_address_refused");
 }

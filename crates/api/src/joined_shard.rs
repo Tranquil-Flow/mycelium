@@ -14,6 +14,7 @@ use protocol::{
 use runtime::sidecar_artifact::grant_limits;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+pub mod carrier;
 pub mod native;
 pub mod route;
 pub mod serve;
@@ -155,6 +156,31 @@ pub fn issue_with_source(
     source_endpoint: &str,
     source_key: &Value,
 ) -> Result<Value> {
+    issue_with_source_addrs(
+        coordinator,
+        registration,
+        run,
+        transfer,
+        recipe,
+        source_endpoint,
+        source_key,
+        &[],
+    )
+}
+/// As `issue_with_source`, also signing the source's direct addresses into the
+/// grant (artifact grant v1 `direct_addrs`, unchanged wire shape), so a LAN
+/// member dials the source only where the seed said it listens.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_with_source_addrs(
+    coordinator: &seed::Coordinator,
+    registration: &Value,
+    run: &str,
+    transfer: &Value,
+    recipe: &Value,
+    source_endpoint: &str,
+    source_key: &Value,
+    source_addrs: &[std::net::SocketAddr],
+) -> Result<Value> {
     let source_digest = identity::key_record_digest(source_key)
         .map_err(|_| fail("joined_shard_identity_mismatch"))?;
     let node = text(&registration["message"]["member"], "node_id")?;
@@ -194,7 +220,8 @@ pub fn issue_with_source(
         "recipient_node_id":node,"recipient_endpoint_id":reg["carrier_endpoint_id"],
         "recipient_key_digest":row["verification_key_digest"],"assignment_id":run,
         "manifest_pack_digest":recipe["node_plan_digest"],"allowed_object_digests":[transfer["content_digest"]],
-        "authorized_sources":[{"endpoint_id":source_endpoint,"verification_key_digest":source_digest,"direct_addrs":[]}],
+        "authorized_sources":[{"endpoint_id":source_endpoint,"verification_key_digest":source_digest,
+            "direct_addrs":source_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>()}],
         "maximum_total_bytes":bytes.checked_mul(2).ok_or(fail("joined_shard_invalid"))?,
         "maximum_bytes_per_second":ag::DEFAULT_MAXIMUM_BYTES_PER_SECOND,"maximum_chunk_bytes":ag::MAX_CHUNK_BYTES,
         "issued_at_unix_ms":now_ms,"not_before_unix_ms":now_ms,"expires_at_unix_ms":expires});

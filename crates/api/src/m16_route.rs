@@ -21,7 +21,7 @@ use iroh::{EndpointAddr, EndpointId, endpoint::Connection};
 use protocol::router_wire;
 use runtime::{
     iroh::IrohTransport,
-    iroh_host::LoopbackHost,
+    iroh_host::{LanPolicy, LoopbackHost},
     iroh_receive::{DispatchRefusal, RouterReceiver},
     m16_coordinator::{SharedClock, SharedIdSource},
     m16_factory::{DeviceFacts, FactoryInputs, LiveM16Runtime, build_live_m16_runtime},
@@ -30,7 +30,7 @@ use runtime::{
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -72,6 +72,25 @@ pub struct StagePeer {
     pub endpoint: EndpointId,
     pub socket: SocketAddr,
     pub generation: u64,
+}
+/// Carrier network of an executor. Loopback is the default; direct LAN is used
+/// only when a caller explicitly configures it with an interface and allow-list.
+#[derive(Clone, Debug)]
+enum Network {
+    Loopback,
+    Lan {
+        interface: IpAddr,
+        policy: LanPolicy,
+    },
+}
+/// Internal dial target: every address comes from a loopback StagePeer or a
+/// member-signed, owner-verified carrier advertisement.
+#[derive(Clone)]
+struct Peer {
+    node_id: String,
+    endpoint: EndpointId,
+    addrs: Vec<SocketAddr>,
+    generation: u64,
 }
 /// Per-stage observable teardown outcome, for host status and qualification.
 #[derive(Clone, Debug, Default)]
@@ -189,11 +208,81 @@ pub struct RouteExecutor {
     cancel: Arc<AtomicBool>,
 }
 impl RouteExecutor {
-    /// Bind the owner carrier with its route-pinned key and dial every stage now.
+    /// Bind the owner carrier with its route-pinned key and dial every stage now
+    /// over LocalOnly loopback (the default carrier).
     pub fn connect(
         message: Value,
         secret: iroh::SecretKey,
         peers: Vec<StagePeer>,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        if peers.iter().any(|p| !p.socket.ip().is_loopback()) {
+            return Err(error("joined_route_peer_mismatch"));
+        }
+        let peers = peers
+            .into_iter()
+            .map(|p| Peer {
+                node_id: p.node_id,
+                endpoint: p.endpoint,
+                addrs: vec![p.socket],
+                generation: p.generation,
+            })
+            .collect();
+        Self::open(
+            message,
+            secret,
+            peers,
+            Network::Loopback,
+            currentness,
+            codec,
+        )
+    }
+    /// Explicit direct-LAN carrier: the owner endpoint binds exactly `interface`
+    /// (no relay, no discovery) and dials each stage ONLY at the addresses of its
+    /// member-signed, owner-verified advertisement, all within `policy`. Iroh
+    /// pins each stage's endpoint key, so a different key at an advertised
+    /// address fails the handshake. Same deadlines, cancellation and backpressure
+    /// as the loopback carrier.
+    pub fn connect_lan(
+        message: Value,
+        secret: iroh::SecretKey,
+        carriers: Vec<crate::joined_shard::carrier::VerifiedCarrier>,
+        interface: IpAddr,
+        policy: LanPolicy,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        if !policy.allows(interface)
+            || carriers
+                .iter()
+                .any(|c| c.addrs().iter().any(|a| !policy.allows(a.ip())))
+        {
+            return Err(error("joined_route_address_refused"));
+        }
+        let peers = carriers
+            .iter()
+            .map(|c| Peer {
+                node_id: c.node_id().to_owned(),
+                endpoint: c.endpoint(),
+                addrs: c.addrs().to_vec(),
+                generation: c.generation(),
+            })
+            .collect();
+        Self::open(
+            message,
+            secret,
+            peers,
+            Network::Lan { interface, policy },
+            currentness,
+            codec,
+        )
+    }
+    fn open(
+        message: Value,
+        secret: iroh::SecretKey,
+        peers: Vec<Peer>,
+        network: Network,
         currentness: Currentness,
         codec: Arc<dyn Codec>,
     ) -> Result<(Self, RouteHandle), PublicError> {
@@ -206,7 +295,7 @@ impl RouteExecutor {
                 s["member"]["node_id"] != p.node_id
                     || s["carrier_endpoint_id"] != p.endpoint.to_string()
                     || s["member"]["generation"] != p.generation
-                    || !p.socket.ip().is_loopback()
+                    || p.addrs.is_empty()
             })
         {
             return Err(error("joined_route_peer_mismatch"));
@@ -233,8 +322,16 @@ impl RouteExecutor {
         let cancel = Arc::new(AtomicBool::new(false));
         let (shared, flag, route) = (observed.clone(), cancel.clone(), message.clone());
         let thread = std::thread::spawn(move || {
-            if let Err(code) = carrier(&route, secret, &peers, &currentness, &rx, &shared, &flag)
-                && let Ok(mut o) = shared.state.lock()
+            if let Err(code) = carrier(
+                &route,
+                secret,
+                &peers,
+                &network,
+                &currentness,
+                &rx,
+                &shared,
+                &flag,
+            ) && let Ok(mut o) = shared.state.lock()
             {
                 o.setup_failure.get_or_insert(code.to_owned());
             }
@@ -473,8 +570,10 @@ fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
 }
 type Fence = Box<dyn Fn() -> ConnectionFence + Send + Sync>;
-fn peer_addr(p: &StagePeer) -> EndpointAddr {
-    EndpointAddr::new(p.endpoint).with_ip_addr(p.socket)
+fn peer_addr(p: &Peer) -> EndpointAddr {
+    p.addrs
+        .iter()
+        .fold(EndpointAddr::new(p.endpoint), |a, s| a.with_ip_addr(*s))
 }
 struct Link<'a> {
     send: IrohTransport<'a, app_host_clock::Clock, Fence>,
@@ -569,7 +668,8 @@ impl Link<'_> {
 fn carrier(
     message: &Value,
     secret: iroh::SecretKey,
-    peers: &[StagePeer],
+    peers: &[Peer],
+    network: &Network,
     currentness: &Currentness,
     commands: &mpsc::Receiver<Command>,
     observed: &RouteHandle,
@@ -581,9 +681,20 @@ fn carrier(
         .build()
         .map_err(|_| "joined_route_runtime_failed")?;
     let clock = crate::managed_carrier::HostClock::default();
-    let mut host =
-        LoopbackHost::bind_with_secret(&rt, &clock, deadline(&clock, B::WorkerStartup)?, secret)
-            .map_err(|_| "joined_route_bind_failed")?;
+    let bound = deadline(&clock, B::WorkerStartup)?;
+    let mut host = match network {
+        Network::Loopback => LoopbackHost::bind_with_secret(&rt, &clock, bound, secret),
+        Network::Lan { interface, policy } => LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            bound,
+            secret,
+            &[Channel::Router],
+            *interface,
+            policy.clone(),
+        ),
+    }
+    .map_err(|_| "joined_route_bind_failed")?;
     let epoch = message["topology_version"]
         .as_u64()
         .ok_or("joined_route_invalid")?;
@@ -605,7 +716,7 @@ fn carrier(
             );
         }
     }
-    let fence = |p: &StagePeer| -> (ConnectionFence, Fence) {
+    let fence = |p: &Peer| -> (ConnectionFence, Fence) {
         let base = ConnectionFence {
             endpoint_id: *p.endpoint.as_bytes(),
             local_generation: epoch,
@@ -620,7 +731,7 @@ fn carrier(
             }),
         )
     };
-    let link = |c: &Connection, p: &StagePeer| -> Result<Link<'_>, &'static str> {
+    let link = |c: &Connection, p: &Peer| -> Result<Link<'_>, &'static str> {
         let (base, f1) = fence(p);
         let (_, f2) = fence(p);
         Ok(Link {
