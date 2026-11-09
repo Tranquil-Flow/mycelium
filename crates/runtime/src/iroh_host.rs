@@ -658,17 +658,23 @@ impl<'a> LoopbackHost<'a> {
                     let admission = admission.clone();
                     pool.spawn(async move {
                         // A stalled handshake must not hold the caller's window.
-                        let connection = tokio::time::timeout(handshake, incoming)
-                            .await
-                            .map_err(|_| Error::Authentication)?
-                            .map_err(|_| Error::Authentication)?;
+                        // A failed one frees its receive-filter slot at once
+                        // (B11; still counted against its host's share).
+                        let connection = match tokio::time::timeout(handshake, incoming).await {
+                            Ok(Ok(connection)) => connection,
+                            Ok(Err(_)) | Err(_) => {
+                                pin.refuse();
+                                return Err(Error::Authentication);
+                            }
+                        };
                         match admission.admits_key(&connection.remote_id()) {
                             // Not an admitted peer key: refused here, unpinned
                             // at once (no close drain for an unauthenticated
-                            // peer), never handed to the caller.
+                            // peer), its receive-filter slot freed for other
+                            // hosts at once (B11), never handed to the caller.
                             Some(false) => {
                                 connection.close(LAN_KEY_REFUSED.into(), b"lan_key_refused");
-                                drop(pin);
+                                pin.refuse();
                                 return Err(Error::Authentication);
                             }
                             Some(true) => {
