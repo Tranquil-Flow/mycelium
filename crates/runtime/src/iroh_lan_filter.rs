@@ -46,6 +46,23 @@
 //! PROVISIONAL (accept side before or without that verification), each with
 //! its own capacity, so unauthenticated handshakes can never exhaust or evict
 //! the pins of authenticated peers.
+//!
+//! Learned hosts (B14, owner ruling 12 option A). A member cannot pin its
+//! route owner's host from signed data (the owner's address is in no signed
+//! document), so the owner's every new socket used to wait in the provisional
+//! table with everybody else, and a source at the owner's IP needed only its
+//! share to starve it. A host now LEARNS the source of a handshake strictly
+//! after verifying that it came under an admitted peer key
+//! ([`Admission::learn`], from the accept path after [`Admission::admits_key`]),
+//! one source per admitted key: a key verified at a new address replaces its
+//! old one at once (IP change), and a key no longer admitted loses it. Generic
+//! (any admitted key, no owner role). A learned host's Initials then use their
+//! own lane of `RelayConnectionSlots` entries, which no other source can fill;
+//! its refused handshakes free their slot without counting against the lane.
+//! Once every admitted key's host is learned, the waiting room for every other
+//! source shrinks to `relearn_slots` (a re-learning after an IP change still
+//! finds room; one host takes one). Learning never skips a key check: every
+//! connection from a learned host is verified like any other.
 use crate::iroh_host::LanPolicy;
 use budgets::{BudgetId, Entries};
 use iroh::endpoint::transports::{
@@ -146,6 +163,17 @@ fn host_share(capacity: usize) -> usize {
         (capacity / PROVISIONAL_SHARES).max(1)
     }
 }
+/// Once every admitted key's host is learned (B14), every other source shares
+/// `1 / RELEARN_SHARES` of the provisional table: room for a re-learning after
+/// an IP change, and less for floods to reach iroh's address map.
+const RELEARN_SHARES: usize = 8;
+fn relearn_slots(capacity: usize) -> usize {
+    if capacity == 0 {
+        0
+    } else {
+        (capacity / RELEARN_SHARES).max(1)
+    }
+}
 /// A receive-filter entry: an unpinned source admitted for one QUIC Initial.
 #[derive(Clone, Copy, Debug)]
 struct Inbound {
@@ -153,6 +181,21 @@ struct Inbound {
     /// Its handshake was refused: no longer admits datagrams nor takes a slot,
     /// but counts against its host's share until `until`.
     refused: bool,
+    /// The learned host whose lane admitted it (B14); `None` = the waiting
+    /// room of every other source.
+    lane: Option<IpAddr>,
+}
+/// Which provisional lanes exist right now (B14; a snapshot, see `lanes`).
+#[derive(Debug, Default)]
+struct Lanes {
+    learned: HashSet<IpAddr>,
+    /// Every admitted key's host is learned: the waiting room shrinks.
+    shrunk: bool,
+}
+impl Lanes {
+    fn of(&self, ip: IpAddr) -> Option<IpAddr> {
+        self.learned.contains(&ip).then_some(ip)
+    }
 }
 fn handshake() -> Option<Duration> {
     let span = BudgetId::SidecarLocalHandshake.span(Entries::ZERO).ok()?;
@@ -171,12 +214,11 @@ pub(crate) struct Admission {
     /// `RelayConnectionSlots`, the concurrent handshake bound.
     provisional_capacity: usize,
     /// Receive filter: unpinned sources admitted for one QUIC Initial, until
-    /// the instant each entry expires. At most `provisional_capacity` live
+    /// the instant each entry expires. Per lane (B14: the waiting room, and
+    /// each learned host's own), at most `provisional_capacity` live
     /// (unrefused) entries plus as many refused ones.
     inbound: Mutex<HashMap<SocketAddr, Inbound>>,
     inbound_ttl: Duration,
-    /// Live entries plus held provisional pins one source IP may have.
-    host_share: usize,
     /// Every destination ever pinned (oldest dropped past `remembered`): the
     /// endpoint's address book keeps a returning peer's earlier, released
     /// addresses, which were admitted then and are no evidence of a leak.
@@ -188,6 +230,10 @@ pub(crate) struct Admission {
     /// Exact peer keys from signed data: when set, an accepted handshake under
     /// any other key is refused by the host and unpinned at once.
     keys: RwLock<Option<BTreeSet<iroh::EndpointId>>>,
+    /// Learned hosts (B14): admitted key -> the source of its last verified
+    /// handshake. At most one per admitted key. Lock order: `inbound` ->
+    /// `keys` -> `learned` (each optional).
+    learned: RwLock<HashMap<iroh::EndpointId, SocketAddr>>,
     /// Set once the host closes: pins stop releasing so the endpoint's own
     /// CONNECTION_CLOSE frames still reach admitted peers.
     closing: AtomicBool,
@@ -219,11 +265,11 @@ impl Admission {
             provisional_capacity,
             inbound: Mutex::new(HashMap::new()),
             inbound_ttl: handshake().unwrap_or(Duration::ZERO),
-            host_share: host_share(provisional_capacity),
             history: Mutex::new((HashSet::new(), VecDeque::new())),
             remembered,
             hosts: RwLock::new(hosts),
             keys: RwLock::new(None),
+            learned: RwLock::new(HashMap::new()),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
@@ -236,15 +282,35 @@ impl Admission {
         &self.policy
     }
     /// A fresh admission for a recycled endpoint (B11): the same policy,
-    /// bounds and signed peer hosts/keys; no pins, history, receive-filter
-    /// entries or counters (they described the closed endpoint).
+    /// bounds, signed peer hosts/keys and learned hosts of those keys (B14:
+    /// the same socket and key, so what was verified still holds); no pins,
+    /// history, receive-filter entries or counters (they described the closed
+    /// endpoint).
     pub(crate) fn successor(&self) -> Result<Arc<Self>, Error> {
         let next = Self::new(self.policy.clone(), self.capacity, self.remembered);
         let hosts = self.hosts.read().map_err(|_| Error::Unavailable)?.clone();
         let keys = self.keys.read().map_err(|_| Error::Unavailable)?.clone();
+        let learned = self.learned.read().map_err(|_| Error::Unavailable)?.clone();
         *next.hosts.write().map_err(|_| Error::Unavailable)? = hosts;
         *next.keys.write().map_err(|_| Error::Unavailable)? = keys;
+        *next.learned.write().map_err(|_| Error::Unavailable)? = learned;
         Ok(next)
+    }
+    /// The current lanes. A poisoned key or learned table has no lanes (the
+    /// B11 table for everybody): learning never widens anything it cannot read.
+    fn lanes(&self) -> Lanes {
+        let Ok(keys) = self.keys.read() else {
+            return Lanes::default();
+        };
+        let Ok(learned) = self.learned.read() else {
+            return Lanes::default();
+        };
+        Lanes {
+            learned: learned.values().map(|a| a.ip()).collect(),
+            shrunk: keys
+                .as_ref()
+                .is_some_and(|k| !k.is_empty() && k.iter().all(|key| learned.contains_key(key))),
+        }
     }
     /// The pre-send check, evaluated for every datagram.
     pub(crate) fn may_send(&self, dst: SocketAddr) -> bool {
@@ -291,35 +357,48 @@ impl Admission {
         if !quic_initial(datagram) || !self.may_accept(src) {
             return false;
         }
-        let taken = |inbound: &HashMap<SocketAddr, Inbound>| {
-            inbound
-                .values()
-                .filter(|e| !e.refused && now < e.until)
-                .count()
-        };
+        // Only a new Initial reads the lanes (B14; `keys` -> `learned` under
+        // `inbound`, never the reverse anywhere).
+        let lanes = self.lanes();
+        let lane = lanes.of(src.ip());
         if inbound.len() >= self.provisional_capacity {
             inbound.retain(|_, entry| now < entry.until);
         }
         let Some(until) = now.checked_add(self.inbound_ttl) else {
             return false;
         };
-        let mut host = held;
-        host.extend(
-            inbound
-                .iter()
-                .filter(|(a, e)| a.ip() == src.ip() && now < e.until)
-                .map(|(a, _)| *a),
-        );
-        // A refused entry of `src` itself still counts (it is overwritten,
-        // never added to): refusal gives no fresh slot to its own host.
-        if host.len() >= self.host_share {
-            // This host already holds its share (live entries, refused ones
-            // still in their window, held handshakes): fail closed for it only.
-            return false;
+        // Live, unrefused entries of `src`'s lane: its learned host's own
+        // lane, or the waiting room of every other source.
+        let taken = inbound
+            .values()
+            .filter(|e| e.lane == lane && !e.refused && now < e.until)
+            .count();
+        let capacity = match lane {
+            Some(_) => self.provisional_capacity,
+            None if lanes.shrunk => relearn_slots(self.provisional_capacity),
+            None => self.provisional_capacity,
+        };
+        if lane.is_none() {
+            // The waiting room keeps B11's per-host share (of its own size).
+            let mut host = held;
+            host.extend(
+                inbound
+                    .iter()
+                    .filter(|(a, e)| e.lane.is_none() && a.ip() == src.ip() && now < e.until)
+                    .map(|(a, _)| *a),
+            );
+            // A refused entry of `src` itself still counts (it is overwritten,
+            // never added to): refusal gives no fresh slot to its own host.
+            if host.len() >= host_share(capacity) {
+                // This host already holds its share (live entries, refused
+                // ones still in their window, held handshakes): fail closed
+                // for it only.
+                return false;
+            }
         }
-        if taken(&inbound) >= self.provisional_capacity {
-            // Full of live provisional sources: fail closed (the peer's QUIC
-            // retransmits its Initial once an entry expires or is refused).
+        if taken >= capacity {
+            // Full lane: fail closed (the peer's QUIC retransmits its Initial
+            // once an entry expires or is refused).
             return false;
         }
         inbound.insert(
@@ -327,6 +406,7 @@ impl Admission {
             Inbound {
                 until,
                 refused: false,
+                lane,
             },
         );
         self.admitted.fetch_add(1, Ordering::SeqCst);
@@ -342,13 +422,32 @@ impl Admission {
         };
         inbound.retain(|_, entry| now < entry.until);
         for addr in addrs {
-            let refused = inbound.values().filter(|e| e.refused).count();
+            let Some(lane) = inbound.get(addr).map(|e| e.lane) else {
+                continue;
+            };
+            // Per lane (B14): a learned host's refusals never use up the
+            // waiting room's, nor the other way round.
+            let refused = inbound
+                .values()
+                .filter(|e| e.refused && e.lane == lane)
+                .count();
             if let Some(entry) = inbound.get_mut(addr)
                 && !entry.refused
                 && refused < self.provisional_capacity
             {
                 entry.refused = true;
             }
+        }
+    }
+    /// A provisional handshake from `addrs` was verified under an admitted
+    /// key (B14): its entries are done (its sources are pinned now) and stop
+    /// counting against their host or lane.
+    fn release_inbound(&self, addrs: &[SocketAddr]) {
+        let Ok(mut inbound) = self.inbound.lock() else {
+            return;
+        };
+        for addr in addrs {
+            inbound.remove(addr);
         }
     }
     /// The monitor's view of an open path (= the pre-send check).
@@ -395,14 +494,48 @@ impl Admission {
         Ok(())
     }
     /// Replace the exact peer keys accepted handshakes must present (taken
-    /// from signed data; at most `capacity`).
+    /// from signed data; at most `capacity`). A key no longer admitted loses
+    /// its learned host (B14).
     pub(crate) fn set_keys(&self, keys: &[iroh::EndpointId]) -> Result<(), Error> {
         if keys.is_empty() || keys.len() > self.capacity {
             return Err(Error::Authentication);
         }
+        let next: BTreeSet<iroh::EndpointId> = keys.iter().copied().collect();
         let mut current = self.keys.write().map_err(|_| Error::Unavailable)?;
-        *current = Some(keys.iter().copied().collect());
+        let mut learned = self.learned.write().map_err(|_| Error::Unavailable)?;
+        learned.retain(|key, _| next.contains(key));
+        *current = Some(next);
         Ok(())
+    }
+    /// Learn `source` as the host of the admitted peer `key` (B14): call ONLY
+    /// after a completed handshake from `source` was verified under `key`.
+    /// Nothing is learned without admitted keys (the caller verifies keys
+    /// itself), for a key outside them, for a source this host does not
+    /// accept from, or once closing. Replaces the key's earlier host at once.
+    pub(crate) fn learn(&self, source: SocketAddr, key: &iroh::EndpointId) {
+        let source = canonical(source);
+        if !self.may_accept(source) || self.closing.load(Ordering::SeqCst) {
+            return;
+        }
+        let Ok(keys) = self.keys.read() else {
+            return;
+        };
+        if !keys.as_ref().is_some_and(|k| k.contains(key)) {
+            return;
+        }
+        if let Ok(mut learned) = self.learned.write() {
+            learned.insert(*key, source);
+        }
+    }
+    /// The learned hosts' sources (B14), sorted.
+    pub(crate) fn learned_hosts(&self) -> Vec<SocketAddr> {
+        let mut hosts: Vec<SocketAddr> = self
+            .learned
+            .read()
+            .map(|learned| learned.values().copied().collect())
+            .unwrap_or_default();
+        hosts.sort_unstable();
+        hosts
     }
     /// `None` when no keys are set; otherwise whether `key` is one of them.
     /// A poisoned key table admits nothing.
@@ -485,8 +618,13 @@ impl Admission {
             }
         }
     }
+    /// Closing: pins stop releasing, and nothing stays learned (B14; a
+    /// recycle takes its successor, learned hosts included, before this).
     pub(crate) fn close(&self) {
         self.closing.store(true, Ordering::SeqCst);
+        if let Ok(mut learned) = self.learned.write() {
+            learned.clear();
+        }
     }
     /// Datagrams the filter refused to send (never left the socket).
     pub(crate) fn refused(&self) -> u64 {
@@ -547,6 +685,7 @@ impl Pin {
         drop(pins);
         self.class = PinClass::Authenticated;
         self.admission.remember(&self.addrs);
+        self.admission.release_inbound(&self.addrs);
         Ok(())
     }
     /// Record a provisional pin's addresses as admitted (an accept whose
@@ -747,6 +886,9 @@ mod admission_tests;
 #[cfg(all(test, unix))]
 #[path = "iroh_lan_inbound_tests.rs"]
 mod inbound_tests;
+#[cfg(test)]
+#[path = "iroh_lan_learning_tests.rs"]
+mod learning_tests;
 #[cfg(all(test, unix))]
 #[path = "iroh_lan_filter_tests.rs"]
 mod tests;
