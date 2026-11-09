@@ -154,3 +154,64 @@ def test_no_visible_flash_at_the_bottom_hero_colonies(local, seconds):  # noqa: 
             assert n <= 2 * statistics.median(around) + 60, (i / 10, n, lit[max(0, i - 10):i + 11])
         assert not errors, errors
         browser.close()
+
+
+@pytest.mark.parametrize('seconds', [6, 9, 12])
+def test_real_time_load_in_never_pops(local, seconds):  # noqa: F811
+    """Owner (r11.2 live): "on loading it seems to abruptly load in some
+    mycelium strands in the growth phase ... as well as some of the mycelium in
+    circles around the nodes". Causes: the compositor attached only after the
+    whole hero build (the colony monotone pass and the re-bake held it to
+    ~8.5 s of a 9 s intro, so the field appeared nearly whole), the re-bake
+    swapped the raster in one blit, and after the intro the hero was presented
+    only every 4 age units. Real-time screencast (DPR1 dark green), newly lit
+    pixels per 100 ms bin from 30% of the intro to 3 s after it: no bin above
+    2 x the median of the surrounding 2 s + 2000 px (0.15% of the viewport).
+    b218e4f0 at 9 s: +5636 px at 31%; 43dd59f4: +8050 px at 8.2 s; now <= +1600."""
+    import base64
+    import io
+    import statistics
+
+    import numpy as np
+    from PIL import Image
+    local['directory'].staging_samples = True
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context(viewport={'width': 1440, 'height': 900}, color_scheme='dark')
+        context.add_init_script(CLS)
+        page = context.new_page()
+        cdp = context.new_cdp_session(page)
+        frames, errors = [], []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+
+        def on_frame(ev):
+            frames.append((ev['metadata']['timestamp'], ev['data']))
+            cdp.send('Page.screencastFrameAck', {'sessionId': ev['sessionId']})
+        cdp.on('Page.screencastFrame', on_frame)
+        cdp.send('Page.startScreencast', {'format': 'png', 'everyNthFrame': 1})
+        page.goto(local['directory'].origin + f'/?intro={seconds}')
+        nav = page.evaluate('performance.timeOrigin') / 1000
+        page.wait_for_timeout(int(seconds * 1000 + 4000))
+        cdp.send('Page.stopScreencast')
+        T = page.evaluate('MyceliumField.INTRO_MS') / 1000
+        assert T == seconds
+        bins, prev = {}, None
+        for ts, data in frames:
+            t = ts - nav
+            a = np.asarray(Image.open(io.BytesIO(base64.b64decode(data))).convert('RGB')).astype(np.float32) / 255
+            a = np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
+            L = 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
+            if prev is not None:
+                k = int(t * 10)
+                bins[k] = bins.get(k, 0) + int(((L >= 0.02) & ((L - prev) > 0.015)).sum())
+            prev = L
+        ks = sorted(bins)
+        s = [bins.get(k, 0) for k in range(ks[0], ks[-1] + 1)]
+        for i, n in enumerate(s):
+            t = (ks[0] + i) / 10
+            if not (0.3 * T <= t <= T + 3):
+                continue
+            around = [s[j] for j in range(max(0, i - 10), min(len(s), i + 11)) if j != i]
+            assert n <= 2 * statistics.median(around) + 2000, (t, n, s[max(0, i - 10):i + 11])
+        assert not errors, errors
+        browser.close()

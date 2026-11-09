@@ -1150,7 +1150,10 @@ function* buildGeometry(L, budget, out = {}) {
     cv.width = cv.height = 0;
     commit();
   }
-  yield* monotoneColonies();
+  // r11.2c: the colony monotone pass (~1.3 s of slices) runs after the scene
+  // is ready (scene.monotone), not inside the build: it held the compositor's
+  // attach back and the field's load-in with it. Its alphas reach the
+  // visible raster through the cross-faded re-bake.
   // r11.2 mat schedule, last step: a shifted host's whole subtree (forks,
   // hairs and mats inheriting its shift) must be complete by MAT_DONE of the
   // intro. A late fork could inherit a shift that pushed it past the intro end
@@ -1188,6 +1191,7 @@ function* buildGeometry(L, budget, out = {}) {
   }
   return {
     vs, ss, paths, units, nodes, colonies, cords, linkCords, vertex, edge, fusions, explorerRoots, explorerAudit, L, protect, knots,
+    monotone: monotoneColonies,
   };
 }
 
@@ -1471,6 +1475,11 @@ export function createHero(canvas, { stage, state, reduce }) {
   // Static-raster length: living tips (r11.2) keep only their base in the raster.
   const rasterLen = (P) => (P.dyn ? P.dyn.base : P.dyn === undefined && P.pre !== undefined ? Math.min(P.len, P.pre) : P.len);
   function resetGrowth(g) {
+    if (growth.xfade) {
+      growth.xfade.old.width = growth.xfade.old.height = growth.xfade.neu.width = growth.xfade.neu.height = 0;
+      growth.xfade = null;
+    }
+    for (const P of g.paths) P.resumeDelay = 0; // a rebuilt raster has no held paths
     sx.save();
     sx.setTransform(1, 0, 0, 1, 0, 0);
     sx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1523,16 +1532,68 @@ export function createHero(canvas, { stage, state, reduce }) {
       cur = [pts[chunkEnd].x, pts[chunkEnd].y];
     }
   }
-  function flushPieces(ctx, groups) {
-    ctx.lineCap = "butt";
-    for (const [key, path] of groups) {
-      ctx.strokeStyle = key >= 1e6 ? palette.core : palette.glow;
-      ctx.globalAlpha = Math.floor((key % 1e6) / 1000) / 120;
-      ctx.lineWidth = (key % 1000) / 20;
-      ctx.stroke(path);
+  function flushPieces(ctx, groups, ctx2 = null) {
+    for (const c of ctx2 ? [ctx, ctx2] : [ctx]) {
+      c.lineCap = "butt";
+      for (const [key, path] of groups) {
+        c.strokeStyle = key >= 1e6 ? palette.core : palette.glow;
+        c.globalAlpha = Math.floor((key % 1e6) / 1000) / 120;
+        c.lineWidth = (key % 1000) / 20;
+        c.stroke(path);
+      }
+      c.globalAlpha = 1;
     }
     groups.clear();
-    ctx.globalAlpha = 1;
+  }
+  /** r11.2c (owner: strands and rings around the nodes popped in late in the
+   * grow phase): the static raster is replaced twice after it was first drawn
+   * (final colony alphas, see rebakeStatic; the dip glow, see dipsGen). Both
+   * now cross-fade over XFADE_MS instead of one blit; growth during the fade
+   * is drawn into both the old and the new raster. */
+  const XFADE_MS = 1600;
+  const bakeTargets = () => (growth.xfade ? [growth.xfade.ox, growth.xfade.nx] : [sx]);
+  function snapshot() {
+    const cv = document.createElement("canvas");
+    cv.width = canvas.width;
+    cv.height = canvas.height;
+    const cx = cv.getContext("2d");
+    cx.drawImage(canvas, 0, 0);
+    cx.setTransform(sx.getTransform());
+    return cv;
+  }
+  function startXfade(neu) {
+    finishXfade();
+    const old = snapshot(),
+      nx = neu.getContext("2d");
+    nx.setTransform(sx.getTransform());
+    growth.xfade = { old, neu, ox: old.getContext("2d"), nx, t0: performance.now() };
+    stepXfade();
+  }
+  function stepXfade(now = performance.now()) {
+    const x = growth.xfade;
+    if (!x) return;
+    const f = smooth((now - x.t0) / XFADE_MS);
+    sx.save();
+    sx.setTransform(1, 0, 0, 1, 0, 0);
+    sx.globalCompositeOperation = "copy";
+    sx.globalAlpha = f >= 1 ? 1 : 1 - f;
+    sx.drawImage(f >= 1 ? x.neu : x.old, 0, 0);
+    if (f < 1) {
+      sx.globalCompositeOperation = light ? "source-over" : "lighter";
+      sx.globalAlpha = f;
+      sx.drawImage(x.neu, 0, 0);
+    }
+    sx.restore();
+    growth.changed = true;
+    if (f >= 1) {
+      x.old.width = x.old.height = x.neu.width = x.neu.height = 0;
+      growth.xfade = null;
+    }
+  }
+  function finishXfade() {
+    if (!growth.xfade) return;
+    growth.xfade.t0 = -Infinity;
+    stepXfade();
   }
   const bakeGroups = new Map(),
     liveGroups = new Map(),
@@ -1561,7 +1622,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     for (; i < act.length; i++) {
       const P = act[i],
         end = rasterLen(P),
-        e = Math.min(end, (A - P.t0 - (P.matShift || 0)) * P.v);
+        e = Math.min(end, (A - P.t0 - (P.matShift || 0) - (P.resumeDelay || 0)) * P.v);
       if (e > P.drawn + 1e-6) {
         addPiece(bakeGroups, P, P.drawn, e);
         P.drawn = e;
@@ -1577,17 +1638,18 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     for (; i < act.length; i++) act[k++] = act[i];
     act.length = k;
-    sx.globalCompositeOperation = light ? "source-over" : "lighter";
-    flushPieces(sx, bakeGroups);
+    const tg = bakeTargets();
+    for (const c of tg) c.globalCompositeOperation = light ? "source-over" : "lighter";
+    flushPieces(tg[0], bakeGroups, tg[1]);
     for (const P of done) {
-      if (P.knot) drawKnot(sx, P.knot);
+      if (P.knot) for (const c of tg) drawKnot(c, P.knot);
       growth.recent.push(P);
     }
     // r11.2: cores and felt fills build up with the mats (drawn over the
     // static raster by the compositor's hero blit, see drawIntroCores) and are
     // baked into the raster once complete.
     if (!growth.coresDrawn && A >= MAT_END + 4) {
-      drawCores(sx, g, A);
+      for (const c of tg) drawCores(c, g, A);
       growth.coresDrawn = growth.changed = true;
     } else if (!growth.coresDrawn && Math.floor(A) !== growth.coreStep) {
       growth.coreStep = Math.floor(A); // the blit's core layer follows the age
@@ -1710,13 +1772,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     flushPieces(ox, groups);
     for (const P of g.paths) if (P.knot && P.drawn > 0 && P.drawn >= rasterLen(P) - 1e-6) drawKnot(ox, P.knot);
     if (growth.coresDrawn) drawCores(ox, g, growth.age);
-    sx.save();
-    sx.setTransform(1, 0, 0, 1, 0, 0);
-    sx.globalCompositeOperation = "copy";
-    sx.globalAlpha = 1;
-    sx.drawImage(off, 0, 0);
-    sx.restore();
-    off.width = off.height = 0;
+    startXfade(off); // cross-fade, not one blit (owner: rings popped in)
     for (const P of g.paths) P.aOld = null;
     growth.changed = true;
     scene.timings.rebaked = performance.now() - begun;
@@ -1771,7 +1827,8 @@ export function createHero(canvas, { stage, state, reduce }) {
   /** Gradient stops for per-ring glow values: flat over each 8 px ring. */
   const ringStops = (added, K) => added.flatMap((v, q) => [[(q + 0.15) / K, v], [(q + 0.85) / K, v]]);
   function* dipsGen(g) {
-    const glowRgb = hexRgb(palette.glow),
+    const fills = [],
+      glowRgb = hexRgb(palette.glow),
       glow = glowRgb.split(",").map(Number),
       groups = new Map();
     for (const c of g.colonies) {
@@ -1850,14 +1907,19 @@ export function createHero(canvas, { stage, state, reduce }) {
       c.dips = { before: first, after: last, added: added.slice() };
       if (added.some((v) => v > 0)) {
         const f = { r: K * 8, stops: ringStops(added, K) };
-        sx.save();
-        sx.globalCompositeOperation = "lighter";
-        colonyFill(sx, { node: n, fill: f }, glowRgb, 1);
-        sx.restore();
+        fills.push({ node: n, fill: f });
         c.fill2 = f;
-        growth.changed = true;
       }
       yield;
+    }
+    // All dip glows fade in together (cross-fade, not one blit).
+    if (fills.length) {
+      finishXfade();
+      const neu = snapshot(),
+        nx = neu.getContext("2d");
+      nx.globalCompositeOperation = "lighter";
+      for (const f of fills) colonyFill(nx, f, glowRgb, 1);
+      startXfade(neu);
     }
   }
   function startDips(g) {
@@ -2653,13 +2715,26 @@ export function createHero(canvas, { stage, state, reduce }) {
       // Paths held back for the life assignment resume their static growth.
       g.lifeAssigned = true;
       const queued = new Set([...growth.pending, ...growth.active]);
+      // r11.2c (owner: strands popped in whole): a held path resumes growing
+      // from where it was held, at its own speed from now (never drawn whole
+      // in one step); its forks keep at least its delay, so nothing grows
+      // ahead of the part it springs from.
+      const Anow = Number.isFinite(growth.age) ? growth.age : 0;
       for (const P of g.paths) {
         P.pre = undefined;
-        if (!queued.has(P) && growable(P, g) && P.drawn < rasterLen(P) - 1e-6) growth.pending.push(P);
+        if (!queued.has(P) && growable(P, g) && P.drawn < rasterLen(P) - 1e-6) {
+          const v0 = P.pts[0],
+            par = v0.owner >= 0 && v0.owner !== P.id ? g.paths[v0.owner] : null,
+            own = Anow - (P.t0 + (P.matShift || 0) + (P.drawn || 0) / P.v);
+          P.resumeDelay = Math.max(0, own, par?.resumeDelay || 0);
+          growth.pending.push(P);
+        }
       }
-      // Final colony alphas over the whole static raster (see rebakeStatic).
-      await run(rebakeStatic(g));
-      if (disposed) return;
+      // Final colony alphas over the whole static raster (see rebakeStatic):
+      // after the scene is ready. Inside the build it held the compositor's
+      // attach (and with it the field's load-in) back by ~4 s, so the field
+      // appeared nearly whole at 8.5 s of a 9 s intro (owner: abrupt load-in).
+      g.needsRebake = true;
       g.routes = await run(buildSignalRoutes(g));
       if (disposed) return;
       await run(routeLists(g));
@@ -2731,7 +2806,11 @@ export function createHero(canvas, { stage, state, reduce }) {
         const running = introRunning();
         frame++;
         growStep(A, g, performance.now() + 10);
-        const key = running ? frame : Math.floor(A / 4);
+        stepXfade();
+        // Presented every frame during the intro, a cross-fade and the 12 s
+        // after the intro (late and resumed paths finish growing then; at one
+        // present per 4 age units they appeared in 4 s chunks), then every 4.
+        const key = running || growth.xfade || A < START_AGE + 12 ? frame : Math.floor(A / 4);
         if (key !== growth.presentKey) {
           growth.presentKey = key;
           present();
@@ -2745,6 +2824,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       // here in full, and backward seeks rebuild the raster.
       bakeUntil: (A, batched = false) => {
         if (batched) return false;
+        finishXfade(); // diagnostic seeks show the final raster
         growStep(A, g);
         const changed = present();
         commitPresented();
@@ -3026,6 +3106,14 @@ export function createHero(canvas, { stage, state, reduce }) {
     scene.ready = true;
     for (const cb of scene.listeners.splice(0)) cb(scene);
     scene.timings.readyTask = performance.now() - tr; // includes the compositor's first attach stage
+    if (g.needsRebake) {
+      g.needsRebake = false;
+      await nextTask();
+      if (disposed) return;
+      await run(g.monotone());
+      if (disposed) return;
+      await run(rebakeStatic(g));
+    }
   })();
   return () => {
     disposed = true;
