@@ -56,6 +56,9 @@ fn control_child(expected: EndpointId, mode: &str) {
                 // The client stops reading and closes its call-owned connection.
                 let out=vec![b'x';control_max()+1];
                 match send.write_all(&out).await { Ok(())=>{ if let Err(e)=send.finish(){ eprintln!("expected early close: {e}"); } }, Err(e)=>eprintln!("expected bounded-reader close: {e}") }
+            } else if mode=="control-close-observed" {
+                send.write_all(&control_vector("completed")).await.unwrap();
+                send.finish().unwrap();
             } else {
                 println!("L9_CONTROL_RECEIVED true");
                 std::io::stdout().flush().unwrap();
@@ -64,6 +67,10 @@ fn control_child(expected: EndpointId, mode: &str) {
             let iroh::endpoint::ConnectionError::ApplicationClosed(close)=reason else { panic!("call must close explicitly: {reason}"); };
             assert_eq!(close.error_code,7u32.into());
             assert_eq!(close.reason.as_ref(),b"control call ended");
+            if mode=="control-close-observed" {
+                println!("L9_CALL_CLOSED true");
+                std::io::stdout().flush().unwrap();
+            }
         });
         drop(conn);
     }
@@ -122,4 +129,22 @@ fn real_quic_node_control_cancellation_and_rotation_interrupt_held_response() {
         assert_eq!(result.unwrap_err().0,if cancel {"cancelled"} else {"peer_rotated"});
         drop(client);host.close(&clock,clock.deadline()).unwrap();peer.finish();
     }
+}
+#[test]
+fn real_quic_node_control_puts_its_explicit_close_on_the_wire_before_the_call_returns() {
+    // An owner may stop driving its current-thread runtime right after a call:
+    // a pending result poll waits on the thread. The call-owned connection's
+    // close(7) must already be on the wire then. Before B20 it was only queued;
+    // the close timer could drain the connection before the next block_on sent
+    // it, and the member saw a stateless reset (the journal load flake). This
+    // thread drives nothing until the peer reports what it observed.
+    let rt=runtime();let clock=Time::new();let mut host=bind_host(&rt,&clock,clock.deadline()).unwrap();
+    let mut peer=Peer::spawn(host.address().unwrap().id,"control-close-observed");
+    let fence=ConnectionFence{endpoint_id:*peer.address.id.as_bytes(),local_generation:2,remote_generation:3};
+    let (_tx,mut authority)=tokio::sync::watch::channel(Some(fence));
+    let client=NodeControlClient::new(&host,&clock,Entries::new(1)).unwrap();
+    let response=client.call(ControlRequest{peer:&peer.address,fence,command:&control_vector("install_token_path-0"),deadline:control_deadline(&clock)},&mut authority).unwrap();
+    assert_eq!(response,control_vector("completed"));
+    assert_eq!(peer.line("L9_CALL_CLOSED "),"true","the peer must see the explicit close while the caller's runtime is idle");
+    drop(client);host.close(&clock,clock.deadline()).unwrap();peer.finish();
 }
