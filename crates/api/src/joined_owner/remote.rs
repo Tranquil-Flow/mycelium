@@ -187,7 +187,8 @@ fn drive(
         if let Some(command) = next {
             let name = command["command"].as_str().unwrap_or_default().to_owned();
             match call(&remote, command.clone()) {
-                Ok(reply) if name == "cancel_operation" => send(reply),
+                // Immediate member answers (never queued on the member).
+                Ok(reply) if name == "cancel_operation" || name == "status" => send(reply),
                 // The member stops its control channel once it closes: admission is the reply.
                 Ok(reply) if name == "close" && reply["ok"] == true => {
                     send(json!({"ok":true,"result":{"closing":true}}))

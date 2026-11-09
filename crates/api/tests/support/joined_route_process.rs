@@ -23,7 +23,7 @@ use api::{
 };
 use budgets::{BudgetId as B, Entries};
 use std::{
-    process::Command,
+    process::{Child, Command},
     sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
@@ -682,7 +682,343 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
     }
     eprintln!(
-        "B7e total elapsed={:?}; owner remains test driver; route_ready=false",
+        "B7e total elapsed={:?}; owner composition = api::joined_owner (driver is its operator); route_ready=false",
+        began.elapsed()
+    );
+}
+
+// ---- B16 S5: the owner as a separate headless PROCESS (`examples/joined_owner`,
+// composed only of `api::joined_owner`). This test is its operator (stdin
+// commands) and its chat client (HTTP + SSE); members are `shard_member`
+// processes driven ONLY by the owner process over the signed channel.
+struct OwnerProcess {
+    child: Child,
+    input: Option<std::process::ChildStdin>,
+    replies: mpsc::Receiver<Value>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+impl OwnerProcess {
+    fn start(args: &[std::ffi::OsString]) -> Self {
+        use std::io::BufRead as _;
+        let exe = std::env::var_os("B16_OWNER_BINARY")
+            .expect("build api --example joined_owner and set B16_OWNER_BINARY");
+        let mut child = Command::new(exe)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let out = child.stdout.take().unwrap();
+        let (tx, replies) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in std::io::BufReader::new(out).lines() {
+                let Ok(line) = line else { return };
+                let v: Value = serde_json::from_str(&line).unwrap();
+                if tx.send(v).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            input: child.stdin.take(),
+            child,
+            replies,
+            reader: Some(reader),
+        }
+    }
+    fn send(&mut self, command: Value) -> Value {
+        use std::io::Write as _;
+        let input = self.input.as_mut().unwrap();
+        writeln!(input, "{command}").unwrap();
+        input.flush().unwrap();
+        // Long owner steps (transfer, native prepare) are bounded by the
+        // member wall per stage; the owner process enforces its own bounds.
+        self.replies
+            .recv_timeout(allowance() * 4)
+            .unwrap_or_else(|e| panic!("owner reply to {command}: {e:?}"))
+    }
+    fn call(&mut self, command: Value) -> Value {
+        let reply = self.send(command.clone());
+        assert_eq!(reply["ok"], true, "{command} -> {reply}");
+        reply["result"].clone()
+    }
+    fn close(mut self) {
+        self.call(json!({"command":"close"}));
+        self.input.take();
+        let status = self.child.wait().unwrap();
+        assert!(status.success(), "owner exit {status:?}");
+        if let Some(r) = self.reader.take() {
+            r.join().unwrap();
+        }
+    }
+}
+impl Drop for OwnerProcess {
+    fn drop(&mut self) {
+        if self.child.try_wait().unwrap().is_none() {
+            self.child.kill().unwrap();
+            self.child.wait().unwrap();
+        }
+    }
+}
+/// A spawned member process (remote control only, consent by its operator).
+struct MemberProcess(Child);
+impl Drop for MemberProcess {
+    fn drop(&mut self) {
+        if self.0.try_wait().unwrap().is_none() {
+            self.0.kill().unwrap();
+            self.0.wait().unwrap();
+        }
+    }
+}
+fn spawn_member(root: &std::path::Path) -> (MemberProcess, String) {
+    let exe = std::env::var_os("B7_MEMBER_BINARY").expect("B7_MEMBER_BINARY");
+    let decision = super::process::consent_file(root.parent().unwrap());
+    let child = MemberProcess(
+        Command::new(exe)
+            .arg("--state-root")
+            .arg(root)
+            .args(super::member_remote::member_args())
+            .arg("--consent-file")
+            .arg(&decision)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let notice = root.join("member-control.json");
+    let end = Instant::now() + allowance();
+    while !notice.exists() {
+        assert!(
+            Instant::now() < end,
+            "member control endpoint not published"
+        );
+        std::thread::yield_now();
+    }
+    let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+    let c = &info["member_control"];
+    let addrs: Vec<&str> = c["addrs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    let addr = format!("{}@{}", c["endpoint_id"].as_str().unwrap(), addrs.join(","));
+    (child, addr)
+}
+fn post_chat(addr: SocketAddr, bearer: &str, qualification: &Value, tokens: usize) -> Running {
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":tokens,
+        "workload_profile_id":"interactive","qos_class":"interactive","qualification":qualification});
+    let auth = format!("Authorization: Bearer {bearer}\r\n");
+    let posted = Instant::now();
+    let (status, accepted) = http(addr, "POST", "/v1/inference", &auth, &doc.to_string());
+    assert_eq!(status, 202, "{accepted}");
+    let id = accepted["request_id"].as_str().unwrap().to_owned();
+    let token = accepted["session_token"].as_str().unwrap().to_owned();
+    let (tx, events) = mpsc::channel();
+    let path = accepted["stream_path"].as_str().unwrap().to_owned();
+    let headers = format!("{auth}X-Mycelium-Session: {token}\r\n");
+    let reader = std::thread::spawn(move || stream(addr, path, headers, tx, allowance()));
+    Running {
+        id,
+        token,
+        posted,
+        events,
+        reader,
+    }
+}
+fn events_until(r: &Running, tokens: usize, all: &mut Vec<(Value, Instant)>) {
+    while all.iter().filter(|(e, _)| e["type"] == "token").count() < tokens
+        && terminal(all).is_none()
+    {
+        match r.events.recv_timeout(span(B::WorkerStartup)) {
+            Ok(event) => all.push(event),
+            Err(error) => panic!("stream ended ({error:?}): {all:?}"),
+        }
+    }
+}
+use std::net::SocketAddr;
+#[test]
+#[ignore = "real Metal + local Qwen3; B16_OWNER_BINARY, B7_MEMBER_BINARY, native pins and resource gate required"]
+fn owner_process_streams_chat_stops_and_leaves() {
+    let began = Instant::now();
+    let gate = std::env::var_os("B7_RESOURCE_GATE").expect("resource preflight script");
+    let snapshot = PathBuf::from(std::env::var_os("MYCELIUM_QWEN3_SNAPSHOT").unwrap());
+    let native_binary = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").unwrap();
+    let oracle: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let reference: Vec<u64> = serde_json::from_value(oracle["recorded"]["tokens"].clone()).unwrap();
+    let prompt_ids = oracle["recorded"]["workload"]["prompt_ids"]
+        .as_array()
+        .unwrap()
+        .len();
+    let lan_run = super::member_remote::lan().is_some();
+    let path = std::env::temp_dir().join(format!("b16-owner-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    let root = super::native_process::Root(path.canonicalize().unwrap());
+    // The owner control key: the operator's key file, or a fresh one.
+    let key = match std::env::var_os("B8_OWNER_CONTROL_KEY") {
+        Some(file) => PathBuf::from(file),
+        None => {
+            let file = root.0.join("owner-control.key");
+            let hex: String = super::member_remote::owner_secret()
+                .to_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            fs::write(&file, hex).unwrap();
+            file
+        }
+    };
+    let mut spawned = Vec::new();
+    let mut addrs = Vec::new();
+    let (m0, a0) = spawn_member(&root.0.join("member0"));
+    spawned.push(m0);
+    addrs.push(a0);
+    match std::env::var("B8_REMOTE_MEMBER") {
+        Ok(remote) => addrs.push(remote),
+        Err(_) => {
+            let (m1, a1) = spawn_member(&root.0.join("member1"));
+            spawned.push(m1);
+            addrs.push(a1);
+        }
+    }
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "--state-root".into(),
+        root.0.join("owner").into(),
+        "--swarm".into(),
+        "b16-owner".into(),
+        "--control-key".into(),
+        key.into(),
+        "--snapshot".into(),
+        snapshot.into(),
+        "--native-binary".into(),
+        native_binary,
+    ];
+    if let Some((ip, _)) = super::member_remote::lan() {
+        args.extend(["--lan".into(), ip.to_string().into()]);
+        for extra in std::env::var("B8_LAN_ALLOW").unwrap_or_default().split(',') {
+            if !extra.is_empty() {
+                args.extend(["--lan-allow".into(), extra.into()]);
+            }
+        }
+    }
+    let mut owner = OwnerProcess::start(&args);
+    let started = owner.call(json!({"command":"status"}));
+    eprintln!("B16 owner process: {started}");
+    for addr in &addrs {
+        let admitted = owner.call(json!({"command":"admit","member":addr}));
+        eprintln!("B16 admitted {admitted}");
+    }
+    let compiled = owner.call(json!({"command":"compile","ranges":[[0,14],[14,28]]}));
+    eprintln!("B16 compiled {compiled} elapsed={:?}", began.elapsed());
+    let transferred = owner.call(json!({"command":"transfer"}));
+    eprintln!(
+        "B16 transferred {transferred} elapsed={:?}",
+        began.elapsed()
+    );
+    let mut evidence = json!({"route_ready":false,"physical_route_ready":false,
+        "scope":if lan_run { "lan_two_node_rehearsed" } else { route::SCOPE },
+        "carrier":if lan_run { "direct_lan" } else { "loopback" },
+        "owner":"examples/joined_owner process (api::joined_owner)","compiled":compiled,
+        "transferred":transferred});
+    let capacity = prompt_ids + 64;
+    let open = |owner: &mut OwnerProcess, epoch: u64| -> (SocketAddr, String, Value) {
+        for i in 0..2 {
+            admit_native_load(&gate, &format!("stage={i}"));
+        }
+        owner.call(json!({"command":"prepare","tokens":capacity}));
+        let opened = owner.call(json!({"command":"open","epoch":epoch}));
+        (
+            opened["gateway"].as_str().unwrap().parse().unwrap(),
+            opened["bearer"].as_str().unwrap().to_owned(),
+            opened["qualification"].clone(),
+        )
+    };
+    // Chat: 32 greedy tokens == the independent Python/MLX oracle.
+    let (addr, bearer, qualification) = open(&mut owner, 1);
+    let r = post_chat(addr, &bearer, &qualification, NEW_TOKENS);
+    let mut all = Vec::new();
+    events_until(&r, NEW_TOKENS + 1, &mut all);
+    r.reader.join().unwrap();
+    let tokens = token_ids(&all);
+    assert_eq!(terminal(&all).unwrap()["type"], "completed", "{all:?}");
+    assert_eq!(tokens, reference[..NEW_TOKENS], "tokens == oracle");
+    let ttft = all
+        .iter()
+        .find(|(e, _)| e["type"] == "token")
+        .unwrap()
+        .1
+        .duration_since(r.posted)
+        .as_secs_f64()
+        * 1000.0;
+    let settled = owner.call(json!({"command":"settle"}));
+    eprintln!(
+        "B16 owner-process chat tokens={tokens:?} == oracle; ttft_ms={ttft:.1}; settled={settled}"
+    );
+    evidence["chat"] = json!({"tokens":tokens,"reference":&reference[..NEW_TOKENS],"ttft_ms":ttft,"settled":settled});
+    // Stop mid-stream through the owner's gateway.
+    let (addr, bearer, qualification) = open(&mut owner, 2);
+    let r = post_chat(addr, &bearer, &qualification, NEW_TOKENS);
+    let mut all = Vec::new();
+    events_until(&r, 4, &mut all);
+    let stop_at = Instant::now();
+    let auth = format!(
+        "Authorization: Bearer {bearer}\r\nX-Mycelium-Session: {}\r\n",
+        r.token
+    );
+    let (status, body) = http(
+        addr,
+        "DELETE",
+        &format!("/v1/inference/{}", r.id),
+        &auth,
+        "",
+    );
+    assert_eq!(status, 202, "{body}");
+    events_until(&r, usize::MAX, &mut all);
+    r.reader.join().unwrap();
+    let terminal_ms = ms(stop_at);
+    assert_eq!(terminal(&all).unwrap()["type"], "cancelled", "{all:?}");
+    let streamed = token_ids(&all);
+    assert_eq!(
+        streamed,
+        reference[..streamed.len()],
+        "pre-Stop tokens == oracle prefix"
+    );
+    let settled = owner.call(json!({"command":"settle"}));
+    eprintln!(
+        "B16 owner-process stop tokens={streamed:?} terminal_ms={terminal_ms:.1}; settled={settled}"
+    );
+    evidence["stop"] = json!({"tokens_before_stop":streamed,"terminal_after_stop_ms":terminal_ms,"settled":settled});
+    // Leave: the member's product leave, the owner's verified withdrawal.
+    let left = owner.call(json!({"command":"leave","stage":1}));
+    assert_eq!(left["left"]["record"]["state"], "left", "{left}");
+    assert_eq!(left["withdrawn"]["reason"], "member_leave", "{left}");
+    assert_eq!(left["qualification_after"], "readiness_revoked", "{left}");
+    evidence["leave"] = left;
+    owner.close();
+    // The owner closed every member it controls: the spawned ones exit 0.
+    for mut m in spawned {
+        let end = Instant::now() + allowance();
+        let status = loop {
+            if let Some(status) = m.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < end,
+                "member did not exit after owner close"
+            );
+            std::thread::yield_now();
+        };
+        assert!(status.success(), "member exit {status:?}");
+    }
+    if let Some(path) = std::env::var_os("B7_ROUTE_EVIDENCE") {
+        fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
+    }
+    drop(root);
+    eprintln!(
+        "B16 owner process total elapsed={:?}; route_ready=false",
         began.elapsed()
     );
 }

@@ -996,15 +996,27 @@ fn product_remote_member_turns_a_dead_member_into_a_typed_refusal() {
     fs::create_dir(&root).unwrap();
     let root = fs::canonicalize(root).unwrap();
     let member_root = root.join("member");
-    let mut child = Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
-        .arg("--state-root")
-        .arg(&member_root)
-        .args(super::member_remote::member_args())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap();
+    // Exact owned child, killed and reaped on any failure path.
+    struct Reap(Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if self.0.try_wait().unwrap().is_none() {
+                self.0.kill().unwrap();
+            }
+            self.0.wait().unwrap();
+        }
+    }
+    let mut child = Reap(
+        Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
+            .arg("--state-root")
+            .arg(&member_root)
+            .args(super::member_remote::member_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
     let notice = member_root.join("member-control.json");
     let end = Instant::now() + allowance();
     while !notice.exists() {
@@ -1041,8 +1053,8 @@ fn product_remote_member_turns_a_dead_member_into_a_typed_refusal() {
             .0,
         "not_joined"
     );
-    child.kill().unwrap();
-    child.wait().unwrap();
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
     let began = Instant::now();
     let dead = link
         .call(json!({"command":"pair_request"}), within)
