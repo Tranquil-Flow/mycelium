@@ -182,6 +182,12 @@ impl Compiler {
     }
     /// Source consent/observation ladder precedes any local source reads.
     fn acquire(&mut self) -> Result<CompileInputs, PortError> {
+        self.acquire_until(&|| false)
+    }
+    /// [`Self::acquire`] whose source manifest re-hash consults the run's Stop
+    /// once per chunk (`compiler_stopped`). The acquisition's own snapshot
+    /// verification inside `prepared_source` is S1-owned and still unchecked.
+    fn acquire_until(&mut self, stopped: &dyn Fn() -> bool) -> Result<CompileInputs, PortError> {
         let core = self.host()?;
         let (acquisition, seed) = {
             let c = lock(&core)?;
@@ -236,9 +242,13 @@ impl Compiler {
             .map_err(|e| failed(e.code()))?;
         // The actual compiler re-hashes local source bytes; never manufacture a
         // manifest from the retained digest or an installation Source enum.
+        const STOPPED: &str = "compiler_stopped";
+        if stopped() {
+            return Err(failed(STOPPED));
+        }
         let source =
             api::serving_source::prepare_local_source(&source_root, acquisition.model(), &|s| {
-                api::local_manifest::compile_local_model_manifest(
+                api::local_manifest::compile_local_model_manifest_checked(
                     &api::local_manifest::LocalModelSource {
                         root: s.root.clone(),
                         model_id: s.model_id.into(),
@@ -246,8 +256,21 @@ impl Compiler {
                         resolved_commit: s.resolved_commit.into(),
                         tokenizer_assets: Ok(Vec::new()),
                     },
+                    &|| {
+                        if stopped() {
+                            Err(api::local_manifest::CompileError(STOPPED.into()))
+                        } else {
+                            Ok(())
+                        }
+                    },
                 )
-                .map_err(|_| api::serving_source::Failure::Other)
+                .map_err(|e| {
+                    if e.0 == STOPPED {
+                        api::serving_source::Failure::Serving(STOPPED.into())
+                    } else {
+                        api::serving_source::Failure::Other
+                    }
+                })
             })
             .map_err(|e| match e {
                 api::serving_source::Failure::Serving(code) => failed(&code),
@@ -408,6 +431,12 @@ impl CompilePort for Compiler {
     fn compile_inputs(&mut self) -> Result<CompileInputs, PortError> {
         self.acquire()
     }
+    fn compile_inputs_until(
+        &mut self,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<CompileInputs, PortError> {
+        self.acquire_until(stopped)
+    }
     fn retire_bootstrap(&mut self) -> Result<(), PortError> {
         self.observation.retire_bootstrap()
     }
@@ -557,6 +586,12 @@ impl CompilePort for SharedCompiler {
     }
     fn compile_inputs(&mut self) -> Result<CompileInputs, PortError> {
         lock(&self.0)?.compile_inputs()
+    }
+    fn compile_inputs_until(
+        &mut self,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<CompileInputs, PortError> {
+        lock(&self.0)?.compile_inputs_until(stopped)
     }
     fn retire_bootstrap(&mut self) -> Result<(), PortError> {
         lock(&self.0)?.retire_bootstrap()

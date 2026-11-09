@@ -49,6 +49,11 @@ pub(crate) fn reference() -> Result<Value> {
         .map_err(|_| Error("native_reference_invalid"))
 }
 pub(crate) fn file_pin(path: &Path) -> Result<Pin> {
+    file_pin_until(path, &|| false)
+}
+/// [`file_pin`] whose hash consults `stopped` once per read; a Stop refuses
+/// `compiler_stopped` instead of finishing a model-sized scan.
+fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
     use std::os::unix::fs::OpenOptionsExt;
     if path
         .canonicalize()
@@ -72,6 +77,9 @@ pub(crate) fn file_pin(path: &Path) -> Result<Pin> {
     let mut bytes = 0;
     let mut buffer = vec![0; 64 * 1024];
     loop {
+        if stopped() {
+            return Err(Error("compiler_stopped"));
+        }
         let n = file
             .read(&mut buffer)
             .map_err(|_| Error("native_file_unavailable"))?;
@@ -108,7 +116,10 @@ impl Config {
         Ok(Some(Self { binary, pin }))
     }
     fn verify(&self) -> Result<()> {
-        let pin = file_pin(&self.binary)?;
+        self.verify_until(&|| false)
+    }
+    fn verify_until(&self, stopped: &dyn Fn() -> bool) -> Result<()> {
+        let pin = file_pin_until(&self.binary, stopped)?;
         if pin.sha256 != self.pin.sha256 || pin.bytes != self.pin.bytes {
             return Err(Error("native_binary_changed"));
         }
@@ -369,8 +380,10 @@ pub fn build(
     } else {
         None
     };
+    // Every parent-side whole-file scan below observes the compiler's Stop.
+    let stopped = || cancel.load(Ordering::SeqCst);
     let source = artifact.source().source_root.join("model.safetensors");
-    let source_pin = file_pin(&source)?;
+    let source_pin = file_pin_until(&source, &stopped)?;
     if source_pin.sha256 != text(&oracle["identity"], "checkpoint_sha256")?
         || source_pin.bytes != number(&oracle["identity"], "checkpoint_bytes")?
     {
@@ -478,8 +491,8 @@ pub fn build(
         cleanup.push(worker.close()?);
     }
     check()?;
-    config.verify()?;
-    let final_source = file_pin(&source)?;
+    config.verify_until(&stopped)?;
+    let final_source = file_pin_until(&source, &stopped)?;
     if final_source.sha256 != source_pin.sha256 || final_source.bytes != source_pin.bytes {
         return Err(Error("native_source_mismatch"));
     }
@@ -502,6 +515,7 @@ pub fn build(
         &mut plan,
         &checkpoint,
         started.elapsed().as_secs_f64(),
+        &stopped,
     )
     .map(Some)
 }
@@ -512,6 +526,7 @@ fn emit(
     plan: &mut Value,
     checkpoint: &Value,
     seconds: f64,
+    stopped: &dyn Fn() -> bool,
 ) -> Result<Qualified> {
     let root = artifact.root();
     fs::create_dir(root.join("compiled")).map_err(|_| Error("native_output_exists"))?;
@@ -575,13 +590,21 @@ fn emit(
     ] {
         pins.insert(name.into(), file_pin(&root.join(name))?);
     }
-    let handoff = crate::compiled_handoff::CompiledHandoff::open(root, &pins).map_err(|e| {
-        eprintln!("native_handoff_refused: {e:?}");
-        Error("native_handoff_refused")
+    let handoff = crate::compiled_handoff::CompiledHandoff::open_until(root, &pins, stopped)
+        .map_err(|e| {
+            if e.code == "compiled_handoff_stopped" {
+                return Error("compiler_stopped");
+            }
+            eprintln!("native_handoff_refused: {e:?}");
+            Error("native_handoff_refused")
+        })?;
+    handoff.revalidate_until(stopped).map_err(|e| {
+        Error(if e.code == "compiled_handoff_stopped" {
+            "compiler_stopped"
+        } else {
+            "native_handoff_changed"
+        })
     })?;
-    handoff
-        .revalidate()
-        .map_err(|_| Error("native_handoff_changed"))?;
     let hosts: BTreeSet<_> = checkpoint["proofs"]
         .as_array()
         .ok_or(Error("native_proof_binding_mismatch"))?

@@ -9,6 +9,7 @@ pub(super) fn open_native(
     pins: &Pins,
     docs: &BTreeMap<&str, Value>,
     mut files: BTreeMap<String, File>,
+    stopped: &dyn Fn() -> bool,
 ) -> Result<CompiledHandoff> {
     let plan = &docs["compiled/operator-plan.json"];
     let checkpoint = &docs["compiled/local-challenge-checkpoint.json"];
@@ -126,7 +127,7 @@ pub(super) fn open_native(
             path.parent().ok_or_else(bad)?,
             path.file_name().and_then(|s| s.to_str()).ok_or_else(bad)?,
         )?;
-        check(&mut file, &pin)?;
+        check(&mut file, &pin, stopped)?;
         files.insert(format!("@native-{role}"), file);
         all_pins.insert(format!("@native-{role}"), pin);
         paths.insert(role.into(), path.to_owned());
@@ -155,7 +156,7 @@ pub(super) fn open_native(
             };
             let key = format!("stage-shards/{name}");
             let mut file = open(root, &key)?;
-            check(&mut file, &pin)?;
+            check(&mut file, &pin, stopped)?;
             files.insert(key.clone(), file);
             all_pins.insert(key, pin);
         }
