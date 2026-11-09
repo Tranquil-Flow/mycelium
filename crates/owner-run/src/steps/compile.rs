@@ -178,10 +178,22 @@ pub fn run_compile_step(
         policy: &policy,
     })
     .map_err(refused)?;
+    // The commit point. Each side effect is preceded directly by a Stop check, with no work
+    // between them: a Stop observed before `retire_bootstrap` prevents both it and the build, one
+    // observed after it (but before `start_build`) prevents the build. A Stop that lands after a
+    // check is ordered after that commit; the wait's first check then ends the step Stopped and
+    // the teardown cancels what was started. Holding the Stop event's lock across these host
+    // calls would not be safer: `Runner::stop` holds the run lock while it sets the event.
+    if env.stopped() {
+        return Err(StepError::Stopped);
+    }
     compile
         .retire_bootstrap()
         .map_err(|e| e.into_step_error("chain_compile_failed"))?;
     env.progress(&compile_progress(nodes.len()));
+    if env.stopped() {
+        return Err(StepError::Stopped);
+    }
     compile.start_build(&prepared.request);
 
     let compiled: Value = wait_with(

@@ -1256,12 +1256,23 @@ impl Host for HeadlessHost {
         handoff: &mut Option<api::compiled_handoff::CompiledHandoff>,
     ) -> Result<(), PublicError> {
         // Hashing retained payloads never holds the public status/state lock.
+        // It looks at that state once per chunk: a quit, leave or role change
+        // that lands meanwhile refuses within one chunk, not after every pin.
         let input = handoff
             .as_ref()
             .ok_or_else(|| PublicError::new(409, "compiled_handoff_absent"))?;
-        input
-            .revalidate()
-            .map_err(|_| PublicError::new(409, "compiled_handoff_invalid"))?;
+        let stopped = || {
+            self.core
+                .lock()
+                .map_or(true, |c| c.closed || c.target || c.fenced)
+        };
+        input.revalidate_until(&stopped).map_err(|e| {
+            if e.code == "compiled_handoff_stopped" {
+                PublicError::new(409, "compiled_handoff_not_installable")
+            } else {
+                PublicError::new(409, "compiled_handoff_invalid")
+            }
+        })?;
         let mut core = self.core.lock().map_err(|_| failure())?;
         if core.closed
             || core.target

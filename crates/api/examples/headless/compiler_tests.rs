@@ -441,6 +441,58 @@ fn compiler_cancellation_reaches_manifest_hash_and_artifact_revalidation() {
     assert!(artifact.root().join("stage-shards").exists());
 }
 
+/// REVIEW-laneB10 seam: the worker-binary pin at build start observes the
+/// compiler's Stop. The pinned "binary" is a real multi-chunk file and no native
+/// work runs: the request names Qwen3-0.6B over the small fixture source, so a
+/// build that gets past the pin refuses `native_model_unsupported` (the control).
+/// With Stop already signalled the pin refuses `compiler_stopped` instead of
+/// hashing the whole binary first. The env pins need a child process.
+#[test]
+fn a_stop_reaches_the_worker_binary_pin_at_build_start() {
+    let f = Fixture::new();
+    let binary = f.root.join("worker-binary");
+    let bytes: Vec<u8> = (0..8 * (1 << 20) + 17).map(|i| (i % 251) as u8).collect();
+    fs::write(&binary, &bytes).unwrap();
+    let sha = protocol::canonical::sha256_prefixed(&bytes)[7..].to_owned();
+    for stopped in [false, true] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "compiler::compiler_tests::worker_binary_pin_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("MYCELIUM_COMPILER_NATIVE_BINARY", &binary)
+            .env("MYCELIUM_COMPILER_NATIVE_SHA256", &sha)
+            .env("B10F_PIN_STOPPED", if stopped { "1" } else { "0" })
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&output.stdout).into_owned()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "stopped={stopped}: {text}");
+        assert!(text.contains("1 passed"), "stopped={stopped}: {text}");
+    }
+}
+#[test]
+#[ignore = "child of a_stop_reaches_the_worker_binary_pin_at_build_start (pinned env)"]
+fn worker_binary_pin_child() {
+    let mut f = Fixture::new();
+    f.request.model_id = "Qwen/Qwen3-0.6B".into();
+    let artifact = f.emit();
+    let signer = Identity::from_secret("b10f-pin-signer", &[91; 32]).unwrap();
+    let stopped = std::env::var("B10F_PIN_STOPPED").unwrap() == "1";
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(stopped));
+    let members = f.members.clone();
+    let refusal = api::native_compiler::build(&artifact, &signer, &|| Ok(members.clone()), cancel)
+        .unwrap_err();
+    let expected = if stopped {
+        "compiler_stopped"
+    } else {
+        "native_model_unsupported"
+    };
+    assert_eq!(refusal.0, expected, "stopped={stopped}");
+}
+
 #[test]
 fn stage_shard_artifact_reopens_real_bytes_and_rejects_tampering() {
     for mutation in ["payload", "document", "symlink", "source", "member"] {
@@ -652,6 +704,64 @@ fn local_qwen3_native_fixture(stage_sharded: bool, stop_at_handoff: bool) {
     ]});
     f.request.stage_sharded = stage_sharded;
     worker_fixture(f, true, stop_at_handoff);
+}
+
+/// REVIEW-laneB10 seam: `install_compiled_handoff` re-hashes every pinned
+/// file of the handoff before it takes custody. It now consults the host's
+/// state once per chunk: a host that has quit refuses at the first chunk. One
+/// pinned byte is flipped in place for that check (restored afterwards): a host
+/// that hashed before looking at its state refuses it `compiled_handoff_invalid`.
+/// The control installs the same genuine handoff into an open host; quit
+/// releases it.
+fn install_observes_a_stopped_host_before_hashing(
+    root: &Path,
+    output: &Path,
+    pins: &api::compiled_handoff::Pins,
+) {
+    let host_at = |name: &str| {
+        let core = Arc::new(Mutex::new(load_core(root.join(name)).unwrap()));
+        (core.clone(), HeadlessHost { core, runs: None })
+    };
+    let (_, mut open) = host_at("install-open");
+    let mut handoff = Some(api::compiled_handoff::CompiledHandoff::open(output, pins).unwrap());
+    let custody = handoff.as_ref().unwrap().custody();
+    open.install_compiled_handoff(&mut handoff)
+        .expect("an open host installs the genuine handoff");
+    assert!(handoff.is_none() && custody.retained());
+    open.quit().unwrap();
+    assert!(!custody.retained(), "quit releases the installed handoff");
+
+    let (core, mut closed) = host_at("install-closed");
+    let mut handoff = Some(api::compiled_handoff::CompiledHandoff::open(output, pins).unwrap());
+    let custody = handoff.as_ref().unwrap().custody();
+    let flipped = output.join("compile-complete.private.json");
+    let original = fs::read(&flipped).unwrap();
+    let mut changed = original.clone();
+    *changed.last_mut().unwrap() ^= 0x20;
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&flipped)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, &changed))
+        .unwrap();
+    core.lock().unwrap().closed = true;
+    let refusal = closed.install_compiled_handoff(&mut handoff);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&flipped)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, &original))
+        .unwrap();
+    let refusal = refusal.expect_err("a quit host never takes custody");
+    assert_eq!(
+        (refusal.status, refusal.code),
+        (409, "compiled_handoff_not_installable"),
+        "the stopped host is seen before any pinned byte is hashed"
+    );
+    assert!(
+        handoff.is_some() && custody.retained(),
+        "a refused install leaves custody with the caller"
+    );
+    drop(handoff);
+    assert!(!custody.retained());
 }
 
 fn worker_boundary(stage_sharded: bool) {
@@ -885,17 +995,49 @@ fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
             "stop_requested_during_handoff_hashing",
             "the build must still be hashing when Stop is requested"
         );
+        let bound = std::time::Duration::from_millis(
+            BudgetId::SidecarReceivePollWait
+                .span(Entries::ZERO)
+                .unwrap()
+                .millis(),
+        );
+        // Signal the compiler's Stop exactly as teardown does, but neither join
+        // nor clear anything: the verdict and the promotion read below are the
+        // worker's own, captured before teardown, which sets `compiler_stopped`
+        // and clears `qualified` whatever the worker did (REVIEW-laneB10 F2).
         let requested = std::time::Instant::now();
-        compiler.teardown().unwrap();
+        compiler.signal_stop();
+        let own = loop {
+            match compiler.poll_build() {
+                BuildPoll::Pending if requested.elapsed() < bound => std::thread::yield_now(),
+                verdict => break verdict,
+            }
+        };
         let latency = requested.elapsed();
+        let promoted = compiler.qualified.is_some();
         eprintln!(
-            "B10 Stop during parent handoff hashing: teardown {latency:?} ({:?} after start)",
+            "B10f Stop during parent handoff hashing: worker's own verdict after {latency:?} ({:?} after start): {own:?}",
             started.elapsed()
         );
-        let BuildPoll::Done(Err(stopped)) = compiler.poll_build() else {
+        let BuildPoll::Done(Err(stopped)) = own else {
+            panic!(
+                "the worker itself must end Stopped within {bound:?} of the Stop, before \
+                 teardown: {own:?} after {latency:?}"
+            );
+        };
+        assert_eq!(
+            stopped.code_or("missing"),
+            "compiler_stopped",
+            "the worker's own verdict"
+        );
+        assert!(!promoted, "the worker itself promoted no handoff");
+        let torn = std::time::Instant::now();
+        compiler.teardown().unwrap();
+        let teardown = torn.elapsed();
+        let BuildPoll::Done(Err(after)) = compiler.poll_build() else {
             panic!("a stopped build never reports success");
         };
-        assert_eq!(stopped.code_or("missing"), "compiler_stopped");
+        assert_eq!(after.code_or("missing"), "compiler_stopped");
         assert!(compiler.qualified.is_none(), "no handoff is promoted");
         let checkpoint: Value = serde_json::from_slice(
             &fs::read(output.join("compiled/local-challenge-checkpoint.json")).unwrap(),
@@ -911,14 +1053,12 @@ fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
         }
         seed.close();
         assert!(
-            latency
-                < std::time::Duration::from_millis(
-                    BudgetId::SidecarReceivePollWait
-                        .span(Entries::ZERO)
-                        .unwrap()
-                        .millis()
-                ),
+            latency < bound,
             "Stop waited {latency:?} for parent-side hashing"
+        );
+        assert!(
+            teardown < bound,
+            "teardown after the worker's own Stop took {teardown:?}"
         );
         return;
     }
@@ -936,6 +1076,7 @@ fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
         let pins = pins.expect("qualified producer pins");
         let handoff = api::compiled_handoff::CompiledHandoff::open(&output, &pins).unwrap();
         handoff.revalidate().unwrap();
+        install_observes_a_stopped_host_before_hashing(&f.root, &output, &pins);
         assert_eq!(handoff.nodes().len(), f.request.node_ids.len());
         assert_eq!(
             protocol::canonical::digest(handoff.plan()).unwrap(),
