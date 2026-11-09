@@ -75,7 +75,8 @@ pub fn prepare(
 /// owner's approval (seed-issued handoff, owner-offered `caps`, membership
 /// ttl), the member's acceptance against this seed (installation CA pinned,
 /// `seed_address` reachable from the member) and its signed carrier
-/// registration, which must name the member's CURRENT seed row.
+/// registration, which must be the member's CURRENT seed row, signed by that
+/// row's enrolled key.
 pub fn admit(
     member: &mut dyn MemberLink,
     owner_root: &Path,
@@ -115,15 +116,12 @@ pub fn admit(
         json!({"command":"accept","handoff":approved.to_value(),"ca_pem":ca,"seed_address":seed_address}),
         within,
     )?;
-    let node = registration["message"]["member"]["node_id"]
-        .as_str()
-        .ok_or_else(|| Refusal("joined_shard_invalid".into()))?;
-    let row = seed
-        .coordinator
-        .member(node)
-        .map_err(|_| Refusal("joined_shard_member_changed".into()))?;
-    if row["generation"] != registration["message"]["member"]["generation"] {
-        return Err(Refusal("joined_shard_member_changed".into()));
-    }
+    // The member's own key claim (which the remote channel enrols for every
+    // later reply) is trusted only once it is the seed row's: signed by the
+    // row's key and endpoint, naming the row's current key, endpoint,
+    // incarnation and generation (REVIEW-laneB16 F2). A refused link must be
+    // dropped by the caller.
+    crate::joined_shard::verify_registration(&seed.coordinator, &registration)
+        .map_err(|e| Refusal(e.0.to_owned()))?;
     Ok(registration)
 }

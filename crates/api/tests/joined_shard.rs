@@ -504,3 +504,147 @@ fn owner_requires_the_members_own_bound_consent_before_an_offer() {
         "withdrawn"
     );
 }
+
+/// An in-process member behind the owner's [`MemberLink`]: it answers
+/// `pair_request` and `accept` with its real pair request, real seed join and
+/// real signed carrier registration. A `liar` re-signs that registration with
+/// its own key and claims that key as the member's enrolled key.
+struct InProcessMember {
+    root: PathBuf,
+    signer: Identity,
+    seed: api::seed::SeedOptions,
+    liar: Option<Identity>,
+    reply: Option<Result<Value, api::joined_owner::link::Refusal>>,
+}
+impl InProcessMember {
+    fn answer(&mut self, command: &Value) -> Result<Value, api::joined_owner::link::Refusal> {
+        let refused = |code: &str| api::joined_owner::link::Refusal(code.into());
+        match command["command"].as_str() {
+            Some("pair_request") => Ok(app_host::build_pair_request(&self.root, &self.root)
+                .map_err(|e| refused(e.code))?
+                .to_value()),
+            Some("accept") => {
+                let random = |n| app_host::hex(&app_host::random(n).unwrap());
+                let env = peer::JoinEnv {
+                    signer: &self.signer,
+                    clock: &app_host::now,
+                    random_hex: &random,
+                    seed: &self.seed,
+                };
+                let mut accepted =
+                    peer::accept_handoff(&self.root, true, &command["handoff"], &env)
+                        .map_err(|e| refused(e.code))?;
+                peer::renew(&self.root, true, accepted.session.as_mut(), &env)
+                    .map_err(|e| refused(e.code))?;
+                let session = accepted.session.ok_or_else(|| refused("session_missing"))?;
+                let endpoint = iroh::SecretKey::generate().public().to_string();
+                let carrier =
+                    Identity::from_secret(&endpoint, &self.signer.secret_bytes()).unwrap();
+                let genuine =
+                    joined_shard::register(&session, &self.signer, &carrier, app_host::now())
+                        .map_err(|e| refused(e.0))?;
+                let Some(liar) = &self.liar else {
+                    return Ok(genuine);
+                };
+                // Same node, generation and incarnation as the seed row; only
+                // the key (and its endpoint) is the liar's, and the liar signs.
+                let mut message = genuine["message"].clone();
+                message["member"]["verification_key_digest"] =
+                    json!(liar.verification_key_digest());
+                message["member"]["endpoint_id"] = json!(liar.endpoint_id());
+                Ok(
+                    json!({"protocol":genuine["protocol"],"signature":liar.sign(&message).unwrap(),
+                    "verification_key":liar.public_key_record(),"message":message}),
+                )
+            }
+            _ => Err(refused("unexpected_command")),
+        }
+    }
+}
+impl api::joined_owner::link::MemberLink for InProcessMember {
+    fn begin(&mut self, command: Value) -> Result<(), api::joined_owner::link::Refusal> {
+        self.reply = Some(self.answer(&command));
+        Ok(())
+    }
+    fn finish(
+        &mut self,
+        _: std::time::Duration,
+    ) -> Result<Value, api::joined_owner::link::Refusal> {
+        self.reply
+            .take()
+            .unwrap_or_else(|| Err(api::joined_owner::link::Refusal("no_command".into())))
+    }
+}
+
+/// REVIEW-laneB16 F2: the owner's admission checks the member's own key claim
+/// against the seed row BEFORE trusting it. The remote channel enrols the key
+/// the accept reply names (`remote.rs`), and the owner then asks that key for
+/// consent; a registration that names the member's node and generation but
+/// another key (signed by that key) must be refused at admit, not first at the
+/// later offer. The genuine registration of the same flow is admitted.
+#[test]
+fn owner_admission_refuses_a_member_key_claim_the_seed_row_does_not_hold() {
+    let root = std::env::temp_dir().join(format!(
+        "b16f-admit-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let owner = root.join("owner");
+    fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b16f-swarm", None).unwrap();
+    let caps = json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false});
+    let within = std::time::Duration::from_millis(
+        budgets::BudgetId::RouterClose
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
+    let member = |name: &str, liar: Option<Identity>| {
+        let dir = root.join(name);
+        fs::create_dir(&dir).unwrap();
+        app_host::build_pair_request(&dir, &dir).unwrap();
+        let (signer, _, _) = app_host::identity(&dir).unwrap();
+        InProcessMember {
+            root: dir,
+            signer,
+            seed: seed.options(),
+            liar,
+            reply: None,
+        }
+    };
+    let mut honest = member("honest", None);
+    let admitted =
+        api::joined_owner::link::admit(&mut honest, &owner, &seed, seed.address, &caps, within)
+            .expect("the genuine registration is admitted");
+    let node = admitted["message"]["member"]["node_id"].as_str().unwrap();
+    assert_eq!(
+        admitted["message"]["member"]["verification_key_digest"],
+        seed.coordinator.member(node).unwrap()["verification_key_digest"]
+    );
+    let liar = Identity::from_secret(
+        &iroh::SecretKey::generate().public().to_string(),
+        &[0x5a; 32],
+    )
+    .unwrap();
+    let mut lying = member("lying", Some(liar));
+    let refused =
+        api::joined_owner::link::admit(&mut lying, &owner, &seed, seed.address, &caps, within);
+    match refused {
+        Err(refusal) => assert_eq!(refusal.0, "joined_shard_signature_invalid", "{refusal:?}"),
+        Ok(registration) => panic!(
+            "admitted a key the seed row does not hold: claimed {} (row {})",
+            registration["message"]["member"]["verification_key_digest"],
+            seed.coordinator
+                .member(
+                    registration["message"]["member"]["node_id"]
+                        .as_str()
+                        .unwrap()
+                )
+                .unwrap()["verification_key_digest"]
+        ),
+    }
+    seed.close();
+    fs::remove_dir_all(&root).unwrap();
+}

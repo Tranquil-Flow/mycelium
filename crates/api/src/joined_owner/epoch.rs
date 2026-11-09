@@ -72,6 +72,15 @@ impl Epoch {
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
+        // Each request holds one connection; more open connections than the
+        // gateway admits pending requests are answered busy, never held.
+        let max_connections = usize::try_from(
+            B::PyFinalMyceliumRequestGatewayServiceMaxPendingRequestsL310C36
+                .count()
+                .map_err(|_| fail("budget_unavailable"))?
+                .get(),
+        )
+        .map_err(|_| fail("budget_unavailable"))?;
         let bearer = crate::app_host::hex(&crate::app_host::random(32)?);
         let host = Arc::new(RouteHost::new(
             coordinator.clone(),
@@ -127,22 +136,36 @@ impl Epoch {
             refusals,
         };
         // Gateway: one owned thread per connection, all joined on close.
+        // Finished connections are joined as new ones arrive (REVIEW-laneB16
+        // F3), so the owned list is bounded by the live connections.
         let (service, stop) = (epoch.service.clone(), epoch.stop.clone());
         let gateway = std::thread::Builder::new()
             .name("joined-owner-gateway".into())
             .spawn(move || {
-                let mut connections = Vec::new();
+                let mut connections: Vec<std::thread::JoinHandle<()>> = Vec::new();
                 for incoming in listener.incoming() {
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    let stream = match incoming {
+                    let mut stream = match incoming {
                         Ok(stream) => stream,
                         Err(e) => {
                             eprintln!("joined owner gateway accept: {e}");
                             continue;
                         }
                     };
+                    let (finished, live): (Vec<_>, Vec<_>) =
+                        connections.drain(..).partition(|c| c.is_finished());
+                    connections = live;
+                    for c in finished {
+                        if c.join().is_err() {
+                            eprintln!("joined owner gateway connection panicked");
+                        }
+                    }
+                    if connections.len() >= max_connections {
+                        busy(&mut stream);
+                        continue;
+                    }
                     let service = service.clone();
                     let spawned = std::thread::Builder::new()
                         .name("joined-owner-connection".into())
@@ -185,8 +208,10 @@ impl Epoch {
                 let mut seen = 0;
                 while !stop.load(Ordering::SeqCst) {
                     if let Err(e) = service.tick() {
+                        // Distinct closed codes in first-seen order: bounded by
+                        // the code set, however long the epoch runs.
                         let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
-                        if r.last().is_none_or(|last| last != e.code) {
+                        if !r.iter().any(|seen| seen == e.code) {
                             r.push(e.code.to_owned());
                         }
                     }
@@ -234,7 +259,7 @@ impl Epoch {
     pub fn qualification(&self) -> Result<Value, PublicError> {
         self.host.qualification()
     }
-    /// Refusals the pump recorded so far (deduplicated consecutive codes).
+    /// Refusals the pump recorded so far (distinct codes, first-seen order).
     pub fn refusals(&self) -> Vec<String> {
         self.refusals
             .lock()
@@ -266,5 +291,24 @@ impl Drop for Epoch {
         if !self.threads.is_empty() {
             self.shutdown();
         }
+    }
+}
+
+/// Answer a connection past the gateway's bound at once (typed 503, no
+/// request read) and close it; nothing is owned for it.
+fn busy(stream: &mut TcpStream) {
+    use std::io::Write;
+    let body = r#"{"error":"joined_owner_gateway_busy"}"#;
+    let reply = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    // A fresh socket's send buffer takes these few bytes without blocking.
+    if let Err(e) = stream
+        .set_nonblocking(true)
+        .and_then(|()| stream.write_all(reply.as_bytes()))
+        .and_then(|()| stream.shutdown(std::net::Shutdown::Write))
+    {
+        eprintln!("joined owner gateway busy reply: {e}");
     }
 }

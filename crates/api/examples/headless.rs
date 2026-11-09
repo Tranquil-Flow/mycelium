@@ -2834,8 +2834,8 @@ fn run() -> Result<(), String> {
     let serve = {
         let (core, app) = (core.clone(), app.clone());
         thread::spawn(move || -> Result<(), String> {
-            // Every connection thread is retained and joined before the listener thread ends,
-            // so the quit answer is on the wire before the process exits.
+            // Every live connection thread is retained and joined before the listener thread
+            // ends, so the quit answer is on the wire before the process exits.
             let mut connections: Vec<thread::JoinHandle<()>> = Vec::new();
             // A listener that fails after a quit closed the core still ended by that quit.
             let unless_quit = |code: String| {
@@ -2845,30 +2845,45 @@ fn run() -> Result<(), String> {
                     Err(code)
                 }
             };
-            // Test seam (like MYCELIUM_L10_TEST_RESOURCE_PROBE): the first accepted connection after
-            // the launch request is dropped and replaced by this errno, so a test reaches a
-            // listener's error end.
-            let mut injected = std::env::var("MYCELIUM_L10_TEST_ACCEPT_ERRNO")
+            // Test seam (like MYCELIUM_L10_TEST_RESOURCE_PROBE): `<errno>[*<count>]` drops the
+            // first `count` (default 1) accepted connections after the launch request and replaces
+            // each by this errno, so a test reaches a listener's error paths.
+            let (injected, mut injections) = std::env::var("MYCELIUM_L10_TEST_ACCEPT_ERRNO")
                 .ok()
-                .and_then(|errno| errno.parse::<i32>().ok());
+                .and_then(|seam| {
+                    let (errno, count) = seam.split_once('*').unwrap_or((seam.as_str(), "1"));
+                    Some((errno.parse::<i32>().ok()?, count.parse::<usize>().ok()?))
+                })
+                .map_or((None, 0), |(errno, count)| (Some(errno), count));
             let mut served = 0_usize;
             // v0.1.4 parity (`socketserver` swallows accept errors and keeps serving): a transient
-            // accept error is recorded once per episode and retried after one poll.
+            // accept error is recorded once per episode; exhaustion is retried after one poll, an
+            // error of one pending connection at once.
             let mut deferred = false;
             loop {
                 let mut accepted = listener.accept();
                 if accepted.is_ok() {
                     // The first connection is the launcher's own launch request.
                     served += 1;
-                    if served == 2
-                        && let Some(errno) = injected.take()
+                    if served >= 2
+                        && injections > 0
+                        && let Some(errno) = injected
                     {
+                        injections -= 1;
                         accepted = Err(std::io::Error::from_raw_os_error(errno));
                     }
                 }
                 match accepted {
                     Ok((stream, _)) => {
                         deferred = false;
+                        // Ended connections are joined as new ones arrive: an ended thread
+                        // that is never joined keeps its stack mapped (one per status poll).
+                        let (ended, live): (Vec<_>, Vec<_>) =
+                            connections.drain(..).partition(|c| c.is_finished());
+                        connections = live;
+                        for handle in ended {
+                            handle.join().unwrap_or(());
+                        }
                         // Accepted sockets must block (the listener is polled non-blocking).
                         if stream.set_nonblocking(false).is_err() {
                             continue;
@@ -2903,6 +2918,20 @@ fn run() -> Result<(), String> {
                     }
                     Err(error) => match listener_wait::accept_failure(&error) {
                         listener_wait::AcceptFailure::Fatal(code) => return unless_quit(code),
+                        // That pending connection is gone; the next one is accepted at once.
+                        listener_wait::AcceptFailure::Connection(code) => {
+                            if !deferred {
+                                deferred = true;
+                                eprintln!("listener_accept_deferred: {code}");
+                            }
+                            // A stream of aborting clients cannot hold off a quit.
+                            if core.lock().map_or(true, |c| c.closed) {
+                                for handle in connections {
+                                    handle.join().unwrap_or(());
+                                }
+                                return Ok(());
+                            }
+                        }
                         listener_wait::AcceptFailure::Transient(code) => {
                             if !deferred {
                                 deferred = true;

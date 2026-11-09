@@ -1194,6 +1194,71 @@ fn product_epoch_streams_chat_over_its_gateway_and_close_frees_the_port() {
         assert_eq!(report["ack_delivered"], true, "{report}");
     }
 }
+/// REVIEW-laneB16 F3: the epoch gateway's owned connections are bounded and
+/// pruned. While as many connections as the gateway admits requests
+/// (`max_pending_requests`) are open, one more is answered at once with a
+/// typed 503 instead of another owned thread; once those clients go, their
+/// finished connections no longer count and the same gateway serves again
+/// (a list that never shrinks would keep refusing). Chat still completes.
+#[test]
+fn product_epoch_gateway_bounds_and_prunes_its_connections() {
+    use std::io::{Read, Write};
+    let s = swarm();
+    let (epoch, members) = product_epoch(&s, &[5, 9, 3, 7]);
+    let cap = B::PyFinalMyceliumRequestGatewayServiceMaxPendingRequestsL310C36
+        .count()
+        .unwrap()
+        .get() as usize;
+    let patience = span(B::RouterClose);
+    let held: Vec<std::net::TcpStream> = (0..cap)
+        .map(|_| std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap())
+        .collect();
+    let answer = |mut stream: std::net::TcpStream, request: &str| {
+        stream.set_read_timeout(Some(patience)).unwrap();
+        if !request.is_empty() {
+            stream.write_all(request.as_bytes()).unwrap();
+        }
+        let mut text = String::new();
+        stream.read_to_string(&mut text).unwrap_or(0);
+        text
+    };
+    // Over the bound: answered before it sends anything, not held.
+    let over = std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap();
+    let busy = answer(over, "");
+    assert!(
+        busy.starts_with("HTTP/1.1 503") && busy.contains("joined_owner_gateway_busy"),
+        "connection {} past the bound was not refused: {busy:?}",
+        cap + 1
+    );
+    drop(held);
+    // The finished connections stop counting: a request is served again.
+    let probe = format!(
+        "GET /v1/inference/none HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        epoch.addr()
+    );
+    let end = Instant::now() + patience;
+    let served = loop {
+        let stream = std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap();
+        let text = answer(stream, &probe);
+        if !text.starts_with("HTTP/1.1 503") || Instant::now() >= end {
+            break text;
+        }
+        std::thread::yield_now();
+    };
+    assert!(
+        served.starts_with("HTTP/1.1 ") && !served.starts_with("HTTP/1.1 503"),
+        "closed connections still count against the bound: {served:?}"
+    );
+    let (_, rx, reader) = chat(&epoch, 4);
+    let all = until_terminal(&rx, usize::MAX);
+    reader.join().unwrap();
+    assert_eq!(token_ids(&all), vec![5, 9, 3, 7]);
+    epoch.close();
+    for m in members {
+        let report = m.thread.join().unwrap().unwrap();
+        assert_eq!(report["ack_delivered"], true, "{report}");
+    }
+}
 #[test]
 fn product_epoch_stop_over_its_gateway_cancels_after_both_stages_acknowledge() {
     let s = swarm();

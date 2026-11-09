@@ -705,6 +705,104 @@ pub(super) fn consent_file(dir: &std::path::Path) -> std::path::PathBuf {
     .unwrap();
     path
 }
+/// REVIEW-laneB16 F5 (v0.1.4 order, `app.py:1742-1757`): the member operator's
+/// `--consent-file` limits are checked BEFORE the member joins anything. A
+/// decision this Mac cannot honour (here: a memory cap above 3/4 of the
+/// stated device memory; and a policy outside the offered choices) ends the
+/// member at launch with the closed code, before it reads a command, writes
+/// an identity or pairs; it is never first refused after a seed join.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_member_refuses_an_unusable_consent_file_before_joining() {
+    let root = std::env::temp_dir().join(format!("b16f-consent-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
+    let caps = json!({"storage_bytes":4_000_000_000u64,"max_memory_bytes":15_000_000_000u64,"max_wall_seconds":600,"max_commands":1000});
+    let mut bad_policy = policy.clone();
+    bad_policy["power"] = json!("always");
+    for (name, policy, caps, code) in [
+        (
+            "memory",
+            policy.clone(),
+            caps,
+            "standing_consent_memory_exceeds_device",
+        ),
+        (
+            "policy",
+            bad_policy,
+            json!({"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}),
+            "consent_required",
+        ),
+    ] {
+        let file = root.join(format!("{name}.json"));
+        fs::write(
+            &file,
+            json!({"device_memory_bytes":16_000_000_000u64,"policy":policy,
+                "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":caps}})
+            .to_string(),
+        )
+        .unwrap();
+        let member_root = root.join(format!("member-{name}"));
+        // Exact owned child, killed and reaped on any failure path.
+        struct Reap(Child);
+        impl Drop for Reap {
+            fn drop(&mut self) {
+                if self.0.try_wait().unwrap().is_none() {
+                    self.0.kill().unwrap();
+                }
+                self.0.wait().unwrap();
+            }
+        }
+        let mut child = Reap(
+            Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
+                .arg("--state-root")
+                .arg(&member_root)
+                .arg("--consent-file")
+                .arg(&file)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let end = Instant::now() + allowance();
+        let status = loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break Some(status);
+            }
+            if Instant::now() >= end {
+                break None;
+            }
+            std::thread::yield_now();
+        };
+        let Some(status) = status else {
+            // Still running: show it would go on to pair (and join) first.
+            let input = child.0.stdin.as_mut().unwrap();
+            writeln!(input, "{}", json!({"command":"pair_request"})).unwrap();
+            input.flush().unwrap();
+            let mut line = String::new();
+            BufReader::new(child.0.stdout.as_mut().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            panic!(
+                "{name}: the member started with a consent file it cannot honour and pairs: {line}"
+            );
+        };
+        let mut stderr = String::new();
+        std::io::Read::read_to_string(child.0.stderr.as_mut().unwrap(), &mut stderr).unwrap();
+        assert!(!status.success(), "{name}: {status:?} {stderr}");
+        assert!(
+            stderr.contains(&format!("shard_member_failed:{code}")),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !member_root.join(app_host::IDENTITY_FILE).exists(),
+            "{name}: no identity before a usable decision"
+        );
+    }
+    fs::remove_dir_all(&root).unwrap();
+}
 /// B16 S3 (gap row 12): consent stays member-side on the product control
 /// channel. The pinned owner may not write a member's consent remotely; the
 /// member operator decides (`--consent-file`), the member binds it to the swarm

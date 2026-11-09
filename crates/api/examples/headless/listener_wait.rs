@@ -37,9 +37,14 @@ pub(super) fn wait(listener: &TcpListener, limit: Duration) -> std::io::Result<(
 /// unusable.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum AcceptFailure {
-    /// Exhausted descriptors or buffers, a client that reset before the accept, a signal, a
-    /// network error on the pending connection: back off one poll and accept again.
+    /// Exhausted descriptors, buffers or memory: back off one poll and accept again (the
+    /// pressure lasts; an immediate retry would spin).
     Transient(String),
+    /// The error belonged to the one pending connection (a client that aborted or reset
+    /// before the accept, a protocol or network error on it, a signal): that connection is
+    /// gone, so accept the next one at once, as v0.1.4's `serve_forever` does
+    /// (REVIEW-laneB17 FU-0a: a sleep here delayed legitimate clients one poll per abort).
+    Connection(String),
     /// Anything else (`EBADF`, `EINVAL`, `ENOTSOCK`, ...): the listener has ended.
     Fatal(String),
 }
@@ -59,28 +64,22 @@ pub(super) fn failure_code(what: &str, error: &std::io::Error) -> String {
 pub(super) fn accept_failure(error: &std::io::Error) -> AcceptFailure {
     let errno = error.raw_os_error();
     let code = failure_code("listener_accept_failed", error);
-    let transient = matches!(
-        errno,
+    match errno {
+        Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM) => {
+            AcceptFailure::Transient(code)
+        }
         Some(
-            libc::EMFILE
-                | libc::ENFILE
-                | libc::ENOBUFS
-                | libc::ENOMEM
-                | libc::ECONNABORTED
-                | libc::ECONNRESET
-                | libc::EINTR
-                | libc::EPROTO
-                | libc::ETIMEDOUT
-                | libc::ENETDOWN
-                | libc::ENETUNREACH
-                | libc::EHOSTDOWN
-                | libc::EHOSTUNREACH
-        )
-    );
-    if transient {
-        AcceptFailure::Transient(code)
-    } else {
-        AcceptFailure::Fatal(code)
+            libc::ECONNABORTED
+            | libc::ECONNRESET
+            | libc::EINTR
+            | libc::EPROTO
+            | libc::ETIMEDOUT
+            | libc::ENETDOWN
+            | libc::ENETUNREACH
+            | libc::EHOSTDOWN
+            | libc::EHOSTUNREACH,
+        ) => AcceptFailure::Connection(code),
+        _ => AcceptFailure::Fatal(code),
     }
 }
 
@@ -122,17 +121,18 @@ mod tests {
     }
     #[test]
     fn exhausted_or_reset_accepts_are_retried_and_a_broken_listener_ends_with_its_errno() {
-        for errno in [
-            libc::EMFILE,
-            libc::ENFILE,
-            libc::ENOBUFS,
-            libc::ECONNABORTED,
-            libc::EINTR,
-        ] {
+        for errno in [libc::EMFILE, libc::ENFILE, libc::ENOBUFS] {
             let error = std::io::Error::from_raw_os_error(errno);
             assert!(
                 matches!(accept_failure(&error), AcceptFailure::Transient(_)),
-                "errno {errno} ends the listener"
+                "errno {errno} is not backed off"
+            );
+        }
+        for errno in [libc::ECONNABORTED, libc::ECONNRESET, libc::EINTR] {
+            let error = std::io::Error::from_raw_os_error(errno);
+            assert!(
+                matches!(accept_failure(&error), AcceptFailure::Connection(_)),
+                "errno {errno} is not retried at once"
             );
         }
         for errno in [libc::EBADF, libc::EINVAL, libc::ENOTSOCK, libc::EOPNOTSUPP] {

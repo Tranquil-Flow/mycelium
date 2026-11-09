@@ -759,14 +759,14 @@ pub mod standing_consent {
             Err(StandingError("standing_consent_state_invalid"))
         }
     }
-    /// `grant_standing_consent`: the one explicit grant shown at join (unbound until membership).
-    pub fn grant(
-        root: &Path,
+    /// The caps a grant would record, checked without touching any state: the
+    /// acknowledged disclosure and `_caps(caps, policy, device_memory_bytes)`.
+    /// v0.1.4 runs exactly this before any role change (`app.py:1751-1757`).
+    pub fn decision_caps(
         body: &Value,
         policy: &Value,
-        now: f64,
         device_memory_bytes: Option<u64>,
-    ) -> Result<Map<String, Value>, StandingError> {
+    ) -> Result<Value, StandingError> {
         let required = StandingError("standing_consent_required");
         let b = body.as_object().ok_or(required)?;
         if !has_exactly(b, &["acknowledged", "disclosure_digest", "caps"])
@@ -776,8 +776,17 @@ pub mod standing_consent {
             return Err(required);
         }
         let memory = device_memory_bytes.map_or(Value::Null, Value::from);
-        let caps =
-            protocol::consent::caps(&b["caps"], policy, &memory).map_err(|e| StandingError(e.0))?;
+        protocol::consent::caps(&b["caps"], policy, &memory).map_err(|e| StandingError(e.0))
+    }
+    /// `grant_standing_consent`: the one explicit grant shown at join (unbound until membership).
+    pub fn grant(
+        root: &Path,
+        body: &Value,
+        policy: &Value,
+        now: f64,
+        device_memory_bytes: Option<u64>,
+    ) -> Result<Map<String, Value>, StandingError> {
+        let caps = decision_caps(body, policy, device_memory_bytes)?;
         if let Some(existing) = load(root)?
             && existing["state"] != "withdrawn"
         {
