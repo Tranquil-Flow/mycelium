@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom},
     os::unix::fs::OpenOptionsExt,
     path::{Component, Path, PathBuf},
     sync::{Arc, Weak},
@@ -81,17 +81,12 @@ fn open(root: &Path, name: &str) -> Result<File> {
     }
     Ok(file)
 }
-struct HashWriter(Sha256);
-impl Write for HashWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.update(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
+/// One cooperative Stop check per chunk of a whole-file hash.
+const HASH_CHUNK_BYTES: usize = 1 << 20;
+fn stopped_refusal() -> WorkflowError {
+    WorkflowError::refused("compiled_handoff_stopped")
 }
-fn check(file: &mut File, pin: &Pin) -> Result<()> {
+fn check(file: &mut File, pin: &Pin, stopped: &dyn Fn() -> bool) -> Result<()> {
     if pin.sha256.len() != 64
         || !pin
             .sha256
@@ -102,9 +97,24 @@ fn check(file: &mut File, pin: &Pin) -> Result<()> {
         return Err(bad());
     }
     file.seek(SeekFrom::Start(0)).map_err(|_| bad())?;
-    let mut hash = HashWriter(Sha256::new());
-    let count = std::io::copy(file, &mut hash).map_err(|_| bad())?;
-    if count != pin.bytes || format!("{:x}", hash.0.finalize()) != pin.sha256 {
+    let mut hash = Sha256::new();
+    let mut count = 0_u64;
+    let mut buffer = vec![0_u8; HASH_CHUNK_BYTES];
+    loop {
+        if stopped() {
+            return Err(stopped_refusal());
+        }
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                hash.update(&buffer[..n]);
+                count += n as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(bad()),
+        }
+    }
+    if count != pin.bytes || format!("{:x}", hash.finalize()) != pin.sha256 {
         return Err(bad());
     }
     file.seek(SeekFrom::Start(0)).map_err(|_| bad())?;
@@ -211,7 +221,14 @@ pub struct CompiledHandoff {
     workflow: ManagedServingWorkflow,
 }
 impl CompiledHandoff {
+    /// Offline reader: [`Self::open_until`] with no Stop.
     pub fn open(root: &Path, pins: &Pins) -> Result<Self> {
+        Self::open_until(root, pins, &|| false)
+    }
+    /// Open and pin-check every retained file. Each whole-file hash consults
+    /// `stopped` once per chunk; a Stop refuses `compiled_handoff_stopped`
+    /// (never "invalid") and releases every handle opened so far.
+    pub fn open_until(root: &Path, pins: &Pins, stopped: &dyn Fn() -> bool) -> Result<Self> {
         let root = root.canonicalize().map_err(|_| bad())?;
         let required = [
             "compile-start.private.json",
@@ -229,7 +246,7 @@ impl CompiledHandoff {
         let mut docs = BTreeMap::new();
         for name in required {
             let mut file = open(&root, name)?;
-            check(&mut file, pins.get(name).ok_or_else(bad)?)?;
+            check(&mut file, pins.get(name).ok_or_else(bad)?, stopped)?;
             docs.insert(name, document(&mut file)?);
             files.insert(name.to_owned(), file);
         }
@@ -238,7 +255,7 @@ impl CompiledHandoff {
             || docs["compiled/operator-plan.json"]["protocol"]
                 == stage_contract::native_shard::PLAN_PROTOCOL
         {
-            return native::open_native(&root, pins, &docs, files);
+            return native::open_native(&root, pins, &docs, files, stopped);
         }
         let plan = &docs["compiled/operator-plan.json"];
         let complete = &docs["compile-complete.private.json"];
@@ -326,7 +343,7 @@ impl CompiledHandoff {
             }
             let full = format!("compiled/transfer-bundle/{name}");
             let mut file = open(&root, &full)?;
-            check(&mut file, &pin)?;
+            check(&mut file, &pin, stopped)?;
             files.insert(full, file);
         }
         if report["transfer_file_count"].as_u64() != Some(payload_pins.len() as u64)
@@ -395,10 +412,15 @@ impl CompiledHandoff {
     /// Revalidate the exact already-open handles before taking host ownership.
     /// This detects changes but is not an immutable filesystem snapshot claim.
     pub fn revalidate(&self) -> Result<()> {
+        self.revalidate_until(&|| false)
+    }
+    /// [`Self::revalidate`] whose hashes consult `stopped` once per chunk.
+    pub fn revalidate_until(&self, stopped: &dyn Fn() -> bool) -> Result<()> {
         for (name, file) in &self.controller.0.files {
             check(
                 &mut file.try_clone().map_err(|_| bad())?,
                 self.controller.0.pins.get(name).ok_or_else(bad)?,
+                stopped,
             )?;
         }
         Ok(())

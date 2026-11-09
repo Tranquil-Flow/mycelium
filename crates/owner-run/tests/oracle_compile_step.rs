@@ -417,3 +417,90 @@ fn a_stop_during_the_compile_wait_is_stopped() {
     assert!(matches!(result, Err(StepError::Stopped)), "{result:?}");
     assert!(world.t.get() >= 30.0 && world.t.get() < 31.0);
 }
+
+/// Proves: a Stop that arrives while the host is still reading the source for `compile_inputs` reaches
+/// that read (one check per chunk) and ends the step as Stopped, exactly like a Stop during the compile
+/// wait: no build request, the bootstrap kept, nothing compiled. The port below models a 100-chunk source
+/// scan on the virtual clock (1 s per chunk); the old read hashes every chunk before it can return.
+#[test]
+fn a_stop_during_the_source_preflight_is_stopped_before_any_build() {
+    use owner_run::chain::PortError;
+    use owner_run::steps::compile::{BuildPoll, CompileContext, CompileInputs, CompilePort};
+    use planner::chain_compile::BuildRequest;
+    use std::rc::Rc;
+    struct Preflight {
+        port: Port,
+        world: Rc<World>,
+        chunks: u32,
+    }
+    impl Preflight {
+        fn chunk(&self) {
+            self.world.t.set(self.world.t.get() + 1.0);
+        }
+    }
+    impl CompilePort for Preflight {
+        fn compile_context(&mut self) -> Result<CompileContext, PortError> {
+            self.port.compile_context()
+        }
+        fn compile_inputs(&mut self) -> Result<CompileInputs, PortError> {
+            for _ in 0..self.chunks {
+                self.chunk();
+            }
+            self.port.compile_inputs()
+        }
+        fn compile_inputs_until(
+            &mut self,
+            stopped: &dyn Fn() -> bool,
+        ) -> Result<CompileInputs, PortError> {
+            for _ in 0..self.chunks {
+                if stopped() {
+                    return Err(PortError::Failed {
+                        code: Some("compiler_stopped".into()),
+                        text: String::new(),
+                    });
+                }
+                self.chunk();
+            }
+            self.port.compile_inputs()
+        }
+        fn retire_bootstrap(&mut self) -> Result<(), PortError> {
+            self.port.retire_bootstrap()
+        }
+        fn start_build(&mut self, request: &BuildRequest) {
+            self.port.start_build(request);
+        }
+        fn poll_build(&mut self) -> BuildPoll {
+            self.port.poll_build()
+        }
+    }
+    let doc = fixture();
+    let rec = &doc["cases"]["build-never-finishes-timeout"];
+    let world = World::new(&json!({"stop_at": 30.0}));
+    let mut env = VEnv::new(&world);
+    let i = &rec["inputs"];
+    let mut port = Preflight {
+        port: Port {
+            inputs: inputs_of(i),
+            adapter: i["adapter"].clone(),
+            slice_mode: false,
+            delay: 0,
+            polls: 0,
+            retired: 0,
+            requests: vec![],
+        },
+        world: world.clone(),
+        chunks: 100,
+    };
+    let mut state = state_of(i);
+    let mut exchange = Exchange { announced: vec![] };
+    let result = run_compile_step(&mut env, &mut exchange, &mut port, &mut state, interval());
+    assert!(matches!(result, Err(StepError::Stopped)), "{result:?}");
+    assert!(
+        world.t.get() >= 30.0 && world.t.get() < 31.0,
+        "the read stops within one chunk of the Stop: ended at {}",
+        world.t.get()
+    );
+    assert!(port.port.requests.is_empty(), "no build after a Stop");
+    assert_eq!(port.port.retired, 0, "the bootstrap is kept");
+    assert!(state.chain_compile_state.is_none());
+}

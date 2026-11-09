@@ -592,14 +592,22 @@ fn stage_sharded_worker_retains_real_bytes_but_refuses_native_challenge() {
 #[test]
 #[ignore = "requires local Qwen3-0.6B + Metal"]
 fn local_qwen3_two_stage_compiler_produces_native_handoff() {
-    local_qwen3_native_fixture(false);
+    local_qwen3_native_fixture(false, false);
 }
 #[test]
 #[ignore = "requires local Qwen3-0.6B + Metal and whole-source evidence"]
 fn local_qwen3_stage_shards_produce_native_handoff() {
-    local_qwen3_native_fixture(true);
+    local_qwen3_native_fixture(true, false);
 }
-fn local_qwen3_native_fixture(stage_sharded: bool) {
+/// REVIEW-laneB6 F1: Stop that lands while the parent hashes the emitted
+/// handoff (source, worker binary and both stage shards, opened then
+/// revalidated) must be observed within one hash chunk, not after the scans.
+#[test]
+#[ignore = "requires local Qwen3-0.6B + Metal"]
+fn local_qwen3_stop_during_parent_handoff_hashing_is_prompt() {
+    local_qwen3_native_fixture(true, true);
+}
+fn local_qwen3_native_fixture(stage_sharded: bool, stop_at_handoff: bool) {
     let mut f = Fixture::new();
     let snapshot = PathBuf::from(std::env::var("HOME").unwrap()).join(
         ".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca",
@@ -643,16 +651,16 @@ fn local_qwen3_native_fixture(stage_sharded: bool) {
         {"node_id":"node-1","start":14,"end":28}
     ]});
     f.request.stage_sharded = stage_sharded;
-    worker_fixture(f, true);
+    worker_fixture(f, true, stop_at_handoff);
 }
 
 fn worker_boundary(stage_sharded: bool) {
     let mut f = Fixture::new();
     f.request.stage_sharded = stage_sharded;
-    worker_fixture(f, false);
+    worker_fixture(f, false, false);
 }
 
-fn worker_fixture(f: Fixture, require_native: bool) {
+fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
     use api::installation_descriptor::{self, Member, Paths, Source};
     let stage_sharded = f.request.stage_sharded;
     let core = Arc::new(Mutex::new(load_core(f.root.join("host")).unwrap()));
@@ -853,12 +861,67 @@ fn worker_fixture(f: Fixture, require_native: bool) {
         match compiler.poll_build() {
             BuildPoll::Pending => {
                 assert!(std::time::Instant::now() < deadline);
+                // compile-complete is the last document stored before the
+                // parent opens and revalidates the handoff; the build is
+                // still running here, so Stop lands inside those scans.
+                if stop_at_handoff
+                    && f.root
+                        .join("host/chain-runs")
+                        .join(run)
+                        .join("compile-complete.private.json")
+                        .exists()
+                {
+                    break Err(failed("stop_requested_during_handoff_hashing"));
+                }
                 std::thread::yield_now();
             }
             BuildPoll::Done(result) => break result,
         }
     };
     let output = f.root.join("host/chain-runs").join(run);
+    if stop_at_handoff {
+        assert_eq!(
+            result.unwrap_err().code_or("missing"),
+            "stop_requested_during_handoff_hashing",
+            "the build must still be hashing when Stop is requested"
+        );
+        let requested = std::time::Instant::now();
+        compiler.teardown().unwrap();
+        let latency = requested.elapsed();
+        eprintln!(
+            "B10 Stop during parent handoff hashing: teardown {latency:?} ({:?} after start)",
+            started.elapsed()
+        );
+        let BuildPoll::Done(Err(stopped)) = compiler.poll_build() else {
+            panic!("a stopped build never reports success");
+        };
+        assert_eq!(stopped.code_or("missing"), "compiler_stopped");
+        assert!(compiler.qualified.is_none(), "no handoff is promoted");
+        let checkpoint: Value = serde_json::from_slice(
+            &fs::read(output.join("compiled/local-challenge-checkpoint.json")).unwrap(),
+        )
+        .unwrap();
+        for proof in checkpoint["proofs"].as_array().unwrap() {
+            let pid = proof["worker_pid"].as_u64().unwrap() as u32;
+            let holder = api::process_identity::Incarnation::of(pid).unwrap();
+            assert!(
+                holder.is_none(),
+                "native worker {pid} must already be reaped"
+            );
+        }
+        seed.close();
+        assert!(
+            latency
+                < std::time::Duration::from_millis(
+                    BudgetId::SidecarReceivePollWait
+                        .span(Entries::ZERO)
+                        .unwrap()
+                        .millis()
+                ),
+            "Stop waited {latency:?} for parent-side hashing"
+        );
+        return;
+    }
     if require_native {
         eprintln!(
             "native compiler verdict after {:?}: {result:?}",

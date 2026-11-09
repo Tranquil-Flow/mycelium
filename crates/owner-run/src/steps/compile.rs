@@ -81,6 +81,16 @@ pub trait CompilePort {
     fn compile_context(&mut self) -> Result<CompileContext, PortError>;
     /// Everything `start_compile` reads from the app.
     fn compile_inputs(&mut self) -> Result<CompileInputs, PortError>;
+    /// [`Self::compile_inputs`] for a host whose source reads can observe the
+    /// owner's Stop (`stopped()`): a long preflight then returns early instead
+    /// of holding the run thread. Any error returned while `stopped()` holds
+    /// ends the step Stopped. The default keeps the uninterruptible read.
+    fn compile_inputs_until(
+        &mut self,
+        _stopped: &dyn Fn() -> bool,
+    ) -> Result<CompileInputs, PortError> {
+        self.compile_inputs()
+    }
     /// `context.retire_bootstrap()`, after the preparation succeeded.
     fn retire_bootstrap(&mut self) -> Result<(), PortError>;
     /// Start the route builder (L8 `build_qwen_live_route.build` + L9 `prepare_serving_workflow`) on a worker
@@ -134,9 +144,17 @@ pub fn run_compile_step(
     );
     state.member_records = Some(records.clone());
     announce(reports, state, "compile", None)?;
+    // The source preflight observes the owner's Stop; an input read that
+    // returns because of it ends the step Stopped, as the build wait does.
     let inputs = compile
-        .compile_inputs()
-        .map_err(|e| e.into_step_error("chain_compile_failed"))?;
+        .compile_inputs_until(&|| env.stopped())
+        .map_err(|e| {
+            if env.stopped() {
+                StepError::Stopped
+            } else {
+                e.into_step_error("chain_compile_failed")
+            }
+        })?;
     let policy = ChainPolicy::pinned();
     let prepared = prepare(&PrepareInput {
         owner_ready: inputs.owner_ready,
