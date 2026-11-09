@@ -111,15 +111,13 @@ impl LanPolicy {
 /// Application close code of a direct-LAN connection that gained a path outside
 /// the allow-list (reason `lan_path_refused`).
 pub const LAN_PATH_REFUSED: u32 = 3;
+fn count(id: BudgetId) -> Result<usize, Error> {
+    usize::try_from(id.count().map_err(|_| Error::Unavailable)?.get())
+        .map_err(|_| Error::Unavailable)
+}
 /// Distinct exact destinations one direct-LAN host may pin at once.
 fn lan_pin_capacity() -> Result<usize, Error> {
-    usize::try_from(
-        BudgetId::SidecarQueueCapacity
-            .count()
-            .map_err(|_| Error::Unavailable)?
-            .get(),
-    )
-    .map_err(|_| Error::Unavailable)
+    count(BudgetId::SidecarQueueCapacity)
 }
 fn budget(id: BudgetId) -> Result<Duration, Error> {
     Ok(Duration::from_millis(
@@ -137,6 +135,13 @@ fn outside_addr(addr: &TransportAddr, admission: &Admission) -> bool {
             from_custom(custom).is_none_or(|a| !admission.admits_path(a))
         }
         _ => true,
+    }
+}
+/// An address-book entry this host never admitted (see `Admission::admits_seen`).
+fn unseen_addr(addr: &TransportAddr, admission: &Admission) -> bool {
+    match lan_path_addr(addr) {
+        Some(a) => !admission.admits_seen(a),
+        None => true,
     }
 }
 /// Any currently open path of `connection` outside the admitted destinations.
@@ -355,7 +360,11 @@ impl<'a> LoopbackHost<'a> {
         let wait = allowance(clock, deadline)?;
         let alpns: Vec<Vec<u8>> = channels.iter().map(|c| c.alpn().to_vec()).collect();
         let admission = match &lan {
-            Some((_, policy)) => Some(Admission::new(policy.clone(), lan_pin_capacity()?)),
+            Some((_, policy)) => Some(Admission::new(
+                policy.clone(),
+                lan_pin_capacity()?,
+                count(BudgetId::ReplayCapacity)?,
+            )),
             None => None,
         };
         let lan_transport = match (&lan, &admission) {
@@ -602,13 +611,7 @@ impl<'a> LoopbackHost<'a> {
             Arrived(Option<Box<iroh::endpoint::Incoming>>),
         }
         let handshake = budget(BudgetId::SidecarLocalHandshake)?;
-        let slots = usize::try_from(
-            BudgetId::RelayConnectionSlots
-                .count()
-                .map_err(|_| Error::Unavailable)?
-                .get(),
-        )
-        .map_err(|_| Error::Unavailable)?;
+        let slots = count(BudgetId::RelayConnectionSlots)?;
         let mut pool = self.handshakes.lock().map_err(|_| Error::Unavailable)?;
         self.runtime.block_on(async {
             tokio::time::timeout(wait, async {
@@ -694,9 +697,11 @@ impl<'a> LoopbackHost<'a> {
                 let Some(connection) = weak.upgrade() else {
                     break;
                 };
+                // A returning peer's earlier (admitted, since released)
+                // addresses stay in the book; only never-admitted ones count.
                 let seen = known.is_some_and(|info| {
                     info.addrs()
-                        .any(|known| outside_addr(known.addr(), &admission))
+                        .any(|known| unseen_addr(known.addr(), &admission))
                 });
                 if seen || outside(&connection, &admission) {
                     connection.close(LAN_PATH_REFUSED.into(), b"lan_path_refused");
@@ -740,6 +745,11 @@ impl<'a> LoopbackHost<'a> {
     #[cfg(test)]
     pub(crate) fn lan_admission(&self) -> Option<&Arc<Admission>> {
         self.lan.as_ref()
+    }
+    /// Direct LAN: whether the pre-send filter currently admits `destination`
+    /// (exact pins, or the range form). `None` in every other mode.
+    pub fn lan_admits(&self, destination: SocketAddr) -> Option<bool> {
+        self.lan.as_ref().map(|lan| lan.may_send(destination))
     }
     /// Direct LAN: datagrams the pre-send filter refused (never sent).
     pub fn lan_refused_datagrams(&self) -> Option<u64> {

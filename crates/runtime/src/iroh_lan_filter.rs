@@ -27,7 +27,7 @@ use iroh::endpoint::transports::{
 };
 use iroh_base::CustomAddr;
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
     net::{IpAddr, SocketAddr},
     sync::{
@@ -70,6 +70,11 @@ pub(crate) struct Admission {
     /// Exact pins: destination -> live holders.
     pins: RwLock<HashMap<SocketAddr, usize>>,
     capacity: usize,
+    /// Every destination ever pinned (oldest dropped past `remembered`): the
+    /// endpoint's address book keeps a returning peer's earlier, released
+    /// addresses, which were admitted then and are no evidence of a leak.
+    history: Mutex<(HashSet<SocketAddr>, VecDeque<SocketAddr>)>,
+    remembered: usize,
     /// Exact peer hosts from signed data: when set, inbound handshakes only
     /// from these IPs (dialed peers are pinned exactly anyway).
     hosts: RwLock<Option<BTreeSet<IpAddr>>>,
@@ -84,12 +89,14 @@ pub(crate) struct Admission {
     pub(crate) distrust_for_test: AtomicBool,
 }
 impl Admission {
-    pub(crate) fn new(policy: LanPolicy, capacity: usize) -> Arc<Self> {
+    pub(crate) fn new(policy: LanPolicy, capacity: usize, remembered: usize) -> Arc<Self> {
         let hosts = policy.peer_hosts().map(|h| h.iter().copied().collect());
         Arc::new(Self {
             policy,
             pins: RwLock::new(HashMap::new()),
             capacity,
+            history: Mutex::new((HashSet::new(), VecDeque::new())),
+            remembered,
             hosts: RwLock::new(hosts),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
@@ -121,6 +128,21 @@ impl Admission {
             return false;
         }
         self.may_send(addr)
+    }
+    /// The monitor's view of an address-book entry: admitted now, or pinned
+    /// earlier on this host (a returning peer's released address).
+    pub(crate) fn admits_seen(&self, addr: SocketAddr) -> bool {
+        #[cfg(test)]
+        if self.distrust_for_test.load(Ordering::SeqCst) {
+            return false;
+        }
+        let addr = canonical(addr);
+        self.may_send(addr)
+            || self
+                .history
+                .lock()
+                .map(|history| history.0.contains(&addr))
+                .unwrap_or(false)
     }
     /// Inbound handshake admission (before any answer is sent).
     pub(crate) fn may_accept(&self, src: SocketAddr) -> bool {
@@ -159,6 +181,19 @@ impl Admission {
         }
         for addr in &addrs {
             *pins.entry(*addr).or_insert(0) += 1;
+        }
+        drop(pins);
+        let mut history = self.history.lock().map_err(|_| Error::Unavailable)?;
+        let (seen, order) = &mut *history;
+        for addr in &addrs {
+            if seen.insert(*addr) {
+                order.push_back(*addr);
+            }
+        }
+        while order.len() > self.remembered {
+            if let Some(oldest) = order.pop_front() {
+                seen.remove(&oldest);
+            }
         }
         Ok(Pin {
             admission: self.clone(),

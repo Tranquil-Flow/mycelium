@@ -647,3 +647,70 @@ fn a_peer_address_change_is_never_followed_to_an_unpinned_address() {
         heard.len()
     );
 }
+/// A peer key seen before at another (since released) address: the address
+/// book still lists the old address, which was legitimately admitted then. A
+/// new connection from the same key at a new address must be kept (the
+/// owner re-dials every route epoch from a fresh socket with the same key).
+#[test]
+fn a_returning_peer_at_a_new_address_is_not_refused_for_its_old_one() {
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let mut server = host(&rt, &clock, ip("127.0.0.1"), loopback(), Channel::Router);
+    let addr = server.address().unwrap();
+    let key = SecretKey::generate();
+    let dial = |peer: &LoopbackHost<'_>| {
+        std::thread::scope(|scope| {
+            let accepted =
+                scope.spawn(|| server.accept(&clock, deadline(&clock, B::SidecarLocalHandshake)));
+            let dialed = peer
+                .connect(&addr, &clock, deadline(&clock, B::SidecarLocalHandshake))
+                .unwrap();
+            (dialed, accepted.join().unwrap().unwrap())
+        })
+    };
+    let lan_host = || {
+        LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            deadline(&clock, B::RouterClose),
+            key.clone(),
+            &[Channel::Router],
+            ip("127.0.0.1"),
+            loopback(),
+        )
+        .unwrap()
+    };
+    let mut first = lan_host();
+    let old = our_socket(&first);
+    let (dialed, accepted) = dial(&first);
+    dialed.close(0u32.into(), b"epoch over");
+    rt.block_on(async { tokio::time::timeout(span(B::RouterClose), accepted.closed()).await })
+        .unwrap();
+    drop((dialed, accepted));
+    first
+        .close(&clock, deadline(&clock, B::RouterClose))
+        .unwrap();
+    // The old address's exact pin is released after its close drain.
+    let end = Instant::now() + span(B::RouterClose) * 2;
+    while server.lan_admits(old) == Some(true) {
+        assert!(Instant::now() < end, "the old pin was never released");
+        std::thread::yield_now();
+    }
+    let mut second = lan_host();
+    assert_ne!(our_socket(&second), old);
+    let (dialed, accepted) = dial(&second);
+    // Several monitor ticks must pass without the host refusing it.
+    let kept = rt.block_on(async {
+        tokio::time::timeout(span(B::SidecarLocalHandshake), accepted.closed()).await
+    });
+    assert!(
+        kept.is_err(),
+        "the returning peer's new connection was closed: {kept:?}"
+    );
+    dialed.close(0u32.into(), b"done");
+    accepted.close(0u32.into(), b"done");
+    for host in [&mut second, &mut server] {
+        host.close(&clock, deadline(&clock, B::RouterClose))
+            .unwrap();
+    }
+}
