@@ -504,3 +504,109 @@ fn a_stop_during_the_source_preflight_is_stopped_before_any_build() {
     assert_eq!(port.port.retired, 0, "the bootstrap is kept");
     assert!(state.chain_compile_state.is_none());
 }
+
+/// Proves (REVIEW-laneB10 F1): the Stop check sits at the commit point itself. Two forced
+/// interleavings on the virtual clock: (1) Stop lands just after the preflight read made its last Stop
+/// check (the read's final chunk crosses `stop_at`, then it returns its inputs); (2) Stop lands while
+/// `retire_bootstrap` runs. In both a Stop observed before a side effect prevents it: (1) neither
+/// retire nor build; (2) the bootstrap is retired but no build is started. The step ends Stopped.
+#[test]
+fn a_stop_observed_before_the_commit_prevents_retire_and_build() {
+    use owner_run::chain::PortError;
+    use owner_run::steps::compile::{BuildPoll, CompileContext, CompileInputs, CompilePort};
+    use planner::chain_compile::BuildRequest;
+    use std::rc::Rc;
+    /// Where the forced Stop lands relative to the commit.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum Lands {
+        AfterLastPreflightCheck,
+        DuringRetire,
+    }
+    struct Interleaved {
+        port: Port,
+        world: Rc<World>,
+        lands: Lands,
+        stop_at: f64,
+    }
+    impl Interleaved {
+        fn cross_stop(&self) {
+            self.world.t.set(self.stop_at);
+        }
+    }
+    impl CompilePort for Interleaved {
+        fn compile_context(&mut self) -> Result<CompileContext, PortError> {
+            self.port.compile_context()
+        }
+        fn compile_inputs(&mut self) -> Result<CompileInputs, PortError> {
+            unreachable!("the step reads through compile_inputs_until")
+        }
+        fn compile_inputs_until(
+            &mut self,
+            stopped: &dyn Fn() -> bool,
+        ) -> Result<CompileInputs, PortError> {
+            // The read's last chunk: one Stop check, then the chunk, during which Stop lands.
+            assert!(
+                !stopped(),
+                "Stop is still clear at the last preflight check"
+            );
+            if self.lands == Lands::AfterLastPreflightCheck {
+                self.cross_stop();
+            }
+            self.port.compile_inputs()
+        }
+        fn retire_bootstrap(&mut self) -> Result<(), PortError> {
+            if self.lands == Lands::DuringRetire {
+                self.cross_stop();
+            }
+            self.port.retire_bootstrap()
+        }
+        fn start_build(&mut self, request: &BuildRequest) {
+            self.port.start_build(request);
+        }
+        fn poll_build(&mut self) -> BuildPoll {
+            self.port.poll_build()
+        }
+    }
+    let doc = fixture();
+    let rec = &doc["cases"]["build-never-finishes-timeout"];
+    let i = &rec["inputs"];
+    for (lands, retired) in [
+        (Lands::AfterLastPreflightCheck, 0),
+        (Lands::DuringRetire, 1),
+    ] {
+        let world = World::new(&json!({"stop_at": 30.0}));
+        let mut env = VEnv::new(&world);
+        let mut port = Interleaved {
+            port: Port {
+                inputs: inputs_of(i),
+                adapter: i["adapter"].clone(),
+                slice_mode: false,
+                delay: 0,
+                polls: 0,
+                retired: 0,
+                requests: vec![],
+            },
+            world: world.clone(),
+            lands,
+            stop_at: 30.0,
+        };
+        let mut state = state_of(i);
+        let mut exchange = Exchange { announced: vec![] };
+        let result = run_compile_step(&mut env, &mut exchange, &mut port, &mut state, interval());
+        assert!(
+            matches!(result, Err(StepError::Stopped)),
+            "{lands:?}: {result:?}"
+        );
+        assert_eq!(
+            port.port.retired, retired,
+            "{lands:?}: retire_bootstrap after an observed Stop"
+        );
+        assert!(
+            port.port.requests.is_empty(),
+            "{lands:?}: start_build after an observed Stop ({} build requests)",
+            port.port.requests.len()
+        );
+        assert!(state.chain_compile_state.is_none(), "{lands:?}");
+        assert_eq!(exchange.announced, ["compile"], "{lands:?}");
+    }
+}
