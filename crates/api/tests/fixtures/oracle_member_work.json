@@ -1,0 +1,2654 @@
+{
+ "scenarios": [
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": {
+        "done_bytes": 0,
+        "total_bytes": 2223
+       },
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "downloading_slice"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/.slice-work/ef9a55cdffb59204d4bc9d5546a8733e5c5a2eef9ede73293e9ed5999f88280e/partial": "sha256:6249da5c681dd8a542b8e38150a3026e02385d590a9dd94f4f83940fd856ee73"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": {
+       "done_bytes": 0,
+       "total_bytes": 2223
+      },
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "downloading_slice"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": {
+        "done_bytes": 0,
+        "total_bytes": 2223
+       },
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "slice_ready"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": {
+       "done_bytes": 0,
+       "total_bytes": 2223
+      },
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "slice_ready"
+     },
+     "t": 1002.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": {
+       "done_bytes": 0,
+       "total_bytes": 2223
+      },
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "slice_ready"
+     },
+     "t": 1003.0
+    },
+    {
+     "actions": [
+      [
+       "/api/work/preview",
+       {
+        "limits": {
+         "max_commands": 5000,
+         "max_disk_bytes": 8000,
+         "max_rss_bytes": 900000000,
+         "max_wall_seconds": 600
+        },
+        "stage_acknowledged": true
+       }
+      ],
+      [
+       "/api/work/accept",
+       {
+        "limits": {
+         "max_commands": 5000,
+         "max_disk_bytes": 8000,
+         "max_rss_bytes": 900000000,
+         "max_wall_seconds": 600
+        },
+        "preview": {
+         "preview": "work-preview"
+        },
+        "work_acknowledged": true
+       }
+      ]
+     ],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1004.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "work_running"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "work_running"
+     },
+     "t": 1004.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1005.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "serving"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "serving",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "serving"
+     },
+     "t": 1005.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "native_pump_state_unwritable",
+       "issued_at": 1006.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": "native_pump_state_unwritable",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "serving",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1006.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1007.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "stopped"
+      }
+     ],
+     "slice_files": {
+      "a13-b18-20261109T120000Z/stage-0/a.bin": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+      "a13-b18-20261109T120000Z/stage-0/b.bin": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66"
+     },
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "stopped",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "stopped"
+     },
+     "t": 1007.0
+    }
+   ],
+   "name": "slice_fetch_then_work_running",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "collect",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "join"
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1003.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "offer",
+     "value": {
+      "archive_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "offer_id": "work-offer-1",
+      "run_id": "a13-b18-20261109T120000Z"
+     }
+    },
+    {
+     "op": "time",
+     "t": 1004.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1005.0
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "serving",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1006.0
+    },
+    {
+     "op": "native",
+     "value": {
+      "error_code": "native_pump_state_unwritable",
+      "state": "blocked"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1007.0
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "stopped",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "member_memory_cap_below_share",
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "member_memory_cap_below_share",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "member_storage_cap_below_share",
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "member_storage_cap_below_share",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1002.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "member_wall_cap_below_share",
+       "issued_at": 1003.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "member_wall_cap_below_share",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1003.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "member_wall_limit_invalid",
+       "issued_at": 1004.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "member_wall_limit_invalid",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1004.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {},
+     "status": {
+      "detail": "member_wall_limit_invalid",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1005.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {},
+     "status": {
+      "detail": "member_wall_limit_invalid",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1006.0
+    }
+   ],
+   "name": "share_refusals_by_name",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "collect",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "caps",
+     "value": {
+      "max_memory_bytes": 899999999
+     }
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "caps",
+     "value": {
+      "max_memory_bytes": true,
+      "storage_bytes": 7999
+     }
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "caps",
+     "value": {
+      "max_wall_seconds": 599
+     }
+    },
+    {
+     "op": "time",
+     "t": 1003.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "caps",
+     "value": {}
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 10
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1004.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 3601
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1005.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600.0
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1006.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": {
+        "done_bytes": 0,
+        "total_bytes": 2223
+       },
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "downloading_slice"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": {
+       "done_bytes": 0,
+       "total_bytes": 2223
+      },
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "downloading_slice"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "slice_plan_digest_mismatch",
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "slice_plan_digest_mismatch",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1002.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {},
+     "status": {
+      "detail": "slice_plan_digest_mismatch",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1003.0
+    }
+   ],
+   "name": "a_slice_that_does_not_match_its_digest_is_refused",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "collect",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2201,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "join"
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1003.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": {
+        "done_bytes": 0,
+        "total_bytes": 2223
+       },
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "downloading_slice"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": {
+       "done_bytes": 0,
+       "total_bytes": 2223
+      },
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "downloading_slice"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "slice_download_limit_exceeded",
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "error"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "slice_download_limit_exceeded",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "error"
+     },
+     "t": 1002.0
+    }
+   ],
+   "name": "a_slice_larger_than_the_storage_share_is_refused",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "collect",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "member_resources": {
+       "end": 14,
+       "max_disk_bytes": 2000,
+       "max_rss_bytes": 900000000,
+       "node_id": "node-local",
+       "start": 0
+      },
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "node_slice_plan": {
+       "download_bytes": 2200,
+       "files": [
+        {
+         "content_digest": "sha256:d642eff070e348aac7193154c28f1ffa26ce05b5e4a9f4a86aefdb49e131cc63",
+         "path": "stage-0/a.bin",
+         "segments": [
+          {
+           "length": 1000,
+           "offset": 0,
+           "sha256": "sha256:3f2c46e9b1cc9d01000a3a27a630137d88a6c8e695c0bce2f52e38a61ec7b0b2",
+           "source_offset": 100,
+           "source_path": "model-00001.safetensors"
+          },
+          {
+           "length": 500,
+           "offset": 1000,
+           "sha256": "sha256:cce688c6a86ab72c72c438d7a67375de467ae03cce62a6d8b43dc243d8a44125",
+           "source_offset": 2000,
+           "source_path": "model-00001.safetensors"
+          }
+         ],
+         "size_bytes": 1500
+        },
+        {
+         "content_digest": "sha256:dc5878c0304fd7599ed327b5ae7cac79ca3f36f7ee2901d7dd4b08f85a4efa66",
+         "path": "stage-0/b.bin",
+         "segments": [
+          {
+           "inline_base64": "c3RhZ2UtaGVhZGVyLTAxMjM0NTY3ODk=",
+           "length": 23,
+           "offset": 0,
+           "sha256": "sha256:651365947257b86a02e6a084aaf5cf7fcf8bc004104b2c762483d331de6be72b"
+          },
+          {
+           "length": 700,
+           "offset": 23,
+           "sha256": "sha256:576bdbbdaf4e98f0cedb7934e5f5cc86b3ca822a9e6b6ea0851bfd9d5db1d68d",
+           "source_offset": 0,
+           "source_path": "model-00002.safetensors"
+          }
+         ],
+         "size_bytes": 723
+        }
+       ],
+       "inline_bytes": 23,
+       "model_id": "Qwen/Qwen3-0.6B",
+       "node_id": "node-local",
+       "node_plan_digest": "sha256:bcb14887f848d2ed7bd0975452cd5fea2140cb238a547f6ffa12f7c24d8befab",
+       "plan_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+       "protocol": "mycelium.a13_node_slice_plan.v1",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca",
+       "source_files": [
+        {
+         "path": "model-00001.safetensors",
+         "size_bytes": 5000
+        },
+        {
+         "path": "model-00002.safetensors",
+         "size_bytes": 3000
+        }
+       ]
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "join"
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "observe",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [
+      [
+       "/api/control/stop",
+       {}
+      ],
+      [
+       "/api/staging/cleanup/accept",
+       {
+        "archive_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "cleanup_acknowledged": true,
+        "offer_id": "stage-hello"
+       }
+      ]
+     ],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "cleaning_up"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "observe",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "cleaning_up"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "observe",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1002.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "owner_run_not_active",
+       "issued_at": 1003.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "idle"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "owner_run_not_active",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "observe",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1003.0
+    },
+    {
+     "actions": [
+      [
+       "/api/control/stop",
+       {}
+      ],
+      [
+       "/api/staging/cleanup/accept",
+       {
+        "archive_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "cleanup_acknowledged": true,
+        "offer_id": "stage-hello"
+       }
+      ]
+     ],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": true,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1004.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "idle"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "idle",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1004.0
+    }
+   ],
+   "name": "owner_requested_cleanup_is_done_first",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "observe",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "cleanup",
+     "value": {
+      "archive_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "offer_id": "stage-hello"
+     }
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "cleanup",
+     "value": {
+      "archive_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "offer_id": "stage-hello"
+     }
+    },
+    {
+     "op": "refuse",
+     "value": "owner_run_not_active"
+    },
+    {
+     "op": "time",
+     "t": 1003.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "refuse",
+     "value": null
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "idle",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "time",
+     "t": 1004.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [
+      [
+       "/api/control/stop",
+       {}
+      ]
+     ],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": null,
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "idle"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "idle",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "idle",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1001.0
+    }
+   ],
+   "name": "no_owner_run_never_keeps_a_worker",
+   "ops": [
+    {
+     "op": "native",
+     "value": {
+      "state": "running"
+     }
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "idle",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "log": [
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1000.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "collect",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1000.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "work_offer_not_published",
+       "issued_at": 1001.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "work_offer_not_published",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1001.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "worker_wall_limit_exceeded",
+       "issued_at": 1002.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "worker_wall_limit_exceeded",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1002.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "native_worker_failed",
+       "issued_at": 1003.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "reported"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "native_worker_failed",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "reported"
+     },
+     "t": 1003.0
+    },
+    {
+     "actions": [],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": "resource_power_policy_violation",
+       "issued_at": 1004.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "idle"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": "resource_power_policy_violation",
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "idle"
+     },
+     "t": 1004.0
+    },
+    {
+     "actions": [
+      [
+       "/api/work/preview",
+       {
+        "limits": {
+         "max_commands": 5000,
+         "max_disk_bytes": 8000,
+         "max_rss_bytes": 900000000,
+         "max_wall_seconds": 600
+        },
+        "stage_acknowledged": true
+       }
+      ],
+      [
+       "/api/work/accept",
+       {
+        "limits": {
+         "max_commands": 5000,
+         "max_disk_bytes": 8000,
+         "max_rss_bytes": 900000000,
+         "max_wall_seconds": 600
+        },
+        "preview": {
+         "preview": "work-preview"
+        },
+        "work_acknowledged": true
+       }
+      ]
+     ],
+     "reports": [
+      {
+       "deployment_id": "dep-b18",
+       "descriptor": {
+        "card": "a13-b18-20261109T120000Z",
+        "slice": false,
+        "statement": {
+         "expires_at": 1600.0,
+         "issued_at": 1000.0
+        }
+       },
+       "detail": null,
+       "issued_at": 1005.0,
+       "model": {
+        "model_id": "Qwen/Qwen3-0.6B",
+        "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+       },
+       "progress": null,
+       "protocol": "mycelium.a13_demo_member_report.v1",
+       "run_id": "a13-b18-20261109T120000Z",
+       "state": "work_running"
+      }
+     ],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "work_running"
+     },
+     "t": 1005.0
+    },
+    {
+     "actions": [],
+     "reports": [],
+     "slice_files": {},
+     "status": {
+      "detail": null,
+      "error_http": null,
+      "local": true,
+      "model_id": "Qwen/Qwen3-0.6B",
+      "phase": "work",
+      "progress": null,
+      "run_id": "a13-b18-20261109T120000Z",
+      "sources": null,
+      "state": "work_running"
+     },
+     "t": 1006.0
+    }
+   ],
+   "name": "whole_snapshot_work_waits_by_name",
+   "ops": [
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "collect",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": false
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "announce",
+     "value": {
+      "deployment_id": "dep-b18",
+      "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "model": {
+       "model_id": "Qwen/Qwen3-0.6B",
+       "resolved_commit": "c1899de289a04d12100db370d81485cdf75e47ca"
+      },
+      "phase": "work",
+      "run_id": "a13-b18-20261109T120000Z",
+      "slice_mode": false,
+      "work_limits": {
+       "max_commands": 5000,
+       "max_disk_bytes": 8000,
+       "max_rss_bytes": 900000000,
+       "max_wall_seconds": 600
+      }
+     }
+    },
+    {
+     "op": "time",
+     "t": 1001.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "native",
+     "value": {
+      "error_code": "worker_wall_limit_exceeded",
+      "state": "failed"
+     }
+    },
+    {
+     "op": "time",
+     "t": 1002.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "native",
+     "value": {
+      "error_code": "Not A Code",
+      "state": "failed"
+     }
+    },
+    {
+     "op": "time",
+     "t": 1003.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "native",
+     "value": {
+      "state": "stopped"
+     }
+    },
+    {
+     "op": "offer",
+     "value": {
+      "archive_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "offer_id": "work-offer-1",
+      "run_id": "a13-b18-20261109T120000Z"
+     }
+    },
+    {
+     "op": "refuse",
+     "value": "resource_power_policy_violation"
+    },
+    {
+     "op": "time",
+     "t": 1004.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "refuse",
+     "value": null
+    },
+    {
+     "op": "time",
+     "t": 1005.0
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "time",
+     "t": 1006.0
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  }
+ ],
+ "source": "demo_target.py+slice_acquisition.py @ f4e366e9 (executed, python3.13)"
+}
