@@ -2834,8 +2834,8 @@ fn run() -> Result<(), String> {
     let serve = {
         let (core, app) = (core.clone(), app.clone());
         thread::spawn(move || -> Result<(), String> {
-            // Every connection thread is retained and joined before the listener thread ends,
-            // so the quit answer is on the wire before the process exits.
+            // Every live connection thread is retained and joined before the listener thread
+            // ends, so the quit answer is on the wire before the process exits.
             let mut connections: Vec<thread::JoinHandle<()>> = Vec::new();
             // A listener that fails after a quit closed the core still ended by that quit.
             let unless_quit = |code: String| {
@@ -2876,6 +2876,14 @@ fn run() -> Result<(), String> {
                 match accepted {
                     Ok((stream, _)) => {
                         deferred = false;
+                        // Ended connections are joined as new ones arrive: an ended thread
+                        // that is never joined keeps its stack mapped (one per status poll).
+                        let (ended, live): (Vec<_>, Vec<_>) =
+                            connections.drain(..).partition(|c| c.is_finished());
+                        connections = live;
+                        for handle in ended {
+                            handle.join().unwrap_or(());
+                        }
                         // Accepted sockets must block (the listener is polled non-blocking).
                         if stream.set_nonblocking(false).is_err() {
                             continue;

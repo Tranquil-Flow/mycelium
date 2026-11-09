@@ -112,6 +112,7 @@ not (
       | test(=a_listener_out_of_descriptors_keeps_serving_once_they_free)
       | test(=a_fatal_listener_end_closes_the_launcher_with_its_errno)
       | test(=aborted_clients_do_not_delay_the_next_accept_by_a_poll_each)
+      | test(=ended_connections_do_not_keep_their_threads)
      ))
   | (binary_id(=obligations::package_dispositions) & test(=original_637_gaps_are_exactly_dispositioned_and_each_is_required))
   | (binary_id(=protocol::planner_snapshot_contracts) & test(=planner_snapshot_reconstructs_every_field_from_independent_gossip_evidence))
