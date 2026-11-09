@@ -7,8 +7,8 @@
 use api::{
     http::{Reply, Request},
     product_app::{
-        self, DEFAULT_REPLAY_LIMIT, EVENTS_PATH, EXPORT_PATH, Events, ProductApp, SNAPSHOT_PATH,
-        STATE_FILE, SourceError, Sources,
+        self, Composition, DEFAULT_REPLAY_LIMIT, EVENTS_PATH, EXPORT_PATH, Events, ProductApp,
+        SNAPSHOT_PATH, STATE_FILE, SourceError, Sources, StateBinding,
     },
     product_projector::ProductProjector,
 };
@@ -106,13 +106,23 @@ fn clock() -> (Arc<AtomicU64>, Box<dyn Fn() -> u64 + Send + Sync>) {
     (now, Box::new(move || read.fetch_add(1, Ordering::SeqCst)))
 }
 
+const SWARM: &str = "sw-0123456789abcdef0123";
+
+/// The state root of the test swarm.
+fn bound(root: &Path) -> StateBinding<'_> {
+    StateBinding {
+        root,
+        swarm_id: SWARM,
+    }
+}
+
 fn app(sources: Arc<Fake>, limit: usize, root: Option<&Path>) -> ProductApp {
     ProductApp::new(
         ProductProjector::new(&[3; 32]).unwrap(),
         sources,
         clock().1,
         limit,
-        root,
+        root.map(bound),
     )
     .unwrap()
 }
@@ -356,7 +366,7 @@ fn the_window_survives_a_restart_and_the_sequence_continues() {
         Fake::owner(),
         clock().1,
         limit + 1,
-        Some(&root),
+        Some(bound(&root)),
     );
     assert_eq!(refused.err().unwrap().0, "product_evidence_state_corrupt");
     let mut tampered: Value = serde_json::from_slice(&before).unwrap();
@@ -367,7 +377,7 @@ fn the_window_survives_a_restart_and_the_sequence_continues() {
         Fake::owner(),
         clock().1,
         limit,
-        Some(&root),
+        Some(bound(&root)),
     );
     assert_eq!(refused.err().unwrap().0, "product_evidence_state_corrupt");
     // A world-readable root is refused (owner-only state).
@@ -378,7 +388,7 @@ fn the_window_survives_a_restart_and_the_sequence_continues() {
         Fake::owner(),
         clock().1,
         limit,
-        Some(&open),
+        Some(bound(&open)),
     );
     assert_eq!(
         refused.err().unwrap().0,
@@ -453,4 +463,352 @@ fn a_replay_limit_outside_the_oracle_bounds_is_refused() {
         );
         assert_eq!(refused.err().unwrap().0, "product_replay_limit_invalid");
     }
+}
+
+/// `state.MAX_STATE_BYTES` (`state.py:18`): the stored window's whole encoding.
+const MAX_STATE_BYTES: usize = 32 * 1024 * 1024;
+
+/// An owner with `count` members: each snapshot then carries one device, readiness row and notice
+/// per member, which makes a few publications outgrow the stored-window cap.
+fn crowd(count: usize) -> Arc<Fake> {
+    let fake = Fake::owner();
+    *fake.members.lock().unwrap() = Some(
+        (0..count)
+            .map(|i| member(&format!("crowd-node-{i:05}"), "RUNNING"))
+            .collect(),
+    );
+    fake
+}
+
+fn stored_events(path: &Path) -> Vec<Value> {
+    let stored: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    stored["events"].as_array().unwrap().clone()
+}
+
+/// B13f F1, read side (`_read_private`, `state.py:179-208`): a stored window of exactly 32 MiB is
+/// read (JSON allows the trailing whitespace that pads it there); one byte more is refused
+/// `product_evidence_state_too_large` before it is parsed, and the file is left exactly as it was.
+#[test]
+fn a_stored_window_over_32_mib_is_refused_and_one_at_the_cap_is_read() {
+    let scratch = Scratch::new("cap-read");
+    let root = private_dir(&scratch.0, "product");
+    {
+        let app = app(Fake::owner(), 4, Some(&root));
+        for _ in 0..2 {
+            app.snapshot().unwrap();
+        }
+    }
+    let path = root.join(STATE_FILE);
+    let mut bytes = fs::read(&path).unwrap();
+    assert!(bytes.len() < MAX_STATE_BYTES);
+    bytes.resize(MAX_STATE_BYTES, b' ');
+    fs::write(&path, &bytes).unwrap();
+    let at_cap = app(Fake::owner(), 4, Some(&root));
+    assert_eq!(
+        at_cap.retained(),
+        2,
+        "a window of exactly 32 MiB is restored"
+    );
+    drop(at_cap);
+    bytes.push(b' ');
+    fs::write(&path, &bytes).unwrap();
+    let refused = ProductApp::new(
+        ProductProjector::new(&[3; 32]).unwrap(),
+        Fake::owner(),
+        clock().1,
+        4,
+        Some(bound(&root)),
+    );
+    assert_eq!(refused.err().unwrap().0, "product_evidence_state_too_large");
+    assert_eq!(fs::read(&path).unwrap(), bytes, "never rewritten");
+}
+
+/// B13f F1, write side (`write`, `state.py:362-383`; `_publish`, `app.py:276-280`): when the window's
+/// encoding would pass 32 MiB, the oldest events are dropped until it fits, and only those: the stored
+/// window plus the next older event would not fit. Memory then holds exactly the stored window, the
+/// cursors stay contiguous and end at the newest publication.
+/// The restored window is one real projection of a crowded swarm re-numbered as consecutive
+/// publications (stored-file input), so the test needs two projections, not 32 MiB of them.
+#[test]
+fn a_window_over_32_mib_keeps_only_the_newest_events_that_fit() {
+    let scratch = Scratch::new("cap-write");
+    let root = private_dir(&scratch.0, "product");
+    let path = root.join(STATE_FILE);
+    let limit = 64;
+    let projected = app(crowd(CROWD), limit, None).snapshot().unwrap();
+    let event = |cursor: u64| {
+        let mut snapshot = projected.clone();
+        snapshot["publication"]["cursor"] = json!(cursor);
+        snapshot["publication"]["generation"] = json!(cursor);
+        // The explorer is optional in a stored event (older publications have none); without it each
+        // restored event is validated without re-deriving its explorer, which keeps this test fast.
+        snapshot.as_object_mut().unwrap().remove("route_explorer");
+        json!({"protocol": "mycelium.product_event.v1", "cursor": cursor,
+               "previous_cursor": cursor - 1, "event_kind": "snapshot_published",
+               "snapshot": snapshot})
+    };
+    let document = |events: &[Value]| {
+        serde_json::to_vec(&json!({"protocol": "mycelium.product_evidence_state.v1",
+                                    "binding": SWARM, "replay_limit": limit, "events": events}))
+        .unwrap()
+    };
+    // The largest window that still fits: one event more would not.
+    let mut window: Vec<Value> = Vec::new();
+    let mut size = document(&window).len();
+    loop {
+        let next = event(window.len() as u64 + 1);
+        let grows = serde_json::to_vec(&next).unwrap().len() + usize::from(!window.is_empty());
+        if size + grows > MAX_STATE_BYTES {
+            break;
+        }
+        size += grows;
+        window.push(next);
+    }
+    assert!(
+        window.len() >= 2 && window.len() < limit,
+        "{}",
+        window.len()
+    );
+    let stored = document(&window);
+    assert_eq!(stored.len(), size);
+    fs::write(&path, stored).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let app = app(crowd(CROWD), limit, Some(&root));
+    assert_eq!(app.retained(), window.len());
+
+    app.snapshot().unwrap();
+    let published = window.len() as u64 + 1;
+    let size = fs::metadata(&path).unwrap().len() as usize;
+    let stored = stored_events(&path);
+    assert!(size <= MAX_STATE_BYTES, "{size}");
+    assert!(stored.len() < published as usize, "nothing was dropped");
+    assert_eq!(
+        app.retained(),
+        stored.len(),
+        "memory holds the stored window"
+    );
+    let cursors: Vec<u64> = stored
+        .iter()
+        .map(|e| e["cursor"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        cursors,
+        ((published + 1 - stored.len() as u64)..=published).collect::<Vec<_>>()
+    );
+    // Only the oldest went: what is kept is the tail of the old window plus the new event, and the
+    // next older event would have pushed the encoding over the cap.
+    let kept = stored.len() - 1;
+    assert_eq!(stored[..kept], window[window.len() - kept..]);
+    let next_older = &window[window.len() - kept - 1];
+    let with_it = size + serde_json::to_vec(next_older).unwrap().len() + 1;
+    assert!(with_it > MAX_STATE_BYTES, "{with_it}");
+}
+
+const CROWD: usize = 1_500;
+
+fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+}
+
+fn open_for(swarm: &str, root: &Path) -> Result<ProductApp, &'static str> {
+    ProductApp::new(
+        ProductProjector::new(&[4; 32]).unwrap(),
+        Fake::owner(),
+        clock().1,
+        DEFAULT_REPLAY_LIMIT,
+        Some(StateBinding {
+            root,
+            swarm_id: swarm,
+        }),
+    )
+    .map_err(|e| e.0)
+}
+
+/// B13f F2: a stored window belongs to its swarm (v0.1.4 kept one window per serving run directory,
+/// so a window never outlived its swarm). Another swarm's window, and one stored before windows were
+/// bound, is set aside when the application opens (same bytes, 0600) and never restored: the new
+/// swarm publishes from cursor 1, and its own window is restored as before.
+#[test]
+fn a_window_of_another_swarm_is_set_aside_and_never_restored() {
+    let scratch = Scratch::new("foreign");
+    let root = private_dir(&scratch.0, "product");
+    let path = root.join(STATE_FILE);
+    {
+        let a = app(Fake::owner(), DEFAULT_REPLAY_LIMIT, Some(&root));
+        for _ in 0..3 {
+            a.snapshot().unwrap();
+        }
+        assert!(a.set_aside().is_none());
+    }
+    let window_a = fs::read(&path).unwrap();
+    let stored: Value = serde_json::from_slice(&window_a).unwrap();
+    assert_eq!(stored["binding"], SWARM);
+
+    let other = "sw-fedcba9876543210fedc";
+    let b = open_for(other, &root).unwrap();
+    let aside = b.set_aside().unwrap().clone();
+    assert_eq!(aside.reason, "product_evidence_state_foreign_swarm");
+    assert!(
+        aside
+            .file_name
+            .starts_with("product-evidence-state.v1.json.foreign-swarm-")
+    );
+    assert_eq!(fs::read(root.join(&aside.file_name)).unwrap(), window_a);
+    assert_eq!(mode(&root.join(&aside.file_name)), 0o600);
+    match b.events(None).unwrap() {
+        Events::After(events) => {
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0]["cursor"], 1);
+        }
+        Events::Stale => panic!("a fresh window is never stale"),
+    }
+    drop(b);
+    let b = open_for(other, &root).unwrap();
+    assert!(b.set_aside().is_none(), "its own window is restored");
+    assert_eq!(b.retained(), 1);
+    drop(b);
+
+    // A window written before windows were bound (B13's three-key document) is set aside too.
+    let mut unbound: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    unbound.as_object_mut().unwrap().remove("binding");
+    let unbound = serde_json::to_vec(&unbound).unwrap();
+    fs::write(&path, &unbound).unwrap();
+    let b = open_for(other, &root).unwrap();
+    let aside = b.set_aside().unwrap().clone();
+    assert_eq!(aside.reason, "product_evidence_state_unbound");
+    assert_eq!(fs::read(root.join(&aside.file_name)).unwrap(), unbound);
+    assert_eq!(b.retained(), 0);
+    drop(b);
+    // Both earlier windows are still there, next to the new one.
+    let mut names: Vec<String> = fs::read_dir(&root)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 2, "{names:?}");
+    // An invalid swarm id is refused before anything is read.
+    assert_eq!(
+        open_for("sw/../x", &root).err(),
+        Some("product_evidence_state_binding_invalid")
+    );
+}
+
+/// B13f F3: a window that cannot be read refuses the application (v0.1.4: `state.py:315-350`, the
+/// serving start failed) with a typed reason the routes answer in their 503 body. Only the owner's
+/// explicit reset moves it: the file keeps its bytes, becomes 0600, and the next application starts a
+/// fresh window. A readable window is never reset, and a file that is not a plain owner-only file
+/// (a symlink here) is left where it is.
+#[test]
+fn a_refused_window_is_moved_aside_only_by_an_explicit_reset() {
+    let scratch = Scratch::new("reset");
+    let root = private_dir(&scratch.0, "product");
+    let path = root.join(STATE_FILE);
+    let reset = |at: u64| product_app::reset_state(bound(&root), DEFAULT_REPLAY_LIMIT, at);
+    {
+        let healthy = app(Fake::owner(), DEFAULT_REPLAY_LIMIT, Some(&root));
+        healthy.snapshot().unwrap();
+    }
+    let healthy = fs::read(&path).unwrap();
+    assert_eq!(
+        reset(NOW).err().unwrap().0,
+        "product_evidence_state_not_refused"
+    );
+    assert_eq!(fs::read(&path).unwrap(), healthy);
+
+    // Corrupt: refused, and the routes say why (not retryable until the reset).
+    let corrupt = b"{\"protocol\": \"mycelium.product_evidence_state.v1\"".to_vec();
+    fs::write(&path, &corrupt).unwrap();
+    let refused = ProductApp::new(
+        ProductProjector::new(&[3; 32]).unwrap(),
+        Fake::owner(),
+        clock().1,
+        DEFAULT_REPLAY_LIMIT,
+        Some(bound(&root)),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(refused.0, "product_evidence_state_corrupt");
+    for (path, code) in [
+        (SNAPSHOT_PATH, "product_snapshot_unavailable"),
+        (EVENTS_PATH, "product_events_unavailable"),
+        (EXPORT_PATH, "product_export_unavailable"),
+    ] {
+        let reply =
+            product_app::handle_composed(Composition::Refused(refused), &get(path, &[])).unwrap();
+        assert_eq!(reply.status, 503);
+        assert_eq!(
+            json_of(&reply),
+            json!({"protocol": "mycelium.product_ui.error.v1", "code": code,
+                   "retryable": false, "reason": "product_evidence_state_corrupt"})
+        );
+    }
+    let mut post = get(SNAPSHOT_PATH, &[]);
+    post.method = "POST".into();
+    let reply = product_app::handle_composed(Composition::Refused(refused), &post).unwrap();
+    assert_eq!(reply.status, 405);
+    assert_eq!(fs::read(&path).unwrap(), corrupt, "refusing never rewrites");
+    let done = reset(NOW).unwrap();
+    assert_eq!(done.reason, "product_evidence_state_corrupt");
+    assert_eq!(
+        done.file_name,
+        format!("product-evidence-state.v1.json.reset-{NOW}")
+    );
+    assert_eq!(fs::read(root.join(&done.file_name)).unwrap(), corrupt);
+    assert!(!path.exists());
+    let fresh = app(Fake::owner(), DEFAULT_REPLAY_LIMIT, Some(&root));
+    assert_eq!(fresh.snapshot().unwrap()["publication"]["cursor"], 1);
+    drop(fresh);
+    let reply = product_app::reset_reply(Ok(done)).unwrap();
+    assert_eq!(reply.status, 200);
+    assert_eq!(
+        json_of(&reply)["protocol"],
+        "mycelium.product_evidence_reset.v1"
+    );
+
+    // Not owner-only (0644): refused as unavailable; the reset makes the set-aside copy 0600.
+    let open = fs::read(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    let refused = open_for(SWARM, &root).err().unwrap();
+    assert_eq!(refused, "product_evidence_state_unavailable");
+    let done = reset(NOW).unwrap();
+    assert_eq!(done.reason, "product_evidence_state_unavailable");
+    assert_eq!(
+        done.file_name,
+        format!("product-evidence-state.v1.json.reset-{NOW}-1"),
+        "an earlier set-aside name is never reused"
+    );
+    assert_eq!(fs::read(root.join(&done.file_name)).unwrap(), open);
+    assert_eq!(mode(&root.join(&done.file_name)), 0o600);
+
+    // A symlink in the window's place: refused, and the reset leaves it (and its target) alone.
+    let target = scratch.0.join("elsewhere.json");
+    fs::write(&target, &healthy).unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    assert_eq!(
+        open_for(SWARM, &root).err(),
+        Some("product_evidence_state_unavailable")
+    );
+    assert_eq!(
+        reset(NOW + 1).err().unwrap().0,
+        "product_evidence_state_unavailable"
+    );
+    assert!(
+        fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&target).unwrap(), healthy);
+    let reply = product_app::reset_reply(Err(product_app::AppError(
+        "product_evidence_state_unavailable",
+    )))
+    .unwrap();
+    assert_eq!(
+        (reply.status, json_of(&reply)),
+        (
+            409,
+            json!({"protocol": "mycelium.product_ui.error.v1",
+                   "code": "product_evidence_state_unavailable", "retryable": false})
+        )
+    );
 }

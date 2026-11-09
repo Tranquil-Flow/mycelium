@@ -104,6 +104,7 @@ not (
      (test(=a_document_between_64_kib_and_the_cap_is_accepted)
       | test(=a_document_over_the_cap_is_refused_as_authority_state_invalid)
      ))
+  | (binary_id(=api::product_app) & test(=a_window_over_32_mib_keeps_only_the_newest_events_that_fit))
   | (binary_id(=api::seed_http) & test(=seed_http_client_equals_the_executed_oracle))
   | (binary_id(=api::headless_signals) &
      (test(=sigint_closes_the_launcher_as_v014)

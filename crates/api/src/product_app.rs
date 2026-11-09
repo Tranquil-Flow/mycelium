@@ -9,6 +9,25 @@
 //! older than the window answers `409 product_cursor_stale`. The window survives a restart in
 //! `product-evidence-state.v1.json` (0600, atomic, at most 32 MiB) and the publication sequence resumes
 //! from it. Source readers are read-only; a failing reader degrades its source with a bounded reason.
+//!
+//! B13f (v0.2 divergences, documented in REPORT-laneB13): the stored window is bound to its swarm.
+//! v0.1.4 kept one window per serving run directory (`serving-runs/<run_id>/registry/product`), so a
+//! window never outlived its swarm; here the window lives in the owner's state root, so the document
+//! names its swarm and a window of another swarm (or an unbound one) is set aside, never restored or
+//! deleted. A window that cannot be read is refused with its typed reason (`reason` in the 503 body)
+//! until the owner resets it ([`reset_state`], `POST /api/v1/product/reset`): the file is moved aside
+//! with its bytes kept and mode 0600, and a fresh window starts.
+//!
+//! Other known differences from v0.1.4 (classes D/E; listed in REPORT-laneB13):
+//! - The routes exist whenever the owner's seed runs (v0.1.4: only while serving).
+//! - The desktop checks the session before the method: an anonymous non-GET gets `401`, where the
+//!   v0.1.4 gateway answered `405` first (`mycelium_ui_gateway/app.py:313-328`: route, method, query,
+//!   then session); a query string is refused by the desktop (`400 path_rejected`, its own envelope).
+//! - Member rows are the seed's rows without v0.1.4's A9 authority-ledger overlay (`_a9_overlaid`,
+//!   `supervisor.py:2124,2193`; `mycelium_a9_authority_ledger.overlay_membership`). v0.2 has no A9
+//!   withdrawal publisher, so that ledger would be empty and the overlay the identity; a v0.1.4
+//!   withdrawal raised `authority_generation` and cleared `activation_eligible` (and the codec's
+//!   `activation_protocol`, or replaced `runtime_backend` for an unknown registry value).
 use crate::{
     http::{Reply, Request},
     preferences::private_write,
@@ -30,6 +49,9 @@ pub const SNAPSHOT_PATH: &str = "/api/v1/product/snapshot";
 pub const EVENTS_PATH: &str = "/api/v1/product/events";
 pub const EXPORT_PATH: &str = "/api/v1/product/export";
 pub const PATHS: [&str; 3] = [SNAPSHOT_PATH, EVENTS_PATH, EXPORT_PATH];
+/// The owner's explicit reset of a refused stored window (B13f; no v0.1.4 counterpart).
+pub const RESET_PATH: &str = "/api/v1/product/reset";
+const RESET_PROTOCOL: &str = "mycelium.product_evidence_reset.v1";
 /// `ProductEvidenceApplication(replay_limit=128)` and its `1 <= replay_limit <= 4_096` (`app.py:57,71-77`).
 pub const DEFAULT_REPLAY_LIMIT: usize = 128;
 pub const MAX_REPLAY_LIMIT: usize = 4_096;
@@ -98,11 +120,38 @@ fn reason(error: &SourceError, fallback: &str) -> String {
     }
 }
 
+/// Where a window persists and the swarm it belongs to.
+#[derive(Clone, Copy, Debug)]
+pub struct StateBinding<'a> {
+    /// An already-created private (0700) directory, e.g. from [`private_root`].
+    pub root: &'a Path,
+    /// The swarm the window is published for.
+    pub swarm_id: &'a str,
+}
+
+/// A stored window that was moved aside instead of being restored: its bytes are kept, mode 0600.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SetAside {
+    /// Why: `product_evidence_state_foreign_swarm`, `product_evidence_state_unbound` (opened), or the
+    /// refusal the owner reset.
+    pub reason: &'static str,
+    /// The new file name, in the same directory.
+    pub file_name: String,
+}
+
+/// What a stored window turned out to be.
+enum Stored {
+    Window(Vec<Value>),
+    /// A readable window of another swarm (or one written before windows were bound).
+    Foreign(&'static str),
+}
+
 /// The owner-only replay store under an already-created private root (`ProductEvidenceStateStore`).
 struct Store {
     root: PathBuf,
     identity: (u64, u64),
     limit: usize,
+    binding: String,
 }
 
 fn root_identity(root: &Path) -> Result<(u64, u64), AppError> {
@@ -117,12 +166,24 @@ fn root_identity(root: &Path) -> Result<(u64, u64), AppError> {
     Ok((meta.dev(), meta.ino()))
 }
 
+/// The binding's alphabet of v0.1.4's bound store (`TransportHistoryStateStore`, `state.py:395-404`).
+fn valid_binding(binding: &str) -> bool {
+    (1..=128).contains(&binding.len())
+        && binding
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+}
+
 impl Store {
-    fn open(root: &Path, limit: usize) -> Result<Self, AppError> {
+    fn open(state: StateBinding<'_>, limit: usize) -> Result<Self, AppError> {
+        if !valid_binding(state.swarm_id) {
+            return Err(AppError("product_evidence_state_binding_invalid"));
+        }
         Ok(Self {
-            identity: root_identity(root)?,
-            root: root.to_path_buf(),
+            identity: root_identity(state.root)?,
+            root: state.root.to_path_buf(),
             limit,
+            binding: state.swarm_id.to_owned(),
         })
     }
     fn revalidate(&self) -> Result<(), AppError> {
@@ -131,7 +192,7 @@ impl Store {
         }
         Ok(())
     }
-    fn load(&self) -> Result<Vec<Value>, AppError> {
+    fn load(&self) -> Result<Stored, AppError> {
         self.revalidate()?;
         let corrupt = AppError("product_evidence_state_corrupt");
         let unavailable = AppError("product_evidence_state_unavailable");
@@ -142,7 +203,9 @@ impl Store {
             .open(&path)
         {
             Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Stored::Window(Vec::new()));
+            }
             Err(_) => return Err(unavailable),
         };
         let meta = file.metadata().map_err(|_| unavailable)?;
@@ -162,12 +225,25 @@ impl Store {
         }
         let document: Value = serde_json::from_slice(&raw).map_err(|_| corrupt)?;
         let fields = document.as_object().ok_or(corrupt)?;
+        // Whose window it is decides before its content: another swarm's window is never read.
+        if fields.get("protocol") == Some(&json!(STATE_PROTOCOL)) {
+            match fields.get("binding") {
+                Some(Value::String(bound)) if *bound != self.binding => {
+                    return Ok(Stored::Foreign("product_evidence_state_foreign_swarm"));
+                }
+                None if fields.len() == 3 => {
+                    return Ok(Stored::Foreign("product_evidence_state_unbound"));
+                }
+                _ => {}
+            }
+        }
         let events = fields
             .get("events")
             .and_then(Value::as_array)
             .filter(|events| events.len() <= self.limit)
             .ok_or(corrupt)?;
-        if fields.len() != 3
+        if fields.len() != 4
+            || fields.get("binding") != Some(&json!(self.binding))
             || fields.get("protocol") != Some(&json!(STATE_PROTOCOL))
             || fields.get("replay_limit") != Some(&json!(self.limit))
             || events
@@ -180,7 +256,7 @@ impl Store {
             return Err(corrupt);
         }
         self.revalidate()?;
-        Ok(events.clone())
+        Ok(Stored::Window(events.clone()))
     }
     /// `write` (`state.py:362-383`): the newest events whose encoding fits `MAX_STATE_BYTES`.
     fn write(&self, events: &VecDeque<Value>) -> Result<usize, AppError> {
@@ -189,6 +265,7 @@ impl Store {
         let payload = loop {
             let document = json!({
                 "protocol": STATE_PROTOCOL,
+                "binding": self.binding,
                 "replay_limit": self.limit,
                 "events": retained,
             });
@@ -207,6 +284,79 @@ impl Store {
         self.revalidate()?;
         Ok(retained.len())
     }
+
+    /// Move the stored window aside as `<STATE_FILE>.<kind>-<now>[-n]` in the same directory: a rename,
+    /// so its bytes are kept; the mode is set to 0600 first. Only a regular, single-link file of this
+    /// user is moved; anything else (a symlink, a foreign or hard-linked file) stays where it is.
+    fn set_aside(&self, kind: &str, now_unix_ms: u64) -> Result<String, AppError> {
+        self.revalidate()?;
+        let unavailable = AppError("product_evidence_state_unavailable");
+        let path = self.root.join(STATE_FILE);
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&path)
+            .map_err(|_| unavailable)?;
+        let meta = file.metadata().map_err(|_| unavailable)?;
+        if !meta.file_type().is_file()
+            || meta.uid() != rustix::process::getuid().as_raw()
+            || meta.nlink() != 1
+        {
+            return Err(unavailable);
+        }
+        if meta.mode() & 0o7777 != 0o600 {
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|_| unavailable)?;
+        }
+        let name = (0..MAX_SET_ASIDE_NAMES)
+            .map(|n| match n {
+                0 => format!("{STATE_FILE}.{kind}-{now_unix_ms}"),
+                n => format!("{STATE_FILE}.{kind}-{now_unix_ms}-{n}"),
+            })
+            .find(|name| {
+                fs::symlink_metadata(self.root.join(name))
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            })
+            .ok_or(unavailable)?;
+        // The name still refers to the file checked above.
+        let current = fs::symlink_metadata(&path).map_err(|_| unavailable)?;
+        if (current.dev(), current.ino()) != (meta.dev(), meta.ino()) {
+            return Err(unavailable);
+        }
+        fs::rename(&path, self.root.join(&name)).map_err(|_| unavailable)?;
+        fs::File::open(&self.root)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| AppError("product_evidence_state_write_failed"))?;
+        self.revalidate()?;
+        Ok(name)
+    }
+}
+
+/// How many `-<n>` suffixes a set-aside name may need within one millisecond.
+const MAX_SET_ASIDE_NAMES: usize = 16;
+
+/// The owner's explicit reset of a stored window this swarm's application refuses (B13f): the file is
+/// moved aside (bytes kept, 0600) and the next application starts a fresh window. A window that
+/// opens, or whose file is not a plain owner-only file this user may move, is left as it is.
+pub fn reset_state(
+    state: StateBinding<'_>,
+    replay_limit: usize,
+    now_unix_ms: u64,
+) -> Result<SetAside, AppError> {
+    let store = Store::open(state, replay_limit)?;
+    let reason = match store.load() {
+        Ok(Stored::Window(_)) => return Err(AppError("product_evidence_state_not_refused")),
+        // Opening would set it aside too; here the owner asked first.
+        Ok(Stored::Foreign(reason)) => reason,
+        Err(refused) => match refused.0 {
+            "product_evidence_state_corrupt"
+            | "product_evidence_state_too_large"
+            | "product_evidence_state_unavailable" => refused.0,
+            _ => return Err(refused),
+        },
+    };
+    let file_name = store.set_aside("reset", now_unix_ms)?;
+    Ok(SetAside { reason, file_name })
 }
 
 /// Create (or admit) the private product state directory `<authority>/serving/product`.
@@ -242,25 +392,40 @@ pub struct ProductApp {
     inner: Mutex<Inner>,
     store: Option<Store>,
     limit: usize,
+    set_aside: Option<SetAside>,
 }
 
 impl ProductApp {
-    /// `__init__` (`app.py:44-118`): a stored window is restored and the sequence resumes after it.
+    /// `__init__` (`app.py:44-118`): this swarm's stored window is restored and the sequence resumes
+    /// after it. Another swarm's window (or an unbound one) is set aside first ([`Self::set_aside`]);
+    /// a window that cannot be read refuses the application with its typed reason.
     pub fn new(
         projector: ProductProjector,
         sources: Arc<dyn Sources>,
         clock: Box<dyn Fn() -> u64 + Send + Sync>,
         replay_limit: usize,
-        state_root: Option<&Path>,
+        state: Option<StateBinding<'_>>,
     ) -> Result<Self, AppError> {
         if !(1..=MAX_REPLAY_LIMIT).contains(&replay_limit) {
             return Err(AppError("product_replay_limit_invalid"));
         }
-        let store = state_root
-            .map(|root| Store::open(root, replay_limit))
+        let store = state
+            .map(|state| Store::open(state, replay_limit))
             .transpose()?;
+        let mut set_aside = None;
         let restored = match &store {
-            Some(store) => store.load()?,
+            Some(store) => match store.load()? {
+                Stored::Window(events) => events,
+                Stored::Foreign(reason) => {
+                    let kind = match reason {
+                        "product_evidence_state_unbound" => "unbound",
+                        _ => "foreign-swarm",
+                    };
+                    let file_name = store.set_aside(kind, clock())?;
+                    set_aside = Some(SetAside { reason, file_name });
+                    Vec::new()
+                }
+            },
             None => Vec::new(),
         };
         if let Some(last) = restored.last() {
@@ -284,7 +449,13 @@ impl ProductApp {
             }),
             store,
             limit: replay_limit,
+            set_aside,
         })
+    }
+
+    /// The stored window this application set aside when it opened (another swarm's), if any.
+    pub fn set_aside(&self) -> Option<&SetAside> {
+        self.set_aside.as_ref()
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>, AppError> {
@@ -396,15 +567,17 @@ impl ProductApp {
     }
 }
 
-/// The gateway's error document (`_send_error`, `app.py:1031-1053`).
+/// The gateway's error document (`_send_error`, `app.py:1031-1053`). B13f adds `reason`, the store's
+/// typed refusal, when the product application itself is refused (v0.1.4 failed the serving start).
 fn refusal(status: u16, code: &str, retryable: bool) -> Reply {
-    let mut reply = Reply::json_bytes(
-        status,
-        dumps_sorted(
-            &json!({"protocol": ERROR_PROTOCOL, "code": code, "retryable": retryable}),
-            Text::Utf8,
-        ),
-    );
+    refusal_with(status, code, retryable, None)
+}
+fn refusal_with(status: u16, code: &str, retryable: bool, reason: Option<&str>) -> Reply {
+    let mut document = json!({"protocol": ERROR_PROTOCOL, "code": code, "retryable": retryable});
+    if let Some(reason) = reason.filter(|reason| *reason != code) {
+        document["reason"] = json!(reason);
+    }
+    let mut reply = Reply::json_bytes(status, dumps_sorted(&document, Text::Utf8));
     if status == 405 {
         reply.headers.push(("allow".into(), "GET".into()));
     }
@@ -438,9 +611,25 @@ fn frame(event: &Value) -> Vec<u8> {
     out
 }
 
+/// The product application a host has for a request, if any.
+#[derive(Clone, Copy)]
+pub enum Composition<'a> {
+    /// No product application (`_product_app is None`): every route answers `503 product_*_unavailable`.
+    Absent,
+    /// The application was refused (its stored window): the 503 carries the typed `reason`, and it is
+    /// not retryable until the owner resets the window ([`RESET_PATH`]).
+    Refused(AppError),
+    Ready(&'a ProductApp),
+}
+
 /// A product route of the browser surface. `app` is `None` while the composition has no product
 /// application (`_product_app is None`): every route then answers `503 product_*_unavailable`.
 pub fn handle(app: Option<&ProductApp>, request: &Request) -> Result<Reply, PublicError> {
+    handle_composed(app.map_or(Composition::Absent, Composition::Ready), request)
+}
+
+/// [`handle`] for a host that also knows why it has no application.
+pub fn handle_composed(app: Composition<'_>, request: &Request) -> Result<Reply, PublicError> {
     let path = request.target.as_str();
     let unavailable = match path {
         SNAPSHOT_PATH => "product_snapshot_unavailable",
@@ -451,20 +640,25 @@ pub fn handle(app: Option<&ProductApp>, request: &Request) -> Result<Reply, Publ
     if request.method != "GET" {
         return Ok(refusal(405, "method_not_allowed", false));
     }
-    let Some(app) = app else {
-        return Ok(refusal(503, unavailable, true));
+    let app = match app {
+        Composition::Absent => return Ok(refusal(503, unavailable, true)),
+        Composition::Refused(reason) => {
+            return Ok(refusal_with(503, unavailable, false, Some(reason.0)));
+        }
+        Composition::Ready(app) => app,
     };
+    let failed = |e: AppError| refusal_with(503, "product_snapshot_unavailable", true, Some(e.0));
     if path != EVENTS_PATH {
         return Ok(match app.snapshot() {
             Ok(snapshot) => Reply::json(200, &snapshot)?,
-            Err(_) => refusal(503, "product_snapshot_unavailable", true),
+            Err(e) => failed(e),
         });
     }
     let Ok(cursor) = last_event_id(request) else {
         return Ok(refusal(400, "invalid_last_event_id", false));
     };
     Ok(match app.events(cursor) {
-        Err(_) => refusal(503, "product_snapshot_unavailable", true),
+        Err(e) => failed(e),
         Ok(Events::Stale) => refusal(409, "product_cursor_stale", false),
         Ok(Events::After(events)) => Reply {
             status: 200,
@@ -479,4 +673,17 @@ pub fn handle(app: Option<&ProductApp>, request: &Request) -> Result<Reply, Publ
             body: events.iter().flat_map(frame).collect(),
         },
     })
+}
+
+/// The answer to the owner's reset ([`RESET_PATH`]): `200` naming the reason and the set-aside file,
+/// or a `409` whose code says why nothing was moved.
+pub fn reset_reply(result: Result<SetAside, AppError>) -> Result<Reply, PublicError> {
+    match result {
+        Ok(set_aside) => Reply::json(
+            200,
+            &json!({"protocol": RESET_PROTOCOL, "reason": set_aside.reason,
+                    "set_aside_as": set_aside.file_name}),
+        ),
+        Err(refused) => Ok(refusal(409, refused.0, false)),
+    }
 }

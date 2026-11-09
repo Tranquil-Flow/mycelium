@@ -191,6 +191,61 @@ impl ProductRoutes for Product {
         Reply::json(200, &json!({"target": request.target}))
     }
 }
+/// Records the resets it is handed (B13f).
+struct Resettable(AtomicUsize);
+impl ProductRoutes for Resettable {
+    fn get(&self, _request: &Request) -> Result<Reply, PublicError> {
+        Err(PublicError::new(500, "unexpected_get"))
+    }
+    fn reset(&self, body: &Map<String, Value>) -> Result<Reply, PublicError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Reply::json(200, &json!({"reset": body.len()}))
+    }
+}
+#[test]
+fn the_product_reset_is_an_owner_action_behind_session_origin_and_action_header() {
+    const RESET: &str = "/api/v1/product/reset";
+    let product = Arc::new(Resettable(AtomicUsize::new(0)));
+    let served = app().with_product(product.clone());
+    let mut anonymous = request("POST", RESET, b"{}");
+    anonymous.headers.retain(|(k, _)| k != "cookie");
+    code(
+        served.handle(anonymous).unwrap(),
+        401,
+        "open_from_native_launcher",
+    );
+    login(&served);
+    for header in ["origin", "x-mycelium-action"] {
+        let mut r = request("POST", RESET, b"{}");
+        r.headers.retain(|(k, _)| k != header);
+        code(served.handle(r).unwrap(), 403, "origin_rejected");
+    }
+    let mut r = request("POST", RESET, b"{}");
+    r.headers.retain(|(k, _)| k != "content-type");
+    code(served.handle(r).unwrap(), 415, "content_type_rejected");
+    assert_eq!(product.0.load(Ordering::SeqCst), 0);
+    code(
+        served.handle(request("GET", RESET, b"")).unwrap(),
+        404,
+        "not_found",
+    );
+    let reply = served.handle(request("POST", RESET, b"{}")).unwrap();
+    assert_eq!(reply.status, 200);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply.body).unwrap(),
+        json!({"reset": 0})
+    );
+    assert_eq!(product.0.load(Ordering::SeqCst), 1);
+    assert_eq!(served.service().calls.load(Ordering::SeqCst), 0);
+    // Without product routes (the packaged host today) it is just another unknown action.
+    let plain = app();
+    login(&plain);
+    code(
+        plain.handle(request("POST", RESET, b"{}")).unwrap(),
+        400,
+        "unknown_action",
+    );
+}
 #[test]
 fn product_routes_are_absent_unless_served_and_then_need_the_session() {
     // A desktop without product routes (the packaged host today): unchanged 404 before the session.

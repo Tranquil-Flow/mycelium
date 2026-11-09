@@ -19,14 +19,38 @@ static SEQ: AtomicUsize = AtomicUsize::new(0);
 const ISSUED: f64 = 1_790_000_000.0;
 const NOW: f64 = ISSUED + 10.0;
 
-fn scratch() -> PathBuf {
-    let p = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "v02-l11-docs-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::SeqCst)
-    ));
-    fs::create_dir_all(&p).unwrap();
-    p
+/// A scratch directory owned by one test: created exclusively (a leftover of an earlier process that
+/// had the same pid is never reused) and removed when dropped, also when the test fails.
+struct Scratch(PathBuf);
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.0).unwrap_or(());
+    }
+}
+fn scratch() -> Scratch {
+    let base = std::env::temp_dir().canonicalize().unwrap();
+    loop {
+        let p = base.join(format!(
+            "v02-l11-docs-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst)
+        ));
+        match fs::create_dir(&p) {
+            Ok(()) => return Scratch(p),
+            // Taken (by a leftover of another process): try the next name.
+            Err(e) => assert_eq!(
+                e.kind(),
+                std::io::ErrorKind::AlreadyExists,
+                "scratch directory {p:?}: {e}"
+            ),
+        }
+    }
 }
 fn mac() -> Observed {
     Observed {
@@ -39,7 +63,7 @@ fn signer(seed: u8) -> Signer {
     Signer::from_seed([seed; 32], docs::SIGNER_ENDPOINT_ID)
 }
 /// A finalized bundle directory (app payload + signed documents) for `version`.
-fn bundle(seed: u8, version: &str, floor: &str) -> PathBuf {
+fn bundle(seed: u8, version: &str, floor: &str) -> Scratch {
     let dir = scratch();
     let exe = dir.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
@@ -168,7 +192,7 @@ fn release() -> PathBuf {
     PathBuf::from(std::env::var("MYCELIUM_V01X_BUNDLE").expect("MYCELIUM_V01X_BUNDLE"))
 }
 /// Only the two documents of the real release, copied to scratch for mutation.
-fn release_documents() -> PathBuf {
+fn release_documents() -> Scratch {
     let dir = scratch();
     for name in [docs::MANIFEST_NAME, docs::SOURCE_NAME] {
         fs::copy(release().join(name), dir.join(name)).unwrap();
@@ -923,4 +947,20 @@ fn a_well_formed_signature_that_is_not_the_signers_fails_the_ed25519_check() {
             "{kind}"
         );
     }
+}
+
+/// B13f F5: every scratch directory a test makes (bundles, copied release documents, key files) is
+/// removed when the test is done with it, so the suite leaves nothing in the temporary directory.
+#[test]
+fn scratch_directories_are_removed_when_their_test_is_done() {
+    let (bundled, plain) = {
+        let bundled = bundle(1, "0.2.0", "0.1.0");
+        let plain = scratch();
+        fs::write(plain.join("test.key"), [5u8; 32]).unwrap();
+        assert!(bundled.join(docs::MANIFEST_NAME).is_file());
+        assert_ne!(bundled.to_path_buf(), plain.to_path_buf());
+        (bundled.to_path_buf(), plain.to_path_buf())
+    };
+    assert!(!bundled.exists(), "{bundled:?} was left behind");
+    assert!(!plain.exists(), "{plain:?} was left behind");
 }

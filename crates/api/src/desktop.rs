@@ -114,6 +114,12 @@ fn same(a: &str, b: &str) -> bool {
 /// without one keeps answering those paths `404 not_found` before any session check.
 pub trait ProductRoutes: Send + Sync {
     fn get(&self, request: &Request) -> Result<Reply, PublicError>;
+    /// `POST /api/v1/product/reset` (B13f): an owner action like every other POST (session, origin
+    /// and `X-Mycelium-Action` are checked first; `body` is the parsed JSON object). A host without
+    /// it answers as for any unknown action.
+    fn reset(&self, _body: &Map<String, Value>) -> Result<Reply, PublicError> {
+        Err(PublicError::new(404, "not_found"))
+    }
 }
 pub struct Desktop<S: Service> {
     host: String,
@@ -287,6 +293,11 @@ impl<S: Service> Desktop<S> {
             return Err(PublicError::new(415, "content_type_rejected"));
         }
         let body = strict_object(&r.body)?;
+        if r.target == crate::product_app::RESET_PATH
+            && let Some(product) = self.product.as_ref()
+        {
+            return product.reset(&body);
+        }
         // No status/session lock is held across ANY service call.
         Reply::ordered(
             200,

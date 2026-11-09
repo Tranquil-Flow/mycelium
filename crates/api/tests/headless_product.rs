@@ -444,3 +444,219 @@ fn the_owner_product_snapshot_and_events_follow_the_swarm_through_a_restart() {
     app.quit();
     fs::remove_dir_all(&base).unwrap_or(());
 }
+
+const STATE: &str = "serving/product/product-evidence-state.v1.json";
+
+/// A private owner state root under a per-test scratch directory, removed when the test ends.
+struct OwnerRoot {
+    base: PathBuf,
+    root: PathBuf,
+}
+impl OwnerRoot {
+    fn new(label: &str) -> Self {
+        let scratch = std::env::temp_dir().join(format!(
+            "b13f-headless-product-{label}-{}",
+            std::process::id()
+        ));
+        fs::remove_dir_all(&scratch).unwrap_or(());
+        fs::create_dir_all(&scratch).unwrap();
+        let base = fs::canonicalize(&scratch).unwrap();
+        let root = base.join("owner");
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        Self { base, root }
+    }
+    fn swarm_id(&self) -> String {
+        let record: Value =
+            serde_json::from_slice(&fs::read(self.root.join("owner-swarm.json")).unwrap()).unwrap();
+        record["swarm_id"].as_str().unwrap().to_owned()
+    }
+    /// The files next to the window other than the window itself (what was set aside).
+    fn set_aside(&self) -> Vec<PathBuf> {
+        let dir = self.root.join("serving/product");
+        let mut found: Vec<PathBuf> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap() != "product-evidence-state.v1.json")
+            .collect();
+        found.sort();
+        found
+    }
+}
+impl Drop for OwnerRoot {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.base).unwrap_or(());
+    }
+}
+fn create_swarm(app: &Headless) {
+    app.post(
+        "/api/network/start",
+        json!({"relay_acknowledged": true, "max_seconds": 1800, "provider": "external",
+               "public_origin": ORIGIN, "proxy_port": free_port()}),
+    );
+    app.post("/api/create", json!({"consent": consent()}));
+}
+fn mode(path: &Path) -> u32 {
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+}
+
+/// B13f F2: the persisted window belongs to the swarm it was published for. v0.1.4 kept it per serving
+/// run (`serving-runs/<run_id>/registry/product`, `workflow.py:489,506`), so a window never outlived its
+/// swarm. The installed host has no action that dissolves a swarm, so a second swarm in the same state
+/// root exists only after the swarm record is gone (a manual reset, or a later owner-leave): that new
+/// swarm must start its own window, and the old one is set aside unchanged, never restored or deleted.
+#[test]
+fn a_new_swarm_in_the_same_state_root_starts_its_own_window() {
+    let owner = OwnerRoot::new("new-swarm");
+    let app = Headless::launch(&owner.root);
+    create_swarm(&app);
+    let swarm_a = owner.swarm_id();
+    for _ in 0..3 {
+        assert_eq!(app.get(SNAPSHOT, None).status, 200);
+    }
+    let a = frames(&app.get(EVENTS, None));
+    assert_eq!(cursors(&a), [1, 2, 3, 4]);
+    app.quit();
+    let window_a = fs::read(owner.root.join(STATE)).unwrap();
+
+    // The swarm's own state goes away: its record, its seed store (which refuses another swarm id,
+    // `seed_state_identity_mismatch`) and the owner's membership of it (`pairing_handoff_changed`
+    // otherwise). The same root then creates another swarm; the rest of the root (node identity,
+    // network settings, serving/) stays, as a reset of the swarm leaves it.
+    fs::create_dir(owner.base.join("swarm-a")).unwrap();
+    for name in ["owner-swarm.json", "seed-rs", "authority/member"] {
+        let aside = owner.base.join("swarm-a").join(name.replace('/', "-"));
+        fs::rename(owner.root.join(name), aside).unwrap();
+    }
+    let app = Headless::launch(&owner.root);
+    create_swarm(&app);
+    let swarm_b = owner.swarm_id();
+    assert_ne!(swarm_a, swarm_b);
+    let b = frames(&app.get(EVENTS, None));
+    assert_eq!(
+        cursors(&b),
+        [1],
+        "swarm B's window starts empty: {:?}",
+        cursors(&b)
+    );
+    let a_ids: BTreeSet<&str> = a
+        .iter()
+        .map(|e| {
+            e["snapshot"]["publication"]["snapshot_id"]
+                .as_str()
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        !a_ids.contains(
+            b[0]["snapshot"]["publication"]["snapshot_id"]
+                .as_str()
+                .unwrap()
+        )
+    );
+    // Swarm A's window was set aside as it was: same bytes, still owner-only.
+    let aside = owner.set_aside();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(fs::read(&aside[0]).unwrap(), window_a);
+    assert_eq!(mode(&aside[0]), 0o600);
+    // B's own window survives B's restart as before.
+    app.quit();
+    let app = Headless::launch(&owner.root);
+    assert_eq!(cursors(&frames(&app.get(EVENTS, Some(1)))), [2]);
+    assert_eq!(owner.set_aside().len(), 1);
+    app.quit();
+}
+
+/// B13f F3: a stored window that cannot be read is refused (v0.1.4 failed the serving start on it,
+/// `state.py:315-350`) with its typed reason in the 503 body, and stays refused, never rewritten, until
+/// the owner resets it: the reset moves the file aside (0600, same bytes) and a fresh window starts.
+#[test]
+fn a_corrupt_window_is_refused_with_its_reason_until_the_owner_resets_it() {
+    let owner = OwnerRoot::new("corrupt");
+    let app = Headless::launch(&owner.root);
+    create_swarm(&app);
+    assert_eq!(app.get(SNAPSHOT, None).status, 200);
+    app.quit();
+    let state = owner.root.join(STATE);
+    let corrupt = b"{\"protocol\": \"mycelium.product_evidence_state.v1\", \"events\": [".to_vec();
+    fs::write(&state, &corrupt).unwrap();
+    assert_eq!(mode(&state), 0o600);
+
+    let app = Headless::launch(&owner.root);
+    for (path, code) in [
+        (SNAPSHOT, "product_snapshot_unavailable"),
+        (EVENTS, "product_events_unavailable"),
+        (EXPORT, "product_export_unavailable"),
+    ] {
+        assert_eq!(
+            refusal(&app.get(path, None)),
+            (
+                503,
+                json!({"protocol": "mycelium.product_ui.error.v1", "code": code,
+                       "retryable": false, "reason": "product_evidence_state_corrupt"})
+            ),
+            "{path}"
+        );
+    }
+    assert_eq!(fs::read(&state).unwrap(), corrupt, "never rewritten");
+    assert!(owner.set_aside().is_empty());
+
+    // The reset is an owner action: session, origin and the action header are required.
+    let reset = "/api/v1/product/reset";
+    let anonymous = app
+        .client
+        .request(
+            "POST",
+            reset,
+            b"{}",
+            &[("Content-Type", "application/json")],
+            false,
+            BudgetId::ModelSelection,
+        )
+        .unwrap();
+    assert_eq!(anonymous.status, 401);
+    let cross = app
+        .client
+        .request(
+            "POST",
+            reset,
+            b"{}",
+            &[
+                ("Content-Type", "application/json"),
+                ("Origin", "https://elsewhere.example"),
+            ],
+            true,
+            BudgetId::ModelSelection,
+        )
+        .unwrap();
+    assert_eq!(cross.status, 403);
+    assert_eq!(fs::read(&state).unwrap(), corrupt);
+
+    let done = app.post(reset, json!({}));
+    let aside = owner.set_aside();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(
+        done,
+        json!({"protocol": "mycelium.product_evidence_reset.v1",
+               "reason": "product_evidence_state_corrupt",
+               "set_aside_as": aside[0].file_name().unwrap().to_str().unwrap()})
+    );
+    assert_eq!(fs::read(&aside[0]).unwrap(), corrupt);
+    assert_eq!(mode(&aside[0]), 0o600);
+    // A fresh window: publication starts again and is stored.
+    let fresh = frames(&app.get(EVENTS, None));
+    assert_eq!(cursors(&fresh), [1]);
+    assert_eq!(mode(&state), 0o600);
+    // A readable window is never reset.
+    let again = app.client.post(reset, &json!({})).unwrap();
+    assert_eq!(
+        refusal(&again),
+        (
+            409,
+            json!({"protocol": "mycelium.product_ui.error.v1",
+                   "code": "product_evidence_state_not_refused", "retryable": false})
+        )
+    );
+    assert_eq!(owner.set_aside().len(), 1);
+    app.quit();
+}
