@@ -3,7 +3,7 @@
 //! pending/completed deduplication and native command receipts. The dispatcher
 //! must arbitrate message IDs before executing effects; ACK means dispatch
 //! completed, never merely that this library read a stream.
-use crate::iroh_host::allowance;
+use crate::iroh_host::{allowance, flush_finished};
 use budgets::MonoInstant;
 use iroh::endpoint::{Connection, SendStream};
 use protocol::{
@@ -164,7 +164,10 @@ impl<C: Clock, F: Fn() -> ConnectionFence> Delivery<'_, '_, C, F> {
                 .await
                 .map_err(|_| Error::Expired)?
                 .map_err(|_| Error::Unavailable)?;
-            self.send.finish().map_err(|_| Error::Unavailable)
+            self.send.finish().map_err(|_| Error::Unavailable)?;
+            // finish() only queues the tail and FIN; a current-thread runtime
+            // must still send them before the receiver goes idle.
+            flush_finished(&self.send).await.map_err(|_| Error::Expired)
         })?;
         self.receiver.check(self.deadline)
     }
