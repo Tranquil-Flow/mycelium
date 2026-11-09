@@ -531,3 +531,81 @@ fn a_fatal_listener_end_closes_the_launcher_with_its_errno() {
     }
     fs::remove_dir_all(&root).unwrap_or(());
 }
+
+/// REVIEW-laneB17 FU-0a: an accept error that belongs to ONE pending connection (here
+/// `ECONNABORTED`, a client that went away before the accept; injected on eight consecutive
+/// connections through `MYCELIUM_L10_TEST_ACCEPT_ERRNO=<errno>*<count>`) is retried at once, as
+/// v0.1.4's `serve_forever` does: it must not delay the next legitimate client by one owner poll
+/// per aborted client (8 x 500 ms). The launcher keeps serving and still logs the episode.
+#[test]
+fn aborted_clients_do_not_delay_the_next_accept_by_a_poll_each() {
+    build();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("b16f-aborted-{}", std::process::id()));
+    fs::remove_dir_all(&root).unwrap_or(());
+    let aborted = 8_u32;
+    let seam = format!("{}*{aborted}", libc::ECONNABORTED);
+    let mut child = launch_env(
+        &root,
+        None,
+        &[("MYCELIUM_L10_TEST_ACCEPT_ERRNO", seam.as_str())],
+    );
+    let guard = ReapOnDrop(&mut child);
+    let child = &mut *guard.0;
+    let Started {
+        port,
+        stderr,
+        readers,
+    } = started(child, &root);
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let began = Instant::now();
+    // Each of these is accepted and then lost to the injected per-connection error.
+    let lost: Vec<TcpStream> = (0..aborted)
+        .map(|_| TcpStream::connect_timeout(&address, patience()).unwrap())
+        .collect();
+    let mut probe = TcpStream::connect_timeout(&address, patience()).unwrap();
+    probe.set_read_timeout(Some(patience())).unwrap();
+    probe
+        .write_all(
+            format!(
+                "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut answer = String::new();
+    probe.read_to_string(&mut answer).unwrap_or(0);
+    let waited = began.elapsed();
+    drop(lost);
+    assert!(
+        answer.starts_with("HTTP/1."),
+        "the launcher does not serve after aborted clients: {answer:?}"
+    );
+    // One poll per aborted client would be 8 polls; allow half of that for a loaded host.
+    let bound = poll() * (aborted / 2);
+    assert!(
+        waited < bound,
+        "the next client waited {waited:?} behind {aborted} aborted ones (bound {bound:?})"
+    );
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the launcher ended after aborted clients"
+    );
+    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
+    kill_process(pid, Signal::TERM).unwrap();
+    let status = exited(child, "the launcher ignored SIGTERM after aborted clients");
+    for reader in readers {
+        reader.join().unwrap_or(());
+    }
+    let lines: Vec<String> = stderr.try_iter().collect();
+    assert_eq!(status.code(), Some(0), "{status:?} {lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("listener_accept_deferred")
+                && line.contains(&format!("errno_{}", libc::ECONNABORTED))),
+        "the episode is not recorded: {lines:?}"
+    );
+    fs::remove_dir_all(&root).unwrap_or(());
+}
