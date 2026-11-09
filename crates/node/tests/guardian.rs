@@ -38,12 +38,27 @@ fn worker_command(root: &Path) -> WorkerCommand {
             "persistent_fixture".into(),
             "--nocapture".into(),
         ],
-        environment: vec![
+        environment: [
             ("L6_GUARDIAN_ROLE".into(), Some("worker".into())),
             ("L6_GUARDIAN_ROOT".into(), Some(root.as_os_str().into())),
             (support::ANCHOR.into(), Some(support::anchor_value())),
-        ],
+        ]
+        .into_iter()
+        .chain(std::env::var_os(PUBLISH_HOLD).map(|v| (PUBLISH_HOLD.into(), Some(v))))
+        .collect(),
     }
+}
+/// Injected delay of the B11 RED: set on the fixture processes of one test only.
+const PUBLISH_HOLD: &str = "L6_GUARDIAN_PUBLISH_HOLD";
+/// Publish a fixture file whole (B11): written under a staging name, then renamed, so a reader
+/// polling for `path` sees it complete or not at all (`std::fs::write` creates it first).
+fn publish(path: &Path, text: &str) {
+    let staged = path.with_extension("staged");
+    std::fs::write(&staged, text).unwrap();
+    if std::env::var_os(PUBLISH_HOLD).is_some() {
+        std::thread::sleep(duration(B::OwnerPoll) * 2);
+    }
+    std::fs::rename(&staged, path).unwrap();
 }
 fn now() -> Now {
     Now {
@@ -108,7 +123,7 @@ fn persistent_fixture() {
     if role == "worker" || role == "descendant" {
         let mut descendant = if role == "worker" && root.join("family").exists() {
             let child = command("descendant", &root).spawn().unwrap();
-            std::fs::write(root.join("descendant-pid"), child.id().to_string()).unwrap();
+            publish(&root.join("descendant-pid"), &child.id().to_string());
             Some(child)
         } else {
             None
@@ -150,7 +165,7 @@ fn persistent_fixture() {
         .unwrap();
         core.started(&reserved, now().mono, now()).unwrap();
         let (guardian, worker) = owned.process_ids().unwrap();
-        std::fs::write(root.join("ids"), format!("{guardian} {worker}")).unwrap();
+        publish(&root.join("ids"), &format!("{guardian} {worker}"));
         assert!(wait(
             || root.join("owner-exit").exists(),
             B::WorkerMaximumWall
@@ -162,6 +177,7 @@ struct Fixture {
     root: PathBuf,
     owner: Option<Child>,
     ids: Option<(u32, u32)>,
+    hold: bool,
 }
 impl Fixture {
     fn new(label: &str) -> Self {
@@ -171,10 +187,15 @@ impl Fixture {
             root,
             owner: None,
             ids: None,
+            hold: false,
         }
     }
     fn launch(&mut self) {
-        self.owner = Some(command("owner", &self.root).spawn().unwrap());
+        let mut owner = command("owner", &self.root);
+        if self.hold {
+            owner.env(PUBLISH_HOLD, "1");
+        }
+        self.owner = Some(owner.spawn().unwrap());
         assert!(wait(
             || self.root.join("ids").exists() && self.root.join("worker-ready").exists(),
             B::WorkerStartup
@@ -307,7 +328,7 @@ fn persistent_guardian_stops_descendants_and_never_certifies_foreign_residue() {
     std::fs::write(f.root.join("family"), b"family").unwrap();
     f.launch();
     assert!(wait(
-        || f.root.join("descendant-ready").exists(),
+        || f.root.join("descendant-ready").exists() && f.root.join("descendant-pid").exists(),
         B::WorkerStartup
     ));
     let descendant: u32 = std::fs::read_to_string(f.root.join("descendant-pid"))
@@ -340,6 +361,28 @@ fn persistent_guardian_stops_descendants_and_never_certifies_foreign_residue() {
         recovered.observe_cleanup(),
         Err(WorkerError::Refused("guardian_cleanup_failed"))
     ));
+}
+/// B11 (gap row 22, M4-WORKPLAN known flake): the pid files the fixture processes publish are
+/// read whole. Under quick load `launch` once read an `ids` file that `std::fs::write` had created
+/// but not yet written (`index out of bounds: the len is 0`). The injected hold widens the gap
+/// between writing and publishing by two `OwnerPoll`s, so the polling reader always lands in it.
+#[test]
+fn fixture_pid_files_are_never_read_half_written() {
+    let mut f = Fixture::new("publish");
+    f.hold = true;
+    std::fs::write(f.root.join("family"), b"family").unwrap();
+    f.launch();
+    let (guardian, worker) = f.ids.unwrap();
+    assert!(guardian != worker && guardian > 0 && worker > 0);
+    assert!(wait(
+        || f.root.join("descendant-ready").exists() && f.root.join("descendant-pid").exists(),
+        B::WorkerStartup
+    ));
+    let descendant: u32 = std::fs::read_to_string(f.root.join("descendant-pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(descendant > 0 && descendant != worker);
 }
 #[test]
 fn failed_spawn_and_duplicate_journal_do_not_touch_foreign_resource_directory() {

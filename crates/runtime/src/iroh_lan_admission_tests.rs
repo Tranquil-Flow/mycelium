@@ -46,6 +46,23 @@ fn loopback_policy() -> LanPolicy {
 fn at(port: usize) -> SocketAddr {
     SocketAddr::new(ip("127.0.0.1"), u16::try_from(port).unwrap())
 }
+/// Distinct LAN hosts for the per-host share (B11): `127.0.0.<host>`, each
+/// explicitly allowed. Pure `Admission` cases, so no such address is bound.
+const HOSTS: usize = 6;
+fn host_ip(host: usize) -> IpAddr {
+    IpAddr::from([127, 0, 0, u8::try_from(host).unwrap()])
+}
+fn on(host: usize, port: usize) -> SocketAddr {
+    SocketAddr::new(host_ip(host), u16::try_from(port).unwrap())
+}
+fn hosts_policy() -> LanPolicy {
+    LanPolicy::with_explicit((1..=HOSTS).map(host_ip).collect()).unwrap()
+}
+/// One source host's share of the provisional table: a quarter of it
+/// (REVIEW-laneB9f (1)), so three other hosts always find room.
+fn share() -> usize {
+    count(B::RelayConnectionSlots) / 4
+}
 
 /// F2: accept-side (provisional) pins have their own capacity and fail closed
 /// there; the whole authenticated capacity stays available to dials.
@@ -106,50 +123,142 @@ fn a_verified_accept_moves_to_the_authenticated_class() {
 /// F1: the receive filter's provisional table holds at most one slot per
 /// concurrent handshake, each for one handshake budget, and fails closed when
 /// full; pinned sources and sources outside the allow-list / peer hosts are
-/// decided without it.
+/// decided without it. B11: filled by several hosts (one host alone may take
+/// only its share, see the next cases).
 #[test]
 fn the_inbound_table_is_bounded_expires_and_fails_closed() {
     let lan = admission(
-        loopback_policy()
-            .with_peer_hosts(vec![ip("127.0.0.1")])
+        hosts_policy()
+            .with_peer_hosts((1..HOSTS).map(host_ip).collect())
             .unwrap(),
     );
     let slots = count(B::RelayConnectionSlots);
     let initial = initial_like();
     let now = Instant::now();
-    for i in 0..slots {
-        assert!(lan.admit_inbound(at(10_000 + i), &initial, now));
+    let filling: Vec<SocketAddr> = (0..slots)
+        .map(|i| on(1 + i / share(), 10_000 + i))
+        .collect();
+    for source in &filling {
+        assert!(lan.admit_inbound(*source, &initial, now), "{source}");
     }
     assert!(
-        lan.admit_inbound(at(10_000), &short_header(), now),
+        lan.admit_inbound(filling[0], &short_header(), now),
         "an admitted source keeps its handshake window"
     );
+    let waiting = on(HOSTS - 1, 20_000);
     assert!(
-        !lan.admit_inbound(at(20_000), &initial, now),
+        !lan.admit_inbound(waiting, &initial, now),
         "a full provisional table must fail closed"
     );
-    let _pin = lan.pin([at(30_000)]).unwrap();
+    let _pin = lan.pin([on(1, 30_000)]).unwrap();
     assert!(
-        lan.admit_inbound(at(30_000), &short_header(), now),
+        lan.admit_inbound(on(1, 30_000), &short_header(), now),
         "a pinned source is never throttled"
     );
     let later = now + span(B::SidecarLocalHandshake);
     assert!(
-        !lan.admit_inbound(at(10_000), &short_header(), later),
+        !lan.admit_inbound(filling[0], &short_header(), later),
         "an expired entry admits nothing but a new Initial"
     );
     assert!(
-        lan.admit_inbound(at(20_000), &initial, later),
+        lan.admit_inbound(waiting, &initial, later),
         "expired entries are evicted"
     );
     assert!(
-        !lan.admit_inbound(SocketAddr::new(ip("127.0.0.2"), 9), &initial, later),
+        !lan.admit_inbound(on(HOSTS, 9), &initial, later),
         "a source outside the signed peer hosts is never admitted"
     );
     assert!(
-        !lan.admit_inbound(SocketAddr::new(ip("127.0.0.3"), 9), &initial, later),
+        !lan.admit_inbound(SocketAddr::new(ip("127.0.0.99"), 9), &initial, later),
         "a source outside the allow-list is never admitted"
     );
+}
+
+/// B11 (REVIEW-laneB9f (1)): one LAN host sending Initials from many ports
+/// takes at most its share of the provisional table, so a peer on another
+/// host is still admitted while it floods.
+#[test]
+fn one_host_flooding_from_many_ports_takes_only_its_share() {
+    let lan = admission(hosts_policy());
+    let slots = count(B::RelayConnectionSlots);
+    let initial = initial_like();
+    let now = Instant::now();
+    let flooded = (0..4 * slots)
+        .filter(|i| lan.admit_inbound(on(1, 10_000 + i), &initial, now))
+        .count();
+    assert_eq!(
+        flooded,
+        share(),
+        "one host took {flooded} of the {slots} provisional slots"
+    );
+    for host in 2..=4 {
+        assert!(
+            lan.admit_inbound(on(host, 9), &initial, now),
+            "host {host}'s Initial was refused while host 1 floods"
+        );
+    }
+}
+
+/// B11: a host's share also counts its provisional (accept-side) pins, so it
+/// cannot re-take fresh ports once its receive-filter entries expire while
+/// its handshakes are still held.
+#[test]
+fn a_hosts_held_provisional_pins_count_against_its_share() {
+    let lan = admission(hosts_policy());
+    let initial = initial_like();
+    let now = Instant::now();
+    let held: Vec<Pin> = (0..share())
+        .map(|i| {
+            assert!(lan.admit_inbound(on(1, 10_000 + i), &initial, now));
+            lan.pin_provisional([on(1, 10_000 + i)]).unwrap()
+        })
+        .collect();
+    let later = now + span(B::SidecarLocalHandshake);
+    assert!(
+        !lan.admit_inbound(on(1, 20_000), &initial, later),
+        "host 1 re-took a fresh port while holding its whole share in pins"
+    );
+    drop(held);
+    assert!(
+        lan.admit_inbound(on(1, 20_000), &initial, later),
+        "released pins must give the share back"
+    );
+}
+
+/// B11 (REVIEW-laneB9f (1)): a handshake the host refused (unadmitted key)
+/// frees its table slot AT ONCE for every other host, not after the entry's
+/// handshake budget, but keeps counting against the refused host's own share
+/// until then (it cannot cycle ports faster by being refused).
+#[test]
+fn a_refused_handshake_frees_its_slot_at_once_but_not_its_hosts_share() {
+    let lan = admission(hosts_policy());
+    let slots = count(B::RelayConnectionSlots);
+    let initial = initial_like();
+    let now = Instant::now();
+    let filling: Vec<SocketAddr> = (0..slots)
+        .map(|i| on(1 + i / share(), 10_000 + i))
+        .collect();
+    for source in &filling {
+        assert!(lan.admit_inbound(*source, &initial, now), "{source}");
+    }
+    let waiting = on(HOSTS, 9);
+    assert!(!lan.admit_inbound(waiting, &initial, now), "table full");
+    let refused = lan.pin_provisional([filling[0]]).unwrap();
+    refused.refuse();
+    assert!(
+        lan.admit_inbound(waiting, &initial, now),
+        "the refused handshake's slot was not freed at once"
+    );
+    assert!(
+        !lan.admit_inbound(filling[0], &short_header(), now),
+        "a refused source must not keep its receive window"
+    );
+    assert!(
+        !lan.admit_inbound(on(1, 20_000), &initial, now),
+        "the refused host re-took its slot from a fresh port at once"
+    );
+    let later = now + span(B::SidecarLocalHandshake);
+    assert!(lan.admit_inbound(on(1, 20_000), &initial, later));
 }
 
 /// What counts as a connection-opening datagram (RFC 9000 17.2 / 14.1).

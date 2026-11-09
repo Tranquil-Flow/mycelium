@@ -6,6 +6,9 @@
 #           config key for them: `cargo nextest run --profile nightly --run-ignored all`
 # No test is deleted or loosened here: `quick` only selects. Everything it leaves out still runs in `merge`.
 
+# Setup scripts (headless-release below) are a nextest experimental feature; nothing else uses one.
+experimental = ["setup-scripts"]
+
 [profile.default]
 fail-fast = true
 
@@ -22,6 +25,27 @@ hello-bootstrap = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'binary_id(=node-service::hello_bootstrap)'
 test-group = 'hello-bootstrap'
+
+# headless-release (B11, gap row 23): api::headless_leave_cleanup runs the RELEASE headless launcher. Each of
+# its tests used to build it itself (a nested `cargo build --release`): on a cold target the first test paid
+# the whole build (57 s on m4/main) against quick's 60 s slow-timeout, and the others waited behind cargo's
+# target lock on their own clocks. This script builds it ONCE, before any test of that binary starts, into the
+# same target directory as the tests (CARGO_TARGET_DIR or the workspace target), and names it in
+# MYCELIUM_HEADLESS_RELEASE; the tests then only read it and check it is exactly the binary they would have
+# built. Without nextest (plain `cargo test`) the tests still build it themselves, once per process. No
+# timeout is changed. The script runs only when a selected test matches the filter.
+[scripts.setup.headless-release]
+command = ["bash", "-c", """
+set -eu
+target="${CARGO_TARGET_DIR:-$NEXTEST_WORKSPACE_ROOT/target}"
+"${CARGO:-cargo}" build --offline --locked -p api --release --example headless \
+    --manifest-path "$NEXTEST_WORKSPACE_ROOT/Cargo.toml" --target-dir "$target" >&2
+echo "MYCELIUM_HEADLESS_RELEASE=$target/release/examples/headless" >> "$NEXTEST_ENV"
+"""]
+
+[[profile.default.scripts]]
+filter = 'binary_id(=api::headless_leave_cleanup)'
+setup = "headless-release"
 
 # quick skips, and never runs, these (each is still run by merge and nightly):
 #  * every #[ignore]d test (nextest skips them unless --run-ignored is given). The real two-host and
