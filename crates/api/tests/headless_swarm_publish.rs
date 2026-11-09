@@ -7,7 +7,7 @@
 #[path = "support/swarm_publisher.rs"]
 mod support;
 use api::swarm::publisher::{
-    DirectoryClient, DirectoryPort,
+    DirectoryClient, DirectoryPort, Error,
     app::{AppPublisher, OwnerFacts},
     heartbeat_seconds,
     host::Stop,
@@ -18,10 +18,15 @@ use serde_json::{Map, Value, json};
 use std::{
     fs,
     io::{BufRead, BufReader},
+    net::{TcpListener, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -119,6 +124,116 @@ fn leave_listing_behind(root: &Path, directory: &str) {
     assert_eq!(rows(directory).len(), 1);
 }
 
+/// A listing whose record is durable but was never confirmed by any directory: the earlier
+/// process died after committing it while the directory was offline. Its retry slot has passed.
+fn leave_unconfirmed_listing(root: &Path, directory: &str) {
+    let offline = AppPublisher::with_connect(
+        root,
+        Box::new(|_origin: &str| {
+            struct Offline;
+            impl DirectoryPort for Offline {
+                fn call(&self, _: &str, _: &str, _: &[u8]) -> Result<Value, Error> {
+                    Err(Error::new("swarm_directory_unreachable"))
+                }
+            }
+            Ok(Arc::new(Offline) as Arc<dyn DirectoryPort>)
+        }),
+    );
+    offline.publish(true, &listing(directory)).unwrap();
+    let serving = json!({"state": "serving", "route_ready": true,
+                         "registry_origin": "http://127.0.0.1:9", "participants": [{}]});
+    let facts = OwnerFacts::from_owner_run(
+        true,
+        Some(&serving),
+        Some("Qwen/Qwen3-0.6B"),
+        Some("https://entry.example.org"),
+    );
+    let past = unix_now() - 2 * heartbeat_seconds().unwrap();
+    let status = offline.tick(past, &facts).unwrap().unwrap();
+    assert!(status.swarm_id.is_some(), "the record is durable");
+}
+/// The installation becomes a member of another swarm (the role record `/api/join/*` writes).
+fn become_member(root: &Path) {
+    api::preferences::private_state::store(
+        &root.join("installation-role.json"),
+        &json!({"protocol": "mycelium.a13_installation_role.v1", "role": "target"}),
+        4096,
+    )
+    .unwrap();
+}
+/// A loopback directory that accepts and never answers (the client's registered deadline ends
+/// each exchange); every accepted connection is reported.
+struct Silent {
+    origin: String,
+    accepted: mpsc::Receiver<()>,
+    stop: Arc<AtomicBool>,
+    join: Option<thread::JoinHandle<()>>,
+}
+impl Silent {
+    fn start() -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (send, accepted) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let join = thread::spawn(move || {
+            let mut held = Vec::new();
+            for socket in listener.incoming() {
+                let socket = socket.unwrap();
+                if stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                held.push(socket);
+                if send.send(()).is_err() {
+                    eprintln!("silent_directory_observer_gone");
+                }
+            }
+        });
+        Self {
+            origin,
+            accepted,
+            stop,
+            join: Some(join),
+        }
+    }
+    fn wait_for_exchange(&self) {
+        self.accepted
+            .recv_timeout(patience())
+            .expect("the host is inside a directory exchange");
+    }
+}
+impl Drop for Silent {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        TcpStream::connect(self.origin.strip_prefix("http://").unwrap()).unwrap();
+        self.join.take().unwrap().join().unwrap();
+    }
+}
+/// A loopback directory origin that only counts connection attempts (its accept queue).
+struct Counting(TcpListener);
+impl Counting {
+    fn start() -> Self {
+        Self(TcpListener::bind(("127.0.0.1", 0)).unwrap())
+    }
+    fn origin(&self) -> String {
+        format!("http://{}", self.0.local_addr().unwrap())
+    }
+    fn connections(&self) -> usize {
+        self.0.set_nonblocking(true).unwrap();
+        let mut count = 0;
+        loop {
+            match self.0.accept() {
+                Ok(_) => count += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return count,
+                Err(e) => panic!("accept: {e}"),
+            }
+        }
+    }
+}
+fn close_budget() -> Duration {
+    span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453)
+}
+
 /// The first stdout line within the patience; the reader is joined (its pipe closes on kill).
 fn first_line(stdout: std::process::ChildStdout) -> String {
     let (send, receive) = mpsc::channel();
@@ -175,13 +290,18 @@ impl Headless {
         let reply = self.client.post(path, &body).unwrap();
         (reply.status, reply.json().unwrap())
     }
-    fn quit(mut self) {
+    fn quit(self) {
+        self.quit_timed();
+    }
+    /// Quit, then the time from the request to the process exit.
+    fn quit_timed(mut self) -> Duration {
+        let started = Instant::now();
         assert_eq!(self.post("/api/quit", json!({})).0, 200);
         let deadline = Instant::now() + patience();
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
                 assert!(status.success(), "{status:?}");
-                return;
+                return started.elapsed();
             }
             assert!(
                 Instant::now() < deadline,
@@ -316,31 +436,42 @@ fn journey(python: bool) {
         "swarm-publish-profile {:?} before: Explicit opt-in throug",
         started.elapsed()
     );
-    // Explicit opt-in through the app route; not serving, so nothing is listed yet.
+    // Explicit opt-in through the app route; not serving, so nothing is listed yet: the bound
+    // directory is never contacted, before or after the opt-out, nor across a restart.
+    let counting = Counting::start();
+    let bound = counting.origin();
     let root = fresh_root(&base, "opt-in");
     let app = Headless::launch(&root);
-    let (status, reply) = app.post("/api/swarm/publish", Value::Object(listing(&origin)));
+    let (status, reply) = app.post("/api/swarm/publish", Value::Object(listing(&bound)));
     assert_eq!(status, 200, "{reply}");
     assert_eq!(reply["enabled"], true);
     assert_eq!(reply["phase"], "pending");
     until("status shows the opt-in", || {
         app.swarm()["phase"] == "pending"
     });
-    assert_eq!(app.swarm()["directory"], origin.as_str());
+    assert_eq!(app.swarm()["directory"], bound.as_str());
     let (status, refused) = app.post("/api/swarm/publish", json!({"link": "mycelium-swarm:x"}));
     assert_eq!(
         (status, refused["error"].clone()),
         (400, json!("swarm_link_mode_unsupported"))
     );
-    assert!(
-        rows(&origin).is_empty(),
-        "an unqualified route is never listed"
-    );
     let (status, out) = app.post("/api/swarm/unpublish", json!({}));
     assert_eq!(status, 200, "{out}");
     assert_eq!(out["enabled"], false);
     app.quit();
-    assert!(rows(&origin).is_empty());
+    let app = Headless::launch(&root);
+    until("the opted-out state reopens", || {
+        app.swarm()["enabled"] == false && app.swarm()["mode"] == "app"
+    });
+    // Several tick periods pass with the state reopened and nothing to do.
+    let settled = Instant::now() + span(BudgetId::OwnerPoll) * 4;
+    until("tick periods pass", || Instant::now() >= settled);
+    app.quit();
+    assert_eq!(
+        counting.connections(),
+        0,
+        "an unlisted, opted-out host contacts no directory"
+    );
 
     eprintln!(
         "swarm-publish-profile {:?} before: A listing left by a cr",
@@ -387,7 +518,81 @@ fn journey(python: bool) {
     p.tick(retry, &stopped).unwrap();
     assert!(rows(&origin).is_empty());
     assert!(p.stop(retry, Stop::Quit).unwrap().is_some());
+
+    eprintln!(
+        "swarm-publish-profile {:?} before: A member keeps showing",
+        started.elapsed()
+    );
+    // A member keeps showing a withdrawal it still owes from its time as an owner.
+    let root = fresh_root(&base, "member-debt");
+    leave_listing_behind(&root, &origin);
+    become_member(&root);
+    directory.stop();
+    let app = Headless::launch(&root);
+    until("the member's status shows the owed withdrawal", || {
+        let s = app.swarm();
+        s["phase"] == "withdraw_pending" && s["error_code"] == "swarm_directory_unreachable"
+    });
+    app.quit();
+    directory.restart(&dir_root);
+    let retry = unix_now() + heartbeat_seconds().unwrap();
+    support::set_clock(&dir_root, retry);
+    let p = AppPublisher::new(&root);
+    assert!(p.resume().unwrap());
+    let member = OwnerFacts::from_owner_run(false, None, None, None);
+    p.tick(retry, &member).unwrap();
+    assert!(rows(&origin).is_empty());
     eprintln!("swarm-publish-profile done {:?}", started.elapsed());
+}
+
+/// A directory that never answers does not hold the owner's actions: an action while the
+/// startup withdrawal waits on it answers at once.
+#[test]
+fn a_silent_directory_does_not_hold_owner_actions() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let silent = Silent::start();
+    let prompt = span(BudgetId::OwnerPoll) * 2;
+    let root = fresh_root(&base, "slow-action");
+    leave_unconfirmed_listing(&root, &silent.origin);
+    let app = Headless::launch(&root);
+    silent.wait_for_exchange();
+    let asked = Instant::now();
+    let (status, out) = app.post("/api/swarm/unpublish", json!({}));
+    let answered = asked.elapsed();
+    eprintln!("swarm-publish-unpublish-during-exchange {answered:?}");
+    assert_eq!(status, 200, "{out}");
+    assert!(
+        answered < prompt,
+        "unpublish waited {answered:?} for the directory"
+    );
+    assert_eq!(out["enabled"], false);
+}
+
+/// Quit while the startup withdrawal waits on a directory that never answers is bounded by the
+/// close budget; the withdrawal it could not finish stays durable for the next start.
+#[test]
+fn a_silent_directory_does_not_hold_quit_beyond_the_close_budget() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let silent = Silent::start();
+    let root = fresh_root(&base, "slow-quit");
+    leave_unconfirmed_listing(&root, &silent.origin);
+    let app = Headless::launch(&root);
+    silent.wait_for_exchange();
+    let quit = app.quit_timed();
+    eprintln!("swarm-publish-quit-during-exchange {quit:?}");
+    let bound = close_budget() + span(BudgetId::OwnerPoll) * 3;
+    assert!(
+        quit < bound,
+        "quit took {quit:?}, beyond the close budget {:?}",
+        close_budget()
+    );
+    let p = AppPublisher::new(&root);
+    assert!(p.resume().unwrap());
+    assert_eq!(p.status_json()["phase"], "withdraw_pending");
 }
 
 #[test]

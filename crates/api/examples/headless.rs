@@ -51,10 +51,7 @@ use api::{
     schema::{PublicError, Raised, STATUS_FIELDS, Snapshot},
     seed::SeedOptions,
     status::PublishedStatus,
-    swarm::publisher::{
-        app::{AppPublisher, OwnerFacts},
-        host::Stop,
-    },
+    swarm::publisher::app::{AppPublisher, OwnerFacts},
     windows::PendingWindows,
     wire::Json,
 };
@@ -2233,7 +2230,9 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
         ("chat", Json::Null),
         (
             "swarm",
-            if core.target {
+            // A member has no listing of its own (`swarm_publish.status` is None), but a
+            // withdrawal it still owes from its time as an owner stays visible until done.
+            if core.target && !core.swarm_publisher.withdrawal_pending() {
                 Json::Null
             } else {
                 Json::from(core.swarm_publisher.status_json())
@@ -2865,6 +2864,17 @@ fn run() -> Result<(), String> {
     serve
         .join()
         .map_err(|_| "serve_thread_panicked".to_owned())?;
+    // `swarm_publish.close` once quit stopped the run: no further directory exchange starts, a
+    // live listing becomes durable withdrawal debt, and one withdrawal attempt ends within the
+    // close budget (`thread.join(5)`), including any wait for a tick inside an exchange. An
+    // unreachable or slow directory is not a failure here: the next start retries the debt.
+    // Only a storage failure fails the close.
+    swarm_publisher
+        .close(
+            unix_seconds(),
+            span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453),
+        )
+        .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
     maintenance
         .join()
         .map_err(|_| "maintenance_thread_panicked".to_owned())?;
@@ -2874,9 +2884,15 @@ fn run() -> Result<(), String> {
     signals
         .join()
         .map_err(|_| "signal_thread_panicked".to_owned())?;
-    swarm_ticks
-        .join()
-        .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
+    // The tick thread ends at its next loop check; one still inside a directory exchange (its
+    // state durable before the exchange) is ended by the process exit, as a crash would be.
+    if swarm_ticks.is_finished() {
+        swarm_ticks
+            .join()
+            .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
+    } else {
+        eprintln!("swarm_publish_tick_ended_by_exit");
+    }
     // Close: the acquisition is cancelled, joined and recorded `closed` (it stays closed across a restart);
     // transient control files go away.
     let acquisition = core.lock().map_err(|_| "core_poisoned")?.acquisition.take();
@@ -2893,12 +2909,6 @@ fn run() -> Result<(), String> {
             _ => {}
         }
     }
-    // `swarm_publish.close` after the run stopped: one bounded withdrawal attempt of a live
-    // listing. An unreachable directory is not a failure here: the debt is already durable in the
-    // state file and the next start retries it. Only a storage failure fails the close.
-    swarm_publisher
-        .stop(unix_seconds(), Stop::Quit)
-        .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
     Ok(())
 }
 fn request_launch(port: u16, credential: &str) -> std::io::Result<()> {

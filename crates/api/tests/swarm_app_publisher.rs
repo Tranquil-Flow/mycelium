@@ -11,22 +11,26 @@ use api::swarm::{
     limits::Limits,
     publisher::{
         DirectoryClient, DirectoryPort, Error,
-        app::{AppPublisher, DB_FILE, KEY_FILE, OwnerFacts},
+        app::{AppPublisher, DB_FILE, OwnerFacts},
         heartbeat_seconds,
         host::Stop,
     },
     wire,
 };
+use budgets::{BudgetId, Entries};
 use serde_json::{Map, Value, json};
 use std::{
     io::{Read, Write},
     net::TcpListener,
+    os::unix::fs::PermissionsExt,
     path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
     },
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 use support::{Scratch, Server, set_clock};
 
@@ -222,7 +226,13 @@ fn lifecycle(python: bool) {
     assert_eq!(pending["enabled"], true);
     assert_eq!(pending["phase"], "pending");
     assert_eq!(pending["directory"], server.origin.as_str());
-    assert_eq!(publisher_files(&state), [KEY_FILE, DB_FILE]);
+    // One private state file (0600) holds the opt-in and the listing key; no other key file.
+    assert_eq!(publisher_files(&state), [DB_FILE]);
+    let mode = std::fs::metadata(state.join(DB_FILE))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
     // Opt-in alone publishes nothing: the run must be serving AND route-qualified.
     for (s, ready) in [("running", false), ("serving", false), ("stopped", false)] {
         p.tick(NOW, &facts(s, ready)).unwrap();
@@ -252,8 +262,12 @@ fn lifecycle(python: bool) {
     // The directory returns the exact signed bytes; verify them independently here.
     let j = parse(&serde_json::to_vec(record).unwrap()).unwrap();
     docs::check_record(&j, &wire::ed25519_verify, false, false).unwrap();
-    let key = std::fs::read(state.join(KEY_FILE)).unwrap();
-    let public = ed25519_dalek::SigningKey::from_bytes(&key.try_into().unwrap()).verifying_key();
+    // The stored listing key (class B state format) is the key that signed the record.
+    let seed: Vec<u8> = rusqlite::Connection::open(state.join(DB_FILE))
+        .unwrap()
+        .query_row("SELECT seed FROM publisher WHERE id=1", [], |r| r.get(0))
+        .unwrap();
+    let public = ed25519_dalek::SigningKey::from_bytes(&seed.try_into().unwrap()).verifying_key();
     assert_eq!(
         record["owner_key"],
         wire::key_text(&public.to_bytes()).unwrap()
@@ -441,4 +455,114 @@ fn deployed_python_directory_publish_refresh_and_withdraw_on_stop() {
 #[ignore = "requires the deployed Python directory copy + cryptography interpreter; explicit loopback qualification"]
 fn deployed_python_directory_failed_withdrawal_keeps_debt_until_a_retry_succeeds() {
     debt(true);
+}
+
+fn span(id: BudgetId) -> Duration {
+    Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
+}
+/// A loopback directory that accepts and never answers; each accepted connection is reported.
+struct Silent {
+    origin: String,
+    accepted: mpsc::Receiver<()>,
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+impl Silent {
+    fn start() -> Self {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (send, accepted) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let join = std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for socket in listener.incoming() {
+                let socket = socket.unwrap();
+                if stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                held.push(socket);
+                if send.send(()).is_err() {
+                    eprintln!("silent_directory_observer_gone");
+                }
+            }
+        });
+        Self {
+            origin,
+            accepted,
+            stop,
+            join: Some(join),
+        }
+    }
+}
+impl Drop for Silent {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        std::net::TcpStream::connect(self.origin.strip_prefix("http://").unwrap()).unwrap();
+        self.join.take().unwrap().join().unwrap();
+    }
+}
+
+#[test]
+fn close_ends_within_its_budget_and_leaves_durable_debt() {
+    let root = Scratch::new();
+    let state = root.0.join("state");
+    std::fs::create_dir(&state).unwrap();
+    let silent = Silent::start();
+    let p = Arc::new(AppPublisher::new(&state));
+    p.publish(true, &body(&silent.origin)).unwrap();
+    let ticking = {
+        let p = p.clone();
+        std::thread::spawn(move || p.tick(NOW, &facts("serving", true)))
+    };
+    let patience = span(BudgetId::ModelSelection) * 4;
+    silent
+        .accepted
+        .recv_timeout(patience)
+        .expect("the tick is inside a directory exchange");
+    // Quit while that exchange waits: bounded by the close budget, not the client's deadline.
+    let budget = span(BudgetId::OwnerPoll) * 2;
+    let started = Instant::now();
+    let closed = p.close(NOW, budget).unwrap().unwrap();
+    let took = started.elapsed();
+    assert!(
+        took < budget + span(BudgetId::OwnerPoll),
+        "close took {took:?}"
+    );
+    assert_eq!(closed.phase, api::swarm::publisher::Phase::WithdrawPending);
+    // Once closing, no pass starts an exchange.
+    p.tick(NOW, &facts("stopped", false)).unwrap();
+    assert!(
+        silent.accepted.try_recv().is_err(),
+        "a tick after close reached the directory"
+    );
+    ticking.join().unwrap().unwrap();
+    assert!(
+        silent.accepted.try_recv().is_err(),
+        "the closing pass started another exchange"
+    );
+    drop(p);
+    // The next start owes the withdrawal of the record that was durable before it was sent.
+    let p = AppPublisher::new(&state);
+    assert!(p.resume().unwrap());
+    assert_eq!(p.status_json()["phase"], "withdraw_pending");
+}
+
+#[test]
+fn close_of_an_opted_out_installation_touches_nothing() {
+    let root = Scratch::new();
+    let connects = Arc::new(AtomicUsize::new(0));
+    let counted = connects.clone();
+    let p = AppPublisher::with_connect(
+        &root.0,
+        Box::new(
+            move |_origin: &str| -> Result<Arc<dyn DirectoryPort>, Error> {
+                counted.fetch_add(1, Ordering::SeqCst);
+                Err(Error::new("swarm_directory_unreachable"))
+            },
+        ),
+    );
+    assert!(p.close(NOW, span(BudgetId::OwnerPoll)).unwrap().is_none());
+    assert_eq!(connects.load(Ordering::SeqCst), 0);
+    assert!(publisher_files(&root.0).is_empty());
 }

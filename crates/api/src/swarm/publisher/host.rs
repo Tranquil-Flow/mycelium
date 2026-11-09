@@ -5,7 +5,9 @@
 //! `observe`. The caller owns serialization and scheduling; no background task or
 //! authority is invented here. Listing preference must come from an explicit owner
 //! action, not membership, relay start, or entry reachability alone.
-use super::{Error, Listing, OwnerState, Status, SwarmPublisher};
+use super::{Call, DirectoryPort, Error, Listing, OwnerState, Status, Step, SwarmPublisher};
+use serde_json::Value;
+use std::sync::Arc;
 
 pub struct OwnerView<'a> {
     pub is_owner: bool,
@@ -37,6 +39,11 @@ impl PublisherHost {
         self.publisher.status()
     }
     pub fn observe(&mut self, now: i64, view: OwnerView<'_>) -> Result<Status, Error> {
+        let step = self.begin_observe(now, view)?;
+        self.publisher.drive(step)
+    }
+    /// `observe` as a pass whose exchanges the caller sends (see `SwarmPublisher::begin`).
+    pub fn begin_observe(&mut self, now: i64, view: OwnerView<'_>) -> Result<Step, Error> {
         let owner = if !view.is_owner {
             self.publisher.set_listing(None)?;
             OwnerState::Left
@@ -59,11 +66,21 @@ impl PublisherHost {
         } else {
             OwnerState::Paused
         };
-        self.publisher.reconcile(now, &owner)
+        self.publisher.begin(now, &owner)
     }
     /// Invoke before releasing publisher custody on quit/leave/pause. On unreachable
     /// directory the file still owns debt; the next startup must open and tick it.
     pub fn stop(&mut self, now: i64, event: Stop) -> Result<Status, Error> {
+        let step = self.begin_stop(now, event)?;
+        self.publisher.drive(step)
+    }
+    /// `stop` as a pass whose exchanges the caller sends.
+    pub fn begin_stop(&mut self, now: i64, event: Stop) -> Result<Step, Error> {
+        let state = self.mark_stop(event)?;
+        self.publisher.begin(now, &state)
+    }
+    /// Only the durable part of `stop` (no exchange): a live listing becomes withdrawal debt.
+    pub fn mark_stop(&mut self, event: Stop) -> Result<OwnerState, Error> {
         let state = match event {
             Stop::Pause => OwnerState::Paused,
             Stop::Leave => {
@@ -72,9 +89,18 @@ impl PublisherHost {
             }
             Stop::Quit => OwnerState::Quit,
         };
-        self.publisher.reconcile(now, &state)
+        self.publisher.mark(&state)?;
+        Ok(state)
+    }
+    /// Apply a reply to an exchange planned by `begin_*`/`advance`.
+    pub fn advance(&mut self, call: Call, reply: Result<Value, Error>) -> Result<Step, Error> {
+        self.publisher.advance(call, reply)
+    }
+    pub fn port(&self) -> Arc<dyn DirectoryPort> {
+        self.publisher.port()
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stop {
     Pause,
     Leave,
