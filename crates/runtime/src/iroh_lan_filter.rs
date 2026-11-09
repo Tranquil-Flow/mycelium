@@ -14,14 +14,29 @@
 //! destination against [`Admission::may_send`] before the `sendto`. A refused
 //! destination is dropped (counted) and nothing leaves the socket; QUIC sees
 //! loss. An IP candidate a peer advertises has no transport and is
-//! black-holed by iroh itself. Receiving is not filtered: no inbound datagram
-//! can make this endpoint send anywhere [`Admission`] does not admit.
+//! black-holed by iroh itself.
+//!
+//! Receive filter (B9f, REVIEW-laneB9 F1). iroh maps the source of every
+//! datagram a custom transport hands up (`socket.rs:654-660`) into an address
+//! map that never evicts (`mapped_addrs.rs:348-359`), so [`LanEndpoint::
+//! poll_recv`] drops a datagram BEFORE iroh sees it unless its source is
+//! allow-listed and either pinned, or provisionally admitted: a QUIC Initial
+//! from a source [`Admission::may_accept`] admits, held in a fixed-size table
+//! (`RelayConnectionSlots` entries, each for one `SidecarLocalHandshake`) that
+//! fails closed when full. New sources therefore reach iroh at most at that
+//! table's rate; iroh's map itself still has no eviction (upstream).
 //!
 //! Admission. Range form ([`LanPolicy::range_form`]): any allow-listed address.
 //! Exact pins (the default): only socket addresses this host dialed (the
 //! caller's signed peer addresses) or accepted an inbound handshake from, each
-//! held by a [`Pin`] for the connection's lifetime plus a close drain.
+//! held by a [`Pin`] for the connection's lifetime plus a close drain. Pins are
+//! in two classes (B9f, F2): AUTHENTICATED (dialed signed addresses, and
+//! accepts whose key the host verified against [`Admission::set_keys`]) and
+//! PROVISIONAL (accept side before or without that verification), each with
+//! its own capacity, so unauthenticated handshakes can never exhaust or evict
+//! the pins of authenticated peers.
 use crate::iroh_host::LanPolicy;
+use budgets::{BudgetId, Entries};
 use iroh::endpoint::transports::{
     CustomEndpoint, CustomSender, CustomTransport, RecvInfo, Transmit,
 };
@@ -35,6 +50,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 use transport::Error;
 
@@ -62,14 +78,72 @@ pub(crate) fn from_custom(addr: &CustomAddr) -> Option<SocketAddr> {
         .map(canonical)
 }
 
+/// Smallest UDP datagram that may carry a client's QUIC Initial (RFC 9000
+/// 14.1; noq drops shorter ones, `noq-proto-1.3.0/src/endpoint.rs:452`).
+const QUIC_MIN_INITIAL: usize = 1200;
+/// Whether `datagram` can open a QUIC connection at a server: a long-header
+/// Initial (type 0b00) of a version noq supports (`noq-proto-1.3.0/src/
+/// lib.rs:173-181`), at least [`QUIC_MIN_INITIAL`] bytes. Every other first
+/// datagram from an unknown source only earns a stateless reset or version
+/// negotiation, which the pre-send filter would refuse anyway.
+fn quic_initial(datagram: &[u8]) -> bool {
+    let Some((&first, rest)) = datagram.split_first() else {
+        return false;
+    };
+    let Some(version) = rest.get(..4) else {
+        return false;
+    };
+    let version = u32::from_be_bytes([version[0], version[1], version[2], version[3]]);
+    datagram.len() >= QUIC_MIN_INITIAL
+        && first & 0x80 != 0
+        && (first >> 4) & 0x03 == 0
+        && matches!(version, 0x0000_0001 | 0xff00_001d..=0xff00_0022)
+}
+/// Live pin holders per destination, by class (see the module note).
+#[derive(Debug, Default)]
+struct PinTable {
+    authenticated: HashMap<SocketAddr, usize>,
+    provisional: HashMap<SocketAddr, usize>,
+}
+impl PinTable {
+    fn contains(&self, addr: &SocketAddr) -> bool {
+        self.authenticated.contains_key(addr) || self.provisional.contains_key(addr)
+    }
+    fn class(&mut self, class: PinClass) -> &mut HashMap<SocketAddr, usize> {
+        match class {
+            PinClass::Authenticated => &mut self.authenticated,
+            PinClass::Provisional => &mut self.provisional,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PinClass {
+    Authenticated,
+    Provisional,
+}
+fn slots() -> Option<usize> {
+    usize::try_from(BudgetId::RelayConnectionSlots.count().ok()?.get()).ok()
+}
+fn handshake() -> Option<Duration> {
+    let span = BudgetId::SidecarLocalHandshake.span(Entries::ZERO).ok()?;
+    Some(Duration::from_millis(span.millis()))
+}
 /// Which destinations a direct-LAN endpoint may send to and which sources it
 /// may accept handshakes from. Shared by the host and its transport.
 #[derive(Debug)]
 pub(crate) struct Admission {
     policy: LanPolicy,
-    /// Exact pins: destination -> live holders.
-    pins: RwLock<HashMap<SocketAddr, usize>>,
+    /// Exact pins: destination -> live holders, by class.
+    pins: RwLock<PinTable>,
+    /// Distinct authenticated destinations (dialed / key-verified).
     capacity: usize,
+    /// Distinct provisional (accept-side, unverified) sources:
+    /// `RelayConnectionSlots`, the concurrent handshake bound.
+    provisional_capacity: usize,
+    /// Receive filter: unpinned sources admitted for one QUIC Initial, until
+    /// the instant each entry expires. At most `provisional_capacity`.
+    inbound: Mutex<HashMap<SocketAddr, Instant>>,
+    inbound_ttl: Duration,
     /// Every destination ever pinned (oldest dropped past `remembered`): the
     /// endpoint's address book keeps a returning peer's earlier, released
     /// addresses, which were admitted then and are no evidence of a leak.
@@ -78,10 +152,15 @@ pub(crate) struct Admission {
     /// Exact peer hosts from signed data: when set, inbound handshakes only
     /// from these IPs (dialed peers are pinned exactly anyway).
     hosts: RwLock<Option<BTreeSet<IpAddr>>>,
+    /// Exact peer keys from signed data: when set, an accepted handshake under
+    /// any other key is refused by the host and unpinned at once.
+    keys: RwLock<Option<BTreeSet<iroh::EndpointId>>>,
     /// Set once the host closes: pins stop releasing so the endpoint's own
     /// CONNECTION_CLOSE frames still reach admitted peers.
     closing: AtomicBool,
     refused: AtomicU64,
+    /// Inbound datagrams the receive filter dropped (never reached iroh).
+    dropped: AtomicU64,
     /// Fault injection: the path monitor treats every path as not admitted
     /// (the sender is unaffected, so close frames still go out). Proves that a
     /// connection is watched at all and that the monitor alone closes it.
@@ -89,17 +168,26 @@ pub(crate) struct Admission {
     pub(crate) distrust_for_test: AtomicBool,
 }
 impl Admission {
+    /// `capacity` authenticated destinations, `remembered` history entries.
+    /// The provisional and receive-filter bounds come from the budget table;
+    /// an unreadable budget leaves them at zero, i.e. closed (no unpinned
+    /// source and no accept is ever admitted).
     pub(crate) fn new(policy: LanPolicy, capacity: usize, remembered: usize) -> Arc<Self> {
         let hosts = policy.peer_hosts().map(|h| h.iter().copied().collect());
         Arc::new(Self {
             policy,
-            pins: RwLock::new(HashMap::new()),
+            pins: RwLock::new(PinTable::default()),
             capacity,
+            provisional_capacity: slots().unwrap_or(0),
+            inbound: Mutex::new(HashMap::new()),
+            inbound_ttl: handshake().unwrap_or(Duration::ZERO),
             history: Mutex::new((HashSet::new(), VecDeque::new())),
             remembered,
             hosts: RwLock::new(hosts),
+            keys: RwLock::new(None),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
+            dropped: AtomicU64::new(0),
             #[cfg(test)]
             distrust_for_test: AtomicBool::new(false),
         })
@@ -118,8 +206,46 @@ impl Admission {
         }
         self.pins
             .read()
-            .map(|pins| pins.contains_key(&dst))
+            .map(|pins| pins.contains(&dst))
             .unwrap_or(false)
+    }
+    /// The receive filter, evaluated for every inbound datagram BEFORE iroh
+    /// sees (and permanently maps) its source; see the module note.
+    pub(crate) fn admit_inbound(&self, src: SocketAddr, datagram: &[u8], now: Instant) -> bool {
+        let src = canonical(src);
+        if !self.policy.allows(src.ip()) {
+            return false;
+        }
+        if self
+            .pins
+            .read()
+            .map(|pins| pins.contains(&src))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        let Ok(mut inbound) = self.inbound.lock() else {
+            return false;
+        };
+        if inbound.get(&src).is_some_and(|until| now < *until) {
+            return true;
+        }
+        if !quic_initial(datagram) || !self.may_accept(src) {
+            return false;
+        }
+        if inbound.len() >= self.provisional_capacity {
+            inbound.retain(|_, until| now < *until);
+        }
+        let Some(until) = now.checked_add(self.inbound_ttl) else {
+            return false;
+        };
+        if inbound.len() >= self.provisional_capacity && !inbound.contains_key(&src) {
+            // Full of live provisional sources: fail closed (the peer's QUIC
+            // retransmits its Initial once an entry expires).
+            return false;
+        }
+        inbound.insert(src, until);
+        true
     }
     /// The monitor's view of an open path (= the pre-send check).
     pub(crate) fn admits_path(&self, addr: SocketAddr) -> bool {
@@ -164,28 +290,82 @@ impl Admission {
         *current = Some(hosts.iter().map(|ip| ip.to_canonical()).collect());
         Ok(())
     }
-    /// Admit exactly `addrs` as destinations until the returned [`Pin`] drops.
-    /// Fails closed once `capacity` distinct destinations are pinned.
+    /// Replace the exact peer keys accepted handshakes must present (taken
+    /// from signed data; at most `capacity`).
+    pub(crate) fn set_keys(&self, keys: &[iroh::EndpointId]) -> Result<(), Error> {
+        if keys.is_empty() || keys.len() > self.capacity {
+            return Err(Error::Authentication);
+        }
+        let mut current = self.keys.write().map_err(|_| Error::Unavailable)?;
+        *current = Some(keys.iter().copied().collect());
+        Ok(())
+    }
+    /// `None` when no keys are set; otherwise whether `key` is one of them.
+    /// A poisoned key table admits nothing.
+    pub(crate) fn admits_key(&self, key: &iroh::EndpointId) -> Option<bool> {
+        match self.keys.read() {
+            Ok(keys) => keys.as_ref().map(|k| k.contains(key)),
+            Err(_) => Some(false),
+        }
+    }
+    /// Admit exactly `addrs` (the caller's signed peer addresses) as
+    /// AUTHENTICATED destinations until the returned [`Pin`] drops. Fails
+    /// closed once `capacity` distinct authenticated destinations are pinned.
     pub(crate) fn pin(
         self: &Arc<Self>,
         addrs: impl IntoIterator<Item = SocketAddr>,
+    ) -> Result<Pin, Error> {
+        let pin = self.take(addrs, PinClass::Authenticated)?;
+        self.remember(&pin.addrs);
+        Ok(pin)
+    }
+    /// Admit an inbound handshake's source as a PROVISIONAL destination (its
+    /// own capacity: unauthenticated sources never touch authenticated pins).
+    pub(crate) fn pin_provisional(
+        self: &Arc<Self>,
+        addrs: impl IntoIterator<Item = SocketAddr>,
+    ) -> Result<Pin, Error> {
+        self.take(addrs, PinClass::Provisional)
+    }
+    fn limit(&self, class: PinClass) -> usize {
+        match class {
+            PinClass::Authenticated => self.capacity,
+            PinClass::Provisional => self.provisional_capacity,
+        }
+    }
+    fn take(
+        self: &Arc<Self>,
+        addrs: impl IntoIterator<Item = SocketAddr>,
+        class: PinClass,
     ) -> Result<Pin, Error> {
         let addrs: Vec<SocketAddr> = addrs.into_iter().map(canonical).collect();
         if addrs.is_empty() || addrs.iter().any(|a| !self.policy.allows(a.ip())) {
             return Err(Error::Authentication);
         }
+        let limit = self.limit(class);
         let mut pins = self.pins.write().map_err(|_| Error::Unavailable)?;
-        let fresh = addrs.iter().filter(|a| !pins.contains_key(*a)).count();
-        if pins.len() + fresh > self.capacity {
+        let table = pins.class(class);
+        let fresh = addrs.iter().filter(|a| !table.contains_key(*a)).count();
+        if table.len() + fresh > limit {
             return Err(Error::Unavailable);
         }
         for addr in &addrs {
-            *pins.entry(*addr).or_insert(0) += 1;
+            *table.entry(*addr).or_insert(0) += 1;
         }
-        drop(pins);
-        let mut history = self.history.lock().map_err(|_| Error::Unavailable)?;
+        Ok(Pin {
+            admission: self.clone(),
+            addrs,
+            class,
+        })
+    }
+    /// Record `addrs` as admitted once (see `admits_seen`). A poisoned history
+    /// only makes the monitor stricter (unseen = outside), never wider.
+    fn remember(&self, addrs: &[SocketAddr]) {
+        let Ok(mut history) = self.history.lock() else {
+            return;
+        };
         let (seen, order) = &mut *history;
-        for addr in &addrs {
+        for addr in addrs {
             if seen.insert(*addr) {
                 order.push_back(*addr);
             }
@@ -195,10 +375,6 @@ impl Admission {
                 seen.remove(&oldest);
             }
         }
-        Ok(Pin {
-            admission: self.clone(),
-            addrs,
-        })
     }
     pub(crate) fn close(&self) {
         self.closing.store(true, Ordering::SeqCst);
@@ -207,12 +383,64 @@ impl Admission {
     pub(crate) fn refused(&self) -> u64 {
         self.refused.load(Ordering::SeqCst)
     }
+    /// Inbound datagrams the receive filter dropped (never reached iroh).
+    pub(crate) fn dropped(&self) -> u64 {
+        self.dropped.load(Ordering::SeqCst)
+    }
 }
 /// Holds exact destination pins; releases them on drop (not while closing).
 #[derive(Debug)]
 pub(crate) struct Pin {
     admission: Arc<Admission>,
     addrs: Vec<SocketAddr>,
+    class: PinClass,
+}
+fn release(table: &mut HashMap<SocketAddr, usize>, addrs: &[SocketAddr]) {
+    for addr in addrs {
+        if let Some(count) = table.get_mut(addr) {
+            *count -= 1;
+            if *count == 0 {
+                table.remove(addr);
+            }
+        }
+    }
+}
+impl Pin {
+    /// A provisional (accept-side) pin whose peer key the host verified moves
+    /// to the authenticated class. Fails closed (pin unchanged) when the
+    /// authenticated table is full.
+    pub(crate) fn promote(&mut self) -> Result<(), Error> {
+        if self.class == PinClass::Authenticated {
+            return Ok(());
+        }
+        let capacity = self.admission.capacity;
+        let mut pins = self
+            .admission
+            .pins
+            .write()
+            .map_err(|_| Error::Unavailable)?;
+        let fresh = self
+            .addrs
+            .iter()
+            .filter(|a| !pins.authenticated.contains_key(*a))
+            .count();
+        if pins.authenticated.len() + fresh > capacity {
+            return Err(Error::Unavailable);
+        }
+        for addr in &self.addrs {
+            *pins.authenticated.entry(*addr).or_insert(0) += 1;
+        }
+        release(&mut pins.provisional, &self.addrs);
+        drop(pins);
+        self.class = PinClass::Authenticated;
+        self.admission.remember(&self.addrs);
+        Ok(())
+    }
+    /// Record a provisional pin's addresses as admitted (an accept whose
+    /// caller verifies the key itself) without changing its class.
+    pub(crate) fn remember(&self) {
+        self.admission.remember(&self.addrs);
+    }
 }
 impl Drop for Pin {
     fn drop(&mut self) {
@@ -224,14 +452,7 @@ impl Drop for Pin {
             // reads `false`), so the pins are never silently widened.
             return;
         };
-        for addr in &self.addrs {
-            if let Some(count) = pins.get_mut(addr) {
-                *count -= 1;
-                if *count == 0 {
-                    pins.remove(addr);
-                }
-            }
-        }
+        release(pins.class(self.class), &self.addrs);
     }
 }
 
@@ -302,7 +523,9 @@ impl CustomEndpoint for LanEndpoint {
         recv_infos: &mut [RecvInfo],
     ) -> Poll<io::Result<usize>> {
         let slots = bufs.len().min(metas.len()).min(recv_infos.len());
+        let now = Instant::now();
         let mut filled = 0;
+        let mut dropped = 0;
         while filled < slots {
             let mut read = tokio::io::ReadBuf::new(&mut bufs[filled][..]);
             match self.socket.poll_recv_from(cx, &mut read) {
@@ -312,6 +535,18 @@ impl CustomEndpoint for LanEndpoint {
                 // on the next poll if it persists.
                 Poll::Ready(Err(_)) => break,
                 Poll::Ready(Ok(source)) => {
+                    if !self.admission.admit_inbound(source, read.filled(), now) {
+                        // The receive filter: iroh never sees (or maps) this
+                        // source; the slot is reused for the next datagram.
+                        self.admission.dropped.fetch_add(1, Ordering::SeqCst);
+                        dropped += 1;
+                        if dropped >= noq_udp::BATCH_SIZE {
+                            // Bounded work per poll under a flood: yield, and
+                            // be polled again at once.
+                            break;
+                        }
+                        continue;
+                    }
                     let len = read.filled().len();
                     let meta = &mut metas[filled];
                     meta.len = len;
@@ -323,10 +558,15 @@ impl CustomEndpoint for LanEndpoint {
                 }
             }
         }
-        if filled == 0 {
-            Poll::Pending
-        } else {
+        if filled > 0 {
             Poll::Ready(Ok(filled))
+        } else {
+            if dropped >= noq_udp::BATCH_SIZE {
+                // Yielded with datagrams possibly still queued: no readiness
+                // event would wake us, so wake ourselves.
+                cx.waker().wake_by_ref();
+            }
+            Poll::Pending
         }
     }
 }
@@ -371,6 +611,12 @@ impl CustomSender for LanSender {
     }
 }
 
+#[cfg(test)]
+#[path = "iroh_lan_admission_tests.rs"]
+mod admission_tests;
+#[cfg(all(test, unix))]
+#[path = "iroh_lan_inbound_tests.rs"]
+mod inbound_tests;
 #[cfg(all(test, unix))]
 #[path = "iroh_lan_filter_tests.rs"]
 mod tests;

@@ -260,6 +260,22 @@ impl RouteExecutor {
         {
             return Err(error("joined_route_address_refused"));
         }
+        // The owner accepts nothing, so its receive filter needs only the
+        // signed carrier hosts: a QUIC Initial from any other host never
+        // reaches iroh (REVIEW-laneB9 F1/F2).
+        let mut hosts: Vec<IpAddr> = carriers
+            .iter()
+            .flat_map(|c| c.addrs().iter().map(|a| a.ip().to_canonical()))
+            .collect();
+        hosts.sort_unstable();
+        hosts.dedup();
+        let policy = if hosts.is_empty() {
+            policy
+        } else {
+            policy
+                .with_peer_hosts(hosts)
+                .map_err(|_| error("joined_route_address_refused"))?
+        };
         let peers = carriers
             .iter()
             .map(|c| Peer {
