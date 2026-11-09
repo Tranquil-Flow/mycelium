@@ -124,13 +124,18 @@ enum Built {
 fn log_set_aside(set_aside: &SetAside) {
     // The daemon log names what was moved and why; nothing else about the window is printed.
     eprintln!(
-        "product_evidence_state_set_aside: {} {}{}",
+        "product_evidence_state_set_aside: {} {}{}{}",
         set_aside.reason,
         set_aside.file_name,
         if set_aside.synced {
             ""
         } else {
             " (directory sync failed)"
+        },
+        if set_aside.pruned {
+            ""
+        } else {
+            " (older set-asides not pruned)"
         }
     );
 }

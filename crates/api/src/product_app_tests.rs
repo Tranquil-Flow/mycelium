@@ -78,3 +78,47 @@ fn a_set_aside_never_replaces_an_existing_file() {
     );
     assert_eq!(fs::read(root.0.join(&name)).unwrap(), b"{not json");
 }
+
+/// Set-asides are pruned (B15, REVIEW-laneB13f FU3): after a set-aside only the newest
+/// `KEEP_SET_ASIDE` set-aside files stay (the one just moved always among them), whatever kind;
+/// the active window's name and every other file in the directory are never touched.
+#[test]
+fn set_asides_are_pruned_to_the_newest_few() {
+    let root = root("prune");
+    let store = store(&root.0);
+    let older = [
+        format!("{STATE_FILE}.reset-1"),
+        format!("{STATE_FILE}.foreign-swarm-2"),
+        format!("{STATE_FILE}.unbound-3-1"),
+        format!("{STATE_FILE}.reset-4"),
+        format!("{STATE_FILE}.reset-40"),
+    ];
+    for name in &older {
+        fs::write(root.0.join(name), b"old").unwrap();
+    }
+    let unrelated = [format!("{STATE_FILE}.reset-x"), "notes.json".to_owned()];
+    for name in &unrelated {
+        fs::write(root.0.join(name), b"keep").unwrap();
+    }
+    fs::write(root.0.join(STATE_FILE), b"{not json").unwrap();
+    fs::set_permissions(root.0.join(STATE_FILE), fs::Permissions::from_mode(0o600)).unwrap();
+    // The clock reads earlier than the newest set-aside: the one just moved is kept anyway.
+    let moved = store.set_aside("reset", 3).unwrap();
+    let mut left: Vec<String> = fs::read_dir(&root.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    left.sort();
+    let mut expected = vec![
+        moved,
+        format!("{STATE_FILE}.reset-40"),
+        format!("{STATE_FILE}.reset-4"),
+        unrelated[0].clone(),
+        unrelated[1].clone(),
+    ];
+    expected.sort();
+    assert_eq!(
+        left, expected,
+        "set-asides were not pruned to the newest three"
+    );
+}

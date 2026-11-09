@@ -36,7 +36,7 @@ use crate::{
     wire::{Text, dumps_sorted},
 };
 use rustix::{
-    fs::{RenameFlags, renameat_with},
+    fs::{AtFlags, RenameFlags, renameat_with, unlinkat},
     io::Errno,
 };
 use serde_json::{Map, Value, json};
@@ -144,6 +144,9 @@ pub struct SetAside {
     /// Whether the directory was synced after the rename (B15: a failed sync still moved the
     /// window; only the move's durability across a power loss is unknown).
     pub synced: bool,
+    /// Whether older set-asides beyond the newest `KEEP_SET_ASIDE` were removed (B15; a failed
+    /// prune leaves them for the next set-aside).
+    pub pruned: bool,
 }
 
 /// What a stored window turned out to be.
@@ -161,6 +164,8 @@ struct Store {
     binding: String,
     /// The last set-aside's directory sync failed (B15; read by `take_unsynced`).
     unsynced: std::sync::atomic::AtomicBool,
+    /// The last set-aside's prune failed (B15; read by `take_unpruned`).
+    unpruned: std::sync::atomic::AtomicBool,
 }
 
 fn root_identity(root: &Path) -> Result<(u64, u64), AppError> {
@@ -194,6 +199,7 @@ impl Store {
             limit,
             binding: state.swarm_id.to_owned(),
             unsynced: std::sync::atomic::AtomicBool::new(false),
+            unpruned: std::sync::atomic::AtomicBool::new(false),
         })
     }
     fn revalidate(&self) -> Result<(), AppError> {
@@ -295,6 +301,35 @@ impl Store {
         Ok(retained.len())
     }
 
+    /// Whether the last set-aside's prune failed (and forget it).
+    fn take_unpruned(&self) -> bool {
+        self.unpruned
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+    /// Keep the newest `KEEP_SET_ASIDE` set-asides (B15, FU3): `moved`, the one just set aside, is
+    /// always one of them (whatever the clock read); older ones of any kind are removed. Only
+    /// regular files whose whole name is a set-aside name are considered, so the active window
+    /// and every other file stay.
+    fn prune(&self, dir: &fs::File, moved: &str) -> std::io::Result<()> {
+        let mut found: Vec<((u64, u64), String)> = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let Some(order) = set_aside_order(&name).filter(|_| name != moved) else {
+                continue;
+            };
+            if entry.file_type()?.is_file() {
+                found.push((order, name));
+            }
+        }
+        found.sort_unstable_by(|a, b| b.cmp(a));
+        for (_, name) in found.into_iter().skip(KEEP_SET_ASIDE.saturating_sub(1)) {
+            unlinkat(dir, name.as_str(), AtFlags::empty())?;
+        }
+        Ok(())
+    }
     /// Whether the last set-aside's directory sync failed (and forget it).
     fn take_unsynced(&self) -> bool {
         self.unsynced
@@ -369,6 +404,10 @@ impl Store {
             sync(&self.root).is_err(),
             std::sync::atomic::Ordering::SeqCst,
         );
+        self.unpruned.store(
+            self.prune(&dir, &name).is_err(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.revalidate()?;
         Ok(name)
     }
@@ -377,6 +416,25 @@ impl Store {
 /// Make a rename in `dir` durable.
 fn sync_dir(dir: &Path) -> std::io::Result<()> {
     fs::File::open(dir).and_then(|dir| dir.sync_all())
+}
+
+/// How many set-aside windows are kept (B15, FU3): the newest three, as a few recent resets or
+/// swarm switches are what an owner might still want to inspect; each is at most
+/// `MAX_STATE_BYTES`.
+const KEEP_SET_ASIDE: usize = 3;
+/// `(ms, suffix)` of a set-aside name `<STATE_FILE>.<kind>-<ms>[-<n>]`; `None` for any other name.
+fn set_aside_order(name: &str) -> Option<(u64, u64)> {
+    let rest = name.strip_prefix(STATE_FILE)?.strip_prefix('.')?;
+    let rest = ["reset-", "foreign-swarm-", "unbound-"]
+        .iter()
+        .find_map(|kind| rest.strip_prefix(kind))?;
+    let (ms, n) = rest.split_once('-').unwrap_or((rest, "0"));
+    let number = |text: &str| {
+        (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| text.parse::<u64>().ok())
+            .flatten()
+    };
+    Some((number(ms)?, number(n)?))
 }
 
 /// How many `-<n>` suffixes a set-aside name may need within one millisecond.
@@ -407,6 +465,7 @@ pub fn reset_state(
         reason,
         file_name,
         synced: !store.take_unsynced(),
+        pruned: !store.take_unpruned(),
     })
 }
 
@@ -477,6 +536,7 @@ impl ProductApp {
                         reason,
                         file_name,
                         synced: !store.take_unsynced(),
+                        pruned: !store.take_unpruned(),
                     });
                     Vec::new()
                 }
