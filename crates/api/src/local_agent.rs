@@ -9,8 +9,10 @@
 //! NOT ported here: owner-requested target cleanup, share refusal, slice fetch and work acceptance.
 //! With no offer pending, `collect`/`observe`/`compile` remains `reported` as in the source.
 use crate::installation_descriptor::Failure;
+use crate::slice_fetch::SliceTransport;
 use budgets::{BudgetId, Entries};
 use serde_json::{Map, Value, json};
+use std::path::PathBuf;
 
 pub const MEMBER_REPORT: &str = "mycelium.a13_demo_member_report.v1";
 
@@ -42,6 +44,47 @@ pub trait AgentHost {
     /// a staging ACK, signed receipt, or local transport connection.
     fn bootstrap(&mut self, _run: &str, _deployment: &str, _offer: &str) -> Result<(), Failure> {
         Err(Failure::new("RuntimeError", "native_bootstrap_unavailable"))
+    }
+    /// `actor.pending_cleanup()`: the owner's signed request to clean this member's stage, if any.
+    fn pending_cleanup(&mut self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// `/api/control/stop` then `/api/staging/cleanup/accept` for `request` (`_cleanup_if_requested`).
+    fn cleanup(&mut self, _request: &Value) -> Result<(), Failure> {
+        Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
+    }
+    /// `/api/control/stop`: no owner run may keep a worker.
+    fn stop_native(&mut self) -> Result<(), Failure> {
+        Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
+    }
+    /// `actor.status()['native_control']` (an empty object when this Mac has none).
+    fn native_control(&mut self) -> Result<Value, Failure> {
+        Ok(json!({}))
+    }
+    /// `actor.pending_stage()`: the pending signed (bootstrap or work) offer, if any.
+    fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// `/api/work/preview` then `/api/work/accept` under `limits` (the owner's own contributor).
+    fn accept_work(&mut self, _limits: &Value) -> Result<(), Failure> {
+        Err(Failure::new("RuntimeError", "member_work_unavailable"))
+    }
+    /// `consent.member_caps(app)`: the caps this Mac's share must fit (an object; `{}` = none known).
+    fn member_caps(&mut self) -> Result<Value, Failure> {
+        Ok(json!({}))
+    }
+    /// `consent.storage_cap(app)`.
+    fn storage_cap(&mut self) -> Result<u64, Failure> {
+        Err(Failure::new("KeyError", "demo_step_failed"))
+    }
+    /// `slice_root(run_id)`: the per-run slice root the descriptor named.
+    fn slice_root(&mut self, _run_id: &str) -> Result<PathBuf, Failure> {
+        Err(Failure::new("ValueError", "slice_destination_invalid"))
+    }
+    /// The owner-served byte source for `announcement`'s slice; `None` = no peer source (the
+    /// repository fallback is not ported here).
+    fn slice_transport(&mut self, _announcement: &Value) -> Option<Box<dyn SliceTransport>> {
+        None
     }
     /// `sink(report)` = `exchange.submit_local(local, report)`.
     fn sink(&mut self, report: &Value) -> Result<(), ExchangeUnavailable>;
@@ -286,6 +329,9 @@ impl LocalAgent {
         self.set("reported", None);
         Ok(())
     }
+
+    /// Seam only (RED baseline): no slice fetch exists to wait for.
+    pub fn join_slice(&mut self) {}
 
     /// `tick()`: the status after one step.
     pub fn tick(&mut self, host: &mut dyn AgentHost) -> Value {

@@ -59,6 +59,7 @@ pub mod schema;
 pub mod seed;
 pub mod serving_source;
 pub mod signed_requests;
+pub mod slice_fetch;
 pub mod sse;
 pub mod status;
 pub mod swarm;
