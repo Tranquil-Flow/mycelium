@@ -1576,8 +1576,10 @@ export function createField({ stage, state, reduce }) {
     // Each stage (and each prepare slice) is its own task; durations are recorded.
     const stages = (metrics.attachStages = []);
     let t0 = performance.now();
-    const stage = async () => {
+    const labels = (metrics.attachLabels = []);
+    const stage = async (label = "prepare") => {
       stages.push(+(performance.now() - t0).toFixed(1));
+      labels.push(label);
       await nextTask();
       t0 = performance.now();
       return disposed;
@@ -1586,9 +1588,9 @@ export function createField({ stage, state, reduce }) {
     graph = scene ? scene.graph : graph;
     await prepare(stage);
     if (disposed) return;
-    if (await stage()) return;
+    if (await stage("prepared")) return;
     const knotsHidden = markKnotsUnderText();
-    if (await stage()) return;
+    if (await stage("knots")) return;
     if (intro && !(intro.start !== null && introTime() >= INTRO_MS / 1000)) {
       resetTile();
       intro.list = statics();
@@ -1599,7 +1601,7 @@ export function createField({ stage, state, reduce }) {
       c.dataset.intro = "skipped";
       rasterStatic();
     }
-    if (await stage()) return;
+    if (await stage("intro")) return;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
       const legs = r.paths.map((p) => {
@@ -1620,11 +1622,11 @@ export function createField({ stage, state, reduce }) {
       const first = (window.MyceliumHero?.firstPulseAt ?? INTRO_MS / 1000 + 2.5 * INTRO_SCALE) + 1.5;
       return { ...r, legs, period, phase: Math.max(first, landing + 3 + 8.5 * (INTRO_SCALE - 1)) + side * (period / 2), chosen: new Map() };
     });
-    if (await stage()) return;
+    if (await stage("schedules")) return;
     cascades = buildCascades();
-    if (await stage()) return; // r11.2b: schedules, cascades and leaks in separate tasks (one 30-32 ms stage at 1920)
+    if (await stage("cascades")) return; // r11.2b: schedules, cascades and leaks in separate tasks (one 30-32 ms stage at 1920)
     buildMarginLeaks();
-    if (await stage()) return;
+    if (await stage("leaks")) return;
     // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
     // the compositor attaches (they appeared at once with the field fronts
     // already 40-60% out); the hero composite keeps showing as before.
@@ -1639,7 +1641,7 @@ export function createField({ stage, state, reduce }) {
     const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
       paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,
-      densityMultiplier: 1.2, baseCount: field.baseCount, count: field.count, sharedGraph: !!scene, connectors: 0, canvasCount: 2, flowSources: field.flowSources,
+      densityMultiplier: field.layout.enabled || !field.layout.compact ? 1.2 : 1.35, baseCount: field.baseCount, count: field.count, sharedGraph: !!scene, connectors: 0, canvasCount: 2, flowSources: field.flowSources,
       ...field.rootAudit, explorerLoneThreads: scene?.graph.explorerAudit?.loneThreads ?? 0, explorerAudit: scene?.graph.explorerAudit,
       marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: MP.GAIN, marginPulseLeak: MP.CUTOFF,
       marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,

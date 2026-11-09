@@ -124,7 +124,14 @@ def test_staging_toggle_switches_one_renderer_persists_and_never_shifts(local): 
             if page.evaluate("()=>document.getElementById('page-mycelium')?.dataset.intro!=='running' && !!(window.__myceliumScene && __myceliumScene.ready)"):
                 break
             page.wait_for_timeout(100)
-        page.wait_for_timeout(2500)
+        # r11.2c/r11.2b: after ready the colony monotone pass, the cross-faded
+        # re-bake and the dip glow run, and the hero is presented every frame
+        # for 12 s after the intro; the baseline rate is taken once that settles.
+        for _ in range(300):
+            if page.evaluate('!!__myceliumScene.timings.dipsDone'):
+                break
+            page.wait_for_timeout(100)
+        page.wait_for_timeout(12500)
         # Default r10; the electric renderer is not even requested.
         assert page.get_attribute('[data-bg-choice="mycelium"]', 'aria-pressed') == 'true'
         assert not [u for u in requests if 'electric' in u]

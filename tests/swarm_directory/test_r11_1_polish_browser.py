@@ -61,7 +61,7 @@ def test_page_build_has_no_long_task(local, width):  # noqa: F811
         page.wait_for_selector(READY, state='attached', timeout=60000)
         t = page.evaluate('__myceliumScene.timings')
         stages = page.evaluate('__understoryMetrics.attachStages')
-        assert len(stages) >= 4 and max(stages) < 30, str((stages, t))
+        assert len(stages) >= 4 and max(stages) < 30, str((list(zip(stages, page.evaluate('__understoryMetrics.attachLabels'))), t))
         assert t['completeTask'] < 30 and t['readyTask'] < 30, str((stages, t))
         assert t['maxSlice'] < 50, t
         # Production intro is the owner's 9 s pick (D61; was 6 s when this was written).

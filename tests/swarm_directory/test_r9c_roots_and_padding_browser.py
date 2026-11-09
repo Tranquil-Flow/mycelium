@@ -35,7 +35,8 @@ def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
         assert w['count']>0 and w['above099']/w['count']<.12 and w['max']<.999,w
         assert m['turningPer100px']['p95']<2.2 and m['uturnsPer1000px']<.05,m
         assert m['periodicity']['p50']<.35,m
-        assert audit.get('marginKnots',0)>0 if width>=1440 else audit.get('marginKnots',0)==0
+        # r11.2b (D65): compact viewports (< 1100 px) carry small edge colonies too.
+        assert audit.get('marginKnots',0)>0
         assert audit.get('marginDensityRatio')==.4
         # One clock must remain aligned after the hero spends time offscreen.
         page.evaluate('scrollTo(0,1600)');page.wait_for_timeout(350)
@@ -47,7 +48,9 @@ def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
         if width>=1440:
             assert any(s['active'] for s in pulses)
             assert page.evaluate('''()=>__myceliumScene.routes.every(r=>r.fieldList.every(v=>!__myceliumScene.graph.ss[v.segment].fieldPath.margin))'''), 'Hero leak must not add a second margin pulse'
-        assert all(s['intensity']==.75 for s in pulses)
+        # D59 (r11.2): margin pulses run at 0.92 of hero brightness (was .75; this
+        # pin was stale since 43dd59f4, where the test already failed on it).
+        assert all(s['intensity']==.92 for s in pulses)
         web=audit.get('web',{})
         assert web.get('spacingCV',0)>.5,web
         assert web.get('spectralPeakFraction',1)<.15,web
@@ -55,8 +58,8 @@ def test_sparse_roots_have_laterals_and_content_aware_margins(local,width):
         assert web.get('fusions',0)>0,web
         if width>=1440:
             assert all(.85<=r<=1 for r in audit['marginPulseRateRelative'])
-        assert audit['marginPulseLeak']==135
+        assert audit['marginPulseLeak']==600  # D59 (r11.2; was 135)
         page.set_viewport_size({'width':800,'height':900});page.wait_for_timeout(400)
         page.wait_for_selector('#page-mycelium[data-ready="1"]',state='attached',timeout=30000)
-        assert page.evaluate('__understoryAudit.marginKnots')==0
+        assert page.evaluate('__understoryAudit.marginKnots')>0  # r11.2b (D65): compact edge colonies
         b.close()

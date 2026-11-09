@@ -18,7 +18,9 @@ def test_unified_scene_has_reachable_field_and_bounded_buffers(local,theme,width
           return {fieldEdges:fieldEdges.length,shared:__understoryAudit.sharedGraph,density:__understoryAudit.count/__understoryAudit.baseCount,
             buffers:oldBytes===__understoryAudit.bytes,hidden:getComputedStyle(document.querySelector('.hero-art')).visibility};}''')
         assert result['shared'] and result['fieldEdges']>0 and result['buffers']
-        assert 1.18 <= result['density'] <= 1.22
+        # r11.2b (D65): compact viewports (< 1100 px, no side margins) carry a 1.35x
+        # sparse field so phones show below-fold mycelium; wider ones keep 1.2x.
+        assert (1.33 <= result['density'] <= 1.37) if width < 1100 else (1.18 <= result['density'] <= 1.22)
         assert result['hidden']=='hidden'
         page.emulate_media(reduced_motion='reduce');page.wait_for_timeout(100)
         frozen=page.locator('#page-mycelium').evaluate('(c)=>c.toDataURL()');page.wait_for_timeout(200)
