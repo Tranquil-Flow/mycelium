@@ -8,7 +8,7 @@
  * recycling outer explorers, pulses and blooms are drawn per frame (by the
  * page compositor in mycelium-field.js). The disposer owns every resource.
  */
-import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
+import { pacer, rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 import { extendFieldGraph } from "./mycelium-field.js";
 
 export const START_AGE = 110; // visitors arrive to a mature core with living rims
@@ -1493,21 +1493,23 @@ export function createHero(canvas, { stage, state, reduce }) {
   const mobile = () => L.mobile;
 
   // ---- progressive scheduler: bounded slices between frames ----
-  const channel = new MessageChannel();
-  let job = null;
-  channel.port1.onmessage = () => step();
-  function step() {
-    if (disposed || !job) return;
+  // r11.4: paced (see pacer in mycelium-geometry.js): a slice ends before the
+  // next vsync instead of after a fixed 8-9 ms, so it never delays a frame.
+  let job = null,
+    sliceEnd = 0;
+  function step(j, deadline) {
+    if (disposed || job !== j) return true;
     const t = performance.now();
+    sliceEnd = deadline;
     let result;
     try {
-      do result = job.gen.next();
-      while (!result.done && performance.now() - t < 9 && !result.value?.toString().startsWith("!"));
+      do result = j.gen.next();
+      while (!result.done && performance.now() < deadline && !result.value?.toString().startsWith("!"));
     } catch (e) {
       job = null;
       throw e;
     }
-    job.onSlice?.();
+    j.onSlice?.();
     // Whole task, including the progressive bake: what a long-task observer sees.
     const spent = performance.now() - t;
     if (spent > 30 && (scene.timings.slowSlices ||= []).length < 8) scene.timings.slowSlices.push([Math.round(spent), typeof result.value === "string" ? result.value : result.done ? "done" : "?"]);
@@ -1515,32 +1517,22 @@ export function createHero(canvas, { stage, state, reduce }) {
       scene.timings.maxSlice = spent;
       scene.timings.maxSliceAt = String(result.value ?? "done");
     }
-    if (result.done) {
-      const j = job;
-      job = null;
-      j.resolve(result.value);
-    } else channel.port2.postMessage(0);
+    if (!result.done) return false;
+    job = null;
+    j.resolve(result.value);
+    return true;
   }
-  /** A fresh task (r11.1): the completion work never shares a task with the last build slice. */
-  const nextTask = () => new Promise((resolve) => {
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => resolve();
-    ch.port2.postMessage(0);
-  });
+  /** A fresh task (r11.1): the completion work never shares a task with the
+   * last build slice. r11.4: a paced one, right after a frame. */
+  const nextTask = () => pacer.slot(0, "hero-task");
   function run(gen, onSlice) {
     return new Promise((resolve) => {
-      job = { gen, resolve, onSlice };
-      channel.port2.postMessage(0);
+      const j = (job = { gen, resolve, onSlice });
+      pacer.add({ prio: 0, name: "hero", run: (deadline) => step(j, deadline) });
     });
   }
-  let sliceStart = performance.now();
-  const budget = () => {
-    if (performance.now() - sliceStart > 8) {
-      sliceStart = performance.now();
-      return true;
-    }
-    return false;
-  };
+  // Generators yield once the paced slice's deadline has passed.
+  const budget = () => performance.now() > sliceEnd;
 
   // ---- r11 incremental growth raster ----
   // Every non-recycling path grows straight into the static raster, one piece
@@ -1551,7 +1543,7 @@ export function createHero(canvas, { stage, state, reduce }) {
   // head per growing tip are drawn on the live layer.
   const HEAD = 16, // px of rim glow behind each growing tip
     HEAD_CAP = 7000;
-  const growth = { epoch: 0, age: -Infinity, scan: 0, pending: [], active: [], recent: [], commit: null, presentKey: null, coresDrawn: false, changed: false };
+  const growth = { epoch: 0, age: -Infinity, scan: 0, pending: [], active: [], recent: [], chg: [], seq: 0, commit: null, presentKey: null, coresDrawn: false, changed: false };
   /** r11.2: before the life assignment (which needs the field) the intro
    * already grows the hero. Paths that may become living are held to a safe
    * static extent meanwhile: a tip candidate to its shortest possible base
@@ -1578,11 +1570,14 @@ export function createHero(canvas, { stage, state, reduce }) {
     sx.setTransform(1, 0, 0, 1, 0, 0);
     sx.clearRect(0, 0, canvas.width, canvas.height);
     sx.restore();
-    for (const P of g.paths) P.drawn = P.presented = P.pi = 0;
+    for (const P of g.paths) (P.drawn = P.presented = P.pi = 0), (P.chg = -1);
     growth.pending = g.paths.filter((P) => growable(P, g));
     growth.scan = g.paths.length;
     growth.active = [];
+    growth.wakeLen = 0;
     growth.recent = [];
+    growth.chg.length = 0;
+    growth.seq++;
     growth.commit = null;
     growth.coresDrawn = false;
     growth.age = -Infinity;
@@ -1602,8 +1597,20 @@ export function createHero(canvas, { stage, state, reduce }) {
       arcs = P.arcs,
       n = pts.length;
     if (n < 2 || s1 <= s0) return;
+    // The first i in [0, n-2] with arcs[i+1] > s0 (else n-2). r11.4: binary
+    // search, same index as the old linear scan from 0 (arcs never decrease),
+    // which walked every point up to a growing tip, every frame, per path.
     let i = 0;
-    while (i < n - 2 && arcs[i + 1] <= s0) i++;
+    if (n > 2 && arcs[1] <= s0) {
+      let lo = 0,
+        hi = n - 2;
+      while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (arcs[m + 1] <= s0) lo = m;
+        else hi = m;
+      }
+      i = hi;
+    }
     let cur = lerpAt(P, i, s0);
     for (;;) {
       const c0 = Math.floor(i / CHUNK) * CHUNK,
@@ -1722,6 +1729,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     for (; growth.scan < paths.length; growth.scan++) {
       const P = paths[growth.scan];
       P.drawn = P.presented = P.pi = 0;
+      P.chg = -1;
       if (growable(P, g)) growth.pending.push(P);
     }
     let w = 0;
@@ -1732,28 +1740,63 @@ export function createHero(canvas, { stage, state, reduce }) {
     growth.pending.length = w;
     const act = growth.active,
       done = [];
+    // r11.4: the start age of each active path (t0 + mat shift + resume delay)
+    // in a parallel array, once the geometry is final (the build's mat limit
+    // still moves mat shifts). ~25-30k active paths wait for their mat's start
+    // during the grow-in; they are passed over without touching the path
+    // (e < 0 for them: nothing to draw, as before).
+    const wakeOk = !!g.wakeFinal,
+      known = wakeOk ? growth.wakeLen || 0 : 0;
+    let W = growth.wake,
+      Z = growth.unborn; // 1: the path has drawn nothing yet (drawLive skips it)
+    if (wakeOk && (!W || W.length < act.length)) {
+      const nw = new Float64Array(Math.ceil(act.length * 1.5) + 64),
+        nz = new Uint8Array(nw.length);
+      if (W) nw.set(W.subarray(0, Math.min(W.length, known))), nz.set(Z.subarray(0, Math.min(Z.length, known)));
+      W = growth.wake = nw;
+      Z = growth.unborn = nz;
+    }
     let k = 0,
       i = 0,
       broke = false;
     for (; i < act.length; i++) {
-      const P = act[i],
-        end = rasterLen(P),
-        e = Math.min(end, (A - P.t0 - (P.matShift || 0) - (P.resumeDelay || 0)) * P.v);
-      if (e > P.drawn + 1e-6) {
-        addPiece(bakeGroups, P, P.drawn, e);
-        P.drawn = e;
-        growth.changed = true;
+      if (i < known && W[i] > A) {
+        act[k] = act[i];
+        Z[k] = Z[i];
+        W[k++] = W[i];
+      } else {
+        const P = act[i],
+          end = rasterLen(P),
+          e = Math.min(end, (A - P.t0 - (P.matShift || 0) - (P.resumeDelay || 0)) * P.v);
+        if (e > P.drawn + 1e-6) {
+          addPiece(bakeGroups, P, P.drawn, e);
+          P.drawn = e;
+          growth.changed = true;
+          // r11.4: the next present snapshots only the paths that grew.
+          if (P.chg !== growth.seq) {
+            P.chg = growth.seq;
+            growth.chg.push(P);
+          }
+        }
+        if (P.drawn >= end - 1e-6) done.push(P);
+        else {
+          if (wakeOk) (W[k] = P.t0 + (P.matShift || 0) + (P.resumeDelay || 0)), (Z[k] = P.drawn <= 0 ? 1 : 0);
+          act[k++] = P;
+        }
       }
-      if (P.drawn >= end - 1e-6) done.push(P);
-      else act[k++] = P;
       if (deadline && (i & 63) === 63 && performance.now() > deadline) {
         i++;
         broke = true;
         break;
       }
     }
-    for (; i < act.length; i++) act[k++] = act[i];
+    for (; i < act.length; i++) {
+      // Unknown entries: evaluated next time.
+      if (wakeOk) (W[k] = i < known ? W[i] : -Infinity), (Z[k] = i < known ? Z[i] : 0);
+      act[k++] = act[i];
+    }
     act.length = k;
+    growth.wakeLen = wakeOk ? k : 0;
     const tg = bakeTargets();
     for (const c of tg) c.globalCompositeOperation = light ? "source-over" : "lighter";
     flushPieces(tg[0], bakeGroups, tg[1]);
@@ -1782,15 +1825,24 @@ export function createHero(canvas, { stage, state, reduce }) {
     scene.hero.version++;
     // r11.3: flat reused buffers (a [P, e] pair per growing path, ~36k per
     // frame at 1920, made the intro frames allocation- and GC-heavy).
-    const n = growth.active.length + growth.recent.length;
+    // r11.4: only the paths whose drawn extent changed since the last present
+    // (up to ~4k a frame; ~30k more of the active list wait for their mat's
+    // start and were snapshotted and committed every frame unchanged: their
+    // commit was a no-op, max(presented, drawn) with drawn already presented).
+    // An uncommitted earlier snapshot is kept (commit takes the max).
+    const base = growth.commit ?? 0,
+      n = base + growth.chg.length + growth.recent.length;
     if (!growth.cP || growth.cP.length < n) {
+      const oP = growth.cP,
+        oE = growth.cE;
       growth.cP = new Array(Math.ceil(n * 1.5));
       growth.cE = new Float64Array(Math.ceil(n * 1.5));
+      for (let i = 0; i < base; i++) (growth.cP[i] = oP[i]), (growth.cE[i] = oE[i]);
     }
     const cP = growth.cP,
       cE = growth.cE;
-    let k = 0;
-    for (const P of growth.active) {
+    let k = base;
+    for (const P of growth.chg) {
       cP[k] = P;
       cE[k++] = P.drawn;
     }
@@ -1800,6 +1852,8 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     growth.commit = k;
     growth.recent = [];
+    growth.chg.length = 0;
+    growth.seq++;
     return true;
   }
   function commitPresented() {
@@ -1842,9 +1896,15 @@ export function createHero(canvas, { stage, state, reduce }) {
     liveSince ??= performance.now();
     const rim = (intro ? 1.25 : 0.9) * smooth((performance.now() - liveSince) / 600);
     let heads = 0;
+    // r11.4: active paths that have drawn nothing yet are passed over without
+    // touching them (growStep's unborn flags; ~30k during the grow-in).
+    const Z = growth.unborn,
+      zl = growth.wakeLen || 0;
     for (const list of [growth.active, growth.recent])
-      for (const P of list) {
-        const e = P.drawn;
+      for (let i = 0; i < list.length; i++) {
+        if (list === growth.active && i < zl && Z[i]) continue;
+        const P = list[i],
+          e = P.drawn;
         if (e <= 0) continue;
         if (P.presented < e) addPiece(liveGroups, P, P.presented, e);
         if (list === growth.active && heads < HEAD_CAP) {
@@ -2091,21 +2151,21 @@ export function createHero(canvas, { stage, state, reduce }) {
     dips.started = true;
     // Light theme, or a re-mount whose colonies were already checked.
     if (light || g.colonies.every((c) => c.dips)) return void (dips.done = true);
-    const gen = dipsGen(g),
-      ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      if (disposed) return;
-      const t0 = performance.now();
+    const gen = dipsGen(g);
+    // r11.4: paced slices of at most 4 ms (see pacer).
+    pacer.add({ prio: 1, name: "dips", run: (deadline) => {
+      if (disposed) return true;
+      const t0 = performance.now(),
+        end = Math.min(deadline, t0 + 4);
       let r;
       do r = gen.next();
-      while (!r.done && performance.now() - t0 < 4);
+      while (!r.done && performance.now() < end);
       scene.timings.maxDipSlice = Math.max(scene.timings.maxDipSlice || 0, performance.now() - t0);
-      if (r.done) {
-        dips.done = true;
-        scene.timings.dipsDone = performance.now() - begun;
-      } else ch.port2.postMessage(0);
-    };
-    ch.port2.postMessage(0);
+      if (!r.done) return false;
+      dips.done = true;
+      scene.timings.dipsDone = performance.now() - begun;
+      return true;
+    } });
   }
   // ---- r11.2 passive life: living periphery on the compositor's life layer ----
   let lifeStamp = 0;
@@ -2865,9 +2925,16 @@ export function createHero(canvas, { stage, state, reduce }) {
   let introRaf = 0,
     frame = 0;
   // Until the compositor attaches, the hero drives its own growth frames.
+  let introDrawn = -Infinity;
   function introFrame(now) {
     introRaf = 0;
     if (disposed || scene.ready) return;
+    // r11.4: 60 Hz while the build runs on a 120 Hz display (see pacer.skip).
+    if (pacer.skip(now - introDrawn)) {
+      introRaf = requestAnimationFrame(introFrame);
+      return;
+    }
+    introDrawn = now;
     scene.clock.tick(now);
     const g = scene.geometry || buildOut;
     if (g.paths && g.colonies && g.units && !reduce.matches) {
@@ -2882,8 +2949,8 @@ export function createHero(canvas, { stage, state, reduce }) {
   (async () => {
     let g = geometryCache.get(L.key);
     if (!g) {
-      sliceStart = performance.now();
       g = await run(buildGeometry(L, budget, buildOut));
+      g.wakeFinal = buildOut.wakeFinal = true; // r11.4: mat shifts are final (see growStep)
       scene.timings.geometry = performance.now() - begun;
       if (disposed) return;
       g.field = await run(extendFieldGraph({
@@ -3338,7 +3405,6 @@ export function createHero(canvas, { stage, state, reduce }) {
     job = null;
     cancelAnimationFrame(introRaf);
     document.removeEventListener("visibilitychange", onHidden);
-    channel.port1.onmessage = null;
     breathBox?.remove();
     for (const r of scene.routes || []) for (const b of r.buckets.values()) for (const t of b.images || []) t.image.width = t.image.height = 0;
     for (const layer of residueCache.keys()) for (const t of layer.images || []) t.image.width = t.image.height = 0;

@@ -498,7 +498,180 @@ function tipCycle(tau, period, g = LIFE_CYCLE.G * period, h = LIFE_CYCLE.H * per
   if (u < g + h + r) return { f: 1 - trap((u - g - h) / r), state: 2 };
   return { f: 0, state: 3 };
 }
+/** r11.4 frame pacer (owner, after r11.3: "stutter is better but not
+ * completely smooth"). Every background loop of the page (the scene build,
+ * the post-ready passes, the field's attach stages, band rasters, blooms) runs
+ * its slices here, one job per task, and a slice ends before the next vsync,
+ * so build work never stacks onto an animation frame. Before, each loop
+ * posted its own 4-9 ms MessageChannel tasks back to back: a slice landing on
+ * a vsync next to a heavy intro frame cost one to four vsyncs (rAF gaps of
+ * 50-230 ms at 1920 DPR2).
+ *
+ * - The pacer keeps a requestAnimationFrame running while it has work, and
+ *   learns the display's frame period (60/120 Hz).
+ * - A slice runs until MARGIN ms before the next 60 Hz vsync, at most MAX ms;
+ *   with less than MIN ms left it waits for the frame (its task runs right
+ *   after the frame's rendering).
+ * - Throughput (the build's timeline must not slip: the field attaches when
+ *   it is done): while background work gets less than its share of the main
+ *   thread (SHARE[prio] of the last WIN ms), the animations redraw on every
+ *   2nd (60 Hz display) or every 2nd-4th (120 Hz) vsync instead (see skip):
+ *   a steady 30-60 Hz, never a dropped run of frames. A fast host keeps 60 Hz
+ *   (or more) throughout; a 120 Hz display redraws at 60 Hz while work is
+ *   pending. Badly starved work still gets FLOOR ms per frame.
+ * - Hidden tabs, or no frame for 4 periods: unpaced MAX ms slices (a tab
+ *   hidden mid-build still finishes), with a timer fallback.
+ * Jobs: { run(deadline) -> true when finished, prio (0 first), name }. */
+const pacer = (() => {
+  const MARGIN = 2.5,
+    MIN = 2,
+    MAX = 8,
+    FLOOR = 4,
+    SHARE = [0.55, 0.35],
+    WIN = 250,
+    HZ60 = 1000 / 60;
+  const hasWindow = typeof requestAnimationFrame === "function" && typeof MessageChannel === "function";
+  let last = -Infinity,
+    period = HZ60,
+    raf = 0,
+    timer = 0,
+    posted = false,
+    turn = 0,
+    every = 1, // animations redraw on every `every`-th vsync
+    judged = 0,
+    ch = null;
+  const jobs = [],
+    spans = [], // [start, end] of the slices inside the last WIN ms
+    stats = { slices: 0, waits: 0, floor: 0, unpaced: 0, maxSlice: 0, maxAt: "", every: [], log: [] };
+  const now = () => performance.now();
+  const target = () => SHARE[Math.min(SHARE.length - 1, Math.min(...jobs.map((j) => j.prio)))];
+  function frame(t) {
+    raf = 0;
+    const d = t - last;
+    // A period from undropped intervals only (60 or 120 Hz alike).
+    if (d > 5 && d < period * 1.4) period = Math.min(20, Math.max(6, period + (d - period) * 0.2));
+    last = t;
+    // The redraw governor, judged every WIN ms: one vsync step at a time.
+    const lo = Math.max(1, Math.round(HZ60 / period)),
+      hi = Math.max(lo, Math.round((2 * HZ60) / period));
+    if (!jobs.length) every = 1;
+    else if (every < lo) every = lo;
+    if (jobs.length && t - judged >= WIN) {
+      judged = t;
+      const sh = share(t),
+        want = target();
+      const was = every;
+      if (sh < want) every = Math.min(hi, Math.max(lo, every + 1));
+      else if (sh > want + 0.1) every = Math.max(lo, every - 1);
+      else every = Math.max(lo, every);
+      if (every !== was && stats.every.length < 64) stats.every.push([Math.round(t), every, +sh.toFixed(2)]);
+    }
+    if (jobs.length) {
+      post();
+      raf = requestAnimationFrame(frame);
+    }
+  }
+  function post() {
+    if (posted) return;
+    posted = true;
+    ch.port2.postMessage(0);
+  }
+  function kick() {
+    if (!ch) {
+      ch = new MessageChannel();
+      ch.port1.onmessage = slice;
+    }
+    post();
+    if (hasWindow && !raf) raf = requestAnimationFrame(frame);
+  }
+  function share(t) {
+    while (spans.length && spans[0][1] < t - WIN) spans.shift();
+    let s = 0;
+    for (const [a, b] of spans) s += b - Math.max(a, t - WIN);
+    return s / WIN;
+  }
+  function wait() {
+    stats.waits++;
+    clearTimeout(timer);
+    // No frame within 4 periods (throttled or hidden): go on unpaced.
+    timer = setTimeout(() => {
+      timer = 0;
+      if (jobs.length) post();
+    }, 4 * Math.max(period, 50) + 2);
+  }
+  function deadlineAt(t) {
+    if (!hasWindow || document.hidden || t - last > Math.max(period, 50) * 4) {
+      stats.unpaced++;
+      return t + MAX;
+    }
+    // Paced on a 60 Hz grid at most: on a 120 Hz display a slice may take
+    // the odd (skipped) 120 Hz frame.
+    const next = last + Math.max(period, HZ60);
+    // A frame is due (its task is queued ahead of ours): yield to it.
+    if (t > next - MARGIN) return -1;
+    if (next - MARGIN - t >= MIN) return Math.min(t + MAX, next - MARGIN);
+    if (share(t) < target() / 2) {
+      stats.floor++;
+      return t + FLOOR;
+    }
+    return -1;
+  }
+  function slice() {
+    posted = false;
+    if (!jobs.length) return;
+    const t = now(),
+      deadline = deadlineAt(t);
+    if (deadline < 0) return wait();
+    // Highest priority first; round-robin among equals.
+    let best = -1;
+    for (let k = 0; k < jobs.length; k++) {
+      const i = (k + turn) % jobs.length;
+      if (best < 0 || jobs[i].prio < jobs[best].prio) best = i;
+    }
+    turn = best + 1;
+    const job = jobs[best];
+    let done = true;
+    try {
+      done = job.run(deadline) !== false;
+    } finally {
+      const e = now();
+      if (done) jobs.splice(jobs.indexOf(job), 1);
+      spans.push([t, e]);
+      stats.slices++;
+      if (e - t > stats.maxSlice) (stats.maxSlice = e - t), (stats.maxAt = job.name || "");
+      if (e - t > 12 && stats.log.length < 64) stats.log.push([Math.round(t), +(e - t).toFixed(1), job.name || "", +(deadline - t).toFixed(1)]);
+      if (jobs.length) post();
+      else every = 1;
+    }
+  }
+  return {
+    stats,
+    /** Adds a job; its run(deadline) is called in later tasks until it returns true. */
+    add(job) {
+      jobs.push(job);
+      kick();
+      return job;
+    },
+    remove(job) {
+      const i = jobs.indexOf(job);
+      if (i >= 0) jobs.splice(i, 1);
+    },
+    /** True when an animation frame `sinceDrawn` ms after the last drawn one
+     * should not redraw (see the governor above); false whenever no
+     * background work is pending. */
+    skip(sinceDrawn) {
+      return jobs.length > 0 && sinceDrawn < every * period - 3;
+    },
+    /** Resolves, with the slice's deadline, at the start of a paced slice
+     * (a fresh task with frame time left). */
+    slot(prio = 0, name = "slot") {
+      return new Promise((resolve) => this.add({ prio, name, run: (deadline) => (resolve(deadline), true) }));
+    },
+  };
+})();
+if (typeof window !== "undefined") window.__myceliumPacer = pacer.stats;
 export {
+  pacer,
   rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock,
   INTRO_BASE_MS, PRODUCTION_INTRO_MS, STAGING_INTRO_CHOICES, STAGING_INTRO_DEFAULT_MS, STAGING_INTRO_KEY, INTRO_MS, INTRO_SCALE, introMs, LIFE_CYCLE, tipCycle, lifeTiming,
 };

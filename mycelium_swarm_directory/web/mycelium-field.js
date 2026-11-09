@@ -10,7 +10,7 @@
  * transforms on scroll (never re-rastered on scroll), and a viewport-sized live
  * layer (fronts, pulses, blooms).
  */
-import { rng, gauss, hash01, smooth, persistWalk, measurePaths, auditPaths, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
+import { pacer, rng, gauss, hash01, smooth, persistWalk, measurePaths, auditPaths, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 
 function contentBounds(offset = 0) {
   const main = document.querySelector("main"),
@@ -1184,18 +1184,23 @@ export function createField({ stage, state, reduce }) {
     if (metrics.bandRasterLog.length > 200) metrics.bandRasterLog.shift();
     return true;
   }
-  const bandCh = new MessageChannel();
-  bandCh.port1.onmessage = () => {
-    if (disposed) return;
+  // r11.4: band rasters are paced slices of at most 4 ms (see pacer).
+  let bandJob = null;
+  const bandSlice = (deadline) => {
+    if (disposed) return true;
     while (bandQueue[0] && bandQueue[0].ready && !bandQueue[0].job) bandQueue.shift(); // finished elsewhere
     const b = bandQueue[0];
-    if (!b) return;
-    if (rasterBand(b, 4)) {
+    if (!b) return true;
+    if (rasterBand(b, Math.min(4, deadline - performance.now()))) {
       bandQueue.shift();
       lastScroll = NaN; // present it
       if (frozen !== null || reduce.matches) paint(frozen ?? clock.elapsed);
     }
-    if (bandQueue.length) bandCh.port2.postMessage(0);
+    return !bandQueue.length;
+  };
+  const bandKick = () => {
+    if (bandJob && !bandJob.done) return;
+    bandJob = pacer.add({ prio: 1, name: "band", run: (deadline) => (bandJob.done = bandSlice(deadline)) });
   };
   function evict(b) {
     b.cv.width = b.cv.height = 0;
@@ -1245,7 +1250,7 @@ export function createField({ stage, state, reduce }) {
         } else if (!b.queued && b.dist <= KEEP) {
           b.queued = true;
           bandQueue.push(b);
-          if (bandQueue.length === 1) bandCh.port2.postMessage(0);
+          bandKick(); // idempotent while a band job runs
         }
       }
     }
@@ -1284,11 +1289,11 @@ export function createField({ stage, state, reduce }) {
       job = ++rasterJob;
     let i = 0,
       spent = 0;
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      if (disposed || job !== rasterJob) return;
+    // r11.4: paced slices (see pacer).
+    pacer.add({ prio: 1, name: "field-raster", run: (deadline) => {
+      if (disposed || job !== rasterJob) return true;
       const t0 = performance.now();
-      while (i < list.length && performance.now() - t0 < 8) {
+      while (i < list.length && performance.now() < deadline) {
         const p = list[i++],
           n = p.rasterEnd;
         eachShift(p, (g, yr) => drawRange(g, p, 0, n, p.alpha * fieldAlpha, true, yr));
@@ -1296,15 +1301,13 @@ export function createField({ stage, state, reduce }) {
       }
       spent += performance.now() - t0;
       tileVersion++;
-      if (i < list.length) ch.port2.postMessage(0);
-      else {
-        metrics.rasterMs = +spent.toFixed(1);
-        c.dataset.tile = "1";
-        settled = true;
-        lastScroll = NaN; // re-evaluate band residency
-      }
-    };
-    ch.port2.postMessage(0);
+      if (i < list.length) return false;
+      metrics.rasterMs = +spent.toFixed(1);
+      c.dataset.tile = "1";
+      settled = true;
+      lastScroll = NaN; // re-evaluate band residency
+      return true;
+    } });
   }
   const indexAt = (p, px) => {
     const arc = p.arc,
@@ -1412,7 +1415,7 @@ export function createField({ stage, state, reduce }) {
     span = { A: 1, H: 1 };
     rootList = null;
     for (const p of field.strands) {
-      if (performance.now() - t > 8) {
+      if (performance.now() > stageEnd) {
         if (await yieldTask()) return;
         t = performance.now();
       }
@@ -1501,7 +1504,7 @@ export function createField({ stage, state, reduce }) {
     lifeRows = [NaN, NaN];
     let j = 0;
     for (const p of field.strands) {
-      if (performance.now() - t > 8) {
+      if (performance.now() > stageEnd) {
         if (await yieldTask()) return;
         t = performance.now();
       }
@@ -1594,11 +1597,10 @@ export function createField({ stage, state, reduce }) {
     return s;
   }
   /** A fresh task: attach() runs in short stages (r11.1: one ~55-90 ms task at 1920 before). */
-  const nextTask = () => new Promise((resolve) => {
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => resolve();
-    ch.port2.postMessage(0);
-  });
+  // r11.4: a paced task, right after a frame (see pacer); prepare's slices
+  // end at its deadline (they were a fixed 8 ms).
+  const nextTask = () => pacer.slot(0, "attach");
+  let stageEnd = 0;
   async function attach() {
     // Each stage (and each prepare slice) is its own task; durations are recorded.
     const stages = (metrics.attachStages = []);
@@ -1607,10 +1609,11 @@ export function createField({ stage, state, reduce }) {
     const stage = async (label = "prepare") => {
       stages.push(+(performance.now() - t0).toFixed(1));
       labels.push(label);
-      await nextTask();
+      stageEnd = await nextTask();
       t0 = performance.now();
       return disposed;
     };
+    stageEnd = performance.now() + 4;
     field = scene ? scene.field : field;
     graph = scene ? scene.graph : graph;
     await prepare(stage);
@@ -2504,20 +2507,20 @@ export function createField({ stage, state, reduce }) {
       gen = null,
       owner = null;
     const legs = marginSchedules.flatMap((s) => s.legs);
-    const ch = new MessageChannel();
     let kb = 0;
-    ch.port1.onmessage = () => {
-      if (disposed) return;
-      const t0 = performance.now();
-      while (performance.now() - t0 < 6) {
+    // r11.4: paced slices of at most 6 ms (see pacer).
+    pacer.add({ prio: 1, name: "margin-legs", run: (deadline) => {
+      if (disposed) return true;
+      const t0 = performance.now(),
+        end = Math.min(deadline, t0 + 6);
+      while (performance.now() < end) {
         if (!gen) {
           if (i >= jobs.length) {
             // r11.3: the margin blooms in 6 ms slices too (all at once was
             // one 70 ms task at 1920 DPR2, inside the intro on a fast host).
             const knots = field.marginKnots;
-            while (kb < knots.length && performance.now() - t0 < 6) bloomFor(knots[kb++]);
-            if (kb < knots.length) ch.port2.postMessage(0);
-            return;
+            while (kb < knots.length && performance.now() < end) bloomFor(knots[kb++]);
+            return kb >= knots.length;
           }
           owner = i < legs.length ? legs[i] : null;
           gen = jobs[i++]();
@@ -2530,9 +2533,8 @@ export function createField({ stage, state, reduce }) {
           gen = null;
         }
       }
-      ch.port2.postMessage(0);
-    };
-    ch.port2.postMessage(0);
+      return false;
+    } });
   }
   /** Cascade routes and start times per side (deterministic): hops follow the
    * side's cords colony by colony down every page copy to the page bottom; a
@@ -2942,8 +2944,12 @@ export function createField({ stage, state, reduce }) {
     }
     Object.assign(c.dataset, { time: t.toFixed(3), paths: field.strands.length, nodes: field.marginKnots.length, sporeNodes: 0, canvasPixels: live.width * live.height });
   }
+  let tickDrawn = -Infinity;
   function tick(now) {
     raf = 0;
+    // r11.4: 60 Hz while background work runs on a 120 Hz display (see pacer.skip).
+    if (pacer.skip(now - tickDrawn)) return schedule();
+    tickDrawn = now;
     firstFrame(now);
     const T = clock.tick(now);
     paint(T);
@@ -3054,22 +3060,22 @@ export function createField({ stage, state, reduce }) {
       b.edges.push(s.id);
       return s;
     };
-    let start = performance.now();
-    const budget = () => (performance.now() - start > 8 ? ((start = performance.now()), true) : false);
+    // r11.4: paced slices (see pacer); the generator yields at the deadline.
+    let end = 0;
+    const budget = () => performance.now() > end;
     const gen = extendFieldGraph({ vs, ss, paths, vertex, edge, nodes: [], w: width, h: 150, budget });
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      if (disposed) return;
-      const t0 = performance.now();
+    pacer.add({ prio: 0, name: "app-field", run: (deadline) => {
+      if (disposed) return true;
+      end = deadline;
       let r;
       do r = gen.next();
-      while (!r.done && performance.now() - t0 < 9);
-      if (!r.done) return ch.port2.postMessage(0);
+      while (!r.done && performance.now() < deadline);
+      if (!r.done) return false;
       field = r.value;
       graph = { vs, ss };
       attach();
-    };
-    ch.port2.postMessage(0);
+      return true;
+    } });
   }
   const layoutObserver = new MutationObserver(() => {
     if (!attached) return;
