@@ -7,9 +7,12 @@
 //! typed refusal code. [`prepare`] issues one single-use challenge per stage,
 //! starts every stage's native prepare before waiting on any (both load in
 //! parallel) and admits each member-signed resident proof against the seed.
-use crate::joined_shard::native::{Admitted, Challenges};
+use crate::{
+    app_host, handoff,
+    joined_shard::native::{Admitted, Challenges},
+};
 use serde_json::{Value, json};
-use std::{path::Path, time::Duration};
+use std::{net::SocketAddr, path::Path, time::Duration};
 
 /// A member's refusal (its own typed code) or a link failure code.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,4 +70,60 @@ pub fn prepare(
         admitted.push(challenges.admit(coordinator, stage.offer, &signed)?);
     }
     Ok(admitted)
+}
+/// Admit a member into the owner's swarm: its signed pair request, the
+/// owner's approval (seed-issued handoff, owner-offered `caps`, membership
+/// ttl), the member's acceptance against this seed (installation CA pinned,
+/// `seed_address` reachable from the member) and its signed carrier
+/// registration, which must name the member's CURRENT seed row.
+pub fn admit(
+    member: &mut dyn MemberLink,
+    owner_root: &Path,
+    seed: &app_host::SeedRuntime<app_host::Unmanaged>,
+    seed_address: SocketAddr,
+    caps: &Value,
+    within: Duration,
+) -> Result<Value, Refusal> {
+    let request = member.call(json!({"command":"pair_request"}), within)?;
+    let (signer, _, _) = app_host::identity_in(owner_root, app_host::SEED_IDENTITY_FILE)?;
+    let issuer = handoff::Coordinator {
+        signer,
+        swarm_id: seed.coordinator.swarm_id().into(),
+        seed_url: seed.seed_url.clone(),
+    };
+    let ttl = budgets::BudgetId::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
+        .span(budgets::Entries::ZERO)
+        .map_err(|_| Refusal("budget_unavailable".into()))?
+        .millis()
+        / 1000;
+    let approved = handoff::approve_pairing(
+        owner_root,
+        true,
+        Some(&issuer),
+        &request,
+        &json!(ttl),
+        caps,
+        app_host::now(),
+        &handoff::Entropy::os,
+    )?;
+    let ca = seed
+        .options()
+        .ca_pem
+        .and_then(|pem| String::from_utf8(pem).ok())
+        .ok_or_else(|| Refusal("seed_ca_unavailable".into()))?;
+    let registration = member.call(
+        json!({"command":"accept","handoff":approved.to_value(),"ca_pem":ca,"seed_address":seed_address}),
+        within,
+    )?;
+    let node = registration["message"]["member"]["node_id"]
+        .as_str()
+        .ok_or_else(|| Refusal("joined_shard_invalid".into()))?;
+    let row = seed
+        .coordinator
+        .member(node)
+        .map_err(|_| Refusal("joined_shard_member_changed".into()))?;
+    if row["generation"] != registration["message"]["member"]["generation"] {
+        return Err(Refusal("joined_shard_member_changed".into()));
+    }
+    Ok(registration)
 }

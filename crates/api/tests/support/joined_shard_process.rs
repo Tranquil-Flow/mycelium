@@ -885,23 +885,15 @@ fn product_owner_transfer_serves_only_a_consenting_member() {
     let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b16-transfer", None).unwrap();
     let member_root = root.join("member");
     let mut node = Node::start(&member_root);
-    let request = node.call(json!({"command":"pair_request"}));
-    let (signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
-    let issuer = handoff::Coordinator {
-        signer,
-        swarm_id: "b16-transfer".into(),
-        seed_url: seed.seed_url.clone(),
-    };
-    let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
-        .span(Entries::ZERO)
-        .unwrap()
-        .millis()
-        / 1000;
-    let approved = handoff::approve_pairing(&owner, true, Some(&issuer), &request, &json!(ttl),
+    let registration = api::joined_owner::link::admit(
+        &mut node,
+        &owner,
+        &seed,
+        seed.address,
         &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
-        app_host::now(), &handoff::Entropy::os).unwrap();
-    let registration = node.call(json!({"command":"accept","handoff":approved.to_value(),
-        "ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed.address}));
+        allowance(),
+    )
+    .unwrap();
     let node_id = registration["message"]["member"]["node_id"].clone();
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../planner/tests/fixtures/source-slices.json"
@@ -990,4 +982,77 @@ fn product_owner_transfer_serves_only_a_consenting_member() {
     node.close();
     seed.close();
     fs::remove_dir_all(root).unwrap();
+}
+
+/// B16 S4: the owner's signed remote member channel is product code
+/// (`api::joined_owner::remote`). A member that dies mid-session becomes a
+/// typed refusal within the call bound, never a panic or a hang, and the link
+/// still closes (its thread joined) afterwards.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_remote_member_turns_a_dead_member_into_a_typed_refusal() {
+    use api::joined_owner::{link::MemberLink, remote::RemoteMember};
+    let root = std::env::temp_dir().join(format!("b16-remote-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let member_root = root.join("member");
+    let mut child = Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
+        .arg("--state-root")
+        .arg(&member_root)
+        .args(super::member_remote::member_args())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let notice = member_root.join("member-control.json");
+    let end = Instant::now() + allowance();
+    while !notice.exists() {
+        assert!(
+            Instant::now() < end,
+            "member control endpoint not published"
+        );
+        std::thread::yield_now();
+    }
+    let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+    let c = &info["member_control"];
+    let addr = c["addrs"].as_array().unwrap().iter().fold(
+        iroh::EndpointAddr::new(c["endpoint_id"].as_str().unwrap().parse().unwrap()),
+        |a, s| a.with_ip_addr(s.as_str().unwrap().parse().unwrap()),
+    );
+    let mut link = RemoteMember::start(
+        super::member_remote::owner_secret().clone(),
+        addr,
+        super::member_remote::lan(),
+    )
+    .unwrap();
+    let within = Duration::from_millis(B::MemberChosenWall.span(Entries::ZERO).unwrap().millis());
+    let request = link
+        .call(json!({"command":"pair_request"}), within)
+        .unwrap();
+    assert!(
+        request["message"].is_object() || request.is_object(),
+        "{request}"
+    );
+    // Refusals keep the member's own code.
+    assert_eq!(
+        link.call(json!({"command":"receive"}), within)
+            .unwrap_err()
+            .0,
+        "not_joined"
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let began = Instant::now();
+    let dead = link
+        .call(json!({"command":"pair_request"}), within)
+        .unwrap_err();
+    assert!(dead.0.starts_with("control_call_failed"), "{dead:?}");
+    assert!(began.elapsed() < within, "bounded: {:?}", began.elapsed());
+    drop(link);
+    eprintln!(
+        "B16 remote: dead member -> {dead:?} after {:?}",
+        began.elapsed()
+    );
+    fs::remove_dir_all(&root).unwrap();
 }

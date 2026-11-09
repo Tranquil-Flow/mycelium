@@ -27,6 +27,7 @@ pub mod codec;
 pub mod consent;
 pub mod epoch;
 pub mod link;
+pub mod remote;
 pub mod source;
 
 fn fail(code: &'static str) -> PublicError {

@@ -114,26 +114,23 @@ impl Drop for Forwarder {
         }
     }
 }
+/// Owner admission step = PRODUCT code (api::joined_owner::link::admit), then
+/// the member's own consent is requested (member-side, C1).
 fn pair(
     node: &mut Node,
     root: &Path,
     seed: &app_host::SeedRuntime<app_host::Unmanaged>,
     seed_address: std::net::SocketAddr,
 ) -> Value {
-    let request = node.call(json!({"command":"pair_request"}));
-    let (signer, _, _) = app_host::identity_in(root, app_host::SEED_IDENTITY_FILE).unwrap();
-    let issuer = handoff::Coordinator {
-        signer,
-        swarm_id: seed.coordinator.swarm_id().into(),
-        seed_url: seed.seed_url.clone(),
-    };
-    let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
-        .span(Entries::ZERO)
-        .unwrap()
-        .millis()
-        / 1000;
-    let handoff=handoff::approve_pairing(root,true,Some(&issuer),&request,&json!(ttl),&json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),app_host::now(),&handoff::Entropy::os).unwrap();
-    let registration=node.call(json!({"command":"accept","handoff":handoff.to_value(),"ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed_address}));
+    let registration = api::joined_owner::link::admit(
+        node,
+        root,
+        seed,
+        seed_address,
+        &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
+        allowance(),
+    )
+    .unwrap();
     super::process::member_consent(node, &registration, &seed.coordinator);
     registration
 }
