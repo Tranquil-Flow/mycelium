@@ -230,6 +230,15 @@ fn run() -> Result<()> {
                 match (served, recycled) {
                     (Ok(mut report), Ok(())) => {
                         report["carrier_recycled"] = json!(true);
+                        // B14: the recycled endpoint KEEPS the hosts it
+                        // learned from key-verified owner handshakes.
+                        let learned: Vec<String> = host
+                            .lan_learned_hosts()
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|a| a.ip().to_string())
+                            .collect();
+                        report["carrier_learned_hosts"] = json!(learned);
                         Ok(report)
                     }
                     (Ok(_), Err(e)) => Err(format!("carrier_recycle_failed:{e}")),

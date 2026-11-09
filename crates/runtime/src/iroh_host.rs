@@ -62,7 +62,9 @@ pub enum NetworkMode {
 /// to any allow-listed address. Sources: any allow-listed address, or only the
 /// exact peer hosts of [`LanPolicy::with_peer_hosts`] when the caller has them;
 /// an unpinned source reaches iroh only with a QUIC Initial, through a bounded
-/// provisional table (B9f, `iroh_lan_filter` module note).
+/// provisional table (B9f, `iroh_lan_filter` module note). The host of a
+/// handshake verified under an admitted peer key is learned and gets its own
+/// lane of that table (B14, [`LoopbackHost::lan_learned_hosts`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LanPolicy {
     extra: Vec<IpAddr>,
@@ -706,6 +708,9 @@ impl<'a> LoopbackHost<'a> {
                                     connection.close(0u32.into(), b"lan_pins_exhausted");
                                     return Err(error);
                                 }
+                                // B14: strictly after the key check, the
+                                // admitted key's host is learned (own lane).
+                                admission.learn(source, &connection.remote_id());
                             }
                             // No keys set: the caller verifies the key; the pin
                             // stays provisional (its own capacity).
@@ -817,6 +822,13 @@ impl<'a> LoopbackHost<'a> {
     /// (exact pins, or the range form). `None` in every other mode.
     pub fn lan_admits(&self, destination: SocketAddr) -> Option<bool> {
         self.lan.as_ref().map(|lan| lan.may_send(destination))
+    }
+    /// Direct LAN: the sources this host learned for its admitted peer keys
+    /// (B14: each from a handshake verified under that key; one per key).
+    /// Their hosts' Initials have their own provisional lane. `None` in every
+    /// other mode.
+    pub fn lan_learned_hosts(&self) -> Option<Vec<SocketAddr>> {
+        self.lan.as_ref().map(|lan| lan.learned_hosts())
     }
     /// Direct LAN: datagrams the pre-send filter refused (never sent).
     pub fn lan_refused_datagrams(&self) -> Option<u64> {
