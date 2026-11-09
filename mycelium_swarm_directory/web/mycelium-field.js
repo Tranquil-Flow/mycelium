@@ -23,7 +23,10 @@ function contentBounds(offset = 0) {
     left = Math.min(left, r.left);
     right = Math.max(right, r.right);
   }
-  return { left, right, offset, rects: rects.length, enabled: innerWidth >= 1100 && Math.min(left, innerWidth - right) >= 60 };
+  // r11.2b (owner: "for the mobile, doesn't seem to show much background
+  // mycelium when you scroll down"): below 1100 px there are no side margins;
+  // compact viewports get small edge colonies instead (see extendFieldGraph).
+  return { left, right, offset, rects: rects.length, enabled: innerWidth >= 1100 && Math.min(left, innerWidth - right) >= 60, compact: innerWidth < 1100 };
 }
 
 /** Hyphal knots (r11; refs/hyphal-knots, recipe in design/r11-coordination.md):
@@ -182,8 +185,13 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     layout = contentBounds(0),
     left = 0;
   w = W;
+  // r11.2b compact (< 1100 px): edge colonies partly off-screen, scaled to the
+  // width (MK), and a denser sparse field (1.35x) so every scroll position of
+  // a phone carries visible mycelium. Wider viewports are byte-identical.
+  const compact = !layout.enabled && layout.compact,
+    MK = compact ? Math.max(0.5, Math.min(0.8, w / 960)) : 1;
   const baseCount = Math.round((w * height) / 26000),
-    count = Math.round(baseCount * 1.2);
+    count = Math.round(baseCount * (compact ? 1.35 : 1.2));
   const strands = [],
     fusions = [],
     grid = new Map(),
@@ -349,11 +357,12 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     p.endFade = [a, b].filter((v) => marginKnots.includes(v));
     return p;
   };
-  if (layout.enabled)
+  if (layout.enabled || compact)
     for (const side of [-1, 1]) {
-      const px = side < 0 ? layout.left * 0.45 : layout.right + (w - layout.right) * 0.55,
+      const px = compact ? (side < 0 ? 3 : w - 3) : side < 0 ? layout.left * 0.45 : layout.right + (w - layout.right) * 0.55,
         knots = [];
-      for (let y = top + 120 + R() * 120; y < top + height - 60; y += 380 + R() * 360) {
+      // Compact: the two sides alternate (offset by half a spacing).
+      for (let y = top + 120 + R() * 120 + (compact && side > 0 ? 260 : 0); y < top + height - 60; y += compact ? 420 + R() * 280 : 380 + R() * 360) {
         const centre = vertex(px + gauss(R) * 14, y + gauss(R) * 30, 0);
         knots.push(centre);
         marginKnots.push(centre);
@@ -364,9 +373,9 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         const fan = Math.PI / 2 + gauss(R) * 0.4 + (R() < 0.5 ? Math.PI : 0),
           lobes = [];
         for (let j = 0, n = 2 + Math.floor(R() * 3); j < n; j++) {
-          const along = (R() - 0.25) * 20,
-            across = gauss(R) * 9;
-          lobes.push({ x: centre.x + Math.cos(fan) * along - Math.sin(fan) * across, y: centre.y + Math.sin(fan) * along + Math.cos(fan) * across, r: 9 + R() * 9 });
+          const along = (R() - 0.25) * 20 * MK,
+            across = gauss(R) * 9 * MK;
+          lobes.push({ x: centre.x + Math.cos(fan) * along - Math.sin(fan) * across, y: centre.y + Math.sin(fan) * along + Math.cos(fan) * across, r: (9 + R() * 9) * MK });
         }
         const inMat = (front = 0) => {
           for (;;) {
@@ -400,19 +409,19 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
           return p;
         };
         // Felt: the soft core (random headings, tightly curled, short).
-        for (let j = 0; j < 56; j++) tuft(curl(inMat(), R() * 6.283, 6 + R() * 12, 0.32), 0.22 + R() * 0.16, 0.62);
+        for (let j = 0; j < Math.round(56 * MK); j++) tuft(curl(inMat(), R() * 6.283, (6 + R() * 12) * MK, 0.32), 0.22 + R() * 0.16, 0.62);
         // Forward fuzz: near-parallel along the fan, gently curving, heavy-tailed lengths.
-        for (let j = 0; j < 36; j++) tuft(curl(inMat(0.7), fan + gauss(R) * 0.45, 8 + 34 * Math.pow(R(), 1.6), 0.07), 0.22 + R() * 0.14, 0.6);
+        for (let j = 0; j < Math.round(36 * MK); j++) tuft(curl(inMat(0.7), fan + gauss(R) * 0.45, (8 + 34 * Math.pow(R(), 1.6)) * MK, 0.07), 0.22 + R() * 0.14, 0.6);
         // A short rear/side fringe.
         for (let j = 0; j < 8; j++) tuft(curl(inMat(), fan + Math.PI + gauss(R) * 0.9, 4 + R() * 6, 0.12), 0.2, 0.45);
         // Long hyphae stay graph-connected to the colony vertex through two
         // meandering spines inside the mat; each leaves from its own spine vertex
         // and exits at a scattered rim point, so nothing converges on one point.
         const spines = [fan, fan + Math.PI].map((h, k) => {
-          const p = tuft(curl(centre, h + gauss(R) * 0.5, k ? 12 + R() * 8 : 22 + R() * 12, 0.3), 0.3, 0.5);
+          const p = tuft(curl(centre, h + gauss(R) * 0.5, (k ? 12 + R() * 8 : 22 + R() * 12) * MK, 0.3), 0.3, 0.5);
           if (!k) {
             p.haze = lobes; // the broad soft glow of the mat (no peak at the centre)
-            mats.push({ centre, lobes, fan, haze: p });
+            mats.push({ centre, lobes, fan, haze: p, k: MK });
           }
           return p.points.slice(2);
         });
@@ -444,8 +453,8 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         // r11: runners leave the colony for the content column (ref-8 sparse
         // hyphae flowing inwards), so text sections carry mycelium as in r9.
         const inward = side < 0 ? 0 : Math.PI;
-        for (let j = 0, n = 4 + Math.floor(R2() * 4); j < n; j++) {
-          const hh = inward + gauss(R2) * 0.6,
+        for (let j = 0, n = 4 + Math.floor(R2() * 4) + (compact ? 1 : 0); j < n; j++) {
+          const hh = inward + gauss(R2) * (compact ? 0.8 : 0.6),
             { inner, o } = leave(hh);
           const p = add([...inner, ...persistWalk(o, hh, 380 + R2() * 420, R2, { ...sparseWalk, k: 0.016, pull: undefined })], { width: 0.5, alpha: 0.8 });
           p.runner = true;
@@ -562,12 +571,13 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   // web so no other geometry or stream moves) and a soft central haze lobe.
   const feltR = rng("r112-margin-felt");
   for (const m of mats) {
-    const { centre, fan } = m;
-    for (let j = 0; j < MAT_FELT; j++) {
-      const rr = MAT_R * Math.pow(feltR(), 1.6),
+    const { centre, fan } = m,
+      MR = MAT_R * m.k; // r11.2b: compact edge mats are scaled to the width
+    for (let j = 0, n = Math.round(MAT_FELT * m.k); j < n; j++) {
+      const rr = MR * Math.pow(feltR(), 1.6),
         o = feltR() * 6.283,
-        u = rr / MAT_R,
-        len = 5 + feltR() * 11 * (1 - 0.4 * u),
+        u = rr / MR,
+        len = (5 + feltR() * 11 * (1 - 0.4 * u)) * Math.sqrt(m.k),
         h = u < 0.45 ? feltR() * 6.283 : o + gauss(feltR) * 0.9, // tangled core, outward-leaning rim (no radial star)
         pts = [{ x: centre.x + Math.cos(o) * rr, y: centre.y + Math.sin(o) * rr }];
       let a = h,
@@ -586,7 +596,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     }
     void fan;
     // A central lobe makes the mat's glow peak at its point and fall off.
-    m.lobes.push({ x: centre.x, y: centre.y, r: MAT_R * 0.95 }, { x: centre.x, y: centre.y, r: MAT_R * 3.2, k: 1.7 });
+    m.lobes.push({ x: centre.x, y: centre.y, r: MR * 0.95 }, { x: centre.x, y: centre.y, r: MR * 3.2, k: 1.7 });
     budget() && (yield "margin-felt");
   }
   // Strands crossing a colony core (not its own felt) dissolve there too.
@@ -861,9 +871,17 @@ export function createField({ stage, state, reduce }) {
     if (intro && intro.start === null) intro.start = now ?? performance.now();
   };
 
+  // r11.2b: compact edge colonies pulse and cascade at 0.7 of the margin gain.
+  const mpGain = () => (field.layout.enabled ? MP.GAIN : MP.GAIN * 0.7);
   const marginWeight = (px) => {
     const l = field.layout;
-    if (!l.enabled) return 0;
+    if (!l.enabled) {
+      // r11.2b compact: the edge colonies (centres 3 px inside the edge) carry
+      // margin weight out to ~40 px; the text column stays at column weight.
+      if (!field.marginKnots.length) return 0;
+      const q = Math.max(0, Math.min(1, (40 - Math.min(px, field.width - px)) / 32));
+      return q * q * (3 - 2 * q);
+    }
     const dd = px < l.left ? l.left - px : px > l.right ? px - l.right : 0,
       q = Math.max(0, Math.min(1, dd / 72));
     return q * q * (3 - 2 * q);
@@ -1910,7 +1928,7 @@ export function createField({ stage, state, reduce }) {
         // A cascade owns its side: no independent crest overlaps it.
         const start = t - age;
         if (cascadeBusy(s.side, start, start + crestEnd)) continue;
-        out.push({ side: s.side, leg, age, leak: leg.leak, gain: MP.GAIN, p: leg.p, duration: leg.duration, speed: MP.FAST, residueOnly: age >= crestEnd || cy < cycle });
+        out.push({ side: s.side, leg, age, leak: leg.leak, gain: mpGain(), p: leg.p, duration: leg.duration, speed: MP.FAST, residueOnly: age >= crestEnd || cy < cycle });
       }
     }
     return out;
@@ -2483,7 +2501,7 @@ export function createField({ stage, state, reduce }) {
    * cascade starts on every CAS.EVERY-th hero pulse reaching or leaving the
    * side's hero colony, never overlapping the previous one on that side. */
   function buildCascades() {
-    if (!scene?.sched || !field.layout.enabled) return [];
+    if (!scene?.sched || !(field.layout.enabled || field.marginKnots.length)) return [];
     const docH = document.documentElement.scrollHeight,
       heroTop = scene.hero.top,
       copies = Math.max(1, Math.ceil((docH - heroTop - field.top) / field.height)),
@@ -2512,7 +2530,7 @@ export function createField({ stage, state, reduce }) {
       let off = 0;
       hops.forEach((h, i) => {
         h.off = off;
-        h.gain = MP.GAIN * Math.max(CAS.FLOOR, Math.pow(CAS.TAPER, i));
+        h.gain = mpGain() * Math.max(CAS.FLOOR, Math.pow(CAS.TAPER, i));
         off += h.dur + CAS.RELAY;
       });
       const span = hops.length ? hops.at(-1).off + hops.at(-1).dur + MP.TAIL : 0,
@@ -2670,7 +2688,7 @@ export function createField({ stage, state, reduce }) {
     for (const trip of marginTrips(t)) {
       drawMarginTrip(trip, t, add, shift);
       const node = trip.p.points.at(-1);
-      if (!trip.residueOnly && field.marginKnots.includes(node)) drawBloom(node, trip.age - trip.duration, MP.GAIN, add, shift);
+      if (!trip.residueOnly && field.marginKnots.includes(node)) drawBloom(node, trip.age - trip.duration, mpGain(), add, shift);
     }
     for (const { c, age } of cascadeAt(t))
       for (const h of c.hops) {
