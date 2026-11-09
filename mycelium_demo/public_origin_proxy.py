@@ -55,6 +55,9 @@ _DIRECTORY_ASSET_PATHS = frozenset(
     {
         '/',
         '/apex.js',
+        '/vision',
+        "/swarms/vision.css",
+        "/swarms/vision.js",
         "/swarms/design.css",
         "/swarms/theme.js",
         "/swarms/design.js",
@@ -379,7 +382,7 @@ class PublicOriginProxyHandler(BaseHTTPRequestHandler):
             self._send_redirect(_hosted.DIRECTORY_MOUNT_PREFIX + "/")
             return
         if self._config.directory_host is not None and (
-            _is_directory_mount(path) or path == '/apex.js' or
+            _is_directory_mount(path) or path in ('/apex.js', '/vision') or
             (path == '/' and not self._config.enable_product_routes)
         ):
             self._handle_directory_request()

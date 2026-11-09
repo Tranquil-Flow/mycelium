@@ -1,0 +1,277 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+   /vision: the homepage's header, palette, type and footer (design.css), a calm
+   field (the /swarms density) and a Simple | Technical switch. Every panel is
+   in the HTML; the switch only hides the inactive one. */
+:root[data-vision-mode="simple"] [data-panel="technical"],
+:root[data-vision-mode="technical"] [data-panel="simple"] {
+  display: none;
+}
+/* Without JavaScript both versions show, each under its own heading. */
+:root:not([data-vision-mode]) .mode-switch,
+:root[data-vision-mode] .panel-title {
+  display: none;
+}
+.panel-title {
+  margin: 48px 0 0;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* Text sits on the living field: a local background-coloured halo under the
+   glyphs (as on the homepage); opaque surfaces need none. */
+.vision-page main,
+.vision-page footer.foot {
+  text-shadow: 0 0 2px var(--bg), 0 0 4px var(--bg), 0 0 10px var(--bg);
+}
+.vision-page main :is(.btn, button, .goal-today, .table-card, .mode-switch) {
+  text-shadow: none;
+}
+.vision-page footer.foot {
+  padding: 28px 44px;
+}
+
+.vision-head {
+  padding: 64px 0 8px;
+}
+.vision-head h1 {
+  font-size: clamp(40px, 4.6vw, 62px);
+  line-height: 1.05;
+  max-width: 17ch;
+  margin: 18px 0 34px;
+}
+.mode-switch {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--muted);
+  border-radius: 10px;
+  padding: 3px;
+  background: var(--card);
+}
+.mode-switch [role="tab"] {
+  font: 550 15px var(--sans);
+  min-width: 124px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mode-switch [role="tab"]:hover {
+  color: var(--ink);
+}
+.mode-switch [role="tab"][aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.mode-switch [role="tab"]:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.vision-page .sect {
+  padding: 44px 0;
+  max-width: 1000px;
+}
+.vision-page .vision-panel > .sect:first-of-type {
+  padding-top: 40px;
+}
+.vision-page .sect > h2 {
+  font-size: 32px;
+  line-height: 1.15;
+  margin-bottom: 20px;
+}
+.vision-page .sect p,
+.vision-list li {
+  line-height: 1.75;
+  max-width: 68ch;
+}
+.vision-lead {
+  font-size: 1.15rem;
+}
+
+.aim-grid {
+  margin-top: 8px;
+}
+.aim-grid h3 {
+  font-size: 20px;
+  font-weight: 550;
+  margin: 0 0 10px;
+}
+.aim-grid p {
+  margin: 10px 0;
+}
+.goal-today {
+  display: block;
+}
+
+.vision-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 12px;
+}
+.vision-list.limits {
+  list-style: none;
+  padding: 0;
+  gap: 10px;
+}
+.vision-page .table-card + .vision-list {
+  margin-top: 26px;
+}
+
+.table-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 18px;
+}
+.vision-table {
+  font-size: 15px;
+}
+table.vision-table th {
+  font-size: 12.5px;
+}
+table.vision-table td {
+  vertical-align: top;
+  line-height: 1.6;
+}
+table.vision-table td:first-child {
+  font-weight: 600;
+  width: 26%;
+}
+table.vision-table td:last-child {
+  width: 32%;
+}
+.vision-table .goal-today {
+  background: var(--card-2);
+  padding: 8px 12px;
+}
+
+.principles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 900px;
+}
+.principles li {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 999px;
+  padding: 8px 14px;
+  line-height: 1.45;
+  text-shadow: none;
+}
+.vision-cta {
+  margin-top: 30px;
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .vision-page footer.foot {
+    padding: 28px 32px;
+  }
+}
+/* Tables stack into one card per row. */
+@media (max-width: 720px) {
+  .table-card {
+    background: transparent;
+    border: 0;
+    padding: 0;
+  }
+  table.vision-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .vision-table,
+  .vision-table tbody,
+  .vision-table tr,
+  table.vision-table td {
+    display: block;
+    width: auto;
+  }
+  .vision-table tr {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    text-shadow: none;
+  }
+  table.vision-table td,
+  table.vision-table td:first-child,
+  table.vision-table td:last-child {
+    border: 0;
+    padding: 4px 0;
+    width: auto;
+  }
+  table.vision-table td:first-child {
+    font-size: 17px;
+    padding-bottom: 6px;
+  }
+  table.vision-table td:not(:first-child)::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 12px;
+    font-weight: 620;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  table.vision-table td:last-child {
+    padding-top: 8px;
+  }
+}
+@media (max-width: 640px) {
+  /* Same header as the homepage on phones (site.css .apex .top rules). */
+  .vision-page .top .wrap {
+    gap: 8px;
+  }
+  .vision-page .top .btn {
+    font-size: 14px;
+    padding: 0 10px;
+  }
+  .vision-head {
+    padding-top: 36px;
+  }
+  .vision-head h1 {
+    font-size: 36px;
+    line-height: 1.08;
+    max-width: none;
+    text-wrap: balance;
+    margin-bottom: 26px;
+  }
+  .mode-switch {
+    display: flex;
+  }
+  .mode-switch [role="tab"] {
+    flex: 1;
+    min-width: 0;
+  }
+  :root:not([data-vision-mode]) .mode-switch {
+    display: none;
+  }
+  .vision-page .sect {
+    padding: 32px 0;
+  }
+  .vision-page .sect > h2 {
+    font-size: 26px;
+  }
+  .vision-lead {
+    font-size: 1.05rem;
+  }
+  .vision-page footer.foot {
+    padding: 24px 18px;
+  }
+}
