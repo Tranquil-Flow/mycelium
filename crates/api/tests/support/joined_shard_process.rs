@@ -38,10 +38,14 @@ impl Node {
         let exe = std::env::var_os("B7_MEMBER_BINARY")
             .expect("build api --example shard_member and set B7_MEMBER_BINARY");
         if super::member_remote::remote_mode() {
+            // The spawned member's operator decides consent at launch (C1).
+            let decision = consent_file(root.parent().unwrap());
             let child = Command::new(exe)
                 .arg("--state-root")
                 .arg(root)
                 .args(super::member_remote::member_args())
+                .arg("--consent-file")
+                .arg(&decision)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::inherit())
@@ -216,6 +220,23 @@ impl Drop for Node {
             r.join().unwrap();
         }
     }
+}
+/// Consent on the owner's product path (B16 S3, C1): a stdin member's local
+/// operator decides through its private channel; a remote-controlled member's
+/// operator decided at launch (`--consent-file`). Either way the owner only
+/// requests the member's own consent and admits it via `joined_owner::consent`.
+pub(super) fn member_consent(
+    node: &mut Node,
+    registration: &Value,
+    coordinator: &seed::Coordinator,
+) {
+    if node.remote.is_none() {
+        node.call(json!({"command":"consent","device_memory_bytes":16_000_000_000u64,
+            "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
+            "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}));
+    }
+    let status = node.call(json!({"command":"consent_status"}));
+    api::joined_owner::consent::require(coordinator, registration, &status, 1).unwrap();
 }
 /// Two-Mac runbook helper: prints the PUBLIC owner control pin for the
 /// `B8_OWNER_CONTROL_KEY` file (the secret never leaves the owner Mac).
@@ -419,9 +440,7 @@ fn process_transfer(stall: bool, expired: bool) {
         .member(member["node_id"].as_str().unwrap())
         .unwrap();
     assert_eq!(member["generation"], row["generation"]);
-    node.call(json!({"command":"consent","device_memory_bytes":16_000_000_000u64,
-        "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
-        "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}));
+    member_consent(&mut node, &registration, &seed.coordinator);
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../planner/tests/fixtures/source-slices.json"
     ))
@@ -666,4 +685,386 @@ fn process_transfer(stall: bool, expired: bool) {
         released.is_ok(),
         "transfer release while member alive: {released:?}"
     );
+}
+
+/// The member operator's own consent decision for a remote-controlled member
+/// (`--consent-file`, member-side; TWO-MAC-TEST C1).
+pub(super) fn consent_file(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join(format!(
+        "member-consent-{}-{}.json",
+        std::process::id(),
+        app_host::hex(&app_host::random(4).unwrap())
+    ));
+    fs::write(
+        &path,
+        json!({"device_memory_bytes":16_000_000_000u64,
+            "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
+            "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}})
+        .to_string(),
+    )
+    .unwrap();
+    path
+}
+/// B16 S3 (gap row 12): consent stays member-side on the product control
+/// channel. The pinned owner may not write a member's consent remotely; the
+/// member operator decides (`--consent-file`), the member binds it to the swarm
+/// it joins, and the owner reads it back member-signed (`consent_status`) and
+/// admits the member only through `api::joined_owner::consent::require`.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_consent_is_member_side_and_reaches_the_owner_signed() {
+    use super::member_remote::{Link, member_args};
+    struct Reap(Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if self.0.try_wait().unwrap().is_none() {
+                self.0.kill().unwrap();
+            }
+            self.0.wait().unwrap();
+        }
+    }
+    let root = std::env::temp_dir().join(format!("b16-consent-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let owner = root.join("owner");
+    fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b16-consent", None).unwrap();
+    let (seed_signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
+    let issuer = handoff::Coordinator {
+        signer: seed_signer,
+        swarm_id: seed.coordinator.swarm_id().into(),
+        seed_url: seed.seed_url.clone(),
+    };
+    let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    let file = consent_file(&root);
+    let mut outcomes = Vec::new();
+    for (name, operator_consent) in [("no-consent", false), ("member-consent", true)] {
+        let member_root = root.join(name);
+        let mut command = Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap());
+        command
+            .arg("--state-root")
+            .arg(&member_root)
+            .args(member_args());
+        if operator_consent {
+            command.arg("--consent-file").arg(&file);
+        }
+        let mut child = Reap(
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap(),
+        );
+        let notice = member_root.join("member-control.json");
+        let end = Instant::now() + allowance();
+        while !notice.exists() {
+            assert!(
+                Instant::now() < end,
+                "member control endpoint not published"
+            );
+            assert!(child.0.try_wait().unwrap().is_none(), "member exited early");
+            std::thread::yield_now();
+        }
+        let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+        let c = &info["member_control"];
+        let addr = c["addrs"].as_array().unwrap().iter().fold(
+            iroh::EndpointAddr::new(c["endpoint_id"].as_str().unwrap().parse().unwrap()),
+            |a, s| a.with_ip_addr(s.as_str().unwrap().parse().unwrap()),
+        );
+        let (link, replies) = Link::start(addr);
+        let call = |command: Value| -> Value {
+            link.send(command);
+            replies.recv_timeout(allowance()).unwrap()
+        };
+        let request = call(json!({"command":"pair_request","operation_id":1}));
+        let approved = handoff::approve_pairing(&owner, true, Some(&issuer), &request["result"], &json!(ttl),
+            &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
+            app_host::now(), &handoff::Entropy::os).unwrap();
+        let registration = call(
+            json!({"command":"accept","operation_id":2,"handoff":approved.to_value(),
+            "ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed.address}),
+        );
+        assert_eq!(registration["ok"], true, "{registration}");
+        let registration = registration["result"].clone();
+        // The pinned owner may only request: a remote consent write is refused.
+        let written = call(
+            json!({"command":"consent","operation_id":3,"device_memory_bytes":16_000_000_000u64,
+            "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
+            "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}),
+        );
+        assert_eq!(
+            (written["ok"].clone(), written["code"].clone()),
+            (json!(false), json!("member_consent_member_side")),
+            "{name}: {written}"
+        );
+        // Member-signed consent status (enrolled key, verified by the link).
+        let status = call(json!({"command":"consent_status","operation_id":4}));
+        assert_eq!(status["ok"], true, "{status}");
+        let admitted = api::joined_owner::consent::require(
+            &seed.coordinator,
+            &registration,
+            &status["result"],
+            1_000_000,
+        );
+        if operator_consent {
+            let consent = admitted.unwrap();
+            assert_eq!(consent["state"], "granted");
+            assert_eq!(consent["binding"]["swarm_id"], seed.coordinator.swarm_id());
+            assert_eq!(
+                consent["binding"]["node_id"],
+                registration["message"]["member"]["node_id"]
+            );
+        } else {
+            assert_eq!(admitted.unwrap_err().code, "member_consent_required");
+        }
+        assert_eq!(
+            call(json!({"command":"close","operation_id":5}))["ok"],
+            true
+        );
+        drop(link);
+        let end = Instant::now() + allowance();
+        let exit = loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < end, "member did not close");
+            std::thread::yield_now();
+        };
+        assert!(exit.success(), "{exit:?}");
+        outcomes.push(json!({"member":name,"remote_write":written["code"],"status":status["result"]["consent"]["state"]}));
+    }
+    eprintln!("B16 consent: {outcomes:?}");
+    seed.close();
+    fs::remove_dir_all(&root).unwrap();
+}
+
+/// The test driver's member handle is a product `MemberLink` (stdin operator
+/// channel, or the signed remote channel when `B8_MEMBER_CONTROL=remote`).
+impl api::joined_owner::link::MemberLink for Node {
+    fn begin(&mut self, command: Value) -> Result<(), api::joined_owner::link::Refusal> {
+        self.send(command);
+        Ok(())
+    }
+    fn finish(&mut self, within: Duration) -> Result<Value, api::joined_owner::link::Refusal> {
+        let v = self
+            .replies
+            .recv_timeout(within)
+            .map_err(|_| api::joined_owner::link::Refusal("member_reply_timeout".into()))?;
+        if v["ok"] == true {
+            Ok(v["result"].clone())
+        } else {
+            Err(api::joined_owner::link::Refusal(
+                v["code"].as_str().unwrap_or("member_refused").to_owned(),
+            ))
+        }
+    }
+}
+/// B16 S2 (rows 6/3): the owner's transfer step is product code. It asks the
+/// member for its own consent first and serves nothing to a member without it
+/// (stdin mode: that member's local operator has not decided yet); then it
+/// verifies the compiled bytes, issues the seed-signed offer, serves exactly
+/// that offer over the artifact carrier and returns the member's verified
+/// receipt.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_owner_transfer_serves_only_a_consenting_member() {
+    use api::joined_owner::{
+        link::MemberLink,
+        source::{ShardSource, transfer},
+    };
+    let root = std::env::temp_dir().join(format!("b16-transfer-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let owner = root.join("owner");
+    fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b16-transfer", None).unwrap();
+    let member_root = root.join("member");
+    let mut node = Node::start(&member_root);
+    let registration = api::joined_owner::link::admit(
+        &mut node,
+        &owner,
+        &seed,
+        seed.address,
+        &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
+        allowance(),
+    )
+    .unwrap();
+    let node_id = registration["message"]["member"]["node_id"].clone();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let mut recipe = case["node_plans"]["node-0"].clone();
+    recipe["node_id"] = node_id;
+    recipe.as_object_mut().unwrap().remove("node_plan_digest");
+    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+    let file = case["node_files"]["node-0"][0].clone();
+    let encoded = case["shard_files"][file["path"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("deployment/")
+        .unwrap()]
+    .as_str()
+    .unwrap();
+    let bytes: Vec<u8> = (0..encoded.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&encoded[i..i + 2], 16).unwrap())
+        .collect();
+    let objects = owner.join("objects");
+    fs::create_dir(&objects).unwrap();
+    let hash = file["content_digest"].as_str().unwrap();
+    fs::write(objects.join(hash.strip_prefix("sha256:").unwrap()), &bytes).unwrap();
+    let source = ShardSource::start(
+        seed.coordinator.clone(),
+        objects,
+        owner.join("journal"),
+        None,
+    )
+    .unwrap();
+    let within = allowance();
+    if node.remote.is_none() {
+        // No member-side decision yet: refused before any offer or byte.
+        let refused = transfer(
+            &source,
+            &seed.coordinator,
+            &mut node,
+            &registration,
+            "b16-transfer-0",
+            &file,
+            &recipe,
+            within,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(refused.0, "member_consent_required");
+        let held = node.call(json!({"command":"discard"}));
+        assert_eq!(
+            held["nothing_owned"], true,
+            "no custody was started: {held}"
+        );
+    }
+    member_consent(&mut node, &registration, &seed.coordinator);
+    let done = transfer(
+        &source,
+        &seed.coordinator,
+        &mut node,
+        &registration,
+        "b16-transfer-1",
+        &file,
+        &recipe,
+        within,
+    )
+    .unwrap();
+    assert_eq!(done.received["received_bytes"], bytes.len());
+    assert_eq!(done.offer["message"]["transfer"], file);
+    let path = PathBuf::from(done.received["path"].as_str().unwrap());
+    if node.remote.is_none() {
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            bytes,
+            "verified bytes at the member"
+        );
+    }
+    source.close().unwrap();
+    let discarded = node.call(json!({"command":"discard"}));
+    assert_eq!(discarded["inert_bytes_discarded"], true);
+    assert!(!path.exists());
+    assert_eq!(
+        MemberLink::call(&mut node, json!({"command":"discard"}), within).unwrap()["nothing_owned"],
+        true
+    );
+    node.close();
+    seed.close();
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// B16 S4: the owner's signed remote member channel is product code
+/// (`api::joined_owner::remote`). A member that dies mid-session becomes a
+/// typed refusal within the call bound, never a panic or a hang, and the link
+/// still closes (its thread joined) afterwards.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_remote_member_turns_a_dead_member_into_a_typed_refusal() {
+    use api::joined_owner::{link::MemberLink, remote::RemoteMember};
+    let root = std::env::temp_dir().join(format!("b16-remote-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let member_root = root.join("member");
+    // Exact owned child, killed and reaped on any failure path.
+    struct Reap(Child);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if self.0.try_wait().unwrap().is_none() {
+                self.0.kill().unwrap();
+            }
+            self.0.wait().unwrap();
+        }
+    }
+    let mut child = Reap(
+        Command::new(std::env::var_os("B7_MEMBER_BINARY").unwrap())
+            .arg("--state-root")
+            .arg(&member_root)
+            .args(super::member_remote::member_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let notice = member_root.join("member-control.json");
+    let end = Instant::now() + allowance();
+    while !notice.exists() {
+        assert!(
+            Instant::now() < end,
+            "member control endpoint not published"
+        );
+        std::thread::yield_now();
+    }
+    let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+    let c = &info["member_control"];
+    let addr = c["addrs"].as_array().unwrap().iter().fold(
+        iroh::EndpointAddr::new(c["endpoint_id"].as_str().unwrap().parse().unwrap()),
+        |a, s| a.with_ip_addr(s.as_str().unwrap().parse().unwrap()),
+    );
+    let mut link = RemoteMember::start(
+        super::member_remote::owner_secret().clone(),
+        addr,
+        super::member_remote::lan(),
+    )
+    .unwrap();
+    let within = Duration::from_millis(B::MemberChosenWall.span(Entries::ZERO).unwrap().millis());
+    let request = link
+        .call(json!({"command":"pair_request"}), within)
+        .unwrap();
+    assert!(
+        request["message"].is_object() || request.is_object(),
+        "{request}"
+    );
+    // Refusals keep the member's own code.
+    assert_eq!(
+        link.call(json!({"command":"receive"}), within)
+            .unwrap_err()
+            .0,
+        "not_joined"
+    );
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let began = Instant::now();
+    let dead = link
+        .call(json!({"command":"pair_request"}), within)
+        .unwrap_err();
+    assert!(dead.0.starts_with("control_call_failed"), "{dead:?}");
+    assert!(began.elapsed() < within, "bounded: {:?}", began.elapsed());
+    drop(link);
+    eprintln!(
+        "B16 remote: dead member -> {dead:?} after {:?}",
+        began.elapsed()
+    );
+    fs::remove_dir_all(&root).unwrap();
 }

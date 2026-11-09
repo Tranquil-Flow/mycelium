@@ -352,21 +352,8 @@ fn assemble(
     connect: impl FnOnce(Value, iroh::SecretKey) -> Result<(RouteExecutor, RouteHandle), PublicError>,
 ) -> Result<Route, PublicError> {
     let owner = iroh::SecretKey::generate();
-    let stage = |i: usize, start: u64, end: u64| {
-        json!({"stage_index":i,"placement_id":format!("{}:{start}-{end}",rows[i]["node_id"].as_str().unwrap()),
-        "member":rows[i],"carrier_endpoint_id":members[i].endpoint.to_string(),"run":format!("run-{i}"),
-        "offer_digest":digest(&offers[i]),"proof_digest":proof(i),"range":[start,end],
-        "worker_pid":100+i,"tokens":99,"memory":4_000_000_000u64})
-    };
-    let now = app_host::now();
-    let message = json!({"protocol":route::ROUTE,"swarm_id":swarm,
-        "deployment_id":"12345678-1234-5678-9234-abcdefabcdef","deployment_epoch":7,"topology_version":7,
-        "model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
-        "manifest_digest":digest(&json!("manifest")),"owner_endpoint_id":owner.public().to_string(),
-        "stages":[stage(0,0,14),stage(1,14,28)],"issued_at":now,
-        "expires_at":now + span(B::MemberChosenWall).as_secs_f64(),"route_ready":false,"scope":route::SCOPE});
-    let envelope = json!({"protocol":"mycelium.joined_shard.signed.v1","signature":seed.sign(&message).unwrap(),
-        "verification_key":seed.public_key_record(),"message":message});
+    let endpoints: Vec<iroh::EndpointId> = members.iter().map(|m| m.endpoint).collect();
+    let (message, envelope) = signed_route(seed, swarm, rows, offers, &endpoints, &owner);
     for m in &members {
         m.route.send(envelope.clone()).unwrap();
     }
@@ -409,6 +396,32 @@ fn assemble(
         id,
         token,
     })
+}
+/// A seed-signed controlled route over `endpoints` (stage carriers) for `owner`.
+fn signed_route(
+    seed: &Identity,
+    swarm: &str,
+    rows: &[Value],
+    offers: &[Value],
+    endpoints: &[iroh::EndpointId],
+    owner: &iroh::SecretKey,
+) -> (Value, Value) {
+    let stage = |i: usize, start: u64, end: u64| {
+        json!({"stage_index":i,"placement_id":format!("{}:{start}-{end}",rows[i]["node_id"].as_str().unwrap()),
+        "member":rows[i],"carrier_endpoint_id":endpoints[i].to_string(),"run":format!("run-{i}"),
+        "offer_digest":digest(&offers[i]),"proof_digest":proof(i),"range":[start,end],
+        "worker_pid":100+i,"tokens":99,"memory":4_000_000_000u64})
+    };
+    let now = app_host::now();
+    let message = json!({"protocol":route::ROUTE,"swarm_id":swarm,
+        "deployment_id":"12345678-1234-5678-9234-abcdefabcdef","deployment_epoch":7,"topology_version":7,
+        "model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
+        "manifest_digest":digest(&json!("manifest")),"owner_endpoint_id":owner.public().to_string(),
+        "stages":[stage(0,0,14),stage(1,14,28)],"issued_at":now,
+        "expires_at":now + span(B::MemberChosenWall).as_secs_f64(),"route_ready":false,"scope":route::SCOPE});
+    let envelope = json!({"protocol":"mycelium.joined_shard.signed.v1","signature":seed.sign(&message).unwrap(),
+        "verification_key":seed.public_key_record(),"message":message});
+    (message, envelope)
 }
 fn submission(message: &Value, max_new_tokens: u64) -> Value {
     json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":max_new_tokens,
@@ -1033,4 +1046,228 @@ fn lan_carrier_refuses_mitm_keys_unexpected_peers_and_public_interfaces() {
         .err()
         .unwrap();
     assert_eq!(refused.code, "joined_route_address_refused");
+}
+
+// ---- B16 (gap row 6): the owner's epoch composition as PRODUCT code
+// (`api::joined_owner::epoch`), driven through its own loopback HTTP gateway
+// and SSE stream, over real pairing rows and the direct-LAN carrier on an
+// explicit loopback interface. Stage compute stays controlled (no model).
+#[path = "support/sse_client.rs"]
+mod sse_client;
+use api::joined_owner::epoch::{Carriers, Epoch};
+impl Swarm {
+    fn signed(&self, endpoints: &[iroh::EndpointId], owner: &iroh::SecretKey) -> Value {
+        let (signer, _, _) =
+            app_host::identity_in(&self.root.join("owner"), app_host::SEED_IDENTITY_FILE).unwrap();
+        let rows = [self.live(0), self.live(1)];
+        let offers = [self.members[0].offer.clone(), self.members[1].offer.clone()];
+        signed_route(
+            &signer,
+            self.seed.coordinator.swarm_id(),
+            &rows,
+            &offers,
+            endpoints,
+            owner,
+        )
+        .1
+    }
+}
+fn product_epoch(s: &Swarm, tokens: &[u32]) -> (Epoch, Vec<Member>) {
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (members, verified) = s.serve_lan(loopback, &policy, tokens);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let epoch = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+    )
+    .unwrap();
+    (epoch, members)
+}
+fn bearer(e: &Epoch) -> String {
+    format!("Authorization: Bearer {}\r\n", e.bearer())
+}
+fn post(e: &Epoch, max_new_tokens: u64) -> (u16, Value) {
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":max_new_tokens,
+        "workload_profile_id":"interactive","qos_class":"interactive",
+        "qualification":route::qualification(e.host().message()).unwrap()});
+    sse_client::http(
+        e.addr(),
+        "POST",
+        "/v1/inference",
+        &bearer(e),
+        &doc.to_string(),
+    )
+}
+/// Submit over HTTP and stream events into a channel (reader thread owned).
+fn chat(
+    e: &Epoch,
+    max_new_tokens: u64,
+) -> (
+    Value,
+    mpsc::Receiver<(Value, Instant)>,
+    std::thread::JoinHandle<()>,
+) {
+    let (status, accepted) = post(e, max_new_tokens);
+    assert_eq!(status, 202, "{accepted}");
+    let (tx, rx) = mpsc::channel();
+    let (addr, path) = (
+        e.addr(),
+        accepted["stream_path"].as_str().unwrap().to_owned(),
+    );
+    let auth = format!(
+        "{}X-Mycelium-Session: {}\r\n",
+        bearer(e),
+        accepted["session_token"].as_str().unwrap()
+    );
+    let reader = std::thread::spawn(move || {
+        sse_client::stream(addr, path, auth, tx, span(B::WorkerStartup))
+    });
+    (accepted, rx, reader)
+}
+fn until_terminal(rx: &mpsc::Receiver<(Value, Instant)>, tokens: usize) -> Vec<Value> {
+    let mut all = Vec::new();
+    loop {
+        let (event, _) = rx.recv_timeout(span(B::WorkerStartup)).unwrap();
+        let done = matches!(
+            event["type"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        );
+        all.push(event);
+        if done || all.iter().filter(|e| e["type"] == "token").count() >= tokens {
+            return all;
+        }
+    }
+}
+fn token_ids(all: &[Value]) -> Vec<u64> {
+    all.iter()
+        .filter(|e| e["type"] == "token")
+        .map(|e| e["token_id"].as_u64().unwrap())
+        .collect()
+}
+#[test]
+fn product_epoch_streams_chat_over_its_gateway_and_close_frees_the_port() {
+    let s = swarm();
+    let (epoch, members) = product_epoch(&s, &[5, 9, 3, 7]);
+    assert_eq!(
+        epoch.worker_pids(),
+        vec![100, 101],
+        "pids named by the signed route"
+    );
+    let (_, rx, reader) = chat(&epoch, 4);
+    let all = until_terminal(&rx, usize::MAX);
+    reader.join().unwrap();
+    assert_eq!(all.last().unwrap()["type"], "completed", "{all:?}");
+    assert_eq!(token_ids(&all), vec![5, 9, 3, 7]);
+    // N3 through the product gateway: the spent epoch admits nothing more.
+    let (status, refused) = post(&epoch, 1);
+    assert_eq!(
+        (status, refused["error"].as_str()),
+        (409, Some("route_dropped"))
+    );
+    let addr = epoch.addr();
+    let refusals = epoch.close();
+    assert!(
+        refusals.iter().all(|r| r == "route_dropped"),
+        "pump refusals recorded: {refusals:?}"
+    );
+    assert!(
+        std::net::TcpStream::connect(addr).is_err(),
+        "close joined the gateway and freed its port"
+    );
+    for m in members {
+        let report = m.thread.join().unwrap().unwrap();
+        assert_eq!(report["ack_delivered"], true, "{report}");
+    }
+}
+#[test]
+fn product_epoch_stop_over_its_gateway_cancels_after_both_stages_acknowledge() {
+    let s = swarm();
+    let (epoch, members) = product_epoch(&s, &[5, 9, 3, 7]);
+    let (accepted, rx, reader) = chat(&epoch, 32);
+    let mut all = until_terminal(&rx, 2);
+    let auth = format!(
+        "{}X-Mycelium-Session: {}\r\n",
+        bearer(&epoch),
+        accepted["session_token"].as_str().unwrap()
+    );
+    let path = format!("/v1/inference/{}", accepted["request_id"].as_str().unwrap());
+    let (status, body) = sse_client::http(epoch.addr(), "DELETE", &path, &auth, "");
+    assert_eq!(status, 202, "{body}");
+    all.extend(until_terminal(&rx, usize::MAX));
+    reader.join().unwrap();
+    assert_eq!(all.last().unwrap()["type"], "cancelled", "{all:?}");
+    let streamed = token_ids(&all);
+    assert_eq!(streamed, [5, 9, 3, 7, 5, 9, 3, 7][..streamed.len()]);
+    let end = Instant::now() + span(B::WorkerStartup);
+    let mut seen = 0;
+    while !epoch.handle().state.lock().unwrap().settled() {
+        assert!(Instant::now() < end, "teardown bounded");
+        seen = epoch.handle().wait(seen, span(B::OwnerPoll));
+    }
+    assert_eq!(epoch.qualification().unwrap_err().code, "route_dropped");
+    epoch.close();
+    for m in members {
+        assert_eq!(m.thread.join().unwrap().unwrap()["ack_delivered"], true);
+    }
+}
+#[test]
+fn product_epoch_refuses_an_unreachable_stage_with_a_typed_error() {
+    let s = swarm();
+    // The registered carrier keys, but nothing listens at the dialled ports.
+    let dead: Vec<std::net::SocketAddr> = (0..2)
+        .map(|_| {
+            std::net::UdpSocket::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+        })
+        .collect();
+    let endpoints: Vec<iroh::EndpointId> = s.members.iter().map(|m| m.secret.public()).collect();
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(&endpoints, &owner);
+    let peers = (0..2)
+        .map(|i| StagePeer {
+            node_id: s.live(i)["node_id"].as_str().unwrap().into(),
+            endpoint: endpoints[i],
+            socket: dead[i],
+            generation: s.live(i)["generation"].as_u64().unwrap(),
+        })
+        .collect();
+    let began = Instant::now();
+    let refused = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Loopback(peers),
+        Arc::new(Text),
+    )
+    .err()
+    .expect("an unreachable stage is refused, never a half-open epoch");
+    eprintln!(
+        "B16 unreachable stage: {} after {:?}",
+        refused.code,
+        began.elapsed()
+    );
+    assert_eq!(refused.status, 409);
+    assert!(refused.code.starts_with("joined_route"), "{}", refused.code);
+    // The executor's setup bound (WorkerStartup) plus its bounded close.
+    assert!(
+        began.elapsed() < span(B::WorkerStartup) + span(B::RouterClose),
+        "bounded dial"
+    );
 }

@@ -2,30 +2,29 @@
 //! Real product request path over the real Router carrier: HTTP POST -> M16
 //! admission -> joined-route carrier executor -> two member-owned native workers
 //! (two OS processes) -> TokenEvent -> registry -> SSE. Tokens are compared with
-//! the pinned Python/MLX packed oracle (never with Rust output). Owner remains a
-//! test driver for pairing, shard emission, worker (re)prepare, address discovery,
-//! death evidence and withdrawal delivery; route_ready stays false.
+//! the pinned Python/MLX packed oracle (never with Rust output). The owner's
+//! epoch (route host, carrier executor, M16 runtime, request gateway, pump) and
+//! tokenizer are PRODUCT code (`api::joined_owner`, B16); this driver remains
+//! the owner operator for pairing, shard emission, worker (re)prepare, address
+//! discovery, death evidence and withdrawal delivery; route_ready stays false.
 use super::native_process::{self, Fixture, admit_native_load, allowance};
 use super::sse_client::{http, stream};
 use super::*;
 use api::{
+    joined_owner::{
+        self,
+        codec::NativeCodec,
+        epoch::{Carriers, Epoch},
+        link::Stage,
+    },
     joined_shard::{native, route},
-    m16_requests::{Host as _, M16Requests},
-    m16_route::{self, Codec, Currentness, RouteExecutor, RouteHandle, RouteHost, StagePeer},
-    registry::Config,
-    schema::PublicError,
+    m16_requests::Host as _,
+    m16_route::{self, Codec, StagePeer},
 };
 use budgets::{BudgetId as B, Entries};
-use runtime::m16_ledger::{IdSource, LeaseClock};
 use std::{
-    io::{BufRead, BufReader, Write},
-    net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc,
-    },
+    process::{Child, Command},
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 const PROMPT: &str = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nExplain how rain forms and why plants need it. Give a detailed answer.<|im_end|>\n<|im_start|>assistant\n";
@@ -37,106 +36,10 @@ fn span(id: B) -> Duration {
 fn ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
 }
-/// The product tokenizer crate over the selected snapshot, via the pinned
-/// native binary's private helper (api links no tokenizer).
-struct Helper {
-    child: Child,
-    input: Option<ChildStdin>,
-    output: BufReader<ChildStdout>,
-}
-struct HelperCodec(Mutex<Helper>);
-impl HelperCodec {
-    fn start(tokenizer: &std::path::Path) -> Self {
-        let binary =
-            std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").expect("pinned native binary");
-        let mut child = Command::new(binary)
-            .arg("tokenize")
-            .arg(tokenizer)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let input = child.stdin.take().unwrap();
-        let output = BufReader::new(child.stdout.take().unwrap());
-        Self(Mutex::new(Helper {
-            child,
-            input: Some(input),
-            output,
-        }))
-    }
-    fn call(&self, request: Value) -> Result<Value, PublicError> {
-        let mut h = self.0.lock().unwrap();
-        let input = h
-            .input
-            .as_mut()
-            .ok_or(PublicError::new(503, "tokenizer_unavailable"))?;
-        writeln!(input, "{request}").map_err(|_| PublicError::new(503, "tokenizer_unavailable"))?;
-        input
-            .flush()
-            .map_err(|_| PublicError::new(503, "tokenizer_unavailable"))?;
-        let mut line = String::new();
-        h.output
-            .read_line(&mut line)
-            .map_err(|_| PublicError::new(503, "tokenizer_unavailable"))?;
-        serde_json::from_str(&line).map_err(|_| PublicError::new(503, "tokenizer_unavailable"))
-    }
-    fn close(&self) {
-        let mut h = self.0.lock().unwrap();
-        // EOF ends the helper; require its clean exit (exact owned child).
-        h.input.take();
-        assert!(h.child.wait().unwrap().success());
-    }
-}
-impl Codec for HelperCodec {
-    fn encode(&self, text: &str) -> Result<Vec<u32>, PublicError> {
-        serde_json::from_value(self.call(json!({"encode":text}))?["ids"].clone())
-            .map_err(|_| PublicError::new(503, "tokenizer_unavailable"))
-    }
-    fn decode(&self, token: u32) -> Result<String, PublicError> {
-        Ok(self.call(json!({"decode":token}))?["text"]
-            .as_str()
-            .ok_or(PublicError::new(503, "tokenizer_unavailable"))?
-            .to_owned())
-    }
-}
-struct Wall;
-impl LeaseClock for Wall {
-    fn now(&self) -> f64 {
-        app_host::now()
-    }
-}
-#[derive(Default)]
-struct Ids(AtomicU64);
-impl IdSource for Ids {
-    fn new_id(&self, prefix: &str) -> String {
-        format!("{prefix}-{}", self.0.fetch_add(1, Ordering::SeqCst))
-    }
-}
-/// One route epoch: route doc, carrier executor, M16 runtime, HTTP gateway, pump.
-struct Epoch {
-    service: M16Requests,
-    handle: RouteHandle,
-    host: Arc<RouteHost>,
-    addr: SocketAddr,
-    bearer: String,
-    stop: Arc<AtomicBool>,
-    threads: Vec<std::thread::JoinHandle<()>>,
-    refusals: Arc<Mutex<Vec<String>>>,
-    worker_pids: Vec<i32>,
-}
-impl Epoch {
-    fn close(mut self) -> Vec<String> {
-        self.stop.store(true, Ordering::SeqCst);
-        // Wake the accept loop so it observes `stop`; a refused connect means it already exited.
-        if let Err(e) = TcpStream::connect(self.addr) {
-            eprintln!("epoch close wake: {e}");
-        }
-        self.handle.changed.notify_all();
-        for t in self.threads.drain(..) {
-            t.join().unwrap();
-        }
-        self.refusals.lock().unwrap().clone()
-    }
+/// The product tokenizer over the selected snapshot (api::joined_owner::codec).
+fn native_codec(tokenizer: &std::path::Path) -> NativeCodec {
+    let binary = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").expect("pinned native binary");
+    NativeCodec::start(std::path::Path::new(&binary), tokenizer).unwrap()
 }
 fn alive(pid: i32) -> bool {
     Command::new("/bin/kill")
@@ -169,90 +72,61 @@ fn prepare(
         admit_native_load(&fx.resource_gate, &format!("node={i}"));
     }
     let began = Instant::now();
-    for &i in which {
-        let nonce = challenges.issue(&fx.ids[i], assigned(fx, i)).unwrap();
-        fx.nodes[i].send(
-            json!({"command":"prepare_native","range":fx.ranges[i],"tokens":tokens,
-            "nonce":nonce,"forbidden_source":fx.source}),
-        );
-    }
-    let admitted = which
-        .iter()
-        .map(|&i| {
-            let signed = fx.nodes[i].result_with(allowance());
-            challenges
-                .admit(&fx.seed.coordinator, &fx.offers[i], &signed)
-                .unwrap()
+    // Owner prepare step = PRODUCT code (api::joined_owner::link::prepare).
+    let ranges: Vec<[u64; 2]> = (0..fx.nodes.len()).map(|i| assigned(fx, i)).collect();
+    let mut stages: Vec<Stage<'_>> = fx
+        .nodes
+        .iter_mut()
+        .enumerate()
+        .filter(|(i, _)| which.contains(i))
+        .map(|(i, node)| Stage {
+            member: node,
+            offer: &fx.offers[i],
+            range: ranges[i],
         })
         .collect();
+    let admitted = joined_owner::link::prepare(
+        challenges,
+        &fx.seed.coordinator,
+        &mut stages,
+        tokens,
+        &fx.source,
+        allowance(),
+    )
+    .unwrap();
     eprintln!("B7e prepared {which:?} in {:.1} ms", ms(began));
     admitted
 }
-#[allow(clippy::too_many_arguments)]
+/// Thin owner driver: issue the route, deliver it to the members, then open the
+/// owner's PRODUCT epoch (api::joined_owner::epoch) on the chosen carrier.
 fn open_epoch(
     fx: &mut Fixture,
     epoch: u64,
     proofs: &[native::Admitted],
     secret: &iroh::SecretKey,
-    codec: &Arc<HelperCodec>,
+    codec: &Arc<NativeCodec>,
     addrs: &[Value],
 ) -> Epoch {
     let model = json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
         "manifest_digest":fx.manifest_digest});
-    let stages = proofs.to_vec();
     let envelope = route::issue(
         &fx.seed.coordinator,
         &model,
         DEPLOYMENT,
         epoch,
         &secret.public().to_string(),
-        &stages,
+        proofs,
         app_host::now(),
     )
     .unwrap();
     for i in 0..2 {
         fx.nodes[i].send(json!({"command":"serve","route":envelope}));
     }
-    let bearer = app_host::hex(&app_host::random(32).unwrap());
-    let codec_dyn: Arc<dyn Codec> = codec.clone();
-    let host = Arc::new(
-        RouteHost::new(
-            fx.seed.coordinator.clone(),
-            envelope.clone(),
-            codec_dyn.clone(),
-            bearer.clone(),
-        )
-        .unwrap(),
-    );
-    let message = host.message().clone();
-    let peers: Vec<StagePeer> = (0..2)
-        .map(|i| StagePeer {
-            node_id: fx.ids[i].clone(),
-            endpoint: addrs[i]["endpoint_id"].as_str().unwrap().parse().unwrap(),
-            socket: serde_json::from_value(addrs[i]["socket"].clone()).unwrap(),
-            generation: message["stages"][i]["member"]["generation"]
-                .as_u64()
-                .unwrap(),
-        })
-        .collect();
-    let coordinator = fx.seed.coordinator.clone();
-    let currentness: Currentness = Arc::new(move |node: &str| {
-        coordinator
-            .member(node)
-            .ok()
-            .and_then(|r| r["generation"].as_u64())
-    });
-    for i in 0..2 {
-        eprintln!(
-            "B7e epoch={epoch} stage={i} signed_generation={} live={:?}",
-            message["stages"][i]["member"]["generation"],
-            currentness(&fx.ids[i])
-        );
-    }
-    let (executor, handle) = match super::member_remote::lan() {
+    let message = &envelope["message"];
+    let carriers = match super::member_remote::lan() {
         // Direct LAN: dial only the member-signed, owner-verified advertisements.
-        Some((interface, policy)) => {
-            let carriers = (0..2)
+        Some((interface, policy)) => Carriers::Lan {
+            verified: (0..2)
                 .map(|i| {
                     api::joined_shard::carrier::verify(
                         &fx.seed.coordinator,
@@ -263,117 +137,40 @@ fn open_epoch(
                     )
                     .unwrap()
                 })
-                .collect();
-            drop(peers);
-            RouteExecutor::connect_lan(
-                message.clone(),
-                secret.clone(),
-                carriers,
-                interface,
-                policy,
-                currentness,
-                codec_dyn,
-            )
-        }
-        None => RouteExecutor::connect(
-            message.clone(),
-            secret.clone(),
-            peers,
-            currentness,
-            codec_dyn,
+                .collect(),
+            interface,
+            policy,
+        },
+        None => Carriers::Loopback(
+            (0..2)
+                .map(|i| StagePeer {
+                    node_id: fx.ids[i].clone(),
+                    endpoint: addrs[i]["endpoint_id"].as_str().unwrap().parse().unwrap(),
+                    socket: serde_json::from_value(addrs[i]["socket"].clone()).unwrap(),
+                    generation: message["stages"][i]["member"]["generation"]
+                        .as_u64()
+                        .unwrap(),
+                })
+                .collect(),
         ),
-    }
-    .unwrap();
-    host.attach(handle.clone()).unwrap();
-    let runtime = m16_route::runtime(
-        &message,
-        Arc::new(Wall),
-        Arc::new(Wall),
-        Arc::new(Ids::default()),
-    )
-    .unwrap();
-    let host_dyn: Arc<dyn api::m16_requests::Host> = host.clone();
-    let service = M16Requests::new(
-        runtime,
-        host_dyn,
-        Box::new(executor),
-        Config::new(64, 4, 0.0).unwrap(),
-    )
-    .unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let refusals = Arc::new(Mutex::new(Vec::new()));
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    let addr = listener.local_addr().unwrap();
-    let mut threads = Vec::new();
-    {
-        let (service, stop) = (service.clone(), stop.clone());
-        threads.push(std::thread::spawn(move || {
-            let mut connections = Vec::new();
-            for incoming in listener.incoming() {
-                if stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                let stream = incoming.unwrap();
-                let service = service.clone();
-                connections.push(std::thread::spawn(move || {
-                    let gateway = api::requests::Gateway::new(service);
-                    if let Err(e) = api::http::serve_response_connection(
-                        stream,
-                        span(B::ModelSelection),
-                        api::requests::MAX_REQUEST_BODY,
-                        |r| gateway.preflight(r),
-                        |r| gateway.handle(r),
-                    ) {
-                        // Bounded polls end streams; recorded, never silently dropped.
-                        eprintln!("gateway connection ended: {e:?}");
-                    }
-                }));
-            }
-            for c in connections {
-                c.join().unwrap();
-            }
-        }));
-    }
-    {
-        let (service, stop, handle, refusals) = (
-            service.clone(),
-            stop.clone(),
-            handle.clone(),
-            refusals.clone(),
+    };
+    let current = joined_owner::epoch::currentness(&fx.seed.coordinator);
+    for i in 0..2 {
+        eprintln!(
+            "B7e epoch={epoch} stage={i} signed_generation={} live={:?}",
+            message["stages"][i]["member"]["generation"],
+            current(&fx.ids[i])
         );
-        // Host pump: event-driven by carrier changes, bounded by the owner poll.
-        threads.push(std::thread::spawn(move || {
-            let mut seen = 0;
-            while !stop.load(Ordering::SeqCst) {
-                if let Err(e) = service.tick() {
-                    let mut r = refusals.lock().unwrap();
-                    if r.last().is_none_or(|last| last != e.code) {
-                        r.push(e.code.to_owned());
-                    }
-                }
-                seen = handle.wait(seen, span(B::OwnerPoll));
-            }
-        }));
     }
-    let worker_pids = proofs
-        .iter()
-        .map(|p| {
-            p.proof()["message"]["proof"]["worker_pid"]
-                .as_i64()
-                .unwrap() as i32
-        })
-        .collect();
-    Epoch {
-        service,
-        handle,
-        host,
-        addr,
-        bearer,
-        stop,
-        threads,
-        refusals,
-        worker_pids,
-    }
+    let codec_dyn: Arc<dyn Codec> = codec.clone();
+    Epoch::open(
+        fx.seed.coordinator.clone(),
+        envelope.clone(),
+        secret.clone(),
+        carriers,
+        codec_dyn,
+    )
+    .unwrap()
 }
 struct Running {
     id: String,
@@ -384,15 +181,18 @@ struct Running {
 }
 fn submit(e: &Epoch) -> Running {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":NEW_TOKENS,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":e.host.qualification().unwrap()});
-    let auth = format!("Authorization: Bearer {}\r\n", e.bearer);
+        "workload_profile_id":"interactive","qos_class":"interactive","qualification":e.host().qualification().unwrap()});
+    let auth = format!("Authorization: Bearer {}\r\n", e.bearer());
     let posted = Instant::now();
-    let (status, accepted) = http(e.addr, "POST", "/v1/inference", &auth, &doc.to_string());
+    let (status, accepted) = http(e.addr(), "POST", "/v1/inference", &auth, &doc.to_string());
     assert_eq!(status, 202, "{accepted}");
     let id = accepted["request_id"].as_str().unwrap().to_owned();
     let token = accepted["session_token"].as_str().unwrap().to_owned();
     let (tx, events) = mpsc::channel();
-    let (addr, path) = (e.addr, accepted["stream_path"].as_str().unwrap().to_owned());
+    let (addr, path) = (
+        e.addr(),
+        accepted["stream_path"].as_str().unwrap().to_owned(),
+    );
     let headers = format!("{auth}X-Mycelium-Session: {token}\r\n");
     let reader = std::thread::spawn(move || stream(addr, path, headers, tx, allowance()));
     Running {
@@ -407,9 +207,9 @@ fn submit(e: &Epoch) -> Running {
 fn assert_epoch_retired(e: &Epoch, phase: &str) {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":1,
         "workload_profile_id":"interactive","qos_class":"interactive",
-        "qualification":route::qualification(e.host.message()).unwrap()});
-    let auth = format!("Authorization: Bearer {}\r\n", e.bearer);
-    let (status, refused) = http(e.addr, "POST", "/v1/inference", &auth, &doc.to_string());
+        "qualification":route::qualification(e.host().message()).unwrap()});
+    let auth = format!("Authorization: Bearer {}\r\n", e.bearer());
+    let (status, refused) = http(e.addr(), "POST", "/v1/inference", &auth, &doc.to_string());
     assert_eq!(
         (status, refused["error"].as_str()),
         (409, Some("route_dropped")),
@@ -435,13 +235,13 @@ fn collect(e: &Epoch, r: &Running, tokens: usize, all: &mut Vec<(Value, Instant)
     }
 }
 fn diagnose(e: &Epoch, id: &str, all: &[(Value, Instant)]) -> String {
-    let o = e.handle.state.lock().unwrap();
+    let o = e.handle().state.lock().unwrap();
     format!(
         "events={:?} terminal={:?} carrier: ready={} setup={:?} tokens={:?} completed={} failure={:?} failed_at_ms={:?} teardown_requested_ms={:?} stages={:?} finished={} refusals={:?}",
         all.iter()
             .map(|(e, _)| e["type"].clone())
             .collect::<Vec<_>>(),
-        e.service.terminal(id),
+        e.service().terminal(id),
         o.ready,
         o.setup_failure,
         o.tokens,
@@ -454,7 +254,7 @@ fn diagnose(e: &Epoch, id: &str, all: &[(Value, Instant)]) -> String {
             .map(|s| (s.acknowledged_ms, s.failure.clone()))
             .collect::<Vec<_>>(),
         o.teardown_finished,
-        e.refusals.lock().unwrap(),
+        e.refusals(),
     )
 }
 fn terminal(all: &[(Value, Instant)]) -> Option<&Value> {
@@ -535,7 +335,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
             .unwrap(),
         "selected tokenizer must be the oracle's pinned tokenizer"
     );
-    let codec = Arc::new(HelperCodec::start(&tokenizer));
+    let codec = Arc::new(native_codec(&tokenizer));
     let prompt_ids = codec.encode(PROMPT).unwrap();
     assert_eq!(
         json!(prompt_ids),
@@ -552,7 +352,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let challenges = native::Challenges::new();
     let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
     let e = open_epoch(&mut fx, 1, &proofs, &secret, &codec, &addrs);
-    let baseline = e.service.placement_status().unwrap();
+    let baseline = e.service().placement_status().unwrap();
     let r = submit(&e);
     let mut all = Vec::new();
     collect(&e, &r, NEW_TOKENS + 1, &mut all);
@@ -586,7 +386,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_gone(&fx, &e.worker_pids);
+    let gone = wait_gone(&fx, &e.worker_pids());
     let text: String = all
         .iter()
         .filter(|(e, _)| e["type"] == "token")
@@ -596,11 +396,11 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "B7e chat tokens={tokens:?} == reference; ttft_ms={ttft:.1} tok_s={tps:.2} text={text:?}"
     );
     assert_eq!(
-        e.service.placement_status().unwrap(),
+        e.service().placement_status().unwrap(),
         baseline,
         "reservations released"
     );
-    let o = e.handle.state.lock().unwrap();
+    let o = e.handle().state.lock().unwrap();
     evidence["chat"] = json!({"request_id":r.id,"tokens":tokens,"reference":&reference[..NEW_TOKENS],
         "prompt_ids":prompt_ids,"ttft_ms":ttft,"decode_tokens_per_second":tps,
         "end_to_end_tokens_per_second":tokens.len() as f64/end_to_end,"text":text,
@@ -618,11 +418,12 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     collect(&e, &r, 4, &mut all);
     let auth = format!(
         "Authorization: Bearer {}\r\nX-Mycelium-Session: {}\r\n",
-        e.bearer, r.token
+        e.bearer(),
+        r.token
     );
     let stop_at = Instant::now();
     let (status, body) = http(
-        e.addr,
+        e.addr(),
         "DELETE",
         &format!("/v1/inference/{}", r.id),
         &auth,
@@ -633,9 +434,9 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     }
     assert_eq!(status, 202, "{body}");
     let delete_ms = ms(stop_at);
-    let mut seen = e.handle.wait(usize::MAX, Duration::ZERO);
-    while !e.handle.state.lock().unwrap().teardown_finished {
-        seen = e.handle.wait(seen, span(B::OwnerPoll));
+    let mut seen = e.handle().wait(usize::MAX, Duration::ZERO);
+    while !e.handle().state.lock().unwrap().teardown_finished {
+        seen = e.handle().wait(seen, span(B::OwnerPoll));
         assert!(
             stop_at.elapsed() < span(B::WorkerStartup),
             "stop teardown bounded"
@@ -655,8 +456,8 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_gone(&fx, &e.worker_pids);
-    let o = e.handle.state.lock().unwrap();
+    let gone = wait_gone(&fx, &e.worker_pids());
+    let o = e.handle().state.lock().unwrap();
     assert!(
         o.stages.iter().all(|s| s.acknowledged_ms.is_some()),
         "both workers acknowledged"
@@ -668,7 +469,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "both_workers_acknowledged_ms":both_ack_ms,"per_stage_ack_ms_from_teardown":o.stages.iter().map(|s| s.acknowledged_ms).collect::<Vec<_>>(),
         "terminal_after_stop_ms":terminal_ms,"member_reports":reports,"workers_gone_ms":gone});
     drop(o);
-    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
+    assert_eq!(e.host().qualification().unwrap_err().code, "route_dropped");
     assert_epoch_retired(&e, "after stop");
     evidence["stop"]["pump_refusals"] = json!(e.close());
 
@@ -698,16 +499,16 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let member_pid = fx.nodes[k].pid();
     signal("-STOP", member_pid);
     let stalled = Instant::now();
-    let mut seen = e.handle.wait(usize::MAX, Duration::ZERO);
-    while e.handle.state.lock().unwrap().failure.is_none() {
-        seen = e.handle.wait(seen, span(B::OwnerPoll));
+    let mut seen = e.handle().wait(usize::MAX, Duration::ZERO);
+    while e.handle().state.lock().unwrap().failure.is_none() {
+        seen = e.handle().wait(seen, span(B::OwnerPoll));
         assert!(
             stalled.elapsed() < span(B::WorkerStartup),
             "stall must hit its deadline"
         );
     }
     let failed_ms = ms(stalled);
-    let code = e.handle.state.lock().unwrap().failure.unwrap();
+    let code = e.handle().state.lock().unwrap().failure.unwrap();
     signal("-CONT", member_pid);
     collect(&e, &r, usize::MAX, &mut all);
     r.reader.join().unwrap();
@@ -716,8 +517,8 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reports: Vec<Value> = (0..2)
         .map(|i| fx.nodes[i].result_with(allowance()))
         .collect();
-    let gone = wait_gone(&fx, &e.worker_pids);
-    let o = e.handle.state.lock().unwrap();
+    let gone = wait_gone(&fx, &e.worker_pids());
+    let o = e.handle().state.lock().unwrap();
     eprintln!(
         "B7e stall failure={code} after {failed_ms:.1} ms; terminal={t} settled {settled_ms:.1} ms"
     );
@@ -726,7 +527,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "terminal_after_stall_ms":settled_ms,"stages":o.stages.iter().map(|s| json!({"ack_ms":s.acknowledged_ms,"failure":s.failure})).collect::<Vec<_>>(),
         "member_reports":reports,"workers_gone_ms":gone});
     drop(o);
-    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
+    assert_eq!(e.host().qualification().unwrap_err().code, "route_dropped");
     assert_epoch_retired(&e, "after stall");
     evidence["stall"]["pump_refusals"] = json!(e.close());
 
@@ -735,7 +536,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     // then settles the stage with exact-process evidence from this host.
     let proofs = prepare(&mut fx, &challenges, &[0, 1], capacity);
     let e = open_epoch(&mut fx, 4, &proofs, &secret, &codec, &addrs);
-    let baseline = e.service.placement_status().unwrap();
+    let baseline = e.service().placement_status().unwrap();
     let r = submit(&e);
     let mut all = Vec::new();
     collect(&e, &r, 3, &mut all);
@@ -743,9 +544,9 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     signal("-KILL", member_pid);
     let status = fx.nodes[k].wait_exit();
     let reaped_ms = ms(killed);
-    let dead_worker = e.worker_pids[k];
+    let dead_worker = e.worker_pids()[k];
     let worker_gone = wait_workers_gone(&[dead_worker]);
-    m16_route::record_stage_exit(&e.handle, k, json!({"process_exited":true,"worker_absent":true,
+    m16_route::record_stage_exit(e.handle(), k, json!({"process_exited":true,"worker_absent":true,
         "member_pid":member_pid,"exit_signal":std::os::unix::process::ExitStatusExt::signal(&status),
         "worker_pid":dead_worker,"observed_by":"owner_test_driver"})).unwrap();
     collect(&e, &r, usize::MAX, &mut all);
@@ -760,18 +561,18 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     });
     let survivor_report = fx.nodes[survivor].result_with(allowance());
     if fx.nodes[survivor].local() {
-        wait_workers_gone(&[e.worker_pids[survivor]]);
+        wait_workers_gone(&[e.worker_pids()[survivor]]);
     } else {
-        wait_remote_worker_gone(&fx, survivor, e.worker_pids[survivor]);
+        wait_remote_worker_gone(&fx, survivor, e.worker_pids()[survivor]);
     }
-    let o = e.handle.state.lock().unwrap();
+    let o = e.handle().state.lock().unwrap();
     eprintln!(
         "B7e death terminal={t} after {settled_ms:.1} ms; failure={:?} at {:?}",
         o.failure, o.failed_at_ms
     );
     assert_eq!(t["type"], "failed");
     assert_eq!(
-        e.service.placement_status().unwrap(),
+        e.service().placement_status().unwrap(),
         baseline,
         "death releases reservations"
     );
@@ -788,27 +589,27 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         .as_i64()
         .unwrap() as i32;
     // N3: the death already retired this epoch; the withdrawal then revokes it.
-    assert_eq!(e.host.qualification().unwrap_err().code, "route_dropped");
+    assert_eq!(e.host().qualification().unwrap_err().code, "route_dropped");
     let began = Instant::now();
     let left = fx.nodes[survivor].call(json!({"command":"leave","mode":"smooth"}));
     let leave_ms = ms(began);
     let withdrawn = e
-        .host
+        .host()
         .withdraw(&fx.offers[survivor], &left["withdrawal"])
         .unwrap();
     let not_ready_ms = ms(began);
     assert_eq!(
-        e.host.qualification().err().unwrap().code,
+        e.host().qualification().err().unwrap().code,
         "readiness_revoked"
     );
     assert_eq!(withdrawn["reason"], "member_leave");
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":1,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":route::qualification(e.host.message()).unwrap()});
+        "workload_profile_id":"interactive","qos_class":"interactive","qualification":route::qualification(e.host().message()).unwrap()});
     let (status, refused) = http(
-        e.addr,
+        e.addr(),
         "POST",
         "/v1/inference",
-        &format!("Authorization: Bearer {}\r\n", e.bearer),
+        &format!("Authorization: Bearer {}\r\n", e.bearer()),
         &doc.to_string(),
     );
     assert_eq!(
@@ -869,7 +670,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         "withdrawal_verified":withdrawn,"submit_after_leave":{"status":status,"body":refused},
         "reopened":reopened,"consent_state":consent,"worker_pid":leave_pid});
     evidence["death"]["pump_refusals"] = json!(e.close());
-    codec.close();
+    codec.close().unwrap();
     let began = fx.began;
     let Fixture {
         seed, nodes, root, ..
@@ -881,7 +682,343 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
     }
     eprintln!(
-        "B7e total elapsed={:?}; owner remains test driver; route_ready=false",
+        "B7e total elapsed={:?}; owner composition = api::joined_owner (driver is its operator); route_ready=false",
+        began.elapsed()
+    );
+}
+
+// ---- B16 S5: the owner as a separate headless PROCESS (`examples/joined_owner`,
+// composed only of `api::joined_owner`). This test is its operator (stdin
+// commands) and its chat client (HTTP + SSE); members are `shard_member`
+// processes driven ONLY by the owner process over the signed channel.
+struct OwnerProcess {
+    child: Child,
+    input: Option<std::process::ChildStdin>,
+    replies: mpsc::Receiver<Value>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+impl OwnerProcess {
+    fn start(args: &[std::ffi::OsString]) -> Self {
+        use std::io::BufRead as _;
+        let exe = std::env::var_os("B16_OWNER_BINARY")
+            .expect("build api --example joined_owner and set B16_OWNER_BINARY");
+        let mut child = Command::new(exe)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let out = child.stdout.take().unwrap();
+        let (tx, replies) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in std::io::BufReader::new(out).lines() {
+                let Ok(line) = line else { return };
+                let v: Value = serde_json::from_str(&line).unwrap();
+                if tx.send(v).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            input: child.stdin.take(),
+            child,
+            replies,
+            reader: Some(reader),
+        }
+    }
+    fn send(&mut self, command: Value) -> Value {
+        use std::io::Write as _;
+        let input = self.input.as_mut().unwrap();
+        writeln!(input, "{command}").unwrap();
+        input.flush().unwrap();
+        // Long owner steps (transfer, native prepare) are bounded by the
+        // member wall per stage; the owner process enforces its own bounds.
+        self.replies
+            .recv_timeout(allowance() * 4)
+            .unwrap_or_else(|e| panic!("owner reply to {command}: {e:?}"))
+    }
+    fn call(&mut self, command: Value) -> Value {
+        let reply = self.send(command.clone());
+        assert_eq!(reply["ok"], true, "{command} -> {reply}");
+        reply["result"].clone()
+    }
+    fn close(mut self) {
+        self.call(json!({"command":"close"}));
+        self.input.take();
+        let status = self.child.wait().unwrap();
+        assert!(status.success(), "owner exit {status:?}");
+        if let Some(r) = self.reader.take() {
+            r.join().unwrap();
+        }
+    }
+}
+impl Drop for OwnerProcess {
+    fn drop(&mut self) {
+        if self.child.try_wait().unwrap().is_none() {
+            self.child.kill().unwrap();
+            self.child.wait().unwrap();
+        }
+    }
+}
+/// A spawned member process (remote control only, consent by its operator).
+struct MemberProcess(Child);
+impl Drop for MemberProcess {
+    fn drop(&mut self) {
+        if self.0.try_wait().unwrap().is_none() {
+            self.0.kill().unwrap();
+            self.0.wait().unwrap();
+        }
+    }
+}
+fn spawn_member(root: &std::path::Path) -> (MemberProcess, String) {
+    let exe = std::env::var_os("B7_MEMBER_BINARY").expect("B7_MEMBER_BINARY");
+    let decision = super::process::consent_file(root.parent().unwrap());
+    let child = MemberProcess(
+        Command::new(exe)
+            .arg("--state-root")
+            .arg(root)
+            .args(super::member_remote::member_args())
+            .arg("--consent-file")
+            .arg(&decision)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    let notice = root.join("member-control.json");
+    let end = Instant::now() + allowance();
+    while !notice.exists() {
+        assert!(
+            Instant::now() < end,
+            "member control endpoint not published"
+        );
+        std::thread::yield_now();
+    }
+    let info: Value = serde_json::from_slice(&fs::read(&notice).unwrap()).unwrap();
+    let c = &info["member_control"];
+    let addrs: Vec<&str> = c["addrs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    let addr = format!("{}@{}", c["endpoint_id"].as_str().unwrap(), addrs.join(","));
+    (child, addr)
+}
+fn post_chat(addr: SocketAddr, bearer: &str, qualification: &Value, tokens: usize) -> Running {
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":tokens,
+        "workload_profile_id":"interactive","qos_class":"interactive","qualification":qualification});
+    let auth = format!("Authorization: Bearer {bearer}\r\n");
+    let posted = Instant::now();
+    let (status, accepted) = http(addr, "POST", "/v1/inference", &auth, &doc.to_string());
+    assert_eq!(status, 202, "{accepted}");
+    let id = accepted["request_id"].as_str().unwrap().to_owned();
+    let token = accepted["session_token"].as_str().unwrap().to_owned();
+    let (tx, events) = mpsc::channel();
+    let path = accepted["stream_path"].as_str().unwrap().to_owned();
+    let headers = format!("{auth}X-Mycelium-Session: {token}\r\n");
+    let reader = std::thread::spawn(move || stream(addr, path, headers, tx, allowance()));
+    Running {
+        id,
+        token,
+        posted,
+        events,
+        reader,
+    }
+}
+fn events_until(r: &Running, tokens: usize, all: &mut Vec<(Value, Instant)>) {
+    while all.iter().filter(|(e, _)| e["type"] == "token").count() < tokens
+        && terminal(all).is_none()
+    {
+        match r.events.recv_timeout(span(B::WorkerStartup)) {
+            Ok(event) => all.push(event),
+            Err(error) => panic!("stream ended ({error:?}): {all:?}"),
+        }
+    }
+}
+use std::net::SocketAddr;
+#[test]
+#[ignore = "real Metal + local Qwen3; B16_OWNER_BINARY, B7_MEMBER_BINARY, native pins and resource gate required"]
+fn owner_process_streams_chat_stops_and_leaves() {
+    let began = Instant::now();
+    let gate = std::env::var_os("B7_RESOURCE_GATE").expect("resource preflight script");
+    let snapshot = PathBuf::from(std::env::var_os("MYCELIUM_QWEN3_SNAPSHOT").unwrap());
+    let native_binary = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").unwrap();
+    let oracle: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let reference: Vec<u64> = serde_json::from_value(oracle["recorded"]["tokens"].clone()).unwrap();
+    let prompt_ids = oracle["recorded"]["workload"]["prompt_ids"]
+        .as_array()
+        .unwrap()
+        .len();
+    let lan_run = super::member_remote::lan().is_some();
+    let path = std::env::temp_dir().join(format!("b16-owner-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    let root = super::native_process::Root(path.canonicalize().unwrap());
+    // The owner control key: the operator's key file, or a fresh one.
+    let key = match std::env::var_os("B8_OWNER_CONTROL_KEY") {
+        Some(file) => PathBuf::from(file),
+        None => {
+            let file = root.0.join("owner-control.key");
+            let hex: String = super::member_remote::owner_secret()
+                .to_bytes()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            fs::write(&file, hex).unwrap();
+            file
+        }
+    };
+    let mut spawned = Vec::new();
+    let mut addrs = Vec::new();
+    let (m0, a0) = spawn_member(&root.0.join("member0"));
+    spawned.push(m0);
+    addrs.push(a0);
+    match std::env::var("B8_REMOTE_MEMBER") {
+        Ok(remote) => addrs.push(remote),
+        Err(_) => {
+            let (m1, a1) = spawn_member(&root.0.join("member1"));
+            spawned.push(m1);
+            addrs.push(a1);
+        }
+    }
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "--state-root".into(),
+        root.0.join("owner").into(),
+        "--swarm".into(),
+        "b16-owner".into(),
+        "--control-key".into(),
+        key.into(),
+        "--snapshot".into(),
+        snapshot.into(),
+        "--native-binary".into(),
+        native_binary,
+    ];
+    if let Some((ip, _)) = super::member_remote::lan() {
+        args.extend(["--lan".into(), ip.to_string().into()]);
+        for extra in std::env::var("B8_LAN_ALLOW").unwrap_or_default().split(',') {
+            if !extra.is_empty() {
+                args.extend(["--lan-allow".into(), extra.into()]);
+            }
+        }
+    }
+    let mut owner = OwnerProcess::start(&args);
+    let started = owner.call(json!({"command":"status"}));
+    eprintln!("B16 owner process: {started}");
+    for addr in &addrs {
+        let admitted = owner.call(json!({"command":"admit","member":addr}));
+        eprintln!("B16 admitted {admitted}");
+    }
+    let compiled = owner.call(json!({"command":"compile","ranges":[[0,14],[14,28]]}));
+    eprintln!("B16 compiled {compiled} elapsed={:?}", began.elapsed());
+    let transferred = owner.call(json!({"command":"transfer"}));
+    eprintln!(
+        "B16 transferred {transferred} elapsed={:?}",
+        began.elapsed()
+    );
+    let mut evidence = json!({"route_ready":false,"physical_route_ready":false,
+        "scope":if lan_run { "lan_two_node_rehearsed" } else { route::SCOPE },
+        "carrier":if lan_run { "direct_lan" } else { "loopback" },
+        "owner":"examples/joined_owner process (api::joined_owner)","compiled":compiled,
+        "transferred":transferred});
+    let capacity = prompt_ids + 64;
+    let open = |owner: &mut OwnerProcess, epoch: u64| -> (SocketAddr, String, Value) {
+        for i in 0..2 {
+            admit_native_load(&gate, &format!("stage={i}"));
+        }
+        owner.call(json!({"command":"prepare","tokens":capacity}));
+        let opened = owner.call(json!({"command":"open","epoch":epoch}));
+        (
+            opened["gateway"].as_str().unwrap().parse().unwrap(),
+            opened["bearer"].as_str().unwrap().to_owned(),
+            opened["qualification"].clone(),
+        )
+    };
+    // Chat: 32 greedy tokens == the independent Python/MLX oracle.
+    let (addr, bearer, qualification) = open(&mut owner, 1);
+    let r = post_chat(addr, &bearer, &qualification, NEW_TOKENS);
+    let mut all = Vec::new();
+    events_until(&r, NEW_TOKENS + 1, &mut all);
+    r.reader.join().unwrap();
+    let tokens = token_ids(&all);
+    assert_eq!(terminal(&all).unwrap()["type"], "completed", "{all:?}");
+    assert_eq!(tokens, reference[..NEW_TOKENS], "tokens == oracle");
+    let ttft = all
+        .iter()
+        .find(|(e, _)| e["type"] == "token")
+        .unwrap()
+        .1
+        .duration_since(r.posted)
+        .as_secs_f64()
+        * 1000.0;
+    let settled = owner.call(json!({"command":"settle"}));
+    eprintln!(
+        "B16 owner-process chat tokens={tokens:?} == oracle; ttft_ms={ttft:.1}; settled={settled}"
+    );
+    evidence["chat"] = json!({"tokens":tokens,"reference":&reference[..NEW_TOKENS],"ttft_ms":ttft,"settled":settled});
+    // Stop mid-stream through the owner's gateway.
+    let (addr, bearer, qualification) = open(&mut owner, 2);
+    let r = post_chat(addr, &bearer, &qualification, NEW_TOKENS);
+    let mut all = Vec::new();
+    events_until(&r, 4, &mut all);
+    let stop_at = Instant::now();
+    let auth = format!(
+        "Authorization: Bearer {bearer}\r\nX-Mycelium-Session: {}\r\n",
+        r.token
+    );
+    let (status, body) = http(
+        addr,
+        "DELETE",
+        &format!("/v1/inference/{}", r.id),
+        &auth,
+        "",
+    );
+    assert_eq!(status, 202, "{body}");
+    events_until(&r, usize::MAX, &mut all);
+    r.reader.join().unwrap();
+    let terminal_ms = ms(stop_at);
+    assert_eq!(terminal(&all).unwrap()["type"], "cancelled", "{all:?}");
+    let streamed = token_ids(&all);
+    assert_eq!(
+        streamed,
+        reference[..streamed.len()],
+        "pre-Stop tokens == oracle prefix"
+    );
+    let settled = owner.call(json!({"command":"settle"}));
+    eprintln!(
+        "B16 owner-process stop tokens={streamed:?} terminal_ms={terminal_ms:.1}; settled={settled}"
+    );
+    evidence["stop"] = json!({"tokens_before_stop":streamed,"terminal_after_stop_ms":terminal_ms,"settled":settled});
+    // Leave: the member's product leave, the owner's verified withdrawal.
+    let left = owner.call(json!({"command":"leave","stage":1}));
+    assert_eq!(left["left"]["record"]["state"], "left", "{left}");
+    assert_eq!(left["withdrawn"]["reason"], "member_leave", "{left}");
+    assert_eq!(left["qualification_after"], "readiness_revoked", "{left}");
+    evidence["leave"] = left;
+    owner.close();
+    // The owner closed every member it controls: the spawned ones exit 0.
+    for mut m in spawned {
+        let end = Instant::now() + allowance();
+        let status = loop {
+            if let Some(status) = m.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < end,
+                "member did not exit after owner close"
+            );
+            std::thread::yield_now();
+        };
+        assert!(status.success(), "member exit {status:?}");
+    }
+    if let Some(path) = std::env::var_os("B7_ROUTE_EVIDENCE") {
+        fs::write(path, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
+    }
+    drop(root);
+    eprintln!(
+        "B16 owner process total elapsed={:?}; route_ready=false",
         began.elapsed()
     );
 }

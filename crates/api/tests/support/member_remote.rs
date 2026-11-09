@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Owner-side driver of a member over the signed remote control channel
-//! (`api::member_control` over NodeControl). One owned thread per member link
-//! holds the owner control endpoint, admits each operator command remotely and
-//! polls its member-signed result, delivering replies in the same shape as the
-//! private stdin channel. Environment (all optional):
+//! Owner-side test configuration of the signed remote member channel; the
+//! channel itself is product code (`api::joined_owner::remote`, B16), which
+//! delivers replies in the same shape as the private stdin channel.
+//! Environment (all optional):
 //! - `B8_MEMBER_CONTROL=remote`: drive spawned members over this channel only.
 //! - `B8_LAN_IP=<this host's private LAN IP>` (+ `B8_LAN_ALLOW=ip,ip`): direct-LAN
 //!   carriers, seed forwarder and source; otherwise LocalOnly loopback.
@@ -20,7 +19,6 @@ use serde_json::{Value, json};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{OnceLock, mpsc},
-    time::{Duration, Instant},
 };
 use transport::{Channel, Clock};
 pub fn remote_mode() -> bool {
@@ -77,160 +75,19 @@ pub fn parse_remote(text: &str) -> iroh::EndpointAddr {
         |a, s| a.with_ip_addr(s.parse::<SocketAddr>().expect("ip:port")),
     )
 }
-fn span(id: B) -> Duration {
-    Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
-}
-/// A running owner-side link; replies arrive on the receiver given at `start`.
-pub struct Link {
-    commands: Option<mpsc::Sender<Value>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
+/// A running owner-side link (PRODUCT `api::joined_owner::remote`, B16);
+/// replies arrive on the receiver given at `start`.
+pub struct Link(api::joined_owner::remote::RemoteChannel);
 impl Link {
     pub fn start(member: iroh::EndpointAddr) -> (Self, mpsc::Receiver<Value>) {
-        let (tx, commands) = mpsc::channel::<Value>();
-        let (reply_tx, replies) = mpsc::channel();
-        let thread = std::thread::spawn(move || drive(member, commands, reply_tx));
-        (
-            Self {
-                commands: Some(tx),
-                thread: Some(thread),
-            },
-            replies,
-        )
+        let (channel, replies) =
+            api::joined_owner::remote::RemoteChannel::start(owner_secret().clone(), member, lan())
+                .unwrap();
+        (Self(channel), replies)
     }
     pub fn send(&self, command: Value) {
-        self.commands.as_ref().unwrap().send(command).unwrap();
+        self.0.send(command).unwrap();
     }
-}
-impl Drop for Link {
-    fn drop(&mut self) {
-        self.commands.take();
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn drive(
-    member: iroh::EndpointAddr,
-    commands: mpsc::Receiver<Value>,
-    replies: mpsc::Sender<Value>,
-) {
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .unwrap();
-    let clock = api::managed_carrier::HostClock::default();
-    let until = |d: Duration| -> MonoInstant {
-        clock
-            .monotonic()
-            .checked_add(budgets::Span::from_millis(d.as_millis() as u64))
-            .unwrap()
-    };
-    let secret = owner_secret().clone();
-    let mut host = match lan() {
-        Some((ip, policy)) => LoopbackHost::bind_lan(
-            &rt,
-            &clock,
-            until(span(B::RouterClose)),
-            secret.clone(),
-            &[Channel::NodeControl],
-            ip,
-            policy,
-        ),
-        None => LoopbackHost::bind_protocols(
-            &rt,
-            &clock,
-            until(span(B::RouterClose)),
-            secret.clone(),
-            &[Channel::NodeControl],
-        ),
-    }
-    .unwrap();
-    let owner = Owner::new(&secret).unwrap();
-    let client = NodeControlClient::new(
-        &host,
-        &clock,
-        B::NodeControlCallConcurrency.count().unwrap(),
-    )
-    .unwrap();
-    let mut remote = Remote {
-        addr: member,
-        enrolled: None,
-    };
-    // One signed call, retried within the call ceiling (a stalled member makes a
-    // single call time out; the operation result is still pending on it).
-    let call = |remote: &Remote, request: Value| -> Result<Value, String> {
-        remote
-            .call(
-                &owner,
-                &client,
-                request,
-                until(span(B::SidecarLocalHandshake)),
-                api::app_host::now(),
-            )
-            .map_err(|e| e.code.to_owned())
-    };
-    let poll = span(B::PyMyceliumA13MacosManagedControlHttpRetryInitialSecondsL317);
-    let mut pending: std::collections::VecDeque<(u64, String, Instant)> = Default::default();
-    loop {
-        let next = if pending.is_empty() {
-            commands.recv().ok()
-        } else {
-            match commands.recv_timeout(poll) {
-                Ok(c) => Some(c),
-                Err(mpsc::RecvTimeoutError::Timeout) => None,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-        };
-        if let Some(command) = next {
-            let name = command["command"].as_str().unwrap_or_default().to_owned();
-            match call(&remote, command.clone()) {
-                Ok(reply) if name == "cancel_operation" => replies.send(reply).unwrap(),
-                // The member stops its control channel once it closes: admission is the reply.
-                Ok(reply) if name == "close" && reply["ok"] == true => replies
-                    .send(json!({"ok":true,"result":{"closing":true}}))
-                    .unwrap(),
-                Ok(reply) if reply["ok"] == true => pending.push_back((
-                    command["operation_id"].as_u64().unwrap(),
-                    name,
-                    Instant::now(),
-                )),
-                Ok(refusal) => replies.send(refusal).unwrap(),
-                Err(code) => replies
-                    .send(json!({"ok":false,"code":format!("control_call_failed:{code}")}))
-                    .unwrap(),
-            }
-        } else if pending.is_empty() {
-            break;
-        }
-        if let Some((id, name, began)) = pending.front().cloned() {
-            match call(&remote, json!({"command":"result","operation_id":id})) {
-                Ok(r) if r["result"]["finished"] == true => {
-                    let reply = r["result"]["reply"].clone();
-                    if name == "accept" && reply["ok"] == true {
-                        // Paired: later replies must be signed by the enrolled key
-                        // (the registration's member row, which the owner checks
-                        // against the seed row before issuing any offer).
-                        remote.enrolled =
-                            reply["result"]["message"]["member"]["verification_key_digest"]
-                                .as_str()
-                                .map(str::to_owned);
-                        assert!(remote.enrolled.is_some(), "registration names its key");
-                    }
-                    pending.pop_front();
-                    replies.send(reply).unwrap();
-                }
-                Ok(_) => {}
-                Err(code) => eprintln!("member result poll {id} ({name}): {code}"),
-            }
-            assert!(
-                began.elapsed() < span(B::MemberChosenWall),
-                "remote operation {name} exceeded the member wall"
-            );
-        }
-    }
-    host.close(&clock, until(span(B::RouterClose))).unwrap();
 }
 /// One owner endpoint (keyed by `secret`) for a bounded set of calls.
 pub fn with_owner<T>(
