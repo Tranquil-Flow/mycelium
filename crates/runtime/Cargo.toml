@@ -18,7 +18,13 @@ hmac = { version = "=0.12.1", default-features = false }
 sha2 = { version = "=0.10.9", default-features = false }
 rustix = { version = "=1.1.4", features = ["fs", "pipe", "process"] }
 serde_json = { version = "=1.0.154", features = ["arbitrary_precision"] }
-iroh = { version = "=1.0.2", default-features = false, features = ["tls-ring"], optional = true }
+# `unstable-custom-transports` (no extra deps): the direct-LAN pre-send filter
+# transport (src/iroh_lan_filter.rs). iroh-base / n0-watcher / noq-udp are the
+# exact versions iroh already resolves; the transport traits name their types.
+iroh = { version = "=1.0.2", default-features = false, features = ["tls-ring", "unstable-custom-transports"], optional = true }
+iroh-base = { version = "=1.2.0", default-features = false, optional = true }
+n0-watcher = { version = "=1.0.0", optional = true }
+noq-udp = { version = "=1.3.0", default-features = false, optional = true }
 tokio = { version = "=1.53.1", features = ["rt", "time", "io-util", "sync", "macros", "net", "signal", "rt-multi-thread"], optional = true }
 [dev-dependencies]
 tokio = { version = "=1.53.1", features = ["rt-multi-thread"] }
@@ -28,6 +34,6 @@ path = "src/bin/mycelium-rs-sidecar.rs"
 required-features = ["iroh-adapter"]
 [features]
 default = []
-iroh-adapter = ["dep:iroh", "dep:tokio"]
+iroh-adapter = ["dep:iroh", "dep:tokio", "dep:iroh-base", "dep:n0-watcher", "dep:noq-udp"]
 [lints]
 workspace = true
