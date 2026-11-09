@@ -30,7 +30,7 @@ fn span(id: B) -> Result<Duration, Refusal> {
 /// Command sender + owned driver thread; replies arrive on the receiver given
 /// at `start`, in the member channel's reply shape (`{ok, result | code}`).
 pub struct RemoteChannel {
-    commands: Option<mpsc::Sender<Value>>,
+    commands: Option<mpsc::SyncSender<Value>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl RemoteChannel {
@@ -44,8 +44,17 @@ impl RemoteChannel {
             call: span(B::SidecarLocalHandshake)?,
             poll: span(B::PyMyceliumA13MacosManagedControlHttpRetryInitialSecondsL317)?,
             wall: span(B::MemberChosenWall)?,
+            pending: usize::try_from(
+                B::PyMyceliumA13MacosManagedControlMaxPendingCommandsL106
+                    .count()
+                    .map_err(|_| Refusal("budget_unavailable".into()))?
+                    .get(),
+            )
+            .map_err(|_| Refusal("budget_unavailable".into()))?,
         };
-        let (tx, commands) = mpsc::channel::<Value>();
+        // Bounded both ways (REVIEW-laneB16 F3): queued commands and admitted
+        // operations awaiting their result; past either, a typed refusal.
+        let (tx, commands) = mpsc::sync_channel::<Value>(budgets.pending);
         let (reply_tx, replies) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -66,8 +75,16 @@ impl RemoteChannel {
         self.commands
             .as_ref()
             .ok_or_else(|| Refusal("member_control_closed".into()))?
-            .send(command)
-            .map_err(|_| Refusal("member_control_closed".into()))
+            .try_send(command)
+            .map_err(|e| {
+                Refusal(
+                    match e {
+                        mpsc::TrySendError::Full(_) => "member_control_busy",
+                        mpsc::TrySendError::Disconnected(_) => "member_control_closed",
+                    }
+                    .into(),
+                )
+            })
     }
 }
 impl Drop for RemoteChannel {
@@ -86,6 +103,8 @@ struct Budgets {
     call: Duration,
     poll: Duration,
     wall: Duration,
+    /// Most queued commands and most admitted operations awaiting a result.
+    pending: usize,
 }
 fn drive(
     secret: iroh::SecretKey,
@@ -168,6 +187,15 @@ fn drive(
             .call(&owner, &client, request, deadline, crate::app_host::now())
             .map_err(|e| e.code.to_owned())
     };
+    // Long operations are admitted only while the owner can track one more.
+    let call_unless_full = |remote: &Remote,
+                            command: Value,
+                            name: &str,
+                            tracked: usize|
+     -> Option<Result<Value, String>> {
+        let immediate = matches!(name, "cancel_operation" | "status" | "close");
+        (immediate || tracked < budgets.pending).then(|| call(remote, command))
+    };
     let send = |reply: Value| {
         if replies.send(reply).is_err() {
             eprintln!("member control reply receiver gone");
@@ -186,19 +214,24 @@ fn drive(
         };
         if let Some(command) = next {
             let name = command["command"].as_str().unwrap_or_default().to_owned();
-            match call(&remote, command.clone()) {
+            let operation = command["operation_id"].as_u64();
+            match call_unless_full(&remote, command, &name, pending.len()) {
+                // Not sent: the member never starts what the owner cannot track.
+                None => send(json!({"ok":false,"code":"member_control_busy"})),
                 // Immediate member answers (never queued on the member).
-                Ok(reply) if name == "cancel_operation" || name == "status" => send(reply),
+                Some(Ok(reply)) if name == "cancel_operation" || name == "status" => send(reply),
                 // The member stops its control channel once it closes: admission is the reply.
-                Ok(reply) if name == "close" && reply["ok"] == true => {
+                Some(Ok(reply)) if name == "close" && reply["ok"] == true => {
                     send(json!({"ok":true,"result":{"closing":true}}))
                 }
-                Ok(reply) if reply["ok"] == true => match command["operation_id"].as_u64() {
+                Some(Ok(reply)) if reply["ok"] == true => match operation {
                     Some(id) => pending.push_back((id, name, Instant::now())),
                     None => send(json!({"ok":false,"code":"operator_operation_id_required"})),
                 },
-                Ok(refusal) => send(refusal),
-                Err(code) => send(json!({"ok":false,"code":format!("control_call_failed:{code}")})),
+                Some(Ok(refusal)) => send(refusal),
+                Some(Err(code)) => {
+                    send(json!({"ok":false,"code":format!("control_call_failed:{code}")}))
+                }
             }
         } else if pending.is_empty() {
             break;

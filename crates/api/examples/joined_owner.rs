@@ -154,6 +154,16 @@ impl Forwarder {
                 if !client.peer_addr().is_ok_and(|p| policy.allows(p.ip())) {
                     continue;
                 }
+                // Finished pipes are joined as new ones arrive (REVIEW-laneB16
+                // F3): the owned list is bounded by the live pipes.
+                let (finished, live): (Vec<_>, Vec<_>) =
+                    pipes.drain(..).partition(|(_, copy)| copy.is_finished());
+                pipes = live;
+                for (_, copy) in finished {
+                    if copy.join().is_err() {
+                        eprintln!("seed forwarder copy panicked");
+                    }
+                }
                 let Ok(server) = TcpStream::connect(target) else {
                     continue;
                 };
@@ -704,12 +714,21 @@ fn run() -> Result<()> {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
     let mut closing = false;
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|_| "operator_read_failed")?;
+    let mut input = stdin.lock();
+    loop {
+        // Bounded before buffering (REVIEW-laneB16 F3): at most limit+1 bytes
+        // of one operator line are ever held.
+        let mut line = Vec::new();
+        let read = std::io::Read::take(std::io::Read::by_ref(&mut input), limit + 1)
+            .read_until(b'\n', &mut line)
+            .map_err(|_| "operator_read_failed")?;
+        if read == 0 {
+            break;
+        }
         if line.len() as u64 > limit {
             return Err("operator_frame_invalid".into());
         }
-        let request: Value = serde_json::from_str(&line).map_err(|_| "operator_json_invalid")?;
+        let request: Value = serde_json::from_slice(&line).map_err(|_| "operator_json_invalid")?;
         let command = request["command"].as_str().unwrap_or_default();
         let reply = match command {
             "status" => Ok(owner.status()),
