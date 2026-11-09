@@ -518,7 +518,8 @@ function tipCycle(tau, period, g = LIFE_CYCLE.G * period, h = LIFE_CYCLE.H * per
  *   2nd (60 Hz display) or every 2nd-4th (120 Hz) vsync instead (see skip):
  *   a steady 30-60 Hz, never a dropped run of frames. A fast host keeps 60 Hz
  *   (or more) throughout; a 120 Hz display redraws at 60 Hz while work is
- *   pending. Badly starved work still gets FLOOR ms per frame.
+ *   pending. Starved work (below half its share: frames heavier than the
+ *   vsync period, e.g. software raster) runs plain MAX ms slices, as before.
  * - Hidden tabs, or no frame for 4 periods: unpaced MAX ms slices (a tab
  *   hidden mid-build still finishes), with a timer fallback.
  * Jobs: { run(deadline) -> true when finished, prio (0 first), name }. */
@@ -526,7 +527,6 @@ const pacer = (() => {
   const MARGIN = 2.5,
     MIN = 2,
     MAX = 8,
-    FLOOR = 4,
     SHARE = [0.55, 0.35],
     WIN = 250,
     HZ60 = 1000 / 60;
@@ -606,14 +606,17 @@ const pacer = (() => {
     }
     // Paced on a 60 Hz grid at most: on a 120 Hz display a slice may take
     // the odd (skipped) 120 Hz frame.
-    const next = last + Math.max(period, HZ60);
+    const next = last + Math.max(period, HZ60),
+      sh = share(t);
+    // Starved (frames heavier than the vsync period, e.g. software raster):
+    // plain MAX ms slices, as before the pacer, until the share recovers.
+    if (sh < target() / 2) {
+      stats.floor++;
+      return t + MAX;
+    }
     // A frame is due (its task is queued ahead of ours): yield to it.
     if (t > next - MARGIN) return -1;
     if (next - MARGIN - t >= MIN) return Math.min(t + MAX, next - MARGIN);
-    if (share(t) < target() / 2) {
-      stats.floor++;
-      return t + FLOOR;
-    }
     return -1;
   }
   function slice() {

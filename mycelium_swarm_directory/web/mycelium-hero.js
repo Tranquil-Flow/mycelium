@@ -1111,7 +1111,9 @@ function* buildGeometry(L, budget, out = {}) {
           for (let g = last; g; g = g.prev) {
             x.stroke(g.path);
             b += g.n;
-            if (b > 1500) {
+            // r11.4: rastered (and a yield checked) after ~300 segments, not
+            // 1500 (one 38-66 ms span); the strokes and their order are unchanged.
+            if (b > 300) {
               b = 0;
               x.getImageData(0, 0, 1, 1);
               if (budget()) yield "monotone";

@@ -1572,10 +1572,26 @@ export function createField({ stage, state, reduce }) {
     return n;
   }
   /** Margin colony tufts as small full-DPR sprites, for compositor-cheap breathing. */
+  // r11.4: each margin colony's tufts, indexed once (a filter over every
+  // field strand per colony made the first breathing frame after the intro
+  // 60-120 ms at 1920 DPR2). Same tufts in the same order.
+  let tuftIndex = null;
+  function tuftsOf(knot) {
+    if (!tuftIndex || tuftIndex.strands !== field.strands) {
+      tuftIndex = { strands: field.strands, map: new Map() };
+      for (const p of field.strands) {
+        if (!p.tuft) continue;
+        const l = tuftIndex.map.get(p.marginRoot);
+        if (l) l.push(p);
+        else tuftIndex.map.set(p.marginRoot, [p]);
+      }
+    }
+    return tuftIndex.map.get(knot) || [];
+  }
   function colonySprite(knot) {
     let s = colonySprites.get(knot);
     if (s) return s;
-    const tufts = field.strands.filter((p) => p.tuft && p.marginRoot === knot);
+    const tufts = tuftsOf(knot);
     if (!tufts.length) return null;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of tufts) {
@@ -1925,6 +1941,17 @@ export function createField({ stage, state, reduce }) {
         el.style.opacity = "";
       }
     attached = true;
+    // r11.4: the breathing sprites, rastered ahead in paced slices (they were
+    // all drawn in the first frame after the intro).
+    if (!reduce.matches && field.marginKnots.length) {
+      let kb = 0;
+      const knots = field.marginKnots;
+      pacer.add({ prio: 1, name: "colony-sprites", run: (deadline) => {
+        if (disposed) return true;
+        while (kb < knots.length && performance.now() < deadline) colonySprite(knots[kb++]);
+        return kb >= knots.length;
+      } });
+    }
     lastVersion = -1;
     paint(frozen ?? clock.elapsed, true);
     c.dataset.ready = "1";
