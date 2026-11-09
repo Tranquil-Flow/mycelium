@@ -336,7 +336,8 @@ impl Headless {
                 Instant::now() < deadline,
                 "headless did not exit after quit"
             );
-            thread::sleep(span(BudgetId::OwnerPoll));
+            // A fine poll, so the measured time is the exit's, not the poll period's.
+            thread::sleep(span(BudgetId::OwnerPoll) / 10);
         }
     }
 }
