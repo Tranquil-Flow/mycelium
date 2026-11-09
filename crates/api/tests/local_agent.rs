@@ -520,6 +520,13 @@ impl AgentHost for WorkHost {
     fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
         Ok(self.offer.clone())
     }
+    /// The oracle's `/api/staging/accept` + `/api/control/start` for the bootstrap offer, as one
+    /// recorded route (no recorded scenario announces a bootstrap offer).
+    fn bootstrap(&mut self, _run: &str, _deployment: &str, offer: &str) -> Result<(), Failure> {
+        self.action("bootstrap", json!({"offer_id": offer}));
+        self.native = json!({"state": "running"});
+        Ok(())
+    }
     fn accept_work(&mut self, limits: &Value) -> Result<(), Failure> {
         self.action(
             "/api/work/preview",
@@ -674,6 +681,59 @@ fn work_announcement(fx: &Value) -> Value {
         .find(|op| op["op"] == "announce" && op["value"]["phase"] == "work")
         .expect("work announcement")["value"]
         .clone()
+}
+
+/// Proves: in the work phase the agent starts its bootstrap worker only when the offer it holds IS the
+/// announced bootstrap offer (`demo_target.py:495-497`): an agent whose descriptor is fresh in the work phase
+/// (nothing bootstrapped yet) holding the WORK offer accepts its work and never re-runs the bootstrap.
+#[test]
+fn the_work_phase_bootstraps_only_for_the_bootstrap_offer_it_holds() {
+    let fx = work_fixture();
+    let whole = fx["scenarios"]
+        .as_array()
+        .expect("scenarios")
+        .iter()
+        .find(|s| s["name"] == "whole_snapshot_work_waits_by_name")
+        .expect("whole-snapshot scenario");
+    let mut work = whole["ops"]
+        .as_array()
+        .expect("ops")
+        .iter()
+        .find(|op| op["op"] == "announce" && op["value"]["phase"] == "work")
+        .expect("work announcement")["value"]
+        .clone();
+    work["bootstrap_offer_id"] = json!("bootstrap-offer-1");
+    let offer = |id: &str| {
+        json!({"archive_digest": format!("sha256:{}", "3".repeat(64)),
+        "offer_id": id, "run_id": work["run_id"]})
+    };
+    for (held, bootstraps) in [("work-offer-1", false), ("bootstrap-offer-1", true)] {
+        let root = scratch(&format!("bootstrap-{held}"));
+        let mut host = WorkHost::new(root.clone());
+        let mut agent = LocalAgent::new();
+        host.native = json!({"state": "stopped"});
+        host.offer = Some(offer(held));
+        host.announcement = Some(work.clone());
+        let status = agent.tick(&mut host);
+        let routes: Vec<&Value> = host.actions.iter().map(|a| &a[0]).collect();
+        if bootstraps {
+            assert_eq!(status["state"], "bootstrap_running", "{held}: {status}");
+            assert_eq!(routes, [&json!("bootstrap")], "{held}");
+            // Once per descriptor: the next tick does not start it again.
+            host.native = json!({"state": "stopped"});
+            agent.tick(&mut host);
+            assert_eq!(host.actions.len(), 1, "{held}: {:?}", host.actions);
+        } else {
+            assert_eq!(status["state"], "work_running", "{held}: {status}");
+            assert_eq!(
+                routes,
+                [&json!("/api/work/preview"), &json!("/api/work/accept")],
+                "{held}: the work offer is accepted, the bootstrap is not re-run"
+            );
+        }
+        drop(agent);
+        fs::remove_dir_all(&root).unwrap_or_default();
+    }
 }
 
 /// Proves: the HTTP repository fallback (S1 model download) is never used for a slice: without an owner-served
