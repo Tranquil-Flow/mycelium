@@ -46,9 +46,14 @@
 //! parent thread creates, closes and drops between `fork` and `exec` is still held by the
 //! not-yet-exec'd child for that interval. The interval is now a few hundred `fcntl`
 //! calls, one system call and `exec` (measured ~1.8 ms instead of ~130 ms to ~1 s at limit
-//! 1,048,575). Callers that rebind a just-closed address must still order it after the
-//! spawn. Unlike the old probe, a descriptor above a limit lowered after it was opened is
-//! covered (it is in the kernel's list).
+//! 1,048,575). `spawn()` returning does not end that interval: std returns when its
+//! exec-status pipe closes, but exec closes close-on-exec descriptors from the highest
+//! number down, so a lower inherited copy (a socket) can outlive the return, and the
+//! kernel can finish releasing it even after the child runs its new image (lane B20).
+//! Code that must know a just-closed socket is released should take a descriptor census
+//! of this process and its live children, not rebind the address. Unlike the old probe,
+//! a descriptor above a limit lowered after it was opened is covered (it is in the
+//! kernel's list).
 //!
 //! The other direction: [`adopt_inherited_descriptor`] turns a descriptor *this* process
 //! inherited (L9 sidecar `--bootstrap-fd N`) into an `OwnedFd`, failing closed. It is the
