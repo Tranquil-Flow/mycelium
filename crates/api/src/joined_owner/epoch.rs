@@ -72,9 +72,12 @@ impl Epoch {
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
-        // Each request holds one connection; more open connections than the
-        // gateway admits pending requests are answered busy, never held.
-        let max_connections = usize::try_from(
+        // v0.1.4 caps ADMITTED requests (request_gateway/service.py:349,458),
+        // not connections: submissions and event streams hold one of
+        // `max_admitted` slots; Stop, status and health are never refused for
+        // capacity. Connections that have not sent a request yet (no bearer
+        // checked) are bounded separately, the oldest dropped for a newcomer.
+        let max_admitted = usize::try_from(
             B::PyFinalMyceliumRequestGatewayServiceMaxPendingRequestsL310C36
                 .count()
                 .map_err(|_| fail("budget_unavailable"))?
@@ -137,17 +140,21 @@ impl Epoch {
         };
         // Gateway: one owned thread per connection, all joined on close.
         // Finished connections are joined as new ones arrive (REVIEW-laneB16
-        // F3), so the owned list is bounded by the live connections.
+        // F3), so the owned list is bounded by the live connections: at most
+        // `max_admitted` holding a slot plus `max_admitted` not yet read.
         let (service, stop) = (epoch.service.clone(), epoch.stop.clone());
+        let admitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let unread: Arc<Mutex<std::collections::VecDeque<(u64, TcpStream)>>> = Arc::default();
         let gateway = std::thread::Builder::new()
             .name("joined-owner-gateway".into())
             .spawn(move || {
                 let mut connections: Vec<std::thread::JoinHandle<()>> = Vec::new();
+                let mut next = 0u64;
                 for incoming in listener.incoming() {
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    let mut stream = match incoming {
+                    let stream = match incoming {
                         Ok(stream) => stream,
                         Err(e) => {
                             eprintln!("joined owner gateway accept: {e}");
@@ -162,29 +169,56 @@ impl Epoch {
                             eprintln!("joined owner gateway connection panicked");
                         }
                     }
-                    if connections.len() >= max_connections {
-                        busy(&mut stream);
+                    next += 1;
+                    let id = next;
+                    let Some(oldest) = unread_admit(&unread, id, &stream, max_admitted) else {
                         continue;
+                    };
+                    if let Some(oldest) = oldest
+                        && let Err(e) = oldest.shutdown(std::net::Shutdown::Both)
+                    {
+                        eprintln!("joined owner gateway drop of a silent connection: {e}");
                     }
-                    let service = service.clone();
+                    let (service, own_unread, admitted) =
+                        (service.clone(), unread.clone(), admitted.clone());
                     let spawned = std::thread::Builder::new()
                         .name("joined-owner-connection".into())
                         .spawn(move || {
                             let gateway = crate::requests::Gateway::new(service);
-                            if let Err(e) = crate::http::serve_response_connection(
+                            let slot = Slot::default();
+                            let served = crate::http::serve_response_connection(
                                 stream,
                                 connection_budget,
                                 crate::requests::MAX_REQUEST_BODY,
-                                |r| gateway.preflight(r),
+                                |r| {
+                                    unread_done(&own_unread, id);
+                                    if let Some(reply) = gateway.preflight(r)? {
+                                        return Ok(Some(reply));
+                                    }
+                                    if counted(r) && !slot.take(&admitted, max_admitted) {
+                                        return crate::http::Reply::error(PublicError::new(
+                                            503,
+                                            "gateway_capacity_exhausted",
+                                        ))
+                                        .map(Some);
+                                    }
+                                    Ok(None)
+                                },
                                 |r| gateway.handle(r),
-                            ) {
+                            );
+                            unread_done(&own_unread, id);
+                            slot.release(&admitted);
+                            if let Err(e) = served {
                                 // Bounded polls end streams; recorded, not dropped.
                                 eprintln!("joined owner gateway connection ended: {e:?}");
                             }
                         });
                     match spawned {
                         Ok(t) => connections.push(t),
-                        Err(e) => eprintln!("joined owner gateway connection thread: {e}"),
+                        Err(e) => {
+                            unread_done(&unread, id);
+                            eprintln!("joined owner gateway connection thread: {e}");
+                        }
                     }
                 }
                 for c in connections {
@@ -294,21 +328,64 @@ impl Drop for Epoch {
     }
 }
 
-/// Answer a connection past the gateway's bound at once (typed 503, no
-/// request read) and close it; nothing is owned for it.
-fn busy(stream: &mut TcpStream) {
-    use std::io::Write;
-    let body = r#"{"error":"joined_owner_gateway_busy"}"#;
-    let reply = format!(
-        "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    // A fresh socket's send buffer takes these few bytes without blocking.
-    if let Err(e) = stream
-        .set_nonblocking(true)
-        .and_then(|()| stream.write_all(reply.as_bytes()))
-        .and_then(|()| stream.shutdown(std::net::Shutdown::Write))
-    {
-        eprintln!("joined owner gateway busy reply: {e}");
+/// Register a connection that has not sent its request yet. Past `bound`
+/// such connections, the oldest is returned to be dropped (it has had its
+/// turn; a silent local process cannot starve the owner's chat or Stop).
+/// `None` = the connection could not be registered (it is dropped).
+fn unread_admit(
+    unread: &Mutex<std::collections::VecDeque<(u64, TcpStream)>>,
+    id: u64,
+    stream: &TcpStream,
+    bound: usize,
+) -> Option<Option<TcpStream>> {
+    let clone = match stream.try_clone() {
+        Ok(clone) => clone,
+        Err(e) => {
+            eprintln!("joined owner gateway connection handle: {e}");
+            return None;
+        }
+    };
+    let mut unread = unread.lock().unwrap_or_else(|p| p.into_inner());
+    let oldest = if unread.len() >= bound {
+        unread.pop_front().map(|(_, s)| s)
+    } else {
+        None
+    };
+    unread.push_back((id, clone));
+    Some(oldest)
+}
+/// The connection's request arrived (or the connection ended).
+fn unread_done(unread: &Mutex<std::collections::VecDeque<(u64, TcpStream)>>, id: u64) {
+    unread
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .retain(|(i, _)| *i != id);
+}
+/// Requests that hold an admitted slot: submissions and event streams. Stop
+/// (`DELETE`), status and health are always served.
+fn counted(r: &crate::http::Request) -> bool {
+    r.method == "POST"
+        || r.target
+            .split('?')
+            .next()
+            .is_some_and(|p| p.ends_with("/events"))
+}
+/// One connection's admitted slot, released when the connection ends.
+#[derive(Default)]
+struct Slot(AtomicBool);
+impl Slot {
+    fn take(&self, admitted: &std::sync::atomic::AtomicUsize, cap: usize) -> bool {
+        let taken = admitted
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < cap).then_some(n + 1)
+            })
+            .is_ok();
+        self.0.store(taken, Ordering::SeqCst);
+        taken
+    }
+    fn release(&self, admitted: &std::sync::atomic::AtomicUsize) {
+        if self.0.swap(false, Ordering::SeqCst) {
+            admitted.fetch_sub(1, Ordering::SeqCst);
+        }
     }
 }
