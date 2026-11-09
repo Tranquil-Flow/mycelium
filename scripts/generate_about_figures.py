@@ -236,7 +236,7 @@ class Art:
         tid, did = '%s-%s-title' % (self.fid, variant), '%s-%s-desc' % (self.fid, variant)
         blur = 'fxb-%s-%s' % (self.fid, variant)
         return ''.join([
-            '<svg class="fig-art fig-%s" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-labelledby="%s %s" '
+            '<svg class="fig-art fig-%s" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-labelledby="%s" aria-describedby="%s" '
             'focusable="false" data-variant="%s">' % (variant, self.w, self.h, self.w, self.h, tid, did, variant),
             '<title id="%s">%s</title><desc id="%s">%s</desc>' % (tid, esc(title), did, esc(desc)),
             '<defs><filter id="%s" x="-20%%" y="-20%%" width="140%%" height="140%%"><feGaussianBlur stdDeviation="5"/></filter></defs>' % blur,
@@ -538,7 +538,7 @@ FIGURES = {
     'swarm': (fig_swarm, 'A swarm: devices linked directly to one another, like threads of mycelium.'),
     'stages': (fig_stages, 'Each stage grows out of the one before. Only the first is working today.'),
     'pipeline': (fig_pipeline, 'A three-stage pipeline. Only activations cross between the devices; the layer ranges '
-                               'are an example, sized by the planner to each device’s memory.'),
+                               'are an example, sized by the planner to each device\'s memory.'),
     'stack': (fig_stack, 'Three layers, from the devices up. Only the compute layer is built today.'),
 }
 

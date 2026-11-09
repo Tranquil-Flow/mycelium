@@ -134,8 +134,9 @@ def test_vision_route_serves_both_versions_with_the_site_csp(directory):
     assert html.count('data-panel="simple"') == 1 and html.count('data-panel="technical"') == 1
     for line in ('AI that belongs to the people who use it', 'The short version', 'How it works', "Who's in charge",
                  'Access is not charity', 'Built for the people usually left out', 'Where we are',
-                 "What we haven't solved", 'Part of something bigger', 'The problem, precisely', 'What Mycelium does today',
-                 'Honest limits today', 'Where the architecture is going', 'The wider stack (CCAI)', 'Principles',
+                 "What we haven't solved", 'Part of something bigger', 'The problem, precisely', 'How Mycelium works',
+                 'What runs today', 'Honest limits today', "What we're building towards", 'The wider stack (CCAI)',
+                 'Principles',
                  'We take no venture capital, so there are no investors to repay',
                  "<strong>We're building AI owned by the people who use it.</strong>"):
         assert line in html, line
@@ -167,7 +168,7 @@ def test_old_vision_route_is_a_permanent_redirect_to_about(directory):
 def test_every_direction_claim_sits_next_to_an_honest_today_line():
     # Simple v3 (owner, 9 Nov): each direction section ends with its 'Today' line.
     tree = parse(VISION)
-    assert set(tree.aims) == {'how', 'in-charge', 'access', 'solved'}
+    assert set(tree.aims) == {'how', 'in-charge', 'access', 'solved', 't-how'}
     for aim in tree.aims.values():
         assert aim['today'].startswith('Today'), aim
     assert 'download it for Apple-silicon Macs' in tree.aims['how']['today']
@@ -193,6 +194,10 @@ def test_every_direction_claim_sits_next_to_an_honest_today_line():
                   'Not automatically cheaper or greener.'):
         assert limit in technical
     assert 'so this is research' in technical
+    # Technical v4: today's coordinator stated honestly after the how-it-works steps.
+    assert tree.aims['t-how']['today'] == ('Today: the device that starts a swarm admits its members and is the entry '
+                                           'point for every request, so it sees every prompt. The other devices see '
+                                           'the activations they process.')
 
 
 def test_header_and_homepage_link_to_about():
