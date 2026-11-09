@@ -137,9 +137,7 @@ fn pair(
         / 1000;
     let handoff=handoff::approve_pairing(root,true,Some(&issuer),&request,&json!(ttl),&json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),app_host::now(),&handoff::Entropy::os).unwrap();
     let registration=node.call(json!({"command":"accept","handoff":handoff.to_value(),"ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed_address}));
-    node.call(json!({"command":"consent","device_memory_bytes":16_000_000_000u64,
-        "policy":{"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"},
-        "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}}));
+    super::process::member_consent(node, &registration, &seed.coordinator);
     registration
 }
 #[test]

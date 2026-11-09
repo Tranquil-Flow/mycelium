@@ -445,3 +445,62 @@ fn failed_native_launch_child() {
     native.discard().unwrap();
     assert!(!path.exists(), "custody retired after proven release");
 }
+
+/// B16 S3 (gap row 12, TWO-MAC-TEST C1): the owner only REQUESTS consent. It
+/// admits a member for a transfer only when the member's OWN standing consent
+/// (member-side decision) is granted, bound to this swarm/member/seed key and
+/// covers the bytes; anything else is `member_consent_required`.
+#[test]
+fn owner_requires_the_members_own_bound_consent_before_an_offer() {
+    use api::joined_owner::consent::require;
+    let p = Pair::new();
+    let registration = p.registration();
+    let status = |root: &std::path::Path| {
+        json!({"consent":standing_consent::load(root).unwrap(),
+            "policy":resource_policy::read(root).unwrap()})
+    };
+    let granted = require(
+        &p.seed.coordinator,
+        &registration,
+        &status(&p.member_root),
+        1_000_000,
+    )
+    .unwrap();
+    assert_eq!(granted["state"], "granted");
+    assert_eq!(granted["binding"]["node_id"], p.session.node_id());
+    let refused = |reply: &Value, bytes: u64| {
+        require(&p.seed.coordinator, &registration, reply, bytes)
+            .unwrap_err()
+            .code
+    };
+    assert_eq!(
+        refused(&status(&p.member_root), 5_000_000_000),
+        "member_consent_required",
+        "caps below the transfer"
+    );
+    assert_eq!(
+        refused(&json!({"consent":null,"policy":null}), 1),
+        "member_consent_required",
+        "no member-side consent"
+    );
+    let mut other = status(&p.member_root);
+    other["consent"]["binding"]["swarm_id"] = json!("another-swarm");
+    assert_eq!(
+        refused(&other, 1),
+        "member_consent_required",
+        "bound elsewhere"
+    );
+    let mut stale = status(&p.member_root);
+    stale["consent"]["binding"]["seed_key_digest"] = json!("sha256:00");
+    assert_eq!(
+        refused(&stale, 1),
+        "member_consent_required",
+        "other seed key"
+    );
+    standing_consent::withdraw(&p.member_root, app_host::now()).unwrap();
+    assert_eq!(
+        refused(&status(&p.member_root), 1),
+        "member_consent_required",
+        "withdrawn"
+    );
+}

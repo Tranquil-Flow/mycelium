@@ -45,11 +45,12 @@ struct Args {
     lan: Option<std::net::IpAddr>,
     allow: Vec<std::net::IpAddr>,
     owner_control: Option<iroh::EndpointId>,
+    /// The member operator's own consent decision (member-side, C1).
+    consent: Option<Value>,
 }
 fn args() -> Result<Args> {
     let mut args = std::env::args().skip(1);
-    let usage =
-        "usage: --state-root PATH [--lan IP] [--lan-allow IP]... [--owner-control ENDPOINT_ID]";
+    let usage = "usage: --state-root PATH [--lan IP] [--lan-allow IP]... [--owner-control ENDPOINT_ID] [--consent-file PATH]";
     if args.next().as_deref() != Some("--state-root") {
         return Err(usage.into());
     }
@@ -58,6 +59,7 @@ fn args() -> Result<Args> {
         lan: None,
         allow: Vec::new(),
         owner_control: None,
+        consent: None,
     };
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(usage)?;
@@ -69,6 +71,7 @@ fn args() -> Result<Args> {
             "--owner-control" => {
                 parsed.owner_control = Some(value.parse().map_err(|_| "owner_control_invalid")?)
             }
+            "--consent-file" => parsed.consent = Some(operator_consent(&value)?),
             _ => return Err(usage.into()),
         }
     }
@@ -77,12 +80,46 @@ fn args() -> Result<Args> {
     }
     Ok(parsed)
 }
+/// Read the member operator's consent decision: `{device_memory_bytes,
+/// policy, consent}` (the same body the local operator's `consent` takes).
+fn operator_consent(path: &str) -> Result<Value> {
+    let limit =
+        api::preferences::private_state::private_json_limit().map_err(|e| e.0.to_owned())?;
+    let text = std::fs::read(path).map_err(|_| "consent_file_unreadable")?;
+    if text.len() as u64 > limit {
+        return Err("consent_file_invalid".into());
+    }
+    let body: Value = serde_json::from_slice(&text).map_err(|_| "consent_file_invalid")?;
+    if !body["policy"].is_object() || !body["consent"].is_object() {
+        return Err("consent_file_invalid".into());
+    }
+    Ok(body)
+}
+/// Grant and bind standing consent from a member-side decision (local stdin
+/// operator or `--consent-file`) to the swarm this member joined.
+fn grant_consent(root: &std::path::Path, membership: &Membership, body: &Value) -> Result<Value> {
+    let held = membership.session.lock().map_err(|_| "session_poisoned")?;
+    let session = held.as_ref().ok_or("not_joined")?;
+    resource_policy::write(root, &body["policy"]).map_err(|e| e.code.to_owned())?;
+    standing_consent::grant(
+        root,
+        &body["consent"],
+        &body["policy"],
+        app_host::now(),
+        body["device_memory_bytes"].as_u64(),
+    )
+    .map_err(|e| e.0.to_owned())?;
+    let binding = session.binding().ok_or("not_joined")?;
+    standing_consent::bind(root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).map_err(|e| e.0.to_owned())?;
+    Ok(json!({"consent":"granted"}))
+}
 fn run() -> Result<()> {
     let Args {
         root,
         lan,
         allow,
         owner_control,
+        consent: operator_decision,
     } = args()?;
     let policy = match lan {
         Some(_) => Some(LanPolicy::with_explicit(allow).map_err(|_| "lan_allow_invalid")?),
@@ -324,6 +361,11 @@ fn run() -> Result<()> {
                     &signer,
                     options,
                 )?);
+                // The operator's `--consent-file` decision binds to the swarm
+                // this member just joined (member-side, before any offer).
+                if let Some(body) = &operator_decision {
+                    grant_consent(&root, session.as_ref().ok_or("session_missing")?, body)?;
+                }
                 let held = session
                     .as_ref()
                     .ok_or("session_missing")?
@@ -343,27 +385,18 @@ fn run() -> Result<()> {
                 member.resume(&signer)?;
                 member.current(&signer).map_err(|e| e.0.to_owned())
             }
-            "consent" => {
-                let held = session
-                    .as_ref()
-                    .ok_or("not_joined")?
-                    .session
-                    .lock()
-                    .map_err(|_| "session_poisoned")?;
-                let session = held.as_ref().ok_or("not_joined")?;
-                resource_policy::write(&root, &request["policy"]).map_err(|e| e.code.to_owned())?;
-                standing_consent::grant(
-                    &root,
-                    &request["consent"],
-                    &request["policy"],
-                    app_host::now(),
-                    request["device_memory_bytes"].as_u64(),
-                )
-                .map_err(|e| e.0.to_owned())?;
-                let binding = session.binding().ok_or("not_joined")?;
-                standing_consent::bind(&root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).map_err(|e| e.0.to_owned())?;
-                Ok(json!({"consent":"granted"}))
+            // C1: consent stays member-side. Only this member's own operator
+            // (private stdin) writes it; the pinned owner may only request it.
+            "consent" if operation.origin == control::Origin::Remote => {
+                Err("member_consent_member_side".into())
             }
+            "consent" => grant_consent(&root, session.as_ref().ok_or("not_joined")?, request),
+            // The member's own standing consent and resource policy, for the
+            // owner to check before any offer (signed on the remote channel).
+            "consent_status" => Ok(json!({
+                "consent": standing_consent::load(&root).map_err(|e| e.0.to_owned())?,
+                "policy": resource_policy::read(&root).map_err(|e| e.code.to_owned())?,
+                "route_ready": false})),
             "receive" => {
                 operation.check()?;
                 let remaining = operation

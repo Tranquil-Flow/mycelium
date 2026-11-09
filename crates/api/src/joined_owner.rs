@@ -24,6 +24,7 @@ use std::{
 };
 
 pub mod codec;
+pub mod consent;
 pub mod epoch;
 
 fn fail(code: &'static str) -> PublicError {
