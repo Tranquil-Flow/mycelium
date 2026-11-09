@@ -279,7 +279,7 @@ impl Host {
             if !demo.active() {
                 return Err(OwnerError("owner_run_not_active"));
             }
-            if let Some(code) = resource_check(&core) {
+            if let Some(code) = exchange_resource_check(&core) {
                 return Err(OwnerError(code));
             }
             let a = seed.exchange.announcement(Some(node)).to_value();

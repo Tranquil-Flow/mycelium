@@ -129,6 +129,8 @@ struct Core {
     /// `DemoApp.resource_observation`: the last observation `_resource_check` made.
     resource_observation: Value,
     observer: Arc<dyn Observer>,
+    /// The verdict a managed-control exchange last probed, and when (see [`exchange_resource_check`]).
+    exchange_resource: Option<(std::time::Instant, Option<&'static str>)>,
     /// `--offline` / `MYCELIUM_OFFLINE`: Hugging Face is never contacted.
     offline: bool,
     revision: u64,
@@ -2509,6 +2511,10 @@ fn resource_check(core: &Shared) -> Option<&'static str> {
     }
     resources::policy_violation(&policy, &observation)
 }
+/// The resource gate the owner's own target checks on every managed-control exchange.
+fn exchange_resource_check(core: &Shared) -> Option<&'static str> {
+    resource_check(core)
+}
 /// `DemoApp._policy_loop` (app.py:1007-1030), the acquisition half: a finished attempt clears the active flag;
 /// a lost membership or a policy violation cancels the real worker, not only the display.
 fn acquisition_policy_tick(core: &Shared) {
@@ -2603,6 +2609,7 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
         acquisition_policy_error: None,
         resource_observation: Observation::unknown().to_value(),
         observer: resource_observer(),
+        exchange_resource: None,
         offline: offline_requested(),
         revision: 0,
         pending: PendingWindows::default(),
