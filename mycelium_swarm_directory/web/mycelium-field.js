@@ -2505,13 +2505,18 @@ export function createField({ stage, state, reduce }) {
       owner = null;
     const legs = marginSchedules.flatMap((s) => s.legs);
     const ch = new MessageChannel();
+    let kb = 0;
     ch.port1.onmessage = () => {
       if (disposed) return;
       const t0 = performance.now();
       while (performance.now() - t0 < 6) {
         if (!gen) {
           if (i >= jobs.length) {
-            for (const k of field.marginKnots) bloomFor(k);
+            // r11.3: the margin blooms in 6 ms slices too (all at once was
+            // one 70 ms task at 1920 DPR2, inside the intro on a fast host).
+            const knots = field.marginKnots;
+            while (kb < knots.length && performance.now() - t0 < 6) bloomFor(knots[kb++]);
+            if (kb < knots.length) ch.port2.postMessage(0);
             return;
           }
           owner = i < legs.length ? legs[i] : null;

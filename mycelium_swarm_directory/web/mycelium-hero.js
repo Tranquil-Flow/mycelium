@@ -1672,7 +1672,8 @@ export function createHero(canvas, { stage, state, reduce }) {
     // r11.2b: a running cross-fade is never cut short. The dip glow started
     // ~0.7 s into the re-bake's fade and finished it in one blit (+6.7k px in
     // 100 ms at 6 s); the new fade now starts from the blend on screen.
-    const prev = growth.xfade,
+    const t0 = performance.now(),
+      prev = growth.xfade,
       old = snapshot(),
       nx = neu.getContext("2d");
     if (prev) {
@@ -1682,6 +1683,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     nx.setTransform(sx.getTransform());
     growth.xfade = { old, neu, ox: old.getContext("2d"), nx, t0: performance.now() };
     stepXfade();
+    (scene.timings.xfadeStarts ||= []).push(+(performance.now() - t0).toFixed(1)); // r11.3: was 23-53 ms at 1920 DPR2 (GPU)
   }
   function stepXfade(now = performance.now()) {
     const x = growth.xfade;
@@ -2097,6 +2099,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       let r;
       do r = gen.next();
       while (!r.done && performance.now() - t0 < 4);
+      scene.timings.maxDipSlice = Math.max(scene.timings.maxDipSlice || 0, performance.now() - t0);
       if (r.done) {
         dips.done = true;
         scene.timings.dipsDone = performance.now() - begun;
