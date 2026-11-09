@@ -689,6 +689,10 @@ pub mod resource_policy {
 /// Mac records, its binding to the accepted membership, and its withdrawal.
 pub mod standing_consent {
     use super::*;
+    /// The automatic acceptor of owner work offers under this grant (`StandingAcceptor`).
+    pub use crate::standing_acceptor::{
+        AcceptFailure, StandingAcceptor, WorkAcceptance, check_work_preview, standing_limits,
+    };
     use sha2::{Digest, Sha256};
     pub const FILE: &str = "standing-consent.json";
     pub const PROTOCOL: &str = "mycelium.a13_standing_consent.v1";

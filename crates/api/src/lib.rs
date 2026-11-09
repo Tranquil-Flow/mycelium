@@ -61,6 +61,7 @@ pub mod serving_source;
 pub mod signed_requests;
 pub mod slice_fetch;
 pub mod sse;
+pub mod standing_acceptor;
 pub mod status;
 pub mod swarm;
 pub mod target_pump;

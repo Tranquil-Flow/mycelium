@@ -1,0 +1,1636 @@
+{
+ "binding": {
+  "node_id": "remote-mac-b18",
+  "seed_key_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "swarm_id": "swarm-b18"
+ },
+ "grant": {
+  "acknowledged": true,
+  "caps": {
+   "max_commands": 1000,
+   "max_memory_bytes": 4000000000,
+   "max_wall_seconds": 600,
+   "storage_bytes": 4000000000
+  },
+  "disclosure_digest": "sha256:f22a00621bc11a4379ad40a508974f7f8325b3623a30ae2b2e674bd945915e19"
+ },
+ "policy": {
+  "background": false,
+  "diagnostics": false,
+  "network": "unmetered_only",
+  "peer_visibility": true,
+  "power": "ac_only",
+  "storage_bytes": 4000000000,
+  "thermal": "stop_on_serious"
+ },
+ "scenarios": [
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [],
+     "last": null,
+     "result": null
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-1"
+      ],
+      [
+       "preview",
+       "work-1",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-1",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": null,
+      "state": "accepted"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": null
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-2"
+      ],
+      [
+       "preview",
+       "work-2",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 8000,
+        "max_rss_bytes": 900000000,
+        "max_wall_seconds": 300
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 8000,
+        "max_rss_bytes": 900000000,
+        "max_wall_seconds": 300
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-2",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": {
+      "offer_id": "work-2",
+      "reason": null,
+      "state": "accepted"
+     }
+    }
+   ],
+   "name": "accepts_each_offer_once_within_the_caps",
+   "ops": [
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 8000,
+      "max_rss_bytes": 900000000,
+      "max_wall_seconds": 300
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-2",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": null,
+   "log": [
+    {
+     "calls": [],
+     "last": null,
+     "result": null
+    }
+   ],
+   "name": "no_grant_means_no_action",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "unbound",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_unbound",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_unbound",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_unbound",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_unbound",
+      "state": "refused"
+     }
+    }
+   ],
+   "name": "unbound_and_withdrawn_wait",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "withdrawn",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_withdrawn",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_withdrawn",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_withdrawn",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_withdrawn",
+      "state": "refused"
+     }
+    }
+   ],
+   "name": "withdrawn_waits",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "membership_required",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "membership_required",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "membership_required",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "membership_required",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_owner_mismatch",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_owner_mismatch",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_consent_owner_mismatch",
+      "state": "refused"
+     },
+     "result": null
+    }
+   ],
+   "name": "membership_refusals",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "binding",
+     "op": "set",
+     "value": null
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "binding",
+     "op": "set",
+     "value": {
+      "node_id": "remote-mac-b18",
+      "seed_key_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "swarm_id": "other"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     },
+     "result": null
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-2",
+      "reason": "standing_offer_exceeds_caps",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-2",
+      "reason": "standing_offer_exceeds_caps",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-3",
+      "reason": "standing_offer_exceeds_caps",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-3",
+      "reason": "standing_offer_exceeds_caps",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-4",
+      "reason": "offer_expired",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-4",
+      "reason": "offer_expired",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-4",
+      "reason": "offer_expired",
+      "state": "refused"
+     },
+     "result": null
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-5"
+      ],
+      [
+       "preview",
+       "work-5",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-5",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": {
+      "offer_id": "work-5",
+      "reason": null,
+      "state": "accepted"
+     }
+    }
+   ],
+   "name": "offer_refusals",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-other"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 4000000001,
+      "expires_at": 2000.0,
+      "offer_id": "work-2",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": true,
+      "expires_at": 2000.0,
+      "offer_id": "work-3",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 1000.0,
+      "offer_id": "work-4",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": null,
+      "offer_id": "work-5",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "resource_power_policy_violation",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "resource_power_policy_violation",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "resource_power_policy_violation",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "resource_power_policy_violation",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-1"
+      ],
+      [
+       "preview",
+       "work-1",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-1",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": null,
+      "state": "accepted"
+     }
+    }
+   ],
+   "name": "resource_refusals_are_retried",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "violation",
+     "op": "set",
+     "value": "resource_power_policy_violation"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "violation",
+     "op": "set",
+     "value": null
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "member_memory_cap_below_share",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "member_memory_cap_below_share",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "member_memory_cap_below_share",
+      "state": "refused"
+     },
+     "result": null
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-2",
+      "reason": "member_storage_cap_below_share",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-2",
+      "reason": "member_storage_cap_below_share",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-3",
+      "reason": "member_wall_cap_below_share",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-3",
+      "reason": "member_wall_cap_below_share",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-4",
+      "reason": "member_wall_limit_invalid",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-4",
+      "reason": "member_wall_limit_invalid",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-5",
+      "reason": "member_resources_invalid",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-5",
+      "reason": "member_resources_invalid",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-6"
+      ],
+      [
+       "preview",
+       "work-6",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 1,
+        "max_rss_bytes": 1,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 1,
+        "max_rss_bytes": 1,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-6",
+      "reason": null,
+      "state": "accepted"
+     },
+     "result": {
+      "offer_id": "work-6",
+      "reason": null,
+      "state": "accepted"
+     }
+    }
+   ],
+   "name": "share_limit_refusals",
+   "ops": [
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 8000,
+      "max_rss_bytes": 4000000001,
+      "max_wall_seconds": 300
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 4000000001,
+      "max_rss_bytes": 900000000,
+      "max_wall_seconds": 300
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-2",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 8000,
+      "max_rss_bytes": 900000000,
+      "max_wall_seconds": 601
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-3",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 8000,
+      "max_rss_bytes": 900000000,
+      "max_wall_seconds": 10
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-4",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 8000,
+      "max_rss_bytes": 0,
+      "max_wall_seconds": 300
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-5",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "required",
+     "op": "set",
+     "value": {
+      "max_disk_bytes": 1,
+      "max_rss_bytes": 1
+     }
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-6",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-1"
+      ],
+      [
+       "preview",
+       "work-1",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "standing_offer_not_for_this_member",
+      "state": "refused"
+     },
+     "result": null
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-2"
+      ],
+      [
+       "preview",
+       "work-2",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-2",
+      "reason": "standing_preview_exceeds_caps",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-2",
+      "reason": "standing_preview_exceeds_caps",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-3"
+      ],
+      [
+       "preview",
+       "work-3",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-3",
+      "reason": "standing_preview_policy_changed",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-3",
+      "reason": "standing_preview_policy_changed",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-4"
+      ],
+      [
+       "preview",
+       "work-4",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-4",
+      "reason": "standing_preview_invalid",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-4",
+      "reason": "standing_preview_invalid",
+      "state": "refused"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-5",
+      "reason": "resource_thermal_policy_violation",
+      "state": "refused"
+     },
+     "result": {
+      "offer_id": "work-5",
+      "reason": "resource_thermal_policy_violation",
+      "state": "refused"
+     }
+    }
+   ],
+   "name": "preview_refusals",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview",
+     "op": "set",
+     "value": {
+      "node_id": "remote-mac-other"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-2",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview",
+     "op": "set",
+     "value": {
+      "limits": {
+       "max_commands": 1001
+      }
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-3",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview",
+     "op": "set",
+     "value": {
+      "resource_policy": {
+       "background": false,
+       "diagnostics": false,
+       "network": "unmetered_only",
+       "peer_visibility": true,
+       "power": "always",
+       "storage_bytes": 4000000000,
+       "thermal": "stop_on_serious"
+      }
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-4",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview",
+     "op": "set",
+     "value": {
+      "route_ready": true
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-5",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview",
+     "op": "set",
+     "value": {}
+    },
+    {
+     "key": "violation",
+     "op": "set",
+     "value": "resource_thermal_policy_violation"
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  },
+  {
+   "grant": "granted",
+   "log": [
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-1"
+      ],
+      [
+       "preview",
+       "work-1",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "node_process_start_failed_launcher_ready_timeout",
+      "state": "failed"
+     },
+     "result": {
+      "offer_id": "work-1",
+      "reason": "node_process_start_failed_launcher_ready_timeout",
+      "state": "failed"
+     }
+    },
+    {
+     "calls": [],
+     "last": {
+      "offer_id": "work-1",
+      "reason": "node_process_start_failed_launcher_ready_timeout",
+      "state": "failed"
+     },
+     "result": null
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-2"
+      ],
+      [
+       "preview",
+       "work-2",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-2",
+      "reason": "standing_accept_failed",
+      "state": "failed"
+     },
+     "result": {
+      "offer_id": "work-2",
+      "reason": "standing_accept_failed",
+      "state": "failed"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-3"
+      ],
+      [
+       "preview",
+       "work-3",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ],
+      [
+       "accept",
+       "remote-mac-b18",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-3",
+      "reason": "standing_accept_failed",
+      "state": "failed"
+     },
+     "result": {
+      "offer_id": "work-3",
+      "reason": "standing_accept_failed",
+      "state": "failed"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-4"
+      ],
+      [
+       "preview",
+       "work-4",
+       {
+        "max_commands": 1000,
+        "max_disk_bytes": 4000000000,
+        "max_rss_bytes": 4000000000,
+        "max_wall_seconds": 600
+       },
+       {
+        "background": false,
+        "diagnostics": false,
+        "network": "unmetered_only",
+        "peer_visibility": true,
+        "power": "ac_only",
+        "storage_bytes": 4000000000,
+        "thermal": "stop_on_serious"
+       }
+      ]
+     ],
+     "last": {
+      "offer_id": "work-4",
+      "reason": "stage_digest_mismatch",
+      "state": "failed"
+     },
+     "result": {
+      "offer_id": "work-4",
+      "reason": "stage_digest_mismatch",
+      "state": "failed"
+     }
+    },
+    {
+     "calls": [
+      [
+       "report",
+       "pre_run",
+       "work-5"
+      ]
+     ],
+     "last": {
+      "offer_id": "work-5",
+      "reason": "member_capability_report_required",
+      "state": "failed"
+     },
+     "result": {
+      "offer_id": "work-5",
+      "reason": "member_capability_report_required",
+      "state": "failed"
+     }
+    }
+   ],
+   "name": "collaborator_failures",
+   "ops": [
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-1",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "accept_raise",
+     "op": "set",
+     "value": {
+      "code": "node_process_start_failed",
+      "public": "node_process_start_failed_launcher_ready_timeout"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-2",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "accept_raise",
+     "op": "set",
+     "value": {
+      "code": "Not A Code"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-3",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "accept_raise",
+     "op": "set",
+     "value": {
+      "text": "Boom"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-4",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "accept_raise",
+     "op": "set",
+     "value": null
+    },
+    {
+     "key": "preview_raise",
+     "op": "set",
+     "value": {
+      "code": "stage_digest_mismatch"
+     }
+    },
+    {
+     "op": "tick"
+    },
+    {
+     "key": "offer",
+     "op": "set",
+     "value": {
+      "archive_bytes": 1000000,
+      "expires_at": 2000.0,
+      "offer_id": "work-5",
+      "run_id": "run-b18",
+      "target_node_id": "remote-mac-b18"
+     }
+    },
+    {
+     "key": "preview_raise",
+     "op": "set",
+     "value": null
+    },
+    {
+     "key": "report_raise",
+     "op": "set",
+     "value": {
+      "code": "member_capability_report_required"
+     }
+    },
+    {
+     "op": "tick"
+    }
+   ]
+  }
+ ],
+ "source": "standing_consent.py @ f4e366e9 (executed, python3.13)"
+}
