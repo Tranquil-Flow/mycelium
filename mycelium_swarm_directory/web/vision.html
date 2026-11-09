@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta name="description" content="AI that belongs to the people who use it. People pool the devices they already own into a shared network, a swarm, that can run AI models together, even models too big for any one device."><title>Mycelium · Our vision</title><link rel="stylesheet" href="/swarms/site.css"><link rel="stylesheet" href="/swarms/design.css"><link rel="stylesheet" href="/swarms/vision.css"><script src="/swarms/theme.js"></script><script src="/swarms/vision.js"></script><script type="module" src="/swarms/design.js"></script></head>
+<body class="vision-page"><canvas id="page-mycelium" class="page-mycelium" aria-hidden="true"></canvas><a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap"><a class="brand" href="/">✳ Mycelium</a><span class="spacer"></span><div class="glow-switch" role="group" aria-label="Mycelium glow"><button type="button" data-glow-choice="green" aria-pressed="true">Green</button><button type="button" data-glow-choice="blue" aria-pressed="false">Blue</button></div><nav class="row" aria-label="Project"><span class="nav-links"><a href="/vision" aria-current="page">Vision</a><a href="https://github.com/Tranquil-Flow/mycelium" rel="noopener">Source code on GitHub</a></span><a class="btn sec" href="/swarms/">Browse swarms</a></nav></div></header>
+<main id="main" class="wrap">
+<section class="sect vision-head" aria-labelledby="vision-title"><p class="eyebrow">Our vision</p><h1 id="vision-title">AI that belongs to the people who use it</h1>
+<div class="mode-switch" id="mode-switch" role="tablist" aria-label="Level of detail"><button type="button" role="tab" id="tab-simple" data-mode="simple" aria-controls="panel-simple" aria-selected="true">Simple</button><button type="button" role="tab" id="tab-technical" data-mode="technical" aria-controls="panel-technical" aria-selected="false" tabindex="-1">Technical</button></div></section>
+
+<div class="vision-panel" id="panel-simple" role="tabpanel" aria-labelledby="tab-simple" data-panel="simple">
+<h2 class="panel-title">Simple</h2>
+<section class="sect" aria-labelledby="s-short"><h2 id="s-short">The short version</h2><p class="vision-lead">Today, almost every time you use AI, your words travel to a datacentre owned by a handful of companies. They decide the price, the rules and who gets access, and they can see what you send.</p><p>Mycelium is a different way. People pool the devices they already own (laptops, desktops, home servers, and one day phones) into a shared network, a <strong>swarm</strong>, that can run AI models together, even models too big for any one device.</p></section>
+<section class="sect" aria-labelledby="s-towards"><h2 id="s-towards">What we're building towards</h2><div class="goal-grid aim-grid">
+<article data-aim="yours"><h3>Yours to run.</h3><p>Your group runs its own swarm, on its own devices, with its own rules. Nobody can switch it off for you.</p></article>
+<article data-aim="no-one-in-charge"><h3>No one in charge.</h3><p>We're building towards swarms where no one person runs things: any member can keep it going if others leave.</p><p class="goal-today"><strong>Today,</strong> the person who starts a swarm coordinates it.</p></article>
+<article data-aim="fair"><h3>Fair by design.</h3><p>As swarms connect, people who lend their devices get paid, and part of every payment goes to a shared fund that gives everyone basic access to AI, starting with those who can least afford it.</p></article>
+<article data-aim="trust"><h3>Trust you can check.</h3><p>We're building towards answers you can verify came from the model you asked for, and prompts that even the devices doing the work can't read.</p><p class="goal-today"><strong>Today,</strong> the devices in your swarm can see what they process, so only share a swarm with people you trust.</p></article>
+</div></section>
+<section class="sect" aria-labelledby="s-where"><h2 id="s-where">Where we are</h2><div class="table-card"><table class="t vision-table" data-table="stages"><thead><tr><th scope="col">Stage</th><th scope="col">What it means</th><th scope="col">Today</th></tr></thead><tbody>
+<tr><td data-label="Stage">1. Trusted swarms</td><td data-label="What it means">Friends, households, labs and co-ops pool their own devices</td><td data-label="Today"><span class="goal-today"><strong>Working now</strong> as an early preview on Apple silicon Macs</span></td></tr>
+<tr><td data-label="Stage">2. Connected communities</td><td data-label="What it means">Swarms link up and share capacity across groups, with fair payment and checks that the right model answered</td><td data-label="Today"><span class="goal-today">Designed; first model-checking tools in testing</span></td></tr>
+<tr><td data-label="Stage">3. A shared commons</td><td data-label="What it means">A common fund guarantees everyone baseline access to AI</td><td data-label="Today"><span class="goal-today">Designed</span></td></tr>
+<tr><td data-label="Stage">4. Proof instead of trust</td><td data-label="What it means">Answers that are mathematically verified and private, even from the devices running them</td><td data-label="Today"><span class="goal-today">Research</span></td></tr>
+</tbody></table></div></section>
+<section class="sect" aria-labelledby="s-bigger"><h2 id="s-bigger">Part of something bigger</h2><p>Mycelium is the computing layer of <strong>CCAI (Collective Commons AI)</strong>, a project organised as a cooperative. We take no venture capital, so no investor can buy control. The code is open source.</p>
+<div class="row vision-cta"><a class="btn" href="/swarms/#contributing">Download Mycelium</a><a class="btn sec" href="#panel-technical" data-mode-link="technical">Read the technical version →</a></div></section>
+</div>
+
+<div class="vision-panel" id="panel-technical" role="tabpanel" aria-labelledby="tab-technical" data-panel="technical">
+<h2 class="panel-title">Technical</h2>
+<section class="sect" aria-labelledby="t-problem"><h2 id="t-problem">The problem, precisely</h2><p>Inference is concentrated in a few providers. That creates dependence (access and model behaviour set by others), cost (prices set for profit, not cost) and exposure (prompts and documents handed to a remote operator, with no way to check which model answered or who saw it). Concentration is also a systemic risk: one decision, takeover or outage affects everyone.</p></section>
+<section class="sect" aria-labelledby="t-today"><h2 id="t-today">What Mycelium does today</h2><ul class="vision-list">
+<li><strong>Pipeline-parallel inference across devices.</strong> A model's layers are split into stages; each device loads its slice and the devices stream activations to one another to produce one answer.</li>
+<li><strong>Swarms are private groups.</strong> A swarm is created by one device and joined by invitation with explicit consent limits (time and compute) that roll over automatically.</li>
+<li><strong>Recovery.</strong> If a device leaves mid-answer, a standby device can continue it with identical output.</li>
+<li><strong>Signed, opt-in listing.</strong> A swarm can choose to appear in the public directory on mycelium.now with a signed listing that it withdraws when it stops.</li>
+<li><strong>Transport.</strong> Encrypted peer-to-peer QUIC connections (iroh), across the internet via relays or directly on a local network.</li>
+<li><strong>Today's support:</strong> an early macOS preview (v0.1.4) on Apple silicon Macs, with Qwen models. v0.2, a full Rust rewrite with a new app, is in progress.</li>
+</ul></section>
+<section class="sect" aria-labelledby="t-limits"><h2 id="t-limits">Honest limits today</h2><ul class="vision-list limits">
+<li class="goal-today"><strong>Not private from your swarm.</strong> Devices doing the work can see what they process. Use swarms with people you trust.</li>
+<li class="goal-today"><strong>Not verified.</strong> You can't yet prove which model produced an answer.</li>
+<li class="goal-today"><strong>One coordinator per swarm.</strong> The device that starts a swarm admits members and routes requests.</li>
+<li class="goal-today"><strong>Not automatically cheaper or greener.</strong> Distribution reduces dependence on central providers; it doesn't by itself make inference more efficient.</li>
+</ul></section>
+<section class="sect" aria-labelledby="t-going"><h2 id="t-going">Where the architecture is going</h2><ul class="vision-list">
+<li><strong>No special owner.</strong> Every device carries its own signed identity, so any member can coordinate and the swarm keeps running when any one device leaves, including the one that started it. Coordination becomes a temporary role, not a position.</li>
+<li><strong>Smarter, more resilient swarms.</strong> Work flows to whichever devices have capacity, and members can change what they contribute without starting over.</li>
+<li><strong>More devices, bigger models.</strong> Beyond Macs to Windows, Linux and phones, and support for new open models without hand-written code for each one.</li>
+<li><strong>More private by design.</strong> Keep as much of each request as possible on the device that asked.</li>
+</ul></section>
+<section class="sect" aria-labelledby="t-stack"><h2 id="t-stack">The wider stack (CCAI)</h2><div class="table-card"><table class="t vision-table" data-table="layers"><thead><tr><th scope="col">Layer</th><th scope="col">Role</th><th scope="col">Status</th></tr></thead><tbody>
+<tr><td data-label="Layer"><strong>Mycelium</strong> (compute)</td><td data-label="Role">Splits models across devices and runs them together</td><td data-label="Status"><span class="goal-today">Built: early preview</span></td></tr>
+<tr><td data-label="Layer"><strong>Mycorrhiza</strong> (coordination)</td><td data-label="Role">Connects groups across trust boundaries: payment at a stable price, verification, privacy-preserving proof of personhood, the shared Commons fund</td><td data-label="Status"><span class="goal-today">Designed</span></td></tr>
+<tr><td data-label="Layer"><strong>Spora</strong> (applications)</td><td data-label="Role">Chat, agents, collaborative tools and an OpenAI-compatible API</td><td data-label="Status"><span class="goal-today">Planned</span></td></tr>
+</tbody></table></div><ul class="vision-list">
+<li><strong>Two ways to run.</strong> A trusted group can run Mycelium on its own, with no blockchain, identity or payment layer. Crossing trust boundaries (strangers sharing compute) is what the coordination layer is for.</li>
+<li><strong>The AI path stays off-chain.</strong> Any blockchain coordinates identity, receipts and settlement only; it never sees prompts.</li>
+<li><strong>Verification, in stages.</strong> First, statistical model-attribution checks (early detectors: about 95% correct on unseen topics), deposits and spot checks; trusted hardware (TEEs) where available; the long-term goal is proof-based verification. Proving even a small model currently takes about 30 hours on consumer hardware, so this is research.</li>
+</ul></section>
+<section class="sect" aria-labelledby="t-principles"><h2 id="t-principles">Principles</h2><ul class="principles">
+<li>Decide locally</li>
+<li>Voluntary association, with the right to leave or fork and take your contribution with you</li>
+<li>Federation over hierarchy</li>
+<li>No permanent rulers: roles rotate and can be recalled</li>
+<li>Fairness built into the economics</li>
+<li>Open source (AGPL-3.0) and open-weight models</li>
+<li>No venture capital: capital can't buy control</li>
+<li>Honest about what's built, designed and still research</li>
+</ul>
+<div class="row vision-cta"><a class="btn sec" href="https://github.com/Tranquil-Flow/mycelium" rel="noopener">Source code on GitHub</a><a class="btn" href="/swarms/#contributing">Download Mycelium</a></div></section>
+</div>
+</main><footer class="foot wrap"><p><a href="https://github.com/Tranquil-Flow/mycelium" rel="noopener">Source code on GitHub</a></p><p>Mycelium · AGPL-3.0-only · No accounts, no analytics by this site.</p><a href="/swarms/#notice">Privacy &amp; trust</a></footer></body></html>

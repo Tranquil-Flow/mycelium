@@ -64,7 +64,7 @@ def test_source_offer_in_every_html_response(directory, path):
         links = Links()
         links.feed(body)
         source_links = [link for link in links.links if link.get('href') == SOURCE]
-        assert len(source_links) == (2 if path == '/' else 1)
+        assert len(source_links) == {'/': 2, '/vision': 3}.get(path, 1)  # /vision: header, technical CTA, footer
         for link in source_links:
             assert 'noopener' in link.get('rel', '').split()
             assert 'target' not in link

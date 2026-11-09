@@ -151,6 +151,23 @@ h3 {
   flex-wrap: nowrap;
   font-size: 12px;
 }
+/* Desktop: the grouped header links lay out as direct nav items. */
+.top nav > .nav-links {
+  display: contents;
+}
+.top nav a[aria-current="page"] {
+  color: var(--ink);
+  text-decoration: none;
+}
+.closing-links {
+  gap: 22px;
+}
+.vision-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 550;
+}
 .btn,
 button {
   border-radius: 8px;
@@ -446,22 +463,27 @@ button {
     min-width: 52px;
     padding-inline: 8px;
   }
-  .apex .top .wrap {
+  :is(.apex, .vision-page) .top .wrap {
     position: relative;
   }
-  .apex .top nav {
+  :is(.apex, .vision-page) .top nav {
     display: contents;
   }
-  .apex .top nav > a:not(.btn) {
+  /* Vision + source links share the brand row, top right. */
+  :is(.apex, .vision-page) .top nav > .nav-links {
     position: absolute;
     right: 18px;
     top: 8px;
+    display: flex;
+    gap: 14px;
+  }
+  :is(.apex, .vision-page) .top .nav-links > a {
     display: flex;
     align-items: center;
     min-height: 44px;
     font-size: 11px;
   }
-  .apex .top nav > .btn {
+  :is(.apex, .vision-page) .top nav > .btn {
     order: 3;
     margin-left: auto;
   }

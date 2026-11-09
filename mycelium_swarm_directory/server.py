@@ -62,6 +62,9 @@ STAGING_ASSETS = {'/swarms/mycelium-hero-electric.js': ('mycelium-hero-electric.
                   '/swarms/mycelium-geometry-electric.js': ('mycelium-geometry-electric.js', 'text/javascript; charset=utf-8')}
 ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/apex.js': ('apex.js', 'text/javascript; charset=utf-8'),
+          '/vision': ('vision.html', 'text/html; charset=utf-8'),
+          '/swarms/vision.css': ('vision.css', 'text/css; charset=utf-8'),
+          '/swarms/vision.js': ('vision.js', 'text/javascript; charset=utf-8'),
           '/swarms/design.css': ('design.css', 'text/css; charset=utf-8'),
           '/swarms/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
           '/swarms/design.js': ('design.js', 'text/javascript; charset=utf-8'),
@@ -187,7 +190,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ASSETS:
             name, kind = ASSETS[path]
             raw = (WEB / name).read_bytes()
-            if self.server.staging_samples and name in ('apex.html', 'index.html'):
+            if self.server.staging_samples and name in ('apex.html', 'index.html', 'vision.html'):
                 raw = raw.replace(b'<header class="top">', STAGING_BANNER + b'<header class="top">', 1)
                 raw = raw.replace(GLOW_SWITCH_END, GLOW_SWITCH_END + STAGING_STYLE_SWITCH
                                   + (STAGING_INTRO_SWITCH if name == 'apex.html' else b''), 1)

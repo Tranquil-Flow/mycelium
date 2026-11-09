@@ -44,7 +44,7 @@ def test_apex_proxy_composes_exact_static_assets_and_keeps_prompt_routes_closed(
     proxy=PublicOriginProxyServer(('127.0.0.1',0),config)
     thread=threading.Thread(target=proxy.serve_forever,daemon=True);thread.start()
     try:
-        for path in ('/','/apex.js','/swarms/site.css'):
+        for path in ('/','/apex.js','/swarms/site.css','/vision','/swarms/vision.css','/swarms/vision.js'):
             c=http.client.HTTPConnection('127.0.0.1',proxy.server_port)
             c.request('GET',path,headers={'Cf-Connecting-Ip':'203.0.113.7'})
             response=c.getresponse();body=response.read()
@@ -52,7 +52,7 @@ def test_apex_proxy_composes_exact_static_assets_and_keeps_prompt_routes_closed(
             assert response.getheader('Set-Cookie') is None
             assert "script-src 'self'" in (response.getheader('Content-Security-Policy') or '')
             c.close()
-        for method,path in [('POST','/'),('POST','/apex.js'),('POST','/chat/api/send'),('POST','/api/v1/inference'),('GET','/apex.html'),('GET','/?tracking=x')]:
+        for method,path in [('POST','/'),('POST','/apex.js'),('POST','/chat/api/send'),('POST','/api/v1/inference'),('GET','/apex.html'),('GET','/?tracking=x'),('POST','/vision'),('GET','/vision.html'),('GET','/vision/'),('GET','/vision?mode=technical')]:
             c=http.client.HTTPConnection('127.0.0.1',proxy.server_port)
             c.request(method,path,body=b'{}' if method=='POST' else None,headers={'Cf-Connecting-Ip':'203.0.113.7','Content-Type':'application/json'})
             response=c.getresponse();response.read()
