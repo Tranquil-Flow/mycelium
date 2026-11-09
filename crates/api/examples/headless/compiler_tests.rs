@@ -441,6 +441,58 @@ fn compiler_cancellation_reaches_manifest_hash_and_artifact_revalidation() {
     assert!(artifact.root().join("stage-shards").exists());
 }
 
+/// REVIEW-laneB10 seam: the worker-binary pin at build start observes the
+/// compiler's Stop. The pinned "binary" is a real multi-chunk file and no native
+/// work runs: the request names Qwen3-0.6B over the small fixture source, so a
+/// build that gets past the pin refuses `native_model_unsupported` (the control).
+/// With Stop already signalled the pin refuses `compiler_stopped` instead of
+/// hashing the whole binary first. The env pins need a child process.
+#[test]
+fn a_stop_reaches_the_worker_binary_pin_at_build_start() {
+    let f = Fixture::new();
+    let binary = f.root.join("worker-binary");
+    let bytes: Vec<u8> = (0..8 * (1 << 20) + 17).map(|i| (i % 251) as u8).collect();
+    fs::write(&binary, &bytes).unwrap();
+    let sha = protocol::canonical::sha256_prefixed(&bytes)[7..].to_owned();
+    for stopped in [false, true] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "compiler::compiler_tests::worker_binary_pin_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("MYCELIUM_COMPILER_NATIVE_BINARY", &binary)
+            .env("MYCELIUM_COMPILER_NATIVE_SHA256", &sha)
+            .env("B10F_PIN_STOPPED", if stopped { "1" } else { "0" })
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&output.stdout).into_owned()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "stopped={stopped}: {text}");
+        assert!(text.contains("1 passed"), "stopped={stopped}: {text}");
+    }
+}
+#[test]
+#[ignore = "child of a_stop_reaches_the_worker_binary_pin_at_build_start (pinned env)"]
+fn worker_binary_pin_child() {
+    let mut f = Fixture::new();
+    f.request.model_id = "Qwen/Qwen3-0.6B".into();
+    let artifact = f.emit();
+    let signer = Identity::from_secret("b10f-pin-signer", &[91; 32]).unwrap();
+    let stopped = std::env::var("B10F_PIN_STOPPED").unwrap() == "1";
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(stopped));
+    let members = f.members.clone();
+    let refusal = api::native_compiler::build(&artifact, &signer, &|| Ok(members.clone()), cancel)
+        .unwrap_err();
+    let expected = if stopped {
+        "compiler_stopped"
+    } else {
+        "native_model_unsupported"
+    };
+    assert_eq!(refusal.0, expected, "stopped={stopped}");
+}
+
 #[test]
 fn stage_shard_artifact_reopens_real_bytes_and_rejects_tampering() {
     for mutation in ["payload", "document", "symlink", "source", "member"] {

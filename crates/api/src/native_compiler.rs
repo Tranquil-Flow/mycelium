@@ -103,13 +103,18 @@ pub(crate) struct Config {
 }
 impl Config {
     pub(crate) fn from_environment() -> Result<Option<Self>> {
+        Self::from_environment_until(&|| false)
+    }
+    /// [`Self::from_environment`] whose binary hash consults `stopped` once
+    /// per read; a Stop refuses `compiler_stopped` before the pin finishes.
+    pub(crate) fn from_environment_until(stopped: &dyn Fn() -> bool) -> Result<Option<Self>> {
         let Some(binary) = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY") else {
             return Ok(None);
         };
         let binary = PathBuf::from(binary);
         let expected = std::env::var("MYCELIUM_COMPILER_NATIVE_SHA256")
             .map_err(|_| Error("native_binary_pin_required"))?;
-        let pin = file_pin(&binary)?;
+        let pin = file_pin_until(&binary, stopped)?;
         if expected != pin.sha256 {
             return Err(Error("native_binary_changed"));
         }
@@ -341,7 +346,10 @@ pub fn build(
     if request.model_id != "Qwen/Qwen3-0.6B" {
         return Ok(None);
     }
-    let Some(config) = Config::from_environment()? else {
+    // Every parent-side whole-file scan below observes the compiler's Stop,
+    // starting with the worker-binary pin.
+    let stopped = || cancel.load(Ordering::SeqCst);
+    let Some(config) = Config::from_environment_until(&stopped)? else {
         return Ok(None);
     };
     let started = Instant::now();
@@ -380,8 +388,6 @@ pub fn build(
     } else {
         None
     };
-    // Every parent-side whole-file scan below observes the compiler's Stop.
-    let stopped = || cancel.load(Ordering::SeqCst);
     let source = artifact.source().source_root.join("model.safetensors");
     let source_pin = file_pin_until(&source, &stopped)?;
     if source_pin.sha256 != text(&oracle["identity"], "checkpoint_sha256")?
