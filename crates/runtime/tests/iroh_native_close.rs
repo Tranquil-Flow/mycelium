@@ -31,9 +31,31 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 // S23-class boundary: native child spawn, endpoint socket creation and the
 // immediate release probe are ordered; every network exchange stays parallel.
 include!("support/fork_lock.rs");
-fn spawn_native(command: &mut Command, root: &std::path::Path) -> NativeChild {
+// `spawn()` returns when std's exec-status pipe closes, but exec closes the
+// close-on-exec descriptors from the highest number down, so the child can still
+// hold lower inherited copies (an endpoint socket) after that (B20: modelled
+// deterministically with a 20k-descriptor block). The boundary therefore ends
+// only once the child runs its new image and creates `started`. That narrows
+// but does not close the window: the kernel can finish releasing an inherited
+// socket shortly after the child starts (B20, 50k-descriptor model under load).
+fn spawn_native(
+    command: &mut Command,
+    root: &std::path::Path,
+    started: &std::path::Path,
+) -> NativeChild {
     let _boundary = fixture_spawn_boundary();
-    NativeChild::spawn(command, root).unwrap()
+    let mut child = NativeChild::spawn(command.env("L9_CLOSE_STARTED", started), root).unwrap();
+    let end = Instant::now()
+        + Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis());
+    while !started.exists() {
+        assert!(
+            child.observe().is_ok_and(|residue| !residue.process_gone),
+            "fixture child ended before it started"
+        );
+        assert!(Instant::now() < end, "fixture child did not start");
+        std::thread::yield_now();
+    }
+    child
 }
 fn bind_host<'a>(runtime: &'a tokio::runtime::Runtime, clock: &Time) -> LoopbackHost<'a> {
     let _boundary = fixture_spawn_boundary();
@@ -48,6 +70,7 @@ fn assert_released(address: &iroh::EndpointAddr, what: &str) {
 struct Owned {
     supervisor: Supervisor<NativeChild>,
     root: PathBuf,
+    started: PathBuf,
 }
 impl Owned {
     fn new() -> Self {
@@ -56,10 +79,13 @@ impl Owned {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
+        // Beside the owned root, never in it: the root must be empty for the
+        // native adapter's own cleanup proof.
+        let started = root.with_extension("started");
         let mut cmd = Command::new(std::env::current_exe().unwrap());
         cmd.args(["--exact", "native_close_child_fixture"])
             .env("L9_CLOSE_FIXTURE", "park");
-        let child = spawn_native(&mut cmd, &root);
+        let child = spawn_native(&mut cmd, &root, &started);
         let ticket = Ticket {
             epoch: 1,
             run: 1,
@@ -69,6 +95,7 @@ impl Owned {
         Self {
             supervisor: Supervisor::new(ticket, child),
             root,
+            started,
         }
     }
 }
@@ -95,11 +122,15 @@ impl Drop for Owned {
         if self.root.exists() {
             std::fs::remove_dir_all(&self.root).unwrap();
         }
+        std::fs::remove_file(&self.started).unwrap();
     }
 }
 #[test]
 fn native_close_child_fixture() {
     if std::env::var_os("L9_CLOSE_FIXTURE").is_some() {
+        if let Some(started) = std::env::var_os("L9_CLOSE_STARTED") {
+            std::fs::File::create_new(started).unwrap();
+        }
         loop {
             std::thread::park();
         }
@@ -192,12 +223,20 @@ fn endpoint_release_is_ordered_against_concurrent_native_spawns() {
             let clock = Time(Instant::now());
             let host = bind_host(&rt, &clock);
             let address = host.address().unwrap();
+            // Spawns overlap the endpoint's whole life; the close and the
+            // immediate rebind are ordered against them. A spawn boundary now
+            // lasts until the child runs, so waiting for one between close and
+            // rebind would leave the freed ephemeral port open to other
+            // processes that long (B20: another test binary bound it).
+            let _boundary = fixture_spawn_boundary();
             drop(host);
             drop(rt);
-            assert_released(
-                &address,
-                "closed endpoint must release sockets under native spawn pressure",
-            );
+            for socket in address.ip_addrs() {
+                assert!(
+                    UdpSocket::bind(*socket).is_ok(),
+                    "closed endpoint must release sockets under native spawn pressure"
+                );
+            }
         }
     });
 }
