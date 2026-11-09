@@ -38,7 +38,31 @@ fn profile_dir() -> PathBuf {
 fn exe_dir() -> PathBuf {
     profile_dir().with_file_name("release")
 }
+/// The prebuilt release launcher named by the `headless-release` nextest setup script.
+const PREBUILT: &str = "MYCELIUM_HEADLESS_RELEASE";
+/// The release launcher, built once before any test uses it. Under nextest the `headless-release` setup
+/// script (`.config/nextest.toml`) builds it ONCE before any test of this binary starts and names it in
+/// [`PREBUILT`]; each test then only reads it, so no test pays the (cold: about a minute) release build
+/// against its own slow-timeout or waits behind another test's build on the target lock. Without that
+/// variable (plain `cargo test`, all tests in one process) the first test builds it, once per process.
 fn build() {
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| match std::env::var_os(PREBUILT) {
+        Some(path) => prebuilt(Path::new(&path)),
+        None => nested_build(),
+    });
+}
+/// A prebuilt launcher must be exactly the one this test would run (`exe_dir()`), never another tree's.
+fn prebuilt(path: &Path) {
+    let expected = exe_dir().join("examples/headless");
+    let (found, expected) = (fs::canonicalize(path), fs::canonicalize(&expected));
+    assert!(
+        matches!((&found, &expected), (Ok(f), Ok(e)) if f == e),
+        "{PREBUILT} {found:?} is not this test's release launcher {expected:?}"
+    );
+    eprintln!("leave-profile launcher prebuilt by the nextest setup script");
+}
+fn nested_build() {
     let measured = Instant::now();
     let target = exe_dir();
     let target = target.parent().expect("target");
