@@ -2833,10 +2833,18 @@ fn run() -> Result<(), String> {
     let budget = span(BudgetId::ModelSelection);
     let serve = {
         let (core, app) = (core.clone(), app.clone());
-        thread::spawn(move || {
+        thread::spawn(move || -> Result<(), String> {
             // Every connection thread is retained and joined before the listener thread ends,
             // so the quit answer is on the wire before the process exits.
             let mut connections: Vec<thread::JoinHandle<()>> = Vec::new();
+            // A listener that fails after a quit closed the core still ended by that quit.
+            let unless_quit = |code: String| {
+                if core.lock().map_or(true, |c| c.closed) {
+                    Ok(())
+                } else {
+                    Err(code)
+                }
+            };
             loop {
                 match listener.accept() {
                     Ok((stream, _)) => {
@@ -2860,16 +2868,17 @@ fn run() -> Result<(), String> {
                             for handle in connections {
                                 handle.join().unwrap_or(());
                             }
-                            return;
+                            return Ok(());
                         }
                         if let Err(error) =
                             listener_wait::wait(&listener, span(BudgetId::OwnerPoll))
                         {
-                            eprintln!("headless_listener_wait_failed: {:?}", error.kind());
-                            return;
+                            return unless_quit(format!("listener_wait_failed:{:?}", error.kind()));
                         }
                     }
-                    Err(_) => return,
+                    Err(error) => {
+                        return unless_quit(format!("listener_accept_failed:{:?}", error.kind()));
+                    }
                 }
             }
         })
@@ -2882,29 +2891,48 @@ fn run() -> Result<(), String> {
                "serving_role": "not_yet_serving", "host": "rust-headless"})
     );
     std::io::stdout().flush().map_err(|e| e.to_string())?;
-    serve
-        .join()
-        .map_err(|_| "serve_thread_panicked".to_owned())?;
+    // From here on every step of the host's cleanup runs, whatever failed before it: a panicked
+    // helper thread or a failed step is recorded, and the FIRST failure is what the exit reports
+    // (B15; a later cleanup error never masks the close's code).
+    let mut failed: Option<String> = None;
+    let mut keep = |step: Result<(), String>| {
+        if let Err(code) = step
+            && failed.is_none()
+        {
+            failed = Some(code);
+        }
+    };
+    // However the listener ended (a quit, a failed accept or wait, a panic), the core is closed
+    // now so the helper threads end too (B15f, REVIEW-laneB15 F2: a failure used to leave them
+    // running until a signal). A poisoned core is closed all the same.
+    let served = serve.join();
+    lock_even_poisoned(&core).0.closed = true;
+    match served {
+        Ok(served) => keep(served),
+        Err(_) => keep(Err("serve_thread_panicked".to_owned())),
+    }
     // `swarm_publish.close` once quit stopped the run: no further directory exchange starts, a
     // live listing becomes durable withdrawal debt, and one withdrawal attempt ends within the
     // close budget (`thread.join(5)`), including any wait for a tick inside an exchange. An
     // unreachable or slow directory is not a failure here: the next start retries the debt.
     // Only a storage failure fails the close (a listing state refused at startup fails every
-    // close). Its result is kept: the host's cleanup below always runs, and a close failure is
-    // returned only after it.
+    // close).
     let close_budget =
         span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453);
     let close_until = Instant::now() + close_budget;
-    let swarm_close = swarm_publisher.close(unix_seconds(), close_budget);
-    maintenance
-        .join()
-        .map_err(|_| "maintenance_thread_panicked".to_owned())?;
-    renewals
-        .join()
-        .map_err(|_| "renewal_thread_panicked".to_owned())?;
-    signals
-        .join()
-        .map_err(|_| "signal_thread_panicked".to_owned())?;
+    keep(
+        swarm_publisher
+            .close(unix_seconds(), close_budget)
+            .map(|_closed| ())
+            .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code)),
+    );
+    for (thread, panicked) in [
+        (maintenance, "maintenance_thread_panicked"),
+        (renewals, "renewal_thread_panicked"),
+        (signals, "signal_thread_panicked"),
+    ] {
+        keep(thread.join().map_err(|_| panicked.to_owned()));
+    }
     // The tick thread ends at its next loop check and is awaited until the close deadline
     // (`thread.join(5)` shares the close budget). It is joined only once its loop has ended, so
     // the join never waits on an exchange. One still inside a directory exchange at the
@@ -2913,28 +2941,78 @@ fn run() -> Result<(), String> {
     let ended =
         swarm_ticks_ended.recv_timeout(close_until.saturating_duration_since(Instant::now()));
     if matches!(ended, Err(mpsc::RecvTimeoutError::Disconnected)) {
-        swarm_ticks
-            .join()
-            .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
+        keep(
+            swarm_ticks
+                .join()
+                .map_err(|_| "swarm_publish_thread_panicked".to_owned()),
+        );
     }
     // Close: the acquisition is cancelled, joined and recorded `closed` (it stays closed across a restart);
     // transient control files go away.
-    let acquisition = core.lock().map_err(|_| "core_poisoned")?.acquisition.take();
+    // A poisoned core is reported, and what it holds is still closed (B15f, REVIEW-laneB15 F4).
+    let (acquisition, poisoned) = {
+        let (mut c, poisoned) = lock_even_poisoned(&core);
+        (c.acquisition.take(), poisoned)
+    };
+    if poisoned {
+        keep(Err("core_poisoned".to_owned()));
+    }
     if let Some(acquisition) = acquisition {
-        acquisition
-            .close()
-            .map_err(|e| format!("acquisition_stop_failed:{}", e.code()))?;
+        keep(
+            acquisition
+                .close()
+                .map_err(|e| format!("acquisition_stop_failed:{}", e.code())),
+        );
     }
     for name in [LAUNCH_FILE, CONTROL_FILE] {
         match fs::remove_file(root.join(name)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(format!("cleanup:{e}"));
+                keep(Err(format!("cleanup:{e}")));
             }
             _ => {}
         }
     }
-    swarm_close.map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
-    Ok(())
+    failed.map_or(Ok(()), Err)
+}
+/// `cell`'s guard even when a panicked holder poisoned it, and whether it was poisoned: quit
+/// cleanup still closes what the core holds (B15f, REVIEW-laneB15 F4) and reports the poison.
+fn lock_even_poisoned<T>(cell: &Mutex<T>) -> (std::sync::MutexGuard<'_, T>, bool) {
+    match cell.lock() {
+        Ok(guard) => (guard, false),
+        Err(poisoned) => (poisoned.into_inner(), true),
+    }
+}
+#[cfg(test)]
+mod quit_tests {
+    use super::lock_even_poisoned;
+    use std::sync::{Arc, Mutex};
+
+    /// B15f (REVIEW-laneB15 F4): a core poisoned by a panicked holder still yields what it
+    /// holds to the quit cleanup (here the acquisition slot), and the poison is reported.
+    #[test]
+    fn a_poisoned_core_still_gives_up_what_it_holds() {
+        let core = Arc::new(Mutex::new(Some("acquisition")));
+        let holder = core.clone();
+        let panicked = std::thread::spawn(move || {
+            let _held = holder.lock().unwrap();
+            panic!("a helper panicked while holding the core");
+        })
+        .join();
+        assert!(panicked.is_err() && core.is_poisoned());
+        let (taken, poisoned) = {
+            let (mut slot, poisoned) = lock_even_poisoned(&core);
+            (slot.take(), poisoned)
+        };
+        assert_eq!(
+            taken,
+            Some("acquisition"),
+            "the poisoned core kept its acquisition"
+        );
+        assert!(poisoned, "the poison was not reported");
+        let healthy = Mutex::new(Some(1));
+        let (slot, poisoned) = lock_even_poisoned(&healthy);
+        assert_eq!((*slot, poisoned), (Some(1), false));
+    }
 }
 fn request_launch(port: u16, credential: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))?;

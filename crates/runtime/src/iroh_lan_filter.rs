@@ -63,6 +63,19 @@
 //! source shrinks to `relearn_slots` (a re-learning after an IP change still
 //! finds room; one host takes one). Learning never skips a key check: every
 //! connection from a learned host is verified like any other.
+//!
+//! Stale learned hosts (B15, REVIEW-laneB14 F2). A learned host counts (own
+//! lane, shrunk waiting room) only while it holds a live authenticated
+//! connection, or for one `MembershipTtl` after its last one ended (or after it
+//! was learned, if none was pinned). That is the lease after which v0.1.4's
+//! coordinator stops counting an unrenewed member (`coordinator.py:180`): a
+//! host silent for that long is no evidence that its address is still the
+//! peer's (DHCP may have handed it on), so the address loses its own lane and
+//! every other source gets the whole B11 table back. A returning peer waits in
+//! that table under its B11 share once, as before B14, and is learned again
+//! by its next verified handshake. An unreadable budget expires at once. A
+//! recycle (B11) carries a host that is live at that moment as seen then
+//! (B15f): the recycle itself ends its connection.
 use crate::iroh_host::LanPolicy;
 use budgets::{BudgetId, Entries};
 use iroh::endpoint::transports::{
@@ -185,6 +198,14 @@ struct Inbound {
     /// room of every other source.
     lane: Option<IpAddr>,
 }
+/// A learned host (B14): the source of an admitted key's last verified
+/// handshake, and when it was last known live (B15).
+#[derive(Clone, Copy, Debug)]
+struct Learned {
+    source: SocketAddr,
+    /// Learned, or its last authenticated connection ended, at this instant.
+    seen: Instant,
+}
 /// Which provisional lanes exist right now (B14; a snapshot, see `lanes`).
 #[derive(Debug, Default)]
 struct Lanes {
@@ -232,8 +253,11 @@ pub(crate) struct Admission {
     keys: RwLock<Option<BTreeSet<iroh::EndpointId>>>,
     /// Learned hosts (B14): admitted key -> the source of its last verified
     /// handshake. At most one per admitted key. Lock order: `inbound` ->
-    /// `keys` -> `learned` (each optional).
-    learned: RwLock<HashMap<iroh::EndpointId, SocketAddr>>,
+    /// `pins` -> `keys` -> `learned` (each optional).
+    learned: RwLock<HashMap<iroh::EndpointId, Learned>>,
+    /// How long a learned host without a live authenticated connection still
+    /// counts (B15: `MembershipTtl`; zero when unreadable).
+    learned_ttl: Duration,
     /// Set once the host closes: pins stop releasing so the endpoint's own
     /// CONNECTION_CLOSE frames still reach admitted peers.
     closing: AtomicBool,
@@ -270,6 +294,10 @@ impl Admission {
             hosts: RwLock::new(hosts),
             keys: RwLock::new(None),
             learned: RwLock::new(HashMap::new()),
+            learned_ttl: BudgetId::MembershipTtl
+                .span(Entries::ZERO)
+                .map(|span| Duration::from_millis(span.millis()))
+                .unwrap_or(Duration::ZERO),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
@@ -285,31 +313,62 @@ impl Admission {
     /// bounds, signed peer hosts/keys and learned hosts of those keys (B14:
     /// the same socket and key, so what was verified still holds); no pins,
     /// history, receive-filter entries or counters (they described the closed
-    /// endpoint).
-    pub(crate) fn successor(&self) -> Result<Arc<Self>, Error> {
+    /// endpoint). A learned host with a live authenticated connection at `now`
+    /// is carried as seen at `now` (B15f, REVIEW-laneB15 F1): the recycle ends
+    /// that connection, and the closing endpoint's pins never mark it, so its
+    /// staleness counts from here; an idle host keeps its own instant. A
+    /// poisoned pin table marks nothing (fail narrow, as `lanes`).
+    pub(crate) fn successor(&self, now: Instant) -> Result<Arc<Self>, Error> {
         let next = Self::new(self.policy.clone(), self.capacity, self.remembered);
         let hosts = self.hosts.read().map_err(|_| Error::Unavailable)?.clone();
         let keys = self.keys.read().map_err(|_| Error::Unavailable)?.clone();
-        let learned = self.learned.read().map_err(|_| Error::Unavailable)?.clone();
+        let live: HashSet<IpAddr> = self
+            .pins
+            .read()
+            .map(|pins| pins.authenticated.keys().map(|a| a.ip()).collect())
+            .unwrap_or_default();
+        let mut learned = self.learned.read().map_err(|_| Error::Unavailable)?.clone();
+        for host in learned.values_mut() {
+            if live.contains(&host.source.ip()) && host.seen < now {
+                host.seen = now;
+            }
+        }
         *next.hosts.write().map_err(|_| Error::Unavailable)? = hosts;
         *next.keys.write().map_err(|_| Error::Unavailable)? = keys;
         *next.learned.write().map_err(|_| Error::Unavailable)? = learned;
         Ok(next)
     }
-    /// The current lanes. A poisoned key or learned table has no lanes (the
-    /// B11 table for everybody): learning never widens anything it cannot read.
-    fn lanes(&self) -> Lanes {
+    /// The current lanes at `now`: only learned hosts that are not stale
+    /// (B15) count. A poisoned pin, key or learned table has no lanes (the B11
+    /// table for everybody): learning never widens anything it cannot read.
+    fn lanes(&self, now: Instant) -> Lanes {
+        let Ok(pins) = self.pins.read() else {
+            return Lanes::default();
+        };
         let Ok(keys) = self.keys.read() else {
             return Lanes::default();
         };
         let Ok(learned) = self.learned.read() else {
             return Lanes::default();
         };
+        let current = |host: &Learned| {
+            pins.authenticated
+                .keys()
+                .any(|a| a.ip() == host.source.ip())
+                || host
+                    .seen
+                    .checked_add(self.learned_ttl)
+                    .is_some_and(|until| now < until)
+        };
         Lanes {
-            learned: learned.values().map(|a| a.ip()).collect(),
-            shrunk: keys
-                .as_ref()
-                .is_some_and(|k| !k.is_empty() && k.iter().all(|key| learned.contains_key(key))),
+            learned: learned
+                .values()
+                .filter(|host| current(host))
+                .map(|host| host.source.ip())
+                .collect(),
+            shrunk: keys.as_ref().is_some_and(|k| {
+                !k.is_empty() && k.iter().all(|key| learned.get(key).is_some_and(current))
+            }),
         }
     }
     /// The pre-send check, evaluated for every datagram.
@@ -357,9 +416,9 @@ impl Admission {
         if !quic_initial(datagram) || !self.may_accept(src) {
             return false;
         }
-        // Only a new Initial reads the lanes (B14; `keys` -> `learned` under
-        // `inbound`, never the reverse anywhere).
-        let lanes = self.lanes();
+        // Only a new Initial reads the lanes (B14; `pins` -> `keys` ->
+        // `learned` under `inbound`, never the reverse anywhere).
+        let lanes = self.lanes(now);
         let lane = lanes.of(src.ip());
         if inbound.len() >= self.provisional_capacity {
             inbound.retain(|_, entry| now < entry.until);
@@ -524,15 +583,35 @@ impl Admission {
             return;
         }
         if let Ok(mut learned) = self.learned.write() {
-            learned.insert(*key, source);
+            learned.insert(
+                *key,
+                Learned {
+                    source,
+                    seen: Instant::now(),
+                },
+            );
         }
     }
-    /// The learned hosts' sources (B14), sorted.
+    /// An authenticated connection to `addrs` ended at `now` (B15): a learned
+    /// host at one of their IPs was live until then.
+    fn seen_until(&self, addrs: &[SocketAddr], now: Instant) {
+        let Ok(mut learned) = self.learned.write() else {
+            return;
+        };
+        for host in learned.values_mut() {
+            if addrs.iter().any(|a| a.ip() == host.source.ip()) && host.seen < now {
+                host.seen = now;
+            }
+        }
+    }
+    /// The learned hosts' sources (B14), sorted; stale ones included until
+    /// their key is verified elsewhere or no longer admitted (B15: a stale
+    /// host only stops counting for the receive filter).
     pub(crate) fn learned_hosts(&self) -> Vec<SocketAddr> {
         let mut hosts: Vec<SocketAddr> = self
             .learned
             .read()
-            .map(|learned| learned.values().copied().collect())
+            .map(|learned| learned.values().map(|host| host.source).collect())
             .unwrap_or_default();
         hosts.sort_unstable();
         hosts
@@ -714,6 +793,11 @@ impl Drop for Pin {
             return;
         };
         release(pins.class(self.class), &self.addrs);
+        drop(pins);
+        if self.class == PinClass::Authenticated {
+            // B15: a learned host's staleness counts from here.
+            self.admission.seen_until(&self.addrs, Instant::now());
+        }
     }
 }
 
