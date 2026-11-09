@@ -1560,7 +1560,6 @@ export function createField({ stage, state, reduce }) {
     let t0 = performance.now();
     const stage = async () => {
       stages.push(+(performance.now() - t0).toFixed(1));
-      if (stages.at(-1) > 30) (metrics.slowStages ||= []).push([stages.length - 1, stages.at(-1), new Error().stack.split("\n").slice(1, 4).join(" | ")]); // DIAG-TEMP
       await nextTask();
       t0 = performance.now();
       return disposed;
@@ -2214,7 +2213,6 @@ export function createField({ stage, state, reduce }) {
         last.vis = y.vis;
         last.state = y.state;
       } else p.lifeShown = { vis: y.vis, state: y.state };
-      if (window.__dbgT) { const kk = y.follow ? "cF" : !p.static ? "cN" : y.base > 0 ? "cT" : "cW"; window.__dbgT[kk] = (window.__dbgT[kk] || 0) + 1; } /* DIAG-TEMP */
       if (all) continue;
       const box = arcBox(p.points, p.arc, Math.max(0, lo), hi, 14); // fuzz hairs overhang the polyline
       for (const base of bases) mark(box, base, lo, hi);
@@ -2705,16 +2703,12 @@ export function createField({ stage, state, reduce }) {
       lastScroll = scroll;
     }
     // ---- life layer (r11.2): page-anchored tiles; a tick repaints what changed ----
-    const DT = window.__dbgT, dq = (k, t0, cx) => { if (!DT) return; if (cx) cx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
-    let dt0 = performance.now(); /* DIAG-TEMP */
-    if (DT) DT.frames = (DT.frames || 0) + 1; /* DIAG-TEMP */
-    if (window.__dbgNoLife) {} /* DIAG-TEMP */ else if (force || intro || lifePending || scroll !== lifeScroll || begin - lifeDrawn >= 1000 / LIFE_HZ - 2) {
+    if (force || intro || lifePending || scroll !== lifeScroll || begin - lifeDrawn >= 1000 / LIFE_HZ - 2) {
       lifeTick(t, A, scroll, force);
       lifeDrawn = begin;
       lifeScroll = scroll;
     }
     placeLife(scroll);
-    dq("life", dt0); dt0 = performance.now(); /* DIAG-TEMP */
     // ---- live layer ----
     const lb = performance.now();
     // Dirty-rect live layer: clear only what was drawn last frame.
@@ -2739,7 +2733,6 @@ export function createField({ stage, state, reduce }) {
       if (hb[0] < Infinity) add(hb[0], hb[1] + oy, hb[2], hb[3] + oy);
       heroCost = performance.now() - h0;
     }
-    dq("hero", dt0, lx); dt0 = performance.now(); /* DIAG-TEMP */
     const origin = oy + field.top,
       first = Math.floor(-origin / field.height),
       settle = intro ? 0 : smooth((performance.now() - introEnded) / (2500 * INTRO_SCALE));
@@ -2797,11 +2790,10 @@ export function createField({ stage, state, reduce }) {
           lx.drawImage(s.cv, s.x0, s.y0, s.w, s.h);
           add(s.x0, s.y0 + shift, s.x0 + s.w, s.y0 + s.h + shift);
         }
-      if (!reduced && !intro && !scene?.pulsesOff && !window.__dbgNoMargin) /* DIAG-TEMP */
+      if (!reduced && !intro && !scene?.pulsesOff)
         drawMarginCopy(k, t, add, shift);
       lx.restore();
     }
-    dq("margin", dt0, lx); dt0 = performance.now(); /* DIAG-TEMP */
     // Hero pulses leak into field threads along their actual arrival times.
     if (scene?.activeTrips && !reduced && !scene.pulsesOff) {
       lx.save();
@@ -2831,8 +2823,6 @@ export function createField({ stage, state, reduce }) {
       lx.restore();
     }
     lx.globalAlpha = 1;
-    dq("leak", dt0, lx); /* DIAG-TEMP */
-    if (DT && box[0] < Infinity) DT.dirtyArea = (DT.dirtyArea || 0) + (Math.min(width, box[2]) - Math.max(0, box[0])) * (Math.min(height, box[3]) - Math.max(0, box[1])) / (width * height); /* DIAG-TEMP */
     dirty = box[0] < Infinity ? box : null;
     const cost = performance.now() - begin;
     metrics.frames++;

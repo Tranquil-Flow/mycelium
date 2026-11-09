@@ -2446,10 +2446,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     let drawn = 0,
       active = 0;
     const t = ((T % sched.period) + sched.period) % sched.period;
-    const DT = window.__dbgT, dq = (k, t0) => { if (!DT) return; ctx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
-    let d0 = performance.now(); /* DIAG-TEMP */
     drawResidue(ctx, t, sched, box);
-    dq("p.residue", d0); d0 = performance.now(); /* DIAG-TEMP */
     const trip = sched.trips.filter((p) => t >= p.start && t < p.start + p.route.arrivalMax + TAIL).at(-1);
     if (trip) {
       active = 1;
@@ -2472,7 +2469,6 @@ export function createHero(canvas, { stage, state, reduce }) {
         }
         drawn++;
       }
-      dq("p.crest", d0); d0 = performance.now(); /* DIAG-TEMP */
       // Laid-late and living segments glow as strokes, only where drawn now
       // (r11.2: batched into a few quantised groups).
       lifeStamp++;
@@ -2501,7 +2497,6 @@ export function createHero(canvas, { stage, state, reduce }) {
         grow(box, [Math.min(s.a.x, s.b.x) - 2, Math.min(s.a.y, s.b.y) - 2, Math.max(s.a.x, s.b.x) + 2, Math.max(s.a.y, s.b.y) + 2]);
       }
       flushPieces(ctx, pulseGroups);
-      dq("p.late", d0); d0 = performance.now(); if (DT) DT.lateN = (DT.lateN || 0) + late.length - k0; /* DIAG-TEMP */
       for (const landing of r.landings) {
         // r11: no bloom at the departing node (that read as a disc lighting up
         // before the ripple); the pulse leaves as the ripple along the hyphae.
@@ -2735,21 +2730,15 @@ export function createHero(canvas, { stage, state, reduce }) {
         lifeStamp++;
         const running = introRunning();
         frame++;
-        const DT = window.__dbgT, dq = (k, t0, cx) => { if (!DT) return; if (cx) cx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
-        let d0 = performance.now(); /* DIAG-TEMP */
         growStep(A, g, performance.now() + 10);
-        dq("h.grow", d0, sx); d0 = performance.now(); /* DIAG-TEMP */
         const key = running ? frame : Math.floor(A / 4);
         if (key !== growth.presentKey) {
           growth.presentKey = key;
           present();
         }
-        dq("h.present", d0, sx); d0 = performance.now(); /* DIAG-TEMP */
         const s = drawLive(ctx, A, g, box, running);
-        dq("h.rim", d0, ctx); d0 = performance.now(); /* DIAG-TEMP */
         if (!dips.started && !running && g.lifeAssigned && growth.coresDrawn && A >= START_AGE && scene.timings.rebaked) startDips(g);
-        const p = T < -1e5 || window.__dbgNoHeroPulse ? 0 : drawPulses(ctx, T, A, g, sched, box); /* DIAG-TEMP */
-        dq("h.pulses", d0, ctx); /* DIAG-TEMP */
+        const p = T < -1e5 ? 0 : drawPulses(ctx, T, A, g, sched, box);
         return { ...s, pulses: p };
       },
       // Running frames grow in drawLive; exact (frozen/diagnostic) ages grow
