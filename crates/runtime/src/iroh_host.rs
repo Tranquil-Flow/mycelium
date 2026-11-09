@@ -60,7 +60,9 @@ pub enum NetworkMode {
 /// only the socket addresses this host dialed (the caller's signed peer
 /// addresses) or accepted a handshake from; [`LanPolicy::range_form`] opts in
 /// to any allow-listed address. Sources: any allow-listed address, or only the
-/// exact peer hosts of [`LanPolicy::with_peer_hosts`] when the caller has them.
+/// exact peer hosts of [`LanPolicy::with_peer_hosts`] when the caller has them;
+/// an unpinned source reaches iroh only with a QUIC Initial, through a bounded
+/// provisional table (B9f, `iroh_lan_filter` module note).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LanPolicy {
     extra: Vec<IpAddr>,
@@ -111,6 +113,9 @@ impl LanPolicy {
 /// Application close code of a direct-LAN connection that gained a path outside
 /// the allow-list (reason `lan_path_refused`).
 pub const LAN_PATH_REFUSED: u32 = 3;
+/// Application close code of an accepted direct-LAN handshake under a key
+/// outside [`LoopbackHost::admit_peer_ids`] (reason `lan_key_refused`).
+pub const LAN_KEY_REFUSED: u32 = 4;
 fn count(id: BudgetId) -> Result<usize, Error> {
     usize::try_from(id.count().map_err(|_| Error::Unavailable)?.get())
         .map_err(|_| Error::Unavailable)
@@ -640,19 +645,42 @@ impl<'a> LoopbackHost<'a> {
                         return Err(Error::Authentication);
                     };
                     // Pinned BEFORE the handshake answers, released if it fails.
-                    let pin = match admission.pin([source]) {
+                    // Provisional: an unauthenticated source never takes (or
+                    // blocks) an authenticated pin. A full provisional table is
+                    // one refused inbound, never a reason to stop accepting.
+                    let mut pin = match admission.pin_provisional([source]) {
                         Ok(pin) => pin,
-                        Err(error) => {
+                        Err(_) => {
                             incoming.ignore();
-                            return Err(error);
+                            return Err(Error::Authentication);
                         }
                     };
+                    let admission = admission.clone();
                     pool.spawn(async move {
                         // A stalled handshake must not hold the caller's window.
                         let connection = tokio::time::timeout(handshake, incoming)
                             .await
                             .map_err(|_| Error::Authentication)?
                             .map_err(|_| Error::Authentication)?;
+                        match admission.admits_key(&connection.remote_id()) {
+                            // Not an admitted peer key: refused here, unpinned
+                            // at once (no close drain for an unauthenticated
+                            // peer), never handed to the caller.
+                            Some(false) => {
+                                connection.close(LAN_KEY_REFUSED.into(), b"lan_key_refused");
+                                drop(pin);
+                                return Err(Error::Authentication);
+                            }
+                            Some(true) => {
+                                if let Err(error) = pin.promote() {
+                                    connection.close(0u32.into(), b"lan_pins_exhausted");
+                                    return Err(error);
+                                }
+                            }
+                            // No keys set: the caller verifies the key; the pin
+                            // stays provisional (its own capacity).
+                            None => pin.remember(),
+                        }
                         Ok((connection, pin))
                     });
                 }
@@ -742,6 +770,15 @@ impl<'a> LoopbackHost<'a> {
             .ok_or(Error::Unavailable)?
             .set_hosts(hosts)
     }
+    /// Direct LAN: the exact peer keys accepted handshakes must present
+    /// (taken from signed data, e.g. the verified route's owner endpoint). A
+    /// handshake under any other key is refused by the host and unpinned at
+    /// once; an admitted one moves to the authenticated pins. Without keys the
+    /// caller verifies the key and accepted pins stay provisional.
+    /// `Unavailable` in every other mode.
+    pub fn admit_peer_ids(&self, ids: &[iroh::EndpointId]) -> Result<(), Error> {
+        self.lan.as_ref().ok_or(Error::Unavailable)?.set_keys(ids)
+    }
     #[cfg(test)]
     pub(crate) fn lan_admission(&self) -> Option<&Arc<Admission>> {
         self.lan.as_ref()
@@ -754,6 +791,10 @@ impl<'a> LoopbackHost<'a> {
     /// Direct LAN: datagrams the pre-send filter refused (never sent).
     pub fn lan_refused_datagrams(&self) -> Option<u64> {
         self.lan.as_ref().map(|lan| lan.refused())
+    }
+    /// Direct LAN: inbound datagrams the receive filter dropped before iroh.
+    pub fn lan_dropped_datagrams(&self) -> Option<u64> {
+        self.lan.as_ref().map(|lan| lan.dropped())
     }
     pub fn connect(
         &self,

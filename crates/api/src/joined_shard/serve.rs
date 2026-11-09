@@ -16,7 +16,7 @@ use budgets::{BudgetId as B, Entries, MonoInstant};
 use protocol::router_wire;
 use runtime::{
     iroh::IrohTransport,
-    iroh_host::LoopbackHost,
+    iroh_host::{LoopbackHost, NetworkMode},
     iroh_receive::{DispatchRefusal, RouterReceiver},
 };
 use serde_json::{Value, json};
@@ -169,6 +169,14 @@ pub fn serve(
         .ok_or("route_owner_invalid")?
         .parse()
         .map_err(|_| "route_owner_invalid")?;
+    // Direct LAN: only the verified route's owner key is accepted; any other
+    // key is refused by the host and unpinned at once (REVIEW-laneB9 F2).
+    if s.host.mode() == NetworkMode::DirectLan
+        && let Err(e) = s.host.admit_peer_ids(&[owner])
+    {
+        stop(compute, false)?;
+        return Err(format!("route_owner_admission_failed:{e:?}"));
+    }
     let generation = live["generation"].as_u64().ok_or("generation_invalid")?;
     let epoch = message["topology_version"]
         .as_u64()

@@ -500,8 +500,14 @@ fn peer_host_pins_admit_inbound_handshakes_only_from_the_signed_hosts() {
             scope.spawn(|| server.accept(&clock, deadline(&clock, B::SidecarLocalHandshake)));
         let dialed = client.connect(&addr, &clock, deadline(&clock, B::SidecarLocalHandshake));
         assert!(dialed.is_err(), "an unpinned host never gets a session");
-        assert_eq!(refused.join().unwrap().unwrap_err(), Error::Authentication);
+        // B9f: dropped by the receive filter before iroh (was `Authentication`
+        // from `Incoming::ignore`): the accept is never woken.
+        assert_eq!(refused.join().unwrap().unwrap_err(), Error::Expired);
     });
+    assert!(
+        server.lan_dropped_datagrams().unwrap() > 0,
+        "the unpinned host's handshake never reached the receive filter"
+    );
     assert_eq!(
         server.admit_peer_hosts(&[ip("8.8.8.8")]),
         Err(Error::Authentication)

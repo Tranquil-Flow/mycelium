@@ -551,8 +551,15 @@ fn real_lan_interface_refuses_an_inbound_path_outside_its_allow_list() {
             dialed.is_err(),
             "refused inbound path never yields a session"
         );
-        assert_eq!(refused.join().unwrap().unwrap_err(), Error::Authentication);
+        // B9f: the refused source is dropped by the receive filter before iroh
+        // sees it (was: `Authentication` from `Incoming::ignore`), so the
+        // accept is never even woken; the datagrams provably arrived.
+        assert_eq!(refused.join().unwrap().unwrap_err(), Error::Expired);
     });
+    assert!(
+        server.lan_dropped_datagrams().unwrap() > 0,
+        "the refused handshake never reached the server's receive filter"
+    );
     client
         .close(&clock, deadline(&clock, B::RouterClose))
         .unwrap();

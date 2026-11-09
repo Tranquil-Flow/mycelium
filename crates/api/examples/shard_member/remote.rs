@@ -16,7 +16,7 @@ use budgets::{BudgetId as B, Entries, MonoInstant};
 use protocol::identity::Identity;
 use runtime::{
     iroh_control_receive::NodeControlReceiver,
-    iroh_host::{LanPolicy, LoopbackHost},
+    iroh_host::{LanPolicy, LoopbackHost, NetworkMode},
 };
 use serde_json::{Value, json};
 use std::{
@@ -173,6 +173,17 @@ fn serve(
             return Err(code);
         }
     };
+    // Direct LAN: only the operator-configured owner key is accepted; the
+    // host refuses (and unpins at once) any other key (REVIEW-laneB9 F2).
+    if host.mode() == NetworkMode::DirectLan
+        && let Err(e) = host.admit_peer_ids(&[owner])
+    {
+        let code = format!("member_control_admission_failed:{e:?}");
+        ready
+            .send(Err(code.clone()))
+            .map_err(|_| "member_control_ready")?;
+        return Err(code);
+    }
     let addr = host.address().map_err(|e| format!("{e:?}"))?;
     let me = addr.id;
     ready
