@@ -297,6 +297,15 @@ fn lifecycle(python: bool) {
     assert_eq!(out["enabled"], false);
     p.tick(now, &facts("serving", true)).unwrap();
     assert!(rows(&switch.real).is_empty());
+    // Opting in again, then the installation stops being the owner (it joined another swarm as
+    // a member): the listing is withdrawn and the opt-in revoked, not carried into the new role.
+    p.publish(true, &body(&server.origin)).unwrap();
+    p.tick(now, &facts("serving", true)).unwrap();
+    assert_eq!(rows(&switch.real).len(), 1);
+    let member = OwnerFacts::from_owner_run(false, None, None, None);
+    let left = p.tick(now, &member).unwrap().unwrap();
+    assert!(!left.enabled);
+    assert!(rows(&switch.real).is_empty());
     // Only the closed v1 documents left this host: no run facts, prompts or identities.
     let sent = switch.sent.lock().unwrap();
     for path in ["/records", "/heartbeat", "/delete"] {
