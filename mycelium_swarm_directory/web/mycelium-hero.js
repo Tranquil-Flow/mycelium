@@ -8,10 +8,42 @@
  * recycling outer explorers, pulses and blooms are drawn per frame (by the
  * page compositor in mycelium-field.js). The disposer owns every resource.
  */
-import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
+import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 import { extendFieldGraph } from "./mycelium-field.js";
 
 export const START_AGE = 110; // visitors arrive to a mature core with living rims
+/** r11.2 (owner: the dense mats "pop" in during the grow-in). Colony cotton and
+ * mat hyphae wait for their own start age (P.matT) in the load-in: a few near
+ * the centre first, then filling outward (60% by radius, 40% hashed), every
+ * one finished by MAT_END, around the end of the hero's growth. Intro timing
+ * only: geometry, births and the established raster are unchanged. */
+const MAT_F0 = 0.04,
+  MAT_F1 = 0.8, // share of the intro by which every mat path has started its last stretch
+  MAT_DONE = 0.94, // ... and by which every mat (with its forks and hairs) is complete
+  INTRO_AGE_POW = 1.6, // the hero's intro age map (see ageAt)
+  ageOfIntro = (f) => START_AGE * (1 - Math.pow(1 - Math.max(0, Math.min(1, f)), INTRO_AGE_POW)),
+  introOfAge = (A) => (A >= START_AGE ? 1 : 1 - Math.pow(Math.max(0, 1 - A / START_AGE), 1 / INTRO_AGE_POW)),
+  MAT_END = ageOfIntro(MAT_F1);
+const MAT_F_COLONY = 0.55, // radiating colony hyphae: all started by 55% of the intro
+  MAT_INHERIT = /^(colony|hair|mat|knot-hair|explorer|explorer-hair)$/;
+/** Start age of a mat path: a few near the centre first, then filling outward
+ * (62% by radius, 38% hashed), in intro time (the age map is front-loaded: by
+ * age, the mats were 80% complete a third of the way into the grow-in). */
+function matAge(id, c, u, f1, dur) {
+  const h = hash01(id * 17 + 5),
+    q = Math.min(1, 0.62 * u + 0.38 * hash01(id * 23 + 11)) * (h < 0.08 ? 0.15 : 1),
+    f0 = Math.max(MAT_F0, introOfAge(c.start + 2)),
+    last = Math.max(c.start + 3, ageOfIntro(f1) - dur);
+  return Math.min(last, Math.max(c.start + 3, ageOfIntro(f0 + q * Math.max(0, f1 - f0))));
+}
+function matTime(P, c, u) {
+  P.matShift = Math.max(P.matShift || 0, matAge(P.id, c, u, MAT_F1, (P.len || 0) / Math.max(1e-6, P.v)) - P.t0);
+}
+/** Mat growth fraction of colony c at age A (cores and felt fills follow it). */
+const matGrow = (c, A) => {
+  const f0 = Math.max(MAT_F0, introOfAge(c.start + 2));
+  return smooth((introOfAge(A) - f0) / Math.max(0.05, MAT_F1 - f0));
+};
 // r11 load-in: the hero grows out from its nodes over the first INTRO_S seconds
 // (shared contract with the field lane), then runs at the normal rate.
 export const INTRO_MS = SHARED_INTRO_MS; // 6000 by default (shared, see mycelium-geometry.js)
@@ -205,6 +237,19 @@ function* buildGeometry(L, budget, out = {}) {
       if (q.y > by1) by1 = q.y;
     }
     Object.assign(P, { box: [bx0 - 2, by0 - 2, bx1 + 2, by1 + 2], pts: poly, points: poly, arcs, len, w: wv, a: av, done: o.t0 + len / o.v, fused: !!fused });
+    // r11.2 mat schedule (load-in only): colony hyphae start on their own
+    // intro-time schedule; their forks, hairs, mats and cotton never start
+    // before the part they grow from is shown (shift inherited).
+    const host = first.owner >= 0 ? paths[first.owner] : null;
+    if (host?.matShift > 0 && MAT_INHERIT.test(o.kind)) {
+      P.matShift = host.matShift;
+      P.matHost = host;
+    }
+    if (o.kind === "colony" && colonies[o.source]) {
+      const c = colonies[o.source],
+        u = Math.min(1, Math.hypot(first.x - c.node.x, first.y - c.node.y) / c.R0);
+      P.matShift = Math.max(P.matShift || 0, matAge(P.id, c, u, MAT_F_COLONY, len / o.v) - o.t0);
+    }
     for (const q of poly) if (q.owner === undefined) index(q, P.id);
     paths.push(P);
     if (P.unit >= 0) units[P.unit].paths.push(P);
@@ -389,9 +434,10 @@ function* buildGeometry(L, budget, out = {}) {
       // converge on a point and read as a neuron soma.
       const radialH = Math.atan2(at.y - sb.y, at.x - sb.x),
         hh = u < 0.32 ? fuzzR() * 6.28 : radialH + gauss(fuzzR) * (0.75 + 0.9 * smooth((0.5 - u) / 0.2));
-      lay(persistWalk(at, hh, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
+      const Pc = lay(persistWalk(at, hh, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
         kind: "hair", source: c.i, t0: (at.birth || c.start) + 1 + fuzzR() * 4, v: c.vel * 0.7, w0: 0.2 + fuzzR() * 0.06, w1: 0.15, a0: 0.27 * (1 - 0.45 * u), a1: 0.11, tone: fuzzR() < 0.12 ? 1 : 0, cord: -1,
       });
+      if (Pc) matTime(Pc, c, u);
       if (budget()) yield "cotton"; // r11.1: checked every hair (k % 60 let one slice run 30-50 ms)
     }
   }
@@ -668,7 +714,8 @@ function* buildGeometry(L, budget, out = {}) {
       kind: "mat", t0, v: 3.4, w0: 0.26, w1: 0.15, a0: 0.28, a1: 0.11, tone: matR() < 0.1 ? 1 : 0, source: src, fuse: 2.6, thin: 0.4,
       walk: { k: 0.018, run: 35, jit: 0.035 }, forkMean: 22, forkAngle: [0.3, 0.6], firstFork: 8, forkLag: 1.5,
     }, 1);
-    void P;
+    const mc = colonies[src];
+    if (P && mc) matTime(P, mc, Math.min(1, Math.hypot(start.x - mc.node.x, start.y - mc.node.y) / mc.R0));
     if (budget()) yield "mat";
   }
   // ---- sparse ref-8 vocabulary: long fine explorers from rims and cords into gaps ----
@@ -834,6 +881,304 @@ function* buildGeometry(L, budget, out = {}) {
       group(at.v, at.h, at.t + 10 + knotR() * 20, P.pts[0].source, (d) => along(P, Math.min(P.len, P.len * 0.2 + d)).v);
     }
   yield "knots";
+  /** r11.2 (owner): density must fall monotonically from the colony centre,
+   * with no fainter ring around the dense core ("max dense at the point,
+   * lowering further away"). The cotton falls steeply while the radiating
+   * hyphae, mat and web peak at 0.25-0.5 R0, which left a dip ring. Each
+   * colony's isotropic layers are rastered offscreen (half scale, additive,
+   * as the page), their luminance measured in 8 px rings (median over 24 sectors, so
+   * cords and single strands do not count), and the alpha of every ring is
+   * raised toward the upper envelope seen from outside (falling >= 4% per
+   * ring; raise only, so the change can be added to what the intro already
+   * drew); up to five passes; then a soft radial felt glow fills what
+   * remains. Link and
+   * dead-end cords strengthen toward the node and overlap the mat edge (they
+   * still start beyond the centre: no star point). Alpha only: no geometry or
+   * RNG changes. */
+  function* monotoneColonies() {
+    const ISO = /^(hair|colony|mat|web|explorer-hair|knot-hair)$/,
+      STEP = 8,
+      MQ = 0.5,
+      SECT = 24,
+      reach = colonies.map((c) => Math.min(220, c.R0 * 1.15));
+    const owner = (x, y) => {
+      let best = -1,
+        bu = 1;
+      for (let i = 0; i < colonies.length; i++) {
+        const nd = colonies[i].node,
+          u = Math.hypot(x - nd.x, y - nd.y) / reach[i];
+        if (u < bu) {
+          bu = u;
+          best = i;
+        }
+      }
+      return best;
+    };
+    // Everything near a colony is rastered (cords and their web included, as
+    // the page shows them); only the isotropic layers are adjusted.
+    const mine = colonies.map(() => []),
+      near = colonies.map(() => []);
+    let n = 0;
+    for (const P of paths) {
+      if (++n % 1500 === 0 && budget()) yield "monotone";
+      const m = P.pts[P.pts.length >> 1];
+      // Recycling explorer units live on the life layer, not in the static
+      // colony: the profile is measured on what stays.
+      const rest = !(P.unit >= 0 && units[P.unit]?.kind === "explorer");
+      for (let i = 0; rest && i < colonies.length; i++) {
+        const nd = colonies[i].node,
+          r = reach[i] + 40;
+        if (P.box[0] > nd.x + r || P.box[2] < nd.x - r || P.box[1] > nd.y + r || P.box[3] < nd.y - r) continue;
+        near[i].push(P);
+      }
+      if (!rest || !ISO.test(P.kind)) continue;
+      const c = owner(m.x, m.y);
+      if (c >= 0) mine[c].push(P);
+    }
+    // All changes go to work copies (P.aw) and are committed in one step at
+    // the end (the intro may draw these paths meanwhile; the scene re-bakes
+    // the static raster afterwards, see rebakeStatic).
+    const work = new Set();
+    const aw = (P) => {
+      if (!P.aw) {
+        P.aw = Float32Array.from(P.a);
+        work.add(P);
+      }
+      return P.aw;
+    };
+    // Cords strengthen toward the node and overlap the mat edge.
+    n = 0;
+    for (const P of paths) {
+      if (++n % 3000 === 0 && budget()) yield "monotone";
+      if (P.kind !== "cord-fibre" && P.kind !== "cord-centre") continue;
+      for (let i = 0; i < P.pts.length; i++) {
+        const q = P.pts[i],
+          c = owner(q.x, q.y);
+        if (c < 0) continue;
+        const r = Math.hypot(q.x - colonies[c].node.x, q.y - colonies[c].node.y);
+        const W = aw(P);
+        W[i] = Math.min(0.95, W[i] * (1 + 0.5 * (1 - smooth((r - 0.15 * colonies[c].R0) / (0.35 * colonies[c].R0)))));
+      }
+    }
+    for (const list of mine) for (const P of list) aw(P);
+    const fills = new Map();
+    const commit = () => {
+      for (const P of work) {
+        P.aOld = P.a;
+        P.a = P.aw;
+        P.aw = null;
+        P.drawnAtCommit = P.drawn || 0;
+      }
+      for (const [c, f] of fills) c.fill = f;
+    };
+    if (typeof document === "undefined") return commit();
+    const statics = new Map(),
+      preMemo = new Map();
+    const lin = new Float32Array(256);
+    for (let i = 0; i < 256; i++) lin[i] = i / 255 <= 0.04045 ? i / 255 / 12.92 : ((i / 255 + 0.055) / 1.055) ** 2.4;
+    const cv = document.createElement("canvas");
+    for (let ci = 0; ci < colonies.length; ci++) {
+      const c = colonies[ci],
+        nd = c.node,
+        Rm = reach[ci],
+        K = Math.floor(Rm / STEP),
+        S = Math.ceil((2 * Rm + 8) * MQ), // measured at half scale (MQ): 1/4 the pixels and garbage
+        gain = new Float64Array(K).fill(1);
+      cv.width = cv.height = S;
+      const x = cv.getContext("2d", { willReadFrequently: true });
+      const measure = function* () {
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.globalCompositeOperation = "source-over";
+        x.globalAlpha = 1;
+        x.fillStyle = "#000"; // opaque: measure what the page shows over its dark ground
+        x.fillRect(0, 0, S, S);
+        x.setTransform(MQ, 0, 0, MQ, S / 2 - nd.x * MQ, S / 2 - nd.y * MQ);
+        x.globalCompositeOperation = "lighter";
+        x.strokeStyle = "#35df47"; // the dark-green glow (saturation as on the page)
+        x.lineCap = "butt";
+        const groups = new Map();
+        let k = 0;
+        for (const P of near[ci]) {
+          // What stays in the static raster (living parts come and go).
+          const ext = statics.get(P) ?? statics.set(P, preBaseOf(P, paths, preMemo)).get(P);
+          for (let i = 0; i < P.pts.length - 1 && P.arcs[i] < ext; i += CHUNK) {
+            const j = Math.min(P.pts.length - 1, i + CHUNK),
+              mid = (i + j) >> 1,
+              key = (P.tone ? 1e6 : 0) + Math.round(Math.min(1, (P.aw || P.a)[mid]) * 120) * 1000 + Math.round(P.w[mid] * 20);
+            // Groups split every ~1500 segments: each stroke is a bounded raster.
+            let g = groups.get(key);
+            if (!g || g.n > 1500) groups.set(key, (g = { path: new Path2D(), n: 0, prev: g || null }));
+            g.path.moveTo(P.pts[i].x, P.pts[i].y);
+            for (let q = i + 1; q <= j; q++) g.path.lineTo(P.pts[q].x, P.pts[q].y);
+            g.n += j - i;
+          }
+          if (++k % 400 === 0 && budget()) yield "monotone";
+        }
+        // Stroked in flushed batches (a 1 px read forces the raster), so no
+        // slice holds the whole colony's raster work.
+        let b = 0;
+        for (const [key, last] of groups) {
+          // The page's dark-green tones: the core tone (cords) is much brighter.
+          x.strokeStyle = key >= 1e6 ? "#a4ffad" : "#35df47";
+          x.globalAlpha = Math.floor((key % 1e6) / 1000) / 120;
+          x.lineWidth = (key % 1000) / 20;
+          for (let g = last; g; g = g.prev) {
+            x.stroke(g.path);
+            b += g.n;
+            if (b > 1500) {
+              b = 0;
+              x.getImageData(0, 0, 1, 1);
+              if (budget()) yield "monotone";
+            }
+          }
+        }
+        // The soft core glow the page adds (drawCores), so the envelope sees it.
+        const cr = Math.max(20, Math.min(40, c.R0 * 0.2)),
+          cg = x.createRadialGradient(nd.x, nd.y, 0, nd.x, nd.y, cr);
+        cg.addColorStop(0, "#35df47");
+        cg.addColorStop(0.45, "#35df47");
+        cg.addColorStop(1, "rgba(0,0,0,0)");
+        x.globalAlpha = 0.15 * protect(nd.x, nd.y);
+        x.fillStyle = cg;
+        x.fillRect(nd.x - cr, nd.y - cr, 2 * cr, 2 * cr);
+        x.globalAlpha = 1;
+        x.getImageData(0, 0, 1, 1);
+        if (budget()) yield "monotone";
+        return yield* ringProfile();
+      };
+      // Ring x sector cell of every pixel (computed once per colony).
+      const cells = new Int16Array(S * S).fill(-1),
+        cnt = new Float64Array(K * SECT);
+      for (let yy = 0; yy < S; yy++) {
+        for (let xx = 0; xx < S; xx++) {
+          const dx = (xx + 0.5 - S / 2) / MQ,
+            dy = (yy + 0.5 - S / 2) / MQ,
+            kk = Math.floor(Math.hypot(dx, dy) / STEP);
+          if (kk >= K) continue;
+          const cell = kk * SECT + (Math.floor(((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI)) * SECT) % SECT);
+          cells[yy * S + xx] = cell;
+          cnt[cell]++;
+        }
+        if ((yy & 15) === 15 && budget()) yield "monotone";
+      }
+      const ringProfile = function* () {
+        const d = x.getImageData(0, 0, S, S).data,
+          sum = new Float64Array(K * SECT);
+        if (budget()) yield "monotone";
+        for (let yy = 0; yy < S; yy++) {
+          for (let xx = 0, i = yy * S, o = i * 4; xx < S; xx++, i++, o += 4) {
+            const cell = cells[i];
+            if (cell >= 0) sum[cell] += 0.2126 * lin[d[o]] + 0.7152 * lin[d[o + 1]] + 0.0722 * lin[d[o + 2]];
+          }
+          if ((yy & 31) === 31 && budget()) yield "monotone";
+        }
+        const out = [];
+        for (let kk = 0; kk < K; kk++) {
+          const v = [];
+          for (let sct = 0; sct < SECT; sct++) if (cnt[kk * SECT + sct]) v.push(sum[kk * SECT + sct] / cnt[kk * SECT + sct]);
+          v.sort((a, b) => a - b);
+          out.push(v.length ? (v[(v.length - 1) >> 1] + v[v.length >> 1]) / 2 : 0);
+        }
+        return out;
+      };
+      let M = null;
+      for (let pass = 0; pass < 5; pass++) {
+        M = yield* measure();
+        // Target (raise only): the upper envelope seen from outside, falling
+        // at least 4% per ring toward the rim; inner rings rise to it.
+        const env = M.slice();
+        for (let k = K - 2; k >= 0; k--) env[k] = Math.max(M[k], env[k + 1] * 1.04);
+        let changed = false;
+        const step = M.map((m, k) => {
+          const gl = m > 1e-6 ? env[k] / m : 1;
+          if (gl > 1.005) changed = true;
+          // Raise only (the intro may already have drawn these paths; the
+          // committed change is added on top, which cannot take ink away).
+          return Math.max(1, Math.min(2, Math.pow(gl, 0.85))); // luminance grows faster than ink: damped
+        });
+        if (!changed) break;
+        for (const P of mine[ci])
+          for (let i = 0; i < P.pts.length; i++) {
+            const q = P.pts[i],
+              u = Math.hypot(q.x - nd.x, q.y - nd.y) / STEP - 0.5,
+              k0 = Math.max(0, Math.min(K - 1, Math.floor(u))),
+              f = Math.max(0, Math.min(1, u - k0)),
+              gk = step[k0] + (step[Math.min(K - 1, k0 + 1)] - step[k0]) * f;
+            if (gk !== 1) P.aw[i] = Math.min(0.95, P.aw[i] * gk);
+          }
+        for (let k = 0; k < K; k++) gain[k] *= step[k];
+      }
+      // Residual dips (where cords and web, which are not scaled, set the
+      // level) are filled by a soft radial felt glow under the strands, sized
+      // per ring so the profile falls >= 12% per 8 px ring inside 0.5 R0 (the
+      // mat, where a dip ring read) and >= 5% beyond: the colony's own glow,
+      // extended (never a ring or a disc edge).
+      const base = document.createElement("canvas");
+      base.width = base.height = S;
+      yield* measure(); // strands alone
+      base.getContext("2d").drawImage(cv, 0, 0);
+      const fillA = new Float64Array(K);
+      const fill = { r: K * STEP, stops: [] },
+        fc = { node: nd, fill };
+      fills.set(c, fill);
+      for (let pass = 0; pass < 5; pass++) {
+        fill.stops = Array.from(fillA, (a, k) => [((k + 0.5) * STEP) / (K * STEP), a]);
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.globalCompositeOperation = "source-over";
+        x.drawImage(base, 0, 0);
+        x.setTransform(MQ, 0, 0, MQ, S / 2 - nd.x * MQ, S / 2 - nd.y * MQ);
+        x.globalCompositeOperation = "lighter";
+        colonyFill(x, fc, "53,223,71", 1);
+        M = yield* ringProfile();
+        const env = M.slice();
+        for (let k = K - 2; k >= 0; k--) env[k] = Math.max(M[k], env[k + 1] * ((k + 1) * STEP < 0.5 * c.R0 ? 1.12 : 1.05));
+        let worst = 0;
+        for (let k = 0; k < K; k++) {
+          const need = env[k] - M[k];
+          worst = Math.max(worst, need / Math.max(1e-6, M[k]));
+          // d(luminance)/d(alpha) of the glow over a dark base is ~0.2: damped.
+          fillA[k] = Math.min(0.6, fillA[k] + (need / 0.2) * 0.8);
+        }
+        if (worst < 0.01) break;
+        if (budget()) yield "monotone";
+      }
+      fill.stops = Array.from(fillA, (a, k) => [((k + 0.5) * STEP) / (K * STEP), a]);
+      base.width = base.height = 0;
+      c.monotoneGain = Array.from(gain);
+      c.radialProfile = M;
+    }
+    cv.width = cv.height = 0;
+    commit();
+  }
+  yield* monotoneColonies();
+  // r11.2 mat schedule, last step: a shifted host's whole subtree (forks,
+  // hairs and mats inheriting its shift) must be complete by MAT_DONE of the
+  // intro. A late fork could inherit a shift that pushed it past the intro end
+  // (6% of a 1440 colony's mat ink was still missing 3 s after it). The
+  // subtree moves earlier as one, so nothing starts before its parent part.
+  {
+    const LIMIT = ageOfIntro(MAT_DONE),
+      kids = new Map(),
+      roots = [];
+    for (const P of paths) {
+      if (!(P.matShift > 0)) continue;
+      if (P.matHost && P.matHost.matShift === P.matShift) (kids.get(P.matHost) || kids.set(P.matHost, []).get(P.matHost)).push(P);
+      else roots.push(P);
+    }
+    const subEnd = (P) => {
+      let e = P.t0 + P.matShift + P.len / P.v;
+      for (const k of kids.get(P) || []) e = Math.max(e, subEnd(k));
+      return e;
+    };
+    const shiftAll = (P, by) => {
+      P.matShift -= by;
+      for (const k of kids.get(P) || []) shiftAll(k, by);
+    };
+    for (const P of roots) {
+      const over = subEnd(P) - LIMIT;
+      if (over > 0) shiftAll(P, Math.min(over, P.matShift));
+    }
+  }
   // Recycle units: per-unit period and phase from independent hashes.
   for (const u of units) {
     if (!u.paths.length) continue;
@@ -846,16 +1191,67 @@ function* buildGeometry(L, budget, out = {}) {
   };
 }
 
-/** Growth state of a path at scene age A (recycling units fade, then regrow). */
-function unitClock(P, units, A) {
-  if (P.unit < 0 || A >= 1e4) return { age: A, fade: 1 };
-  const u = units[P.unit];
-  if (!u.period || u.period > 1e8 || A < u.start + u.period) return { age: A, fade: A < u.start + u.period - 18 || !u.period || u.period > 1e8 ? 1 : 1 - smooth((A - (u.start + u.period - 18)) / 18) };
-  const k = Math.floor((A - u.start) / u.period),
-    local = A - k * u.period,
-    pos = local - u.start;
-  return { age: local, fade: pos > u.period - 18 ? 1 - smooth((pos - (u.period - 18)) / 18) : 1 };
+/** r11.2: the static extent a path keeps whatever the life assignment
+ * decides: a tip candidate its shortest possible base (pins only lengthen a
+ * base), a whole-hair or follower candidate nothing; same hashes as
+ * assignLife. `memo` (optional Map) caches parents. */
+function preBaseOf(P, paths, memo) {
+  if (memo?.has(P)) return memo.get(P);
+  if (!memo && P.pre !== undefined) return P.pre;
+  let pre = P.len;
+  if (!(P.knot || P.cord >= 0 || P.unit >= 0)) {
+    const h = (m) => hash01(P.id * 31 + m * 7919 + 101),
+      v0 = P.pts[0],
+      par = v0.owner >= 0 && v0.owner !== P.id ? paths[v0.owner] : null;
+    const pb = par && par.unit < 0 && !par.knot && !(par.cord >= 0) ? preBaseOf(par, paths, memo) : Infinity;
+    if (par && pb < par.len) {
+      const i = par.pts.indexOf(v0);
+      if ((i >= 0 ? par.arcs[i] : 0) >= pb - 1) pre = 0;
+    }
+    if (pre > 0) {
+      if (P.kind === "explorer" && !P.fused && P.len >= LIFE.MIN_LEN && h(1) < LIFE.TIP_P) pre = P.len - Math.min(P.len * LIFE.TIP_FRAC, LIFE.TIP_MIN + LIFE.TIP_SPAN * h(2));
+      else if ((P.kind === "explorer-hair" || (P.kind === "hair" && par?.kind === "explorer" && par.unit < 0)) && h(3) < LIFE.HAIR_P) pre = 0;
+    }
+  }
+  memo?.set(P, pre);
+  return pre;
 }
+/** r11.2: a colony's soft radial felt glow (fills the residual dips of its
+ * radial profile; stops in ring order, computed in monotoneColonies). */
+function colonyFill(ctx, c, rgb, mul) {
+  if (!c.fill || !c.fill.stops.some(([, a]) => a > 0.002) || mul <= 0) return;
+  const n = c.node,
+    R = c.fill.r,
+    g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, R);
+  g.addColorStop(0, `rgba(${rgb},${Math.min(1, c.fill.stops[0][1] * mul).toFixed(4)})`);
+  for (const [t, a] of c.fill.stops) g.addColorStop(Math.min(1, t), `rgba(${rgb},${Math.min(1, a * mul).toFixed(4)})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = g;
+  ctx.fillRect(n.x - R, n.y - R, 2 * R, 2 * R);
+  ctx.restore();
+}
+const hexRgb = (h) => {
+  const s = h.trim().replace("#", ""),
+    f = s.length === 3 ? s.replace(/./g, (c) => c + c) : s.slice(0, 6);
+  return [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16)).join(",");
+};
+/** Growth state of a path at scene age A and time T. r11.2: a recycling
+ * explorer unit replays its own growth on a 24-60 s cycle (owner: strands must
+ * visibly grow and fade back): it regrows in its original order, holds, then
+ * dies back in reverse (forks and hairs first, then the continuation retracts
+ * tip-first), and rests. The first growth is the natural one (age A). */
+function unitClock(P, units, A, T = A - START_AGE) {
+  if (P.unit < 0 || A >= 1e4) return { age: A, fade: 1, state: 1 };
+  const u = units[P.unit];
+  if (!u.period || u.period > 1e8 || !u.cyc) return { age: A, fade: 1, state: 1 };
+  const c = tipCycle(T + u.ph, u.cyc),
+    age = u.start + c.f * u.grow;
+  return age < A ? { age, fade: 1, state: c.state } : { age: A, fade: 1, state: 0 };
+}
+// r11.2 living hero periphery: explorer tips and fine hairs (see assignLife).
+const LIFE = Object.freeze({ TIP_P: 0.3, HAIR_P: 0.12, MIN_LEN: 50, TIP_MIN: 35, TIP_SPAN: 115, TIP_FRAC: 0.42, PERIOD: 16, PERIOD_SPAN: 30, FOLLOW_LAG: 3, FOLLOW_GAIN: 1.3 });
 
 export function createHero(canvas, { stage, state, reduce }) {
   let disposed = false,
@@ -970,10 +1366,10 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     ctx.globalAlpha = save;
   }
-  function drawCores(ctx, g, A) {
+  function drawCores(ctx, g, A, live = null, box = null) {
     // A broad soft glow over the colony centre (20-40 px), never a point soma.
     for (const c of g.colonies) {
-      const grow = smooth((A - c.start) / 10);
+      const grow = matGrow(c, A) * (live ?? 1);
       if (grow <= 0) continue;
       const n = c.node,
         r = Math.max(20, Math.min(40, c.R0 * 0.2)) * (0.6 + 0.4 * grow),
@@ -987,6 +1383,13 @@ export function createHero(canvas, { stage, state, reduce }) {
       ctx.beginPath();
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fill();
+      colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
+      if (c.fill2) colonyFill(ctx, { node: c.node, fill: c.fill2 }, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
+      if (box) {
+        const R = Math.max(r, c.fill?.r || 0, c.fill2?.r || 0) + 2;
+        grow_(box, [n.x - R, n.y - R, n.x + R, n.y + R]);
+      }
+      if (live === null) c.fillDrawn = !!c.fill;
     }
   }
   const mobile = () => L.mobile;
@@ -1009,6 +1412,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     job.onSlice?.();
     // Whole task, including the progressive bake: what a long-task observer sees.
     const spent = performance.now() - t;
+    if (spent > 30 && (scene.timings.slowSlices ||= []).length < 8) scene.timings.slowSlices.push([Math.round(spent), typeof result.value === "string" ? result.value : result.done ? "done" : "?"]);
     if (spent > (scene.timings.maxSlice || 0)) {
       scene.timings.maxSlice = spent;
       scene.timings.maxSliceAt = String(result.value ?? "done");
@@ -1049,10 +1453,23 @@ export function createHero(canvas, { stage, state, reduce }) {
   // head per growing tip are drawn on the live layer.
   const HEAD = 16, // px of rim glow behind each growing tip
     HEAD_CAP = 7000;
-  const growth = { age: -Infinity, scan: 0, pending: [], active: [], recent: [], commit: null, presentKey: null, coresDrawn: false, changed: false };
-  function growable(P, g) {
-    return !(P.unit >= 0 && g.units[P.unit]?.kind === "explorer");
+  const growth = { epoch: 0, age: -Infinity, scan: 0, pending: [], active: [], recent: [], commit: null, presentKey: null, coresDrawn: false, changed: false };
+  /** r11.2: before the life assignment (which needs the field) the intro
+   * already grows the hero. Paths that may become living are held to a safe
+   * static extent meanwhile: a tip candidate to its shortest possible base
+   * (pins only lengthen a base), a whole-hair or follower candidate not at
+   * all; so nothing living is ever baked into the static raster. Same hashes
+   * as assignLife. */
+  function preBase(P, g) {
+    return P.pre !== undefined ? P.pre : (P.pre = preBaseOf(P, g.paths));
   }
+  function growable(P, g) {
+    if (P.unit >= 0 && g.units[P.unit]?.kind === "explorer") return false;
+    if (!g.lifeAssigned) return preBase(P, g) > 0;
+    return !(P.dyn && (P.dyn.follow || !P.dyn.base));
+  }
+  // Static-raster length: living tips (r11.2) keep only their base in the raster.
+  const rasterLen = (P) => (P.dyn ? P.dyn.base : P.dyn === undefined && P.pre !== undefined ? Math.min(P.len, P.pre) : P.len);
   function resetGrowth(g) {
     sx.save();
     sx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1066,6 +1483,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     growth.commit = null;
     growth.coresDrawn = false;
     growth.age = -Infinity;
+    growth.epoch++;
   }
   const lerpAt = (P, m, s) => {
     const a = P.pts[m],
@@ -1117,7 +1535,8 @@ export function createHero(canvas, { stage, state, reduce }) {
     ctx.globalAlpha = 1;
   }
   const bakeGroups = new Map(),
-    liveGroups = new Map();
+    liveGroups = new Map(),
+    pulseGroups = new Map();
   /** Grow every started path to scene age A in the static raster. With a
    * deadline the work is resumable (returns false until A is complete). */
   function growStep(A, g, deadline = 0) {
@@ -1141,13 +1560,14 @@ export function createHero(canvas, { stage, state, reduce }) {
       broke = false;
     for (; i < act.length; i++) {
       const P = act[i],
-        e = Math.min(P.len, (A - P.t0) * P.v);
+        end = rasterLen(P),
+        e = Math.min(end, (A - P.t0 - (P.matShift || 0)) * P.v);
       if (e > P.drawn + 1e-6) {
         addPiece(bakeGroups, P, P.drawn, e);
         P.drawn = e;
         growth.changed = true;
       }
-      if (P.drawn >= P.len - 1e-6) done.push(P);
+      if (P.drawn >= end - 1e-6) done.push(P);
       else act[k++] = P;
       if (deadline && (i & 63) === 63 && performance.now() > deadline) {
         i++;
@@ -1163,9 +1583,15 @@ export function createHero(canvas, { stage, state, reduce }) {
       if (P.knot) drawKnot(sx, P.knot);
       growth.recent.push(P);
     }
-    if (!growth.coresDrawn && A >= Math.max(...g.colonies.map((c) => c.start)) + 40) {
+    // r11.2: cores and felt fills build up with the mats (drawn over the
+    // static raster by the compositor's hero blit, see drawIntroCores) and are
+    // baked into the raster once complete.
+    if (!growth.coresDrawn && A >= MAT_END + 4) {
       drawCores(sx, g, A);
       growth.coresDrawn = growth.changed = true;
+    } else if (!growth.coresDrawn && Math.floor(A) !== growth.coreStep) {
+      growth.coreStep = Math.floor(A); // the blit's core layer follows the age
+      growth.changed = true;
     }
     if (!broke) growth.age = A;
     return !broke;
@@ -1176,7 +1602,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     if (!growth.changed) return false;
     growth.changed = false;
     scene.hero.version++;
-    growth.commit = growth.active.map((P) => [P, P.drawn]).concat(growth.recent.map((P) => [P, P.len]));
+    growth.commit = growth.active.map((P) => [P, P.drawn]).concat(growth.recent.map((P) => [P, rasterLen(P)]));
     growth.recent = [];
     return true;
   }
@@ -1195,24 +1621,24 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     return out;
   }
+  function grow_(box, b) {
+    grow(box, b);
+  }
   function grow(box, b) {
     if (b[0] < box[0]) box[0] = b[0];
     if (b[1] < box[1]) box[1] = b[1];
     if (b[2] > box[2]) box[2] = b[2];
     if (b[3] > box[3]) box[3] = b[3];
   }
+  let liveSince = null;
   function drawLive(ctx, A, g, box, intro) {
     let active = 0,
       segs = 0;
-    for (const { P, age, fade } of liveAt(A, g)) {
-      const extent = (age - P.t0) * P.v;
-      if (extent < P.len) active++;
-      strokePath(ctx, P, extent, fade, age);
-      segs += P.pts.length;
-      grow(box, P.box);
-    }
     // Unpresented tails at base alpha, then the rim: brightest at the tip.
-    const rim = intro ? 1.25 : 0.9;
+    // r11.2: the rim heads fade in over 0.6 s once the compositor attaches
+    // (before, every growing tip lit up in one frame mid-intro).
+    liveSince ??= performance.now();
+    const rim = (intro ? 1.25 : 0.9) * smooth((performance.now() - liveSince) / 600);
     let heads = 0;
     for (const list of [growth.active, growth.recent])
       for (const P of list) {
@@ -1228,8 +1654,400 @@ export function createHero(canvas, { stage, state, reduce }) {
       }
     active += growth.active.length;
     flushPieces(ctx, liveGroups);
+
     return { active, segs, heads };
   }
+
+  /** r11.2: the static raster the intro drew before the build finished used
+   * provisional colony alphas (committed at the end of the build). Once the
+   * life assignment is in, the raster is re-baked offscreen with the final
+   * alphas, in short slices (each forced to raster before the task ends), up
+   * to exactly what the visible raster holds, then swapped in with one blit.
+   * Adding differences instead lost faint ink to 8-bit rounding. */
+  function* rebakeStatic(g) {
+    const epoch = growth.epoch,
+      off = document.createElement("canvas");
+    off.width = canvas.width;
+    off.height = canvas.height;
+    const ox = off.getContext("2d"),
+      groups = new Map();
+    ox.setTransform(sx.getTransform());
+    ox.globalCompositeOperation = light ? "source-over" : "lighter";
+    for (const P of g.paths) P.rd = 0;
+    let n = 0;
+    const catchUp = function* (sliced) {
+      let any = false,
+        pieces = 0,
+        t0 = performance.now();
+      for (const P of g.paths) {
+        const e = P.drawn || 0;
+        if (e > P.rd + 1e-6) {
+          addPiece(groups, P, P.rd, e);
+          P.rd = e;
+          any = true;
+          pieces++;
+        }
+        // A slice ends after ~250 pieces or 4 ms (paths with nothing new cost
+        // only a compare: a fixed 250-path slice took ~1000 frames per pass).
+        if (sliced && (pieces >= 250 || (++n & 255) === 0) && (pieces >= 250 || performance.now() - t0 > 4)) {
+          pieces = 0;
+          t0 = performance.now();
+          flushPieces(ox, groups);
+          ox.getImageData(0, 0, 1, 1); // raster this batch now, not all at the swap
+          yield "!rebake";
+          if (growth.epoch !== epoch) return false;
+        }
+      }
+      return any;
+    };
+    for (let pass = 0; pass < 4; pass++) {
+      const any = yield* catchUp(true);
+      if (growth.epoch !== epoch) return (off.width = off.height = 0);
+      if (!any) break;
+    }
+    // The swap: the last few pieces, knots, cores and felt fills, one blit.
+    for (const _ of catchUp(false));
+    flushPieces(ox, groups);
+    for (const P of g.paths) if (P.knot && P.drawn > 0 && P.drawn >= rasterLen(P) - 1e-6) drawKnot(ox, P.knot);
+    if (growth.coresDrawn) drawCores(ox, g, growth.age);
+    sx.save();
+    sx.setTransform(1, 0, 0, 1, 0, 0);
+    sx.globalCompositeOperation = "copy";
+    sx.globalAlpha = 1;
+    sx.drawImage(off, 0, 0);
+    sx.restore();
+    off.width = off.height = 0;
+    for (const P of g.paths) P.aOld = null;
+    growth.changed = true;
+    scene.timings.rebaked = performance.now() - begun;
+  }
+  /** r11.2: the last check of the owner's rule (densest at the point, never a
+   * fainter ring) on what the page draws. Once the intro is over, each
+   * colony's ESTABLISHED static raster (every static path fully grown, knots,
+   * cores, felt fills; the page's own stroke code and colours) is drawn
+   * offscreen in short tasks, its luminance measured in 8 px rings (median
+   * over 24 sectors), and any ring still fainter than the rings outside it
+   * (4% per ring) is lifted with a soft radial felt glow (three measured
+   * passes). The glow is drawn onto the hero now and kept on the colony
+   * (fill2) so rebuilds draw it with the cores. Dark only. */
+  const dips = { started: false, done: false };
+  function ringsOf(data, w, h, ox0, oy0, n, K, scale) {
+    const STEP = 8,
+      SECT = 24,
+      lin = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4),
+      sum = new Float64Array(K * SECT),
+      cnt = new Float64Array(K * SECT),
+      rgb = new Float64Array(K * 3),
+      rc = new Float64Array(K),
+      stride = Math.max(1, Math.round(scale));
+    for (let yy = 0; yy < h; yy += stride)
+      for (let xx = 0; xx < w; xx += stride) {
+        const dx = (ox0 + xx + 0.5) / scale - n.x,
+          dy = (oy0 + yy + 0.5) / scale - n.y,
+          k = Math.floor(Math.hypot(dx, dy) / STEP);
+        if (k >= K) continue;
+        const o = (yy * w + xx) * 4,
+          al = data[o + 3] / 255,
+          r = data[o] * al,
+          gg = data[o + 1] * al,
+          b = data[o + 2] * al,
+          cell = k * SECT + (Math.floor(((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI)) * SECT) % SECT);
+        sum[cell] += 0.2126 * lin(r) + 0.7152 * lin(gg) + 0.0722 * lin(b);
+        cnt[cell]++;
+        rgb[k * 3] += r;
+        rgb[k * 3 + 1] += gg;
+        rgb[k * 3 + 2] += b;
+        rc[k]++;
+      }
+    const M = [];
+    for (let k = 0; k < K; k++) {
+      const v = [];
+      for (let q = 0; q < SECT; q++) if (cnt[k * SECT + q]) v.push(sum[k * SECT + q] / cnt[k * SECT + q]);
+      v.sort((p, q) => p - q);
+      M.push(v.length ? (v[(v.length - 1) >> 1] + v[v.length >> 1]) / 2 : 0);
+    }
+    return { M, mean: (k) => [rgb[k * 3] / rc[k], rgb[k * 3 + 1] / rc[k], rgb[k * 3 + 2] / rc[k]], lin };
+  }
+  function* dipsGen(g) {
+    const glowRgb = hexRgb(palette.glow),
+      glow = glowRgb.split(",").map(Number),
+      groups = new Map();
+    for (const c of g.colonies) {
+      const n = c.node,
+        Rm = Math.min(200, 0.8 * c.R0),
+        K = Math.floor(Rm / 8),
+        R = Rm + 2,
+        S = Math.ceil(2 * R * d);
+      if (K < 3) continue;
+      const off = document.createElement("canvas"),
+        tmp = document.createElement("canvas");
+      off.width = off.height = tmp.width = tmp.height = S;
+      const ox = off.getContext("2d"),
+        tx = tmp.getContext("2d", { willReadFrequently: true });
+      ox.setTransform(d, 0, 0, d, -(n.x - R) * d, -(n.y - R) * d);
+      ox.globalCompositeOperation = "lighter";
+      let k = 0,
+        batch = 0;
+      for (const P of g.paths) {
+        if (++k % 2000 === 0) yield;
+        if (!growable(P, g) || P.box[0] > n.x + R || P.box[2] < n.x - R || P.box[1] > n.y + R || P.box[3] < n.y - R) continue;
+        addPiece(groups, P, 0, rasterLen(P));
+        if (P.knot) drawKnot(ox, P.knot);
+        if (++batch % 120 === 0) {
+          flushPieces(ox, groups);
+          ox.getImageData(0, 0, 1, 1); // raster this batch in this task
+          yield;
+        }
+      }
+      flushPieces(ox, groups);
+      const fill2 = c.fill2;
+      c.fill2 = null;
+      drawCores(ox, g, 1e9); // established cores and felt fills (without fill2)
+      c.fill2 = fill2;
+      ox.getImageData(0, 0, 1, 1);
+      yield;
+      const added = new Array(K).fill(0);
+      let first = null,
+        last = null;
+      // Up to 8 measured passes: raising one ring's glow also lifts its
+      // neighbours (gradient stops interpolate), so a ring next to a bump can
+      // take several passes (4 left a 5-7% bump at a 1920 colony).
+      const PASSES = 8;
+      for (let pass = 0; pass < PASSES; pass++) {
+        tx.globalCompositeOperation = "copy";
+        tx.setTransform(1, 0, 0, 1, 0, 0);
+        tx.drawImage(off, 0, 0);
+        tx.globalCompositeOperation = "lighter";
+        tx.setTransform(d, 0, 0, d, -(n.x - R) * d, -(n.y - R) * d);
+        if (added.some((v) => v > 0)) colonyFill(tx, { node: n, fill: { r: K * 8, stops: added.map((v, q) => [(q + 0.5) / K, v]) } }, glowRgb, 1);
+        const rings = ringsOf(tx.getImageData(0, 0, S, S).data, S, S, (n.x - R) * d, (n.y - R) * d, n, K, d),
+          M = rings.M;
+        first ??= M;
+        last = M;
+        yield;
+        if (pass === PASSES - 1) break;
+        const env = M.slice();
+        for (let q = K - 2; q >= 0; q--) env[q] = Math.max(M[q], env[q + 1] * 1.04);
+        let any = false;
+        for (let q = 0; q < K; q++) {
+          const need = env[q] - M[q];
+          if (need <= M[q] * 0.005) continue;
+          const [r, gg, b] = rings.mean(q),
+            L = (x, y, z) => 0.2126 * rings.lin(x) + 0.7152 * rings.lin(y) + 0.0722 * rings.lin(z),
+            slope = (L(Math.min(255, r + 0.01 * glow[0]), Math.min(255, gg + 0.01 * glow[1]), Math.min(255, b + 0.01 * glow[2])) - L(r, gg, b)) / 0.01;
+          if (slope > 1e-6) {
+            added[q] = Math.min(0.35, added[q] + (need / slope) * 0.9);
+            any = true;
+          }
+        }
+        if (!any) break;
+      }
+      off.width = off.height = tmp.width = tmp.height = 0;
+      c.dips = { before: first, after: last, added: added.slice() };
+      if (added.some((v) => v > 0)) {
+        const f = { r: K * 8, stops: added.map((v, q) => [(q + 0.5) / K, v]) };
+        sx.save();
+        sx.globalCompositeOperation = "lighter";
+        colonyFill(sx, { node: n, fill: f }, glowRgb, 1);
+        sx.restore();
+        c.fill2 = f;
+        growth.changed = true;
+      }
+      yield;
+    }
+  }
+  function startDips(g) {
+    dips.started = true;
+    // Light theme, or a re-mount whose colonies were already checked.
+    if (light || g.colonies.every((c) => c.dips)) return void (dips.done = true);
+    const gen = dipsGen(g),
+      ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      if (disposed) return;
+      const t0 = performance.now();
+      let r;
+      do r = gen.next();
+      while (!r.done && performance.now() - t0 < 4);
+      if (r.done) {
+        dips.done = true;
+        scene.timings.dipsDone = performance.now() - begun;
+      } else ch.port2.postMessage(0);
+    };
+    ch.port2.postMessage(0);
+  }
+  // ---- r11.2 passive life: living periphery on the compositor's life layer ----
+  let lifeStamp = 0;
+  const lifeGroups = new Map(),
+    RETREAT_STEPS = [0.75, 0.5, 0.28, 0.1];
+  /** Visible arc and cycle state of a living (non-unit) path, memoised per stamp. */
+  function heroVis(P, A, T) {
+    const y = P.dyn;
+    if (y.stamp === lifeStamp) return y;
+    y.stamp = lifeStamp;
+    const nat = Math.max(0, Math.min(P.len, (A - P.t0) * P.v));
+    if (A >= 1e4) {
+      y.vis = P.len;
+      y.state = 1;
+    } else if (y.follow) {
+      const q = heroVis(y.parent, A, T);
+      y.vis = Math.min(nat, Math.max(0, Math.min(P.len, (q.vis - y.at - LIFE.FOLLOW_LAG) * LIFE.FOLLOW_GAIN)));
+      y.state = q.state;
+    } else {
+      const c = tipCycle(T + y.phase, y.period, y.g, y.h, y.r),
+        cyc = y.base + (P.len - y.base) * c.f;
+      y.vis = Math.min(nat, cyc);
+      y.state = nat < cyc ? 0 : c.state;
+    }
+    return y;
+  }
+  /** Visible arc of any path (static, unit, living tip or follower). */
+  function visibleArc(P, A, T, g) {
+    if (P.unit >= 0) return Math.max(0, Math.min(P.len, (unitClock(P, g.units, A, T).age - P.t0) * P.v));
+    if (P.dyn) return heroVis(P, A, T).vis;
+    return Math.max(0, Math.min(P.len, (A - P.t0) * P.v));
+  }
+  /** visibleArc memoised per path and lifeStamp (the crest visits many
+   * segments of one path per frame). */
+  function arcNow(P, A, T, g) {
+    if (P.arcStamp !== lifeStamp) {
+      P.arcStamp = lifeStamp;
+      P.arcVal = visibleArc(P, A, T, g);
+    }
+    return P.arcVal;
+  }
+  function lifeStroke(P, s0, s1, state, glow) {
+    if (s1 <= s0 + 0.05) return 0;
+    if (state === 2) {
+      const F = Math.min(30, (s1 - s0) * 0.6 + 3),
+        q = F / RETREAT_STEPS.length;
+      addPiece(lifeGroups, P, s0, s1 - F);
+      RETREAT_STEPS.forEach((m, k) => addPiece(lifeGroups, P, s1 - F + k * q, s1 - F + (k + 1) * q, m));
+    } else {
+      addPiece(lifeGroups, P, s0, s1);
+      if (state === 0 && glow && s1 < P.len - 0.5) addPiece(lifeGroups, P, Math.max(s0, s1 - HEAD * 0.6), s1, 0.9, true);
+    }
+    return 1;
+  }
+  /** The living periphery at scene age A, time T (life layer, hero coordinates). */
+  let lifeBins = null,
+    lifeBinsOf = null;
+  /** Living paths whose box meets [y0, y1] (64 px bins of hero y). */
+  function lifeNear(g, y0, y1) {
+    if (!Number.isFinite(y0) || !Number.isFinite(y1)) return g.lifeList;
+    if (lifeBinsOf !== g.lifeList) {
+      lifeBinsOf = g.lifeList;
+      lifeBins = new Map();
+      for (const P of g.lifeList)
+        for (let b = Math.floor(P.box[1] / 64); b <= Math.floor(P.box[3] / 64); b++) (lifeBins.get(b) || lifeBins.set(b, []).get(b)).push(P);
+    }
+    const out = new Set();
+    for (let b = Math.floor(y0 / 64); b <= Math.floor(y1 / 64); b++) for (const P of lifeBins.get(b) || []) out.add(P);
+    return out;
+  }
+  function drawLife(ctx, T, A, g, x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity) {
+    lifeStamp++;
+    let n = 0;
+    for (const P of lifeNear(g, y0, y1)) {
+      if (P.box[2] < x0 - 2 || P.box[0] > x1 + 2 || P.box[3] < y0 - 2 || P.box[1] > y1 + 2) continue;
+      if (P.unit >= 0) {
+        const c = unitClock(P, g.units, A, T);
+        n += lifeStroke(P, 0, Math.max(0, Math.min(P.len, (c.age - P.t0) * P.v)), c.state, P.kind === "explorer");
+      } else {
+        const y = heroVis(P, A, T);
+        n += lifeStroke(P, y.follow ? 0 : y.base, y.vis, y.state, !y.follow && P.kind === "explorer");
+      }
+    }
+    flushPieces(ctx, lifeGroups);
+    return n;
+  }
+  /** r11.2: which paths live. ~62% of explorer hyphae get a living distal tip
+   * (35-150 px); half the fine hairs on explorers regrow whole; laterals and
+   * hairs rooted on a living tip follow it; recycling explorer units replay
+   * their growth (unitClock). Tips never contain field seeds or vertices other
+   * paths fused into, and hold no knots. Deterministic hashes only. */
+  function* assignLife(g) {
+    const fieldV = new Set();
+    for (const p of g.field.strands) {
+      fieldV.add(p.points[0].id);
+      fieldV.add(p.points.at(-1).id);
+    }
+    const h = (P, m) => hash01(P.id * 31 + m * 7919 + 101);
+    for (const u of g.units)
+      if (u.kind === "explorer" && u.paths.length && u.period < 1e8) {
+        u.cyc = 24 + 36 * hash01(u.id * 29 + 3);
+        u.ph = hash01(u.id * 37 + 7) * u.cyc;
+      }
+    g.lifeList = [];
+    let n = 0;
+    for (const P of g.paths) {
+      if (++n % 1500 === 0 && budget()) yield "life";
+      P.dyn = null;
+      if (P.unit >= 0) {
+        if (g.units[P.unit].cyc) g.lifeList.push(P);
+        continue;
+      }
+      if (P.knot || P.cord >= 0) continue;
+      const v0 = P.pts[0],
+        par = v0.owner >= 0 && v0.owner !== P.id ? g.paths[v0.owner] : null;
+      if (par?.dyn) {
+        const i = par.pts.indexOf(v0),
+          at = i >= 0 ? par.arcs[i] : 0;
+        if (at >= (par.dyn.follow ? 0 : par.dyn.base) - 1) {
+          P.dyn = { follow: true, parent: par, at, base: 0 };
+          g.lifeList.push(P);
+          continue;
+        }
+      }
+      const cycle = (len, slow = false) => {
+          const period0 = slow ? 40 + 50 * h(P, 4) : LIFE.PERIOD + LIFE.PERIOD_SPAN * h(P, 4),
+            y = lifeTiming(len, period0, h(P, 6), h(P, 7), h(P, 8));
+          return { ...y, phase: h(P, 5) * y.period };
+        };
+      if (P.kind === "explorer" && !P.fused && P.len >= LIFE.MIN_LEN && h(P, 1) < LIFE.TIP_P) {
+        let base = P.len - Math.min(P.len * LIFE.TIP_FRAC, LIFE.TIP_MIN + LIFE.TIP_SPAN * h(P, 2));
+        for (let i = 1; i < P.pts.length; i++) {
+          if (P.arcs[i] <= base - 4) continue;
+          const v = P.pts[i];
+          let pin = fieldV.has(v.id);
+          for (const e of v.edges) {
+            if (pin) break;
+            const sg = g.ss[e];
+            if (sg.path === P) continue;
+            pin = !!sg.field || !(sg.path && sg.path.pts[0] === v);
+          }
+          if (pin) base = Math.max(base, P.arcs[i] + 4);
+        }
+        if (base <= P.len - 20) {
+          P.dyn = { base, ...cycle(P.len - base) };
+          g.lifeList.push(P);
+        }
+      } else if ((P.kind === "explorer-hair" || (P.kind === "hair" && par?.kind === "explorer" && par.unit < 0)) && h(P, 3) < LIFE.HAIR_P) {
+        P.dyn = { base: 0, ...cycle(P.len, true) };
+        g.lifeList.push(P);
+      }
+    }
+  }
+  /** Per route: the field-leak list and the laid-late/living list, in arrival
+   * order (a frame visits only the crest window), built in slices. */
+  function* routeLists(g) {
+    for (const r of g.routes) {
+      r.fieldList = [];
+      r.lateList = [];
+      let n = 0;
+      for (const v of r.list) {
+        if (++n % 4000 === 0 && budget()) yield "route-lists";
+        const s = g.ss[v.segment];
+        if (s.field) {
+          if (!s.fieldPath?.margin) r.fieldList.push(v);
+        } else if (s.birth > START_AGE - 5 || (s.path && s.path.unit >= 0 && g.units[s.path.unit].period < 1e8) || livingSeg(s)) r.lateList.push(v);
+      }
+      yield "route-lists";
+      r.lateList.sort((a, b) => a.arrival - b.arrival);
+      yield "route-lists";
+    }
+  }
+  /** Route segments on living parts never enter cached pulse sprites. */
+  const livingSeg = (s) => !!s.path?.dyn && (s.path.dyn.follow || !s.path.dyn.base || s.path.arcs[s.index + 1] > s.path.dyn.base);
 
   // ---- arrival bloom: radial bands, the ring travels outward to the rim ----
   function* makeBlooms(g, out) {
@@ -1244,7 +2062,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     let n = 0;
     for (const P of g.paths) {
       if (++n % 2000 === 0) yield "bloom";
-      if (P.unit >= 0 || P.cord >= 0 || P.kind === "explorer" || P.t0 >= START_AGE - 10) continue;
+      if (P.unit >= 0 || P.dyn || P.cord >= 0 || P.kind === "explorer" || P.t0 >= START_AGE - 10) continue;
       const bl = blooms[P.pts[0].source];
       if (!bl) continue;
       const nx = bl.node.x,
@@ -1375,7 +2193,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           list.push({ segment: s.id, arrival, fine: dd, amp, highway });
           // Only segments already mature on arrival enter cached sprites;
           // later growth glows as live strokes once it has been laid.
-          if (s.field || s.birth > START_AGE - 5 || (s.path && s.path.unit >= 0 && g.units[s.path.unit].period < 1e8)) continue;
+          if (s.field || s.birth > START_AGE - 5 || (s.path && s.path.unit >= 0 && g.units[s.path.unit].period < 1e8) || livingSeg(s)) continue;
           if (!highway) {
             // r11 growth residue: coarse arrival bands x near/far from the cord.
             const far = dd >= 160 ? 1 : 0,
@@ -1613,7 +2431,10 @@ export function createHero(canvas, { stage, state, reduce }) {
     let drawn = 0,
       active = 0;
     const t = ((T % sched.period) + sched.period) % sched.period;
+    const DT = window.__dbgT, dq = (k, t0) => { if (!DT) return; ctx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
+    let d0 = performance.now(); /* DIAG-TEMP */
     drawResidue(ctx, t, sched, box);
+    dq("p.residue", d0); d0 = performance.now(); /* DIAG-TEMP */
     const trip = sched.trips.filter((p) => t >= p.start && t < p.start + p.route.arrivalMax + TAIL).at(-1);
     if (trip) {
       active = 1;
@@ -1636,24 +2457,36 @@ export function createHero(canvas, { stage, state, reduce }) {
         }
         drawn++;
       }
-      // Laid-late segments glow as strokes, and only once grown.
-      ctx.strokeStyle = palette.core;
-      ctx.lineCap = "butt";
-      for (const item of r.lateList) {
-        const dt = age - item.arrival;
-        if (dt < 0 || dt > TAIL) continue;
-        const s = g.ss[item.segment],
-          P = s.path,
-          { age: local, fade } = P ? unitClock(P, g.units, A) : { age: A, fade: 1 };
-        if (fade < 0.5 || (P && (local - P.t0) * P.v < P.arcs[s.index + 1])) continue;
-        ctx.globalAlpha = envelope(dt) * item.amp * (light ? 0.3 : 0.8) * fade;
-        grow(box, [Math.min(s.a.x, s.b.x) - 2, Math.min(s.a.y, s.b.y) - 2, Math.max(s.a.x, s.b.x) + 2, Math.max(s.a.y, s.b.y) + 2]);
-        ctx.lineWidth = Math.max(0.45, s.width * 1.5);
-        ctx.beginPath();
-        ctx.moveTo(s.a.x, s.a.y);
-        ctx.lineTo(s.b.x, s.b.y);
-        ctx.stroke();
+      dq("p.crest", d0); d0 = performance.now(); /* DIAG-TEMP */
+      // Laid-late and living segments glow as strokes, only where drawn now
+      // (r11.2: batched into a few quantised groups).
+      lifeStamp++;
+      const late = r.lateList;
+      let k0 = 0,
+        k1 = late.length;
+      while (k0 < k1) {
+        const m = (k0 + k1) >> 1;
+        if (late[m].arrival < age - TAIL) k0 = m + 1;
+        else k1 = m;
       }
+      for (let k = k0; k < late.length; k++) {
+        const item = late[k],
+          dt = age - item.arrival;
+        if (dt < 0) break;
+        const s = g.ss[item.segment],
+          P = s.path;
+        if (P && arcNow(P, A, T, g) < P.arcs[s.index + 1]) continue;
+        const ga = Math.min(1, envelope(dt) * item.amp * (light ? 0.3 : 0.8)),
+          key = 1e6 + Math.round(ga * 120) * 1000 + Math.round(Math.max(0.45, s.width * 1.5) * 20);
+        if (ga < 0.004) continue;
+        let path = pulseGroups.get(key);
+        if (!path) pulseGroups.set(key, (path = new Path2D()));
+        path.moveTo(s.a.x, s.a.y);
+        path.lineTo(s.b.x, s.b.y);
+        grow(box, [Math.min(s.a.x, s.b.x) - 2, Math.min(s.a.y, s.b.y) - 2, Math.max(s.a.x, s.b.x) + 2, Math.max(s.a.y, s.b.y) + 2]);
+      }
+      flushPieces(ctx, pulseGroups);
+      dq("p.late", d0); d0 = performance.now(); if (DT) DT.lateN = (DT.lateN || 0) + late.length - k0; /* DIAG-TEMP */
       for (const landing of r.landings) {
         // r11: no bloom at the departing node (that read as a disc lighting up
         // before the ripple); the pulse leaves as the ripple along the hyphae.
@@ -1691,7 +2524,11 @@ export function createHero(canvas, { stage, state, reduce }) {
     document.getElementById("page-mycelium")?.after(breathBox);
     const R = rng("r10-breath-phase");
     for (const b of scene.blooms) {
-      const segs = b.bands.filter((x) => x.r0 >= 0.32 && x.r1 <= 1.05).flatMap((x) => x.segs);
+      // r11.2: the whole colony breathes, strongest at its core and fading
+      // outward (a 0.32-1.05 R0 annulus alone read as a brighter ring).
+      const segs = b.bands.filter((x) => x.r1 <= 1.05).flatMap((x) =>
+        x.segs.map(([a, q, w, al]) => [a, q, w, al * (1 - 0.65 * smooth((Math.hypot(q.x - b.node.x, q.y - b.node.y) / b.R0 - 0.1) / 0.95))]),
+      );
       if (!segs.length) continue;
       const r = b.R0 * 1.05,
         im = document.createElement("canvas"),
@@ -1734,6 +2571,23 @@ export function createHero(canvas, { stage, state, reduce }) {
   }
   const introRunning = () => intro.on && intro.override === null && intro.skipAt === null && scene.clock.elapsed < INTRO_S + 0.25 * INTRO_SCALE;
   scene.ageAt = ageAt;
+  /** Seconds into the intro at which the hero reaches age A (inverse map). */
+  /** Hero age at which vertex v is shown in the load-in (mat schedule). */
+  scene.vertexAge = (v) => {
+    const P = scene.geometry?.paths?.[v.owner] || buildOut.paths?.[v.owner];
+    return (v.birth || 0) + (P?.matShift || 0);
+  };
+  /** The compositor's hero blit adds the colony cores and felt fills while
+   * they still build up (same additive composite as the baked raster). */
+  scene.drawIntroCores = (ctx) => {
+    const g = scene.geometry || buildOut;
+    if (growth.coresDrawn || !g.colonies || !g.protect || !(growth.age > 0)) return;
+    ctx.save();
+    ctx.globalCompositeOperation = light ? "source-over" : "lighter";
+    drawCores(ctx, g, growth.age, 1);
+    ctx.restore();
+  };
+  scene.introTimeOfAge = (A) => (A >= START_AGE ? INTRO_S : INTRO_S * (1 - Math.pow(Math.max(0, 1 - A / START_AGE), 1 / INTRO_POW)));
   scene.intro = intro;
   // Compositors that predate ageAt read startAge (A = startAge + t); the
   // __setGrowthAge diagnostic assigns it, which pins the age mapping.
@@ -1784,14 +2638,21 @@ export function createHero(canvas, { stage, state, reduce }) {
       }));
       scene.timings.field = performance.now() - begun;
       if (disposed) return;
-      g.routes = await run(buildSignalRoutes(g));
-      for (const r of g.routes) {
-        r.fieldList = r.list.filter((v) => g.ss[v.segment].field && !g.ss[v.segment].fieldPath?.margin);
-        r.lateList = r.list.filter((v) => {
-          const s = g.ss[v.segment];
-          return !s.field && (s.birth > START_AGE - 5 || (s.path && s.path.unit >= 0 && g.units[s.path.unit].period < 1e8));
-        });
+      await run(assignLife(g));
+      if (disposed) return;
+      // Paths held back for the life assignment resume their static growth.
+      g.lifeAssigned = true;
+      const queued = new Set([...growth.pending, ...growth.active]);
+      for (const P of g.paths) {
+        P.pre = undefined;
+        if (!queued.has(P) && growable(P, g) && P.drawn < rasterLen(P) - 1e-6) growth.pending.push(P);
       }
+      // Final colony alphas over the whole static raster (see rebakeStatic).
+      await run(rebakeStatic(g));
+      if (disposed) return;
+      g.routes = await run(buildSignalRoutes(g));
+      if (disposed) return;
+      await run(routeLists(g));
       scene.timings.routes = performance.now() - begun;
       geometryCache.clear();
       geometryCache.set(L.key, g);
@@ -1811,7 +2672,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     if (disposed) return;
     scene.geometry = g;
-    g.livePool = g.paths.filter((P) => !growable(P, g));
+    g.livePool = g.paths.filter((P) => P.unit >= 0 && g.units[P.unit]?.kind === "explorer");
     const bloomOut = {};
     await run(makeBlooms(g, bloomOut));
     scene.blooms = bloomOut.blooms;
@@ -1856,16 +2717,24 @@ export function createHero(canvas, { stage, state, reduce }) {
       drawLive(ctx, T, A, box) {
         // The previous present has been composited: drop its live tails.
         commitPresented();
+        lifeStamp++;
         const running = introRunning();
         frame++;
+        const DT = window.__dbgT, dq = (k, t0, cx) => { if (!DT) return; if (cx) cx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
+        let d0 = performance.now(); /* DIAG-TEMP */
         growStep(A, g, performance.now() + 10);
+        dq("h.grow", d0, sx); d0 = performance.now(); /* DIAG-TEMP */
         const key = running ? frame : Math.floor(A / 4);
         if (key !== growth.presentKey) {
           growth.presentKey = key;
           present();
         }
+        dq("h.present", d0, sx); d0 = performance.now(); /* DIAG-TEMP */
         const s = drawLive(ctx, A, g, box, running);
-        const p = T < -1e5 ? 0 : drawPulses(ctx, T, A, g, sched, box);
+        dq("h.rim", d0, ctx); d0 = performance.now(); /* DIAG-TEMP */
+        if (!dips.started && !running && g.lifeAssigned && growth.coresDrawn && A >= START_AGE && scene.timings.rebaked) startDips(g);
+        const p = T < -1e5 || window.__dbgNoHeroPulse ? 0 : drawPulses(ctx, T, A, g, sched, box); /* DIAG-TEMP */
+        dq("h.pulses", d0, ctx); /* DIAG-TEMP */
         return { ...s, pulses: p };
       },
       // Running frames grow in drawLive; exact (frozen/diagnostic) ages grow
@@ -1878,11 +2747,84 @@ export function createHero(canvas, { stage, state, reduce }) {
         return changed;
       },
       liveCount: (A) => liveAt(A, g).length + growth.active.length,
+      // r11.2: the living periphery, drawn by the compositor's life layer.
+      drawLife: (ctx, T, A, x0, x1, y0, y1) => drawLife(ctx, T, A, g, x0, x1, y0, y1),
+      /** Bounds (hero coords) of the living parts that moved since the last
+       * call (the compositor repaints only the life tiles they touch). */
+      lifeChanges: (T, A, all = false) => {
+        lifeStamp++;
+        const out = [];
+        for (const P of g.lifeList) {
+          let vis, state, s0;
+          if (P.unit >= 0) {
+            const c = unitClock(P, g.units, A, T);
+            vis = Math.max(0, Math.min(P.len, (c.age - P.t0) * P.v));
+            state = c.state;
+            s0 = 0;
+          } else {
+            const y = heroVis(P, A, T);
+            vis = y.vis;
+            state = y.state;
+            s0 = y.follow ? 0 : y.base;
+          }
+          const last = P.lifeShown;
+          if (last && !all && Math.abs(last.vis - vis) < 0.3 && last.state === state) continue;
+          const lo = Math.max(0, Math.min(last ? last.vis : s0, vis) - 40),
+            hi = Math.max(last ? last.vis : vis, vis) + 4;
+          P.lifeShown = { vis, state };
+          if (all) continue;
+          let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+          for (let i = 0; i < P.pts.length; i++) {
+            if (P.arcs[i] < lo - 2 && (i + 1 >= P.pts.length || P.arcs[i + 1] < lo)) continue;
+            if (P.arcs[i] > hi + 2) break;
+            const q = P.pts[i];
+            if (q.x < bx0) bx0 = q.x;
+            if (q.y < by0) by0 = q.y;
+            if (q.x > bx1) bx1 = q.x;
+            if (q.y > by1) by1 = q.y;
+          }
+          if (bx0 < Infinity) out.push([bx0 - 6, by0 - 6, bx1 + 6, by1 + 6]);
+        }
+        return out;
+      },
+      growthState: () => ({ age: growth.age, active: growth.active.length, pending: growth.pending.length, nextT0: Math.min(...growth.pending.map((P) => P.t0)), lastDone: Math.max(...g.paths.filter((P) => growable(P, g)).map((P) => P.t0 + rasterLen(P) / P.v)), startAge: START_AGE, dips: dips.done }),
+      visibleArcs: (list, T) => {
+        lifeStamp++;
+        // As the compositor: reduced motion shows the established state (A = 1e5).
+        const A = reduce.matches ? 1e5 : ageAt(T);
+        return list.map((P) => visibleArc(P, A, T, g));
+      },
+      lifeStats: () => {
+        const own = g.lifeList.filter((P) => P.dyn && !P.dyn.follow);
+        return { living: g.lifeList.length, units: g.lifeList.filter((P) => P.unit >= 0).length, tips: own.filter((P) => P.dyn.base > 0).length, wholeHairs: own.filter((P) => !P.dyn.base).length, followers: g.lifeList.filter((P) => P.dyn?.follow).length };
+      },
       freezeBreath,
       pulseEnvelope: envelope,
       pulseTail: TAIL,
-      unitClock: (P, A) => unitClock(P, g.units, A),
+      unitClock: (P, A, T) => unitClock(P, g.units, A, T),
     });
+    /** r11.2 load-in probe: share of each colony's mat ink (radiating colony
+     * hyphae, cotton, mat hyphae and their hairs; drawn length x alpha) that
+     * is in the static raster now, plus the core/felt-fill build-up. */
+    const matPaths = g.colonies.map(() => []);
+    for (const P of g.paths) {
+      if (!(P.matShift > 0) || !growable(P, g)) continue;
+      const v = P.pts[0],
+        ci = g.colonies.findIndex((c) => Math.hypot(v.x - c.node.x, v.y - c.node.y) < c.R0 * 1.2);
+      if (ci >= 0) matPaths[ci].push(P);
+    }
+    window.__colonyMatProbe = () =>
+      g.colonies.map((c, i) => {
+        let have = 0,
+          all = 0;
+        for (const P of matPaths[i]) {
+          const L = rasterLen(P),
+            a = P.a[P.a.length >> 1] || 0.1;
+          all += L * a;
+          have += Math.min(L, P.drawn || 0) * a;
+        }
+        return { ink: all ? have / all : 1, cores: growth.coresDrawn ? 1 : matGrow(c, growth.age), paths: matPaths[i].length };
+      });
     window.__growthGeometry = { nodes: g.nodes.map((n) => ({ x: n.x, y: n.y, id: n.source })), cords: g.linkCords.map((c) => ({ from: c.a.source, to: c.b.source, length: c.length })), segments: g.ss.length };
     let rootPaths = null;
     Object.defineProperty(window, "__rootPaths", {
@@ -1894,23 +2836,38 @@ export function createHero(canvas, { stage, state, reduce }) {
     window.__fusionEvents = g.paths.filter((P) => P.fused).slice(0, 2000).map((P) => ({ x: P.pts.at(-1).x, y: P.pts.at(-1).y, birth: P.done, degree: P.pts.at(-1).edges.length }));
     window.__dendriticProbe = (T) => {
       const A = START_AGE + T;
-      let activeTips = 0;
-      for (const P of g.paths) {
-        const { age, fade } = unitClock(P, g.units, A);
-        if (fade > 0 && age >= P.t0 && (age - P.t0) * P.v < P.len) activeTips++;
-      }
-      const fused = g.paths.filter((P) => P.fused && unitClock(P, g.units, A).age >= P.done);
-      // No tip retraction: drawn extent never decreases between frames while visible.
-      let regressingTips = 0;
-      for (const P of g.paths) {
-        const a = unitClock(P, g.units, A),
-          b = unitClock(P, g.units, A + 1 / 60);
-        if (a.fade < 0.8 || b.fade < 0.8) continue;
-        const ea = Math.min(P.len, Math.max(0, (a.age - P.t0) * P.v)),
-          eb = Math.min(P.len, Math.max(0, (b.age - P.t0) * P.v));
-        if (eb < ea - 1e-6) regressingTips++;
-      }
-      return { activeTips, regressingTips, fusions: fused.length, connectedSplits: fused.filter((P) => P.pts.at(-1).edges.length >= 3).length };
+      // r11.2: living tips die back tip-first in their retreat phase (owner);
+      // outside it a drawn extent never decreases between frames.
+      const sample = (a, t) => {
+        lifeStamp++;
+        return g.paths.map((P) => {
+          if (P.unit >= 0) {
+            const c = unitClock(P, g.units, a, t);
+            return [Math.min(P.len, Math.max(0, (c.age - P.t0) * P.v)), c.state];
+          }
+          if (P.dyn) {
+            const y = heroVis(P, a, t);
+            return [y.vis, y.state];
+          }
+          return [Math.min(P.len, Math.max(0, (a - P.t0) * P.v)), 1];
+        });
+      };
+      const now = sample(A, T),
+        next = sample(A + 1 / 60, T + 1 / 60);
+      let activeTips = 0,
+        regressingTips = 0,
+        retreatingTips = 0;
+      g.paths.forEach((P, i) => {
+        const [ea, sa] = now[i],
+          [eb, sb] = next[i];
+        if (ea > 0 && ea < P.len && eb > ea) activeTips++;
+        if (eb < ea - 1e-6) {
+          if (sa === 2 || sb === 2) retreatingTips++;
+          else regressingTips++;
+        }
+      });
+      const fused = g.paths.filter((P, i) => P.fused && now[i][0] >= P.len - 1e-6);
+      return { activeTips, regressingTips, retreatingTips, fusions: fused.length, connectedSplits: fused.filter((P) => P.pts.at(-1).edges.length >= 3).length };
     };
     window.__cordAudit = g.cords.map((C) => ({ id: C.id, link: C.link, fibres: C.fibres, w0: C.width0, w1: C.width1, length: C.length, brush: C.brush }));
     // r11 item 3: fuzz along persistent strands (hairs whose base lies on the strand).

@@ -10,7 +10,7 @@
  * transforms on scroll (never re-rastered on scroll), and a viewport-sized live
  * layer (fronts, pulses, blooms).
  */
-import { rng, gauss, smooth, persistWalk, measurePaths, auditPaths, sceneClock, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
+import { rng, gauss, hash01, smooth, persistWalk, measurePaths, auditPaths, sceneClock, tipCycle, lifeTiming, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 
 function contentBounds(offset = 0) {
   const main = document.querySelector("main"),
@@ -167,8 +167,10 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
  * mat, their laterals, field threads crossing it) fades out inside the mat,
  * from full strength FADE_R1 px from the vertex to zero at FADE_R0, so nothing
  * converges on a bright point. Drawing only: graph, routes and RNG unchanged. */
-const FADE_R0 = 11,
-  FADE_R1 = 32;
+const MAT_R = 24, // r11.2 dense felt core radius of a margin colony (CSS px)
+  MAT_FELT = 260;
+const FADE_R0 = 4, // r11.2: inside the denser felt core (r11.1: 11 / 32 left a visible gap)
+  FADE_R1 = 18;
 
 /** Generator: lays the field into the shared graph; returns the field record. */
 export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, h, top: pageTop = 0, budget = () => false, seedOk = () => true }) {
@@ -330,6 +332,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
 
   // Minor margin colonies: small asymmetric tufts dissolving into ref-8 hyphae.
   const marginRoutes = [],
+    mats = [],
     marginKnots = [],
     marginDensityRatio = 0.4;
   const join = (a, b, width = 0.9) => {
@@ -407,7 +410,10 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
         // and exits at a scattered rim point, so nothing converges on one point.
         const spines = [fan, fan + Math.PI].map((h, k) => {
           const p = tuft(curl(centre, h + gauss(R) * 0.5, k ? 12 + R() * 8 : 22 + R() * 12, 0.3), 0.3, 0.5);
-          if (!k) p.haze = lobes; // the broad soft glow of the mat (no peak at the centre)
+          if (!k) {
+            p.haze = lobes; // the broad soft glow of the mat (no peak at the centre)
+            mats.push({ centre, lobes, fan, haze: p });
+          }
           return p.points.slice(2);
         });
         const hubs = spines.flat();
@@ -549,6 +555,40 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     }
     power.push(re * re + im * im);
   }
+  // r11.2 (owner): margin colonies need more permanent density around their
+  // points, like a smaller hero colony, with density falling monotonically
+  // from the centre (no fainter ring) and every attached strand visibly
+  // joining the mat. A centre-heavy felt core (own RNG stream, laid after the
+  // web so no other geometry or stream moves) and a soft central haze lobe.
+  const feltR = rng("r112-margin-felt");
+  for (const m of mats) {
+    const { centre, fan } = m;
+    for (let j = 0; j < MAT_FELT; j++) {
+      const rr = MAT_R * Math.pow(feltR(), 1.6),
+        o = feltR() * 6.283,
+        u = rr / MAT_R,
+        len = 5 + feltR() * 11 * (1 - 0.4 * u),
+        h = u < 0.45 ? feltR() * 6.283 : o + gauss(feltR) * 0.9, // tangled core, outward-leaning rim (no radial star)
+        pts = [{ x: centre.x + Math.cos(o) * rr, y: centre.y + Math.sin(o) * rr }];
+      let a = h,
+        tw = gauss(feltR) * 0.25;
+      for (let k = 0, n = Math.max(3, Math.ceil(len / 1.8)); k < n; k++) {
+        tw = tw * 0.8 + gauss(feltR) * 0.14;
+        a += tw;
+        const q = pts.at(-1);
+        pts.push({ x: q.x + (Math.cos(a) * len) / n, y: q.y + (Math.sin(a) * len) / n });
+      }
+      const t = add(pts, { width: 0.2 + feltR() * 0.18, alpha: 0.8 * (1 - 0.4 * u), margin: true });
+      t.hair = true;
+      t.tuft = true;
+      t.marginRoot = centre;
+      t.introStart = feltR() * 24 * u;
+    }
+    void fan;
+    // A central lobe makes the mat's glow peak at its point and fall off.
+    m.lobes.push({ x: centre.x, y: centre.y, r: MAT_R * 0.95 }, { x: centre.x, y: centre.y, r: MAT_R * 3.2, k: 1.7 });
+    budget() && (yield "margin-felt");
+  }
   // Strands crossing a colony core (not its own felt) dissolve there too.
   if (marginKnots.length)
     for (const p of strands) {
@@ -566,6 +606,27 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       }
       budget() && (yield "core-fade");
     }
+  // r11.2 cascade (owner: a hero pulse "slowly extend all the way down the
+  // sides of the page as it ... hits each node"): each side's last colony joins
+  // the first colony of the next page copy (the field repeats every `height`),
+  // so a pulse can relay colony by colony down the whole page. Own RNG stream,
+  // laid last: no other geometry or stream moves.
+  const wrapR = rng("r112-margin-wrap");
+  for (const r of marginRoutes) {
+    const a = r.knots.at(-1),
+      f = r.knots[0],
+      b = vertex(f.x, f.y + height, 0),
+      raw = persistWalk(a, Math.atan2(b.y - a.y, b.x - a.x), Math.hypot(b.x - a.x, b.y - a.y), wrapR, { k: 0.016, run: 60, jit: 0.025 }),
+      last = raw.at(-1),
+      pts = raw.map((q, i) => ({ x: q.x + ((b.x - last.x) * i) / (raw.length - 1), y: q.y + ((b.y - last.y) * i) / (raw.length - 1) }));
+    pts[0] = a;
+    pts[pts.length - 1] = b;
+    const p = add(pts, { width: 1.25, alpha: 0.95, margin: true });
+    p.introStart = 0;
+    p.endFade = [a, b]; // dissolves into both colony mats (b is the next copy's first colony)
+    p.wrap = true;
+    r.wrap = p;
+  }
   yield "knots";
   const hyphalKnots = placeKnots({ strands, junctions, marginKnots, layout, w, top, height });
   const rootAudit = {
@@ -578,20 +639,57 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   };
 }
 
-function life(p, t, reduce) {
-  if (p.static || reduce) return { extent: p.points.length - 1, alpha: p.alpha };
-  const phase = (t * 1.2 + p.phase) % p.period,
-    local = phase - 5 - p.birth;
-  // Dims in place over the last 20 s of a period; the laid path never retracts.
-  const fade = 1 - smooth((phase - (p.period - 22)) / 20);
-  return { extent: Math.max(0, Math.min(p.points.length - 1, local / 0.5)), alpha: p.alpha * Math.max(0, Math.min(1, local / 2)) * fade };
-}
+/** r11.2 passive life (owner: "strands still don't seem to be growing/fading
+ * much passively"). About 55% of the field and margin hyphae carry a living
+ * distal tip (35-150 px) and ~60% of the static laterals (orders 1-2) regrow
+ * whole; each tip regrows
+ * (glowing slightly), holds, dies back tip-first with a fading tail, rests,
+ * on its own 20-60 s period and phase. Laterals rooted on a living tip follow
+ * it (they emerge behind the advancing tip and vanish before it retreats past
+ * them). The base stays in the static raster; living parts are drawn on a
+ * page-anchored life layer at LIFE_HZ (sub-pixel steps). */
+const LIFE = Object.freeze({ TIP_P: 0.18, LATERAL_P: 0.1, MIN_LEN: 50, TIP_MIN: 35, TIP_SPAN: 115, TIP_FRAC: 0.42, PERIOD: 16, PERIOD_SPAN: 30, SLOW_PERIOD: 40, SLOW_SPAN: 50, FOLLOW_LAG: 3, FOLLOW_GAIN: 1.3 });
+/** r11.2 margin pulses at ~92% of the hero (owner: "pulses on the sidebar to be
+ * upped ... to almost same extent hero has"): the hero's crest speed (38 px/s
+ * on the cord, 22 px/s through fine threads), reach (600 of the hero's 650 px
+ * of fine distance, decay 276 of 300 px), brightness, residue that retreats
+ * far-edge first, and an arrival bloom travelling out to the colony rim. At
+ * most one per side; rate ~0.93 of the hero's. */
+const MP = Object.freeze({ GAIN: 0.92, FAST: 38, SLOW: 22, CUTOFF: 600, LAMBDA: 276, STEP: 0.3, TAIL: 5.6, RSTEP: 4, RES: 0.15, RES_HOLD: 2, RES_BACK: 0.2, RES_FAR: 3, RES_FADE: 6, RATE: 0.93, BLOOM_R: 48 });
+const LIFE_HZ = 24, // life ticks per second (each repaints only what changed)
+  LIFE_TILE = 128, // CSS px; the life layer is a page-anchored grid of tiles
+  LIFE_PAD = 192; // tiles kept above and below the viewport
 
 /** Shared load-in contract (design/r11-coordination.md): everything starts at
  * the first rendered frame and is established by INTRO_MS, with ease-out pacing. */
 export const INTRO_MS = SHARED_INTRO_MS; // 6000 by default (shared, see mycelium-geometry.js)
 const easeOut = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 3);
+/** r11.2 field front: a quadratic ease-out (the cubic one left every colony
+ * at ~350-490 px/s on the first frames, a flash of strands at each margin mat). */
+const frontEase = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 2);
 const HERO_EDGE_S = 3.6 * INTRO_SCALE; // fallback: hero reaches its edges (~0.75 of its 0-4.5 s growth at 6 s)
+/** r11.2 (owner: "a fast paced burst of sparks erupts from the bottom two
+ * nodes" ~2/3 into the grow-in). All ~40-60 hero-edge continuation families
+ * (3-5k strands, rooted on the bottom colonies) used to start together when the
+ * hero reached 75% and cross 550 px in the remaining 1.5-2.5 s with a cubic
+ * ease-out: ~650 px/s glowing fronts. Now each family starts when the hero has
+ * grown its own seed vertex, never later than HERO_FAMILY_LATEST of the intro,
+ * and its front advances on a trapezoid (gentle start, constant cruise, eased
+ * arrival) that ends exactly at INTRO_MS. */
+const HERO_FAMILY_LATEST = 0.62,
+  HERO_FAMILY_GAP = 0.065, // s between family starts (6 s base)
+  HERO_FAMILY_VMAX = 200; // px/s at the 6 s base (scaled by 1/INTRO_SCALE)
+function trapEase(u, a = 0.25, b = 0.35) {
+  u = Math.max(0, Math.min(1, u));
+  const v = 1 / (1 - a / 2 - b / 2);
+  if (u < a) return (v * u * u) / (2 * a);
+  if (u <= 1 - b) return v * (a / 2 + (u - a));
+  return 1 - (v * (1 - u) * (1 - u)) / (2 * b);
+}
+const trapSpeed = (u, a = 0.25, b = 0.35) => {
+  const v = 1 / (1 - a / 2 - b / 2);
+  return u <= 0 || u >= 1 ? 0 : u < a ? (v * u) / a : u <= 1 - b ? v : (v * (1 - u)) / b;
+};
 let introUsed = false; // switches (theme, hue, style, resize) never replay the intro
 
 function rgba(colour, a) {
@@ -655,6 +753,18 @@ export function createField({ stage, state, reduce }) {
   live.setAttribute("aria-hidden", "true");
   c.after(live);
   const lx = live.getContext("2d");
+  // r11.2 life layer: living tips and regrowing laterals on a page-anchored
+  // grid of full-DPR tiles (one container moved by a compositor transform on
+  // scroll). A tick repaints only the tiles a moving tip touched, so the cost
+  // follows the number of active tips, not the viewport (a whole-viewport
+  // canvas redrawn and re-uploaded at 20 Hz cost 30% of the presented frames).
+  const lifeBox = document.createElement("div"),
+    lifeInner = document.createElement("div");
+  lifeBox.className = "page-mycelium-field page-mycelium-life";
+  lifeBox.setAttribute("aria-hidden", "true");
+  lifeInner.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;will-change:transform";
+  lifeBox.appendChild(lifeInner);
+  c.after(lifeBox);
   // Static field: horizontal band tiles at device pixels (sharp), as DOM
   // canvases in a fixed box. Scrolling only moves them (compositor transform);
   // r11 blitted one 4x-pixel tile into the viewport canvas on every scroll.
@@ -680,6 +790,7 @@ export function createField({ stage, state, reduce }) {
   c.style.bottom = "auto";
   c.style.height = "1px";
   if (!light) c.style.mixBlendMode = "plus-lighter"; // hero adds onto the field, as the old 'lighter' composite
+  // (r11.2) no blend mode on the life layer: over the dark ground source-over of its own additive strokes reads the same and keeps compositing cheap
   x.setTransform(d, 0, 0, d, 0, 0);
   lx.setTransform(d, 0, 0, d, 0, 0);
   const fieldAlpha = light ? 0.24 : 0.62,
@@ -696,8 +807,14 @@ export function createField({ stage, state, reduce }) {
     lastVersion = -1,
     tileVersion = 0,
     dirty = null,
-    liveStrands = [],
+    lifeList = [],
+    lifeStamp = 0,
+    lifeY = NaN,
+    lifeScroll = NaN,
+    lifePending = false,
+    lifeDrawn = -Infinity,
     marginSchedules = [],
+    cascades = [],
     heroInterval = 24,
     colonySprites = new Map(),
     introEnded = 0,
@@ -709,11 +826,32 @@ export function createField({ stage, state, reduce }) {
   // Intro: only on the first field of a fresh page load (never on switches).
   let intro =
     !introUsed && performance.now() < 4000 && !reduce.matches && !document.hidden && frozen === null
-      ? { start: null, heroAt: null, cursor: 0, manual: null }
+      ? { start: null, cursor: 0, manual: null }
       : null;
   introUsed = true;
   const introTime = (now = performance.now()) => (!intro ? INTRO_MS / 1000 : intro.manual !== null ? intro.manual / 1000 : intro.start === null ? 0 : (now - intro.start) / 1000);
   window.MyceliumField = Object.freeze({ INTRO_MS, INTRO_SCALE, get introProgress() { return Math.min(1, introTime() / (INTRO_MS / 1000)); } });
+  /** Load-in activity probe (r11.2): field growth-front speeds (px/s along the
+   * strands) and the number of glowing intro tips per family. */
+  window.__introActivity = () => {
+    const t = introTime(),
+      T = INTRO_MS / 1000,
+      dEase = (u) => (u <= 0 || u >= 1 ? 0 : (frontEase(u + 1e-4) - frontEase(u - 1e-4)) / 2e-4),
+      roots = field ? heroRoots() : [];
+    const rateH = (r) => (intro && r.introT0 !== undefined ? (trapSpeed((t - r.introT0) / (T - r.introT0)) / (T - r.introT0)) * r.famReach : 0);
+    return {
+      t, running: !!intro, spanA: span.A, spanH: span.H, roots: roots.length, rootStarts: roots.map((r) => +(r.introT0 ?? -1).toFixed(2)),
+      rateA: intro ? (dEase(t / T) / T) * span.A : 0,
+      rateH: Math.max(0, ...roots.map(rateH)),
+      rootsStarted: intro ? roots.filter((r) => r.introT0 !== undefined && t >= r.introT0).length : roots.length,
+      tipsA: intro ? tips.filter(([p]) => !p.heroFamily).length : 0,
+      tipsH: intro ? tips.filter(([p]) => p.heroFamily).length : 0,
+      // glowing tips whose front moves faster than 210 px/s at the 6 s base:
+      // hero-edge families (the burst) and the field's own fronts
+      fastTips: intro ? tips.filter(([p]) => (p.heroFamily ? rateH(p.heroRoot) : (dEase(t / T) / T) * span.A) > 210 / INTRO_SCALE).length : 0,
+      fastH: intro ? tips.filter(([p]) => p.heroFamily && rateH(p.heroRoot) > 210 / INTRO_SCALE).length : 0,
+    };
+  };
   const firstFrame = (now) => {
     if (intro && intro.start === null) intro.start = now ?? performance.now();
   };
@@ -763,6 +901,19 @@ export function createField({ stage, state, reduce }) {
    * per-chunk column weight and distal taper fixed by chunk position, so
    * incremental (intro) and one-shot rasters match. Butt caps throughout: no
    * alpha beads at joints. Fuzz and knots inside the range are drawn too. */
+  /** Cottony mat glow: overlapping broad soft lobes, never a bright point. */
+  function drawHaze(ctx, p, alpha, mulAt = null) {
+    for (const l of p.haze) {
+      const R1 = l.r * 1.6,
+        g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, R1);
+      g.addColorStop(0, hazeIn);
+      g.addColorStop(0.55, hazeMid);
+      g.addColorStop(1, hazeOut);
+      ctx.globalAlpha = Math.min(1, alpha * (l.k || 1) * marginWeight(l.x) * lightMul * (mulAt ? mulAt(l.y) : 1));
+      ctx.fillStyle = g;
+      ctx.fillRect(l.x - R1, l.y - R1, R1 * 2, R1 * 2);
+    }
+  }
   function drawRange(ctx, p, from, to, alpha, detail = false, yr = null) {
     const pts = p.points,
       n = pts.length - 1,
@@ -771,21 +922,9 @@ export function createField({ stage, state, reduce }) {
     ctx.lineCap = "butt";
     let f = 0;
     if (detail && !p.fuzz && p.fuzzSeed >= 0) p.fuzz = makeFuzz(p, p.fuzzSeed);
-    if (p.haze && from === 0) {
-      // Cottony mat glow: overlapping broad soft lobes, never a bright point.
-      const op = ctx.globalCompositeOperation;
-      for (const l of p.haze) {
-        const R1 = l.r * 1.6,
-          g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, R1);
-        g.addColorStop(0, hazeIn);
-        g.addColorStop(0.55, hazeMid);
-        g.addColorStop(1, hazeOut);
-        ctx.globalAlpha = Math.min(1, alpha * marginWeight(l.x) * lightMul);
-        ctx.fillStyle = g;
-        ctx.fillRect(l.x - R1, l.y - R1, R1 * 2, R1 * 2);
-      }
-      ctx.globalCompositeOperation = op;
-    }
+    // r11.2: during the load-in the mat glow builds up on the live layer and
+    // is baked into the bands once, at the end of the intro (no pop).
+    if (p.haze && from === 0 && !(intro && detail)) drawHaze(ctx, p, alpha);
     const fz = detail ? p.fuzz : null;
     if (fz) while (f < fz.length && fz[f] < from) f += 7;
     const fades = p.fades; // r11.1: per-point fade into a colony core (fading strands only)
@@ -888,7 +1027,7 @@ export function createField({ stage, state, reduce }) {
     ctx.stroke();
     ctx.restore();
   }
-  const statics = () => field.strands.filter((p) => p.static);
+  const statics = () => field.strands.filter((p) => p.static && p.rasterEnd > 0);
   /** Calls fn(ctx, yr) for every band (and wrap copy) the strand overlaps;
    * yr is the band's range in the strand's own (unshifted) coordinates. */
   function eachShift(p, fn) {
@@ -976,7 +1115,7 @@ export function createField({ stage, state, reduce }) {
       bottom = top + b.h;
     while (job.i < job.list.length && performance.now() - t0 < budgetMs) {
       const p = job.list[job.i++],
-        n = p.points.length - 1;
+        n = p.rasterEnd;
       for (const shift of [-field.height, 0, field.height]) {
         if (p.box[3] + shift < top || p.box[1] + shift > bottom) continue;
         b.cx.save();
@@ -1101,7 +1240,7 @@ export function createField({ stage, state, reduce }) {
       const t0 = performance.now();
       while (i < list.length && performance.now() - t0 < 8) {
         const p = list[i++],
-          n = p.points.length - 1;
+          n = p.rasterEnd;
         eachShift(p, (g, yr) => drawRange(g, p, 0, n, p.alpha * fieldAlpha, true, yr));
         p.drawn = n;
       }
@@ -1134,15 +1273,40 @@ export function createField({ stage, state, reduce }) {
   /** Intro step: grows the static tile incrementally to the current intro
    * time. Field sources and margin colonies start at t=0; hero-edge
    * continuations join when the hero reaches its edges. */
+  let rootList = null;
+  /** Hero-edge family roots with their start times (seconds into the intro):
+   * when the hero has grown the seed vertex (its age map), at most
+   * HERO_FAMILY_LATEST of the intro. Deterministic (manual sweeps match). */
+  function heroRoots() {
+    if (rootList) return rootList;
+    const T = INTRO_MS / 1000;
+    rootList = field.strands.filter((p) => p.heroFamily && p.heroRoot === p);
+    for (const r of rootList) {
+      const b = scene?.vertexAge ? scene.vertexAge(r.points[0]) : r.points[0].birth,
+        at = scene?.introTimeOfAge && Number.isFinite(b) ? scene.introTimeOfAge(b) : HERO_EDGE_S;
+      // Late seeds start a little ahead of the hero so no front cruises faster
+      // than HERO_FAMILY_VMAX (the old burst moved at ~650 px/s).
+      const cruise = (r.famReach || 1) / (1 - 0.25 / 2 - 0.35 / 2);
+      r.introCap = Math.min(HERO_FAMILY_LATEST * T, T - cruise / (HERO_FAMILY_VMAX / INTRO_SCALE));
+      r.introT0 = Math.max(0, Math.min(r.introCap, at));
+      r.front = -1;
+    }
+    // Seeds the hero grows at the same age (a colony centre) set off one after
+    // another, HERO_FAMILY_GAP apart (7 left within 250 ms at 6 s).
+    const gap = HERO_FAMILY_GAP * INTRO_SCALE,
+      order = [...rootList].sort((a, b) => a.introT0 - b.introT0);
+    for (let i = 1; i < order.length; i++) order[i].introT0 = Math.min(order[i].introCap, Math.max(order[i].introT0, order[i - 1].introT0 + gap));
+    order.sort((a, b) => a.introT0 - b.introT0);
+    for (let i = order.length - 2; i >= 0; i--) order[i].introT0 = Math.max(0, Math.min(order[i].introT0, order[i + 1].introT0 - gap));
+    return rootList;
+  }
   function introStep(now, unbounded = false) {
     if (!intro || !field) return;
-    const t = introTime(now);
-    if (intro.heroAt === null) {
-      const hp = window.MyceliumHero?.introProgress;
-      if (typeof hp === "number" ? hp >= 0.75 : t >= HERO_EDGE_S) intro.heroAt = Math.min(t, 5 * INTRO_SCALE);
-    }
-    const dA = easeOut(t / (INTRO_MS / 1000)) * span.A,
-      dH = intro.heroAt === null ? -1 : easeOut((t - intro.heroAt) / Math.max(0.8 * INTRO_SCALE, INTRO_MS / 1000 - intro.heroAt)) * span.H;
+    const t = introTime(now),
+      T = INTRO_MS / 1000;
+    const dA = frontEase(t / T) * span.A;
+    for (const r of heroRoots()) r.front = t < r.introT0 ? -1 : trapEase((t - r.introT0) / (T - r.introT0)) * r.famReach;
+    intro.dA = dA; // living tips follow the same fronts (life layer)
     const list = intro.list,
       t0 = performance.now();
     let drawn = false,
@@ -1150,8 +1314,8 @@ export function createField({ stage, state, reduce }) {
     tips = [];
     for (let k = 0; k < list.length; k++) {
       const p = list[(intro.cursor + k) % list.length],
-        target = indexAt(p, (p.heroFamily ? dH : dA) - p.s0),
-        n = p.points.length - 1;
+        n = p.rasterEnd,
+        target = Math.min(n, indexAt(p, (p.heroFamily ? p.heroRoot.front : dA) - p.s0));
       if (target > 0 && target < n) tips.push([p, target]);
       if (target <= p.drawn + 1e-6) continue;
       if (!unbounded && performance.now() - t0 > 3.5) {
@@ -1171,8 +1335,9 @@ export function createField({ stage, state, reduce }) {
   function endIntro() {
     if (!intro) return;
     if (field) {
+      for (const p of field.strands) if (p.haze && p.static) eachShift(p, (g) => drawHaze(g, p, p.alpha * fieldAlpha));
       for (const p of intro.list || statics()) {
-        const n = p.points.length - 1;
+        const n = p.rasterEnd;
         if (p.drawn < n) {
           const from = p.drawn;
           eachShift(p, (g, yr) => drawRange(g, p, from, n, p.alpha * fieldAlpha, true, yr));
@@ -1195,6 +1360,7 @@ export function createField({ stage, state, reduce }) {
     let k = 0,
       t = performance.now();
     span = { A: 1, H: 1 };
+    rootList = null;
     for (const p of field.strands) {
       if (performance.now() - t > 8) {
         if (await yieldTask()) return;
@@ -1211,6 +1377,13 @@ export function createField({ stage, state, reduce }) {
         if (i) arc[i] = arc[i - 1] + Math.hypot(q.x - p.points[i - 1].x, q.y - p.points[i - 1].y);
       }
       p.box = [x0 - 14, y0 - 14, x1 + 14, y1 + 14]; // fuzz and knots overhang the polyline
+      // r11.2: the mat's haze lobes reach well past its spine (bands that
+      // only clipped the polyline box cut the glow off at a band edge).
+      if (p.haze)
+        for (const l of p.haze) {
+          const R1 = l.r * 1.6;
+          p.box = [Math.min(p.box[0], l.x - R1), Math.min(p.box[1], l.y - R1), Math.max(p.box[2], l.x + R1), Math.max(p.box[3], l.y + R1)];
+        }
       p.arc = arc;
       if (p.endFade?.length) {
         if (!p.fades) p.fades = Float32Array.from(p.points, (q) => endFadeAt(p, q));
@@ -1218,12 +1391,81 @@ export function createField({ stage, state, reduce }) {
       const par = p.introParent;
       p.heroFamily = !!(p.heroFamily || par?.heroFamily);
       p.s0 = par ? (par.s0 ?? 0) + (p.introAt ?? 0) : p.introStart ?? 0;
-      const reach = p.s0 + arc[arc.length - 1];
+      // r11.2 (owner: margin mats "pop"): a colony's own tufts start on a time
+      // schedule (a few at the centre first, then filling outward by 0.72 of
+      // the intro); converted to front distance once span.A is known.
+      if (p.tuft && p.marginRoot && !par) {
+        const u = Math.min(1, Math.hypot(p.points[0].x - p.marginRoot.x, p.points[0].y - p.marginRoot.y) / (MAT_R * 1.6)),
+          hq = hash01(k * 31 + 7);
+        p.introFrac = 0.03 + 0.69 * Math.min(1, 0.6 * u + 0.4 * hash01(k * 37 + 3)) * (hq < 0.08 ? 0.15 : 1);
+      } else if (!par && !p.introStart && (p.marginRoot || p.runner || p.endFade?.includes(p.points[0]))) {
+        // Hyphae, runners and cords leaving a margin colony set off one by one.
+        p.introFrac = 0.01 + 0.22 * hash01(k * 41 + 13);
+      }
+      const reach = p.introFrac !== undefined ? 0 : p.s0 + arc[arc.length - 1];
+      // r11.2: each hero-edge family grows on its own clock (see trapEase).
+      p.heroRoot = p.heroFamily ? par?.heroRoot || p : null;
+      if (p.heroRoot && p.static) p.heroRoot.famReach = Math.max(p.heroRoot.famReach || 1, reach);
       if (p.static) span[p.heroFamily ? "H" : "A"] = Math.max(span[p.heroFamily ? "H" : "A"], reach);
       // Every persistent strand carries fine hairs except the colony tuft hairs (they are the fuzz).
       // Fuzz is generated lazily on the strand's first raster (no start-up long task).
       p.fuzzSeed = p.static && (!p.hair || p.order === 1) && !p.tuft ? k : -1;
       k++;
+    }
+    // Time-scheduled tufts (and anything rooted on them) take their front offset.
+    for (const p of field.strands) {
+      const par = p.introParent;
+      if (p.introFrac !== undefined) p.s0 = Math.min(span.A - p.arc[p.arc.length - 1], frontEase(p.introFrac) * span.A);
+      else if (par && par.introFrac !== undefined) p.s0 = par.s0 + (p.introAt ?? 0);
+      else continue;
+      if (p.static && !p.heroFamily) span.A = Math.max(span.A, p.s0 + p.arc[p.arc.length - 1]);
+    }
+    // r11.2 passive life: living tips, whole regrowing laterals and their
+    // followers, from per-strand hashes (geometry and RNG streams untouched).
+    const routes = new Set(field.marginRoutes.flatMap((r) => (r.wrap ? [...r.paths, r.wrap] : r.paths))),
+      anchors = new Set(field.marginKnots);
+    for (const p of field.strands) if (p.points[0].owner !== undefined) anchors.add(p.points[0]); // hero vertices
+    lifeList = [];
+    lifeBins = null;
+    let j = 0;
+    for (const p of field.strands) {
+      if (performance.now() - t > 8) {
+        if (await yieldTask()) return;
+        t = performance.now();
+      }
+      const n = p.points.length - 1,
+        L = p.arc[n],
+        id = j++,
+        h = (m) => hash01(id * 13 + m * 7919 + 17);
+      p.rasterEnd = n;
+      p.dyn = null;
+      if (p.tuft || routes.has(p)) continue;
+      const par = p.introParent;
+      let at = p.introAt;
+      if (par && at === undefined) {
+        const i = par.points.indexOf(p.points[0]);
+        at = i >= 0 ? par.arc[i] : 0;
+      }
+      // Tips cycle every 16-46 s; whole small branches and laterals, which read
+      // less, every 40-90 s (fewer changing at once: cheaper life ticks).
+      const cycle = (len, slow = false) => {
+          const period0 = slow ? LIFE.SLOW_PERIOD + LIFE.SLOW_SPAN * h(4) : LIFE.PERIOD + LIFE.PERIOD_SPAN * h(4),
+            y = lifeTiming(len, period0, h(6), h(7), h(8));
+          return { ...y, phase: h(5) * y.period };
+        };
+      if (par?.dyn && at >= (par.dyn.follow ? 0 : par.dyn.base) - 1) p.dyn = { follow: true, parent: par, at, base: 0, len: L };
+      else if (!p.static) p.dyn = { base: 0, len: L, ...cycle(L, true) }; // r10 living branches regrow whole
+      else if (!p.hair && L >= LIFE.MIN_LEN && h(1) < LIFE.TIP_P) {
+        let base = L - Math.min(L * LIFE.TIP_FRAC, LIFE.TIP_MIN + LIFE.TIP_SPAN * h(2));
+        // Knots and points a colony or the hero network meets stay in the static base.
+        for (const kn of p.knots || []) base = Math.max(base, p.arc[Math.min(n, Math.ceil(kn.i) + 1)] + 4);
+        for (let i = 1; i <= n; i++) if (p.arc[i] > base - 4 && anchors.has(p.points[i])) base = Math.max(base, p.arc[i] + 4);
+        if (base <= L - 20) p.dyn = { base, len: L - base, ...cycle(L - base) };
+      } else if (p.hair && p.order <= 2 && p.static && L >= 8 && h(3) < LIFE.LATERAL_P) p.dyn = { base: 0, len: L, ...cycle(L, true) };
+      if (p.dyn) {
+        p.rasterEnd = p.dyn.base > 0 ? indexAt(p, p.dyn.base) : 0;
+        lifeList.push(p);
+      }
     }
   }
   /** Knots never sit under glyphs: any tiled page copy of a knot that falls in
@@ -1291,6 +1533,7 @@ export function createField({ stage, state, reduce }) {
     let t0 = performance.now();
     const stage = async () => {
       stages.push(+(performance.now() - t0).toFixed(1));
+      if (stages.at(-1) > 30) (metrics.slowStages ||= []).push([stages.length - 1, stages.at(-1), new Error().stack.split("\n").slice(1, 4).join(" | ")]); // DIAG-TEMP
       await nextTask();
       t0 = performance.now();
       return disposed;
@@ -1299,7 +1542,6 @@ export function createField({ stage, state, reduce }) {
     graph = scene ? scene.graph : graph;
     await prepare(stage);
     if (disposed) return;
-    liveStrands = field.strands.filter((p) => !p.static);
     if (await stage()) return;
     const knotsHidden = markKnotsUnderText();
     if (await stage()) return;
@@ -1322,22 +1564,27 @@ export function createField({ stage, state, reduce }) {
         const segments = p.segments.map((s) => {
           const start = distance;
           distance += s.len;
-          return { s, arrival: start / 80 };
+          return { s, arrival: start / MP.FAST };
         });
-        return { p, segments, duration: distance / 80 };
+        return { p, segments, duration: distance / MP.FAST, leak: null };
       });
-      const period = Math.max(heroInterval / 0.9, ...legs.map((l) => l.duration + 8));
+      // As the hero: one crest at a time per side (the crest window: the
+      // slowest leak's arrival plus the tail); a trip's residue may still be
+      // fading when the next one leaves.
+      const period = Math.max(heroInterval / MP.RATE, ...legs.map((l) => l.duration + MP.CUTOFF / MP.SLOW + MP.TAIL + 2));
       const landing = scene?.routes?.[0]?.landings.find((l) => l.node === r.source.source)?.time || 0;
-      // A longer intro delays the first hero trip by (6 + 2.5 s) * (scale - 1);
-      // margin trips keep the same relation to it.
-      return { ...r, legs, period, phase: landing + 3 + side * 9 + 8.5 * (INTRO_SCALE - 1), chosen: new Map() };
+      // Never before the first regular hero pulse (the load-in has no pulses).
+      const first = (window.MyceliumHero?.firstPulseAt ?? INTRO_MS / 1000 + 2.5 * INTRO_SCALE) + 1.5;
+      return { ...r, legs, period, phase: Math.max(first, landing + 3 + 8.5 * (INTRO_SCALE - 1)) + side * (period / 2), chosen: new Map() };
     });
+    cascades = buildCascades();
+    buildMarginLeaks();
     const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
       paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,
       densityMultiplier: 1.2, baseCount: field.baseCount, count: field.count, sharedGraph: !!scene, connectors: 0, canvasCount: 2, flowSources: field.flowSources,
       ...field.rootAudit, explorerLoneThreads: scene?.graph.explorerAudit?.loneThreads ?? 0, explorerAudit: scene?.graph.explorerAudit,
-      marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: 0.75, marginPulseLeak: 135,
+      marginKnots: field.marginKnots.length, marginDensityRatio: field.marginDensityRatio, marginPulseIntensity: MP.GAIN, marginPulseLeak: MP.CUTOFF,
       marginPulsePeriods: marginSchedules.map((s) => s.period), marginPulseRateRelative: marginSchedules.map((s) => heroInterval / s.period), protectedRects: field.layout.rects,
       canvasPixels: live.width * live.height, bands: bands.length, tileScale: Math.ceil(field.width * d) / field.width, dpr: d,
       runners: field.strands.filter((p) => p.runner).length,
@@ -1406,13 +1653,147 @@ export function createField({ stage, state, reduce }) {
         return { x: k.x, y: k.y, resident: true, junction: peak(shown, W, W, c0, c0, 8), shownPeak: peak(shown, W, W), matPeak: peak(mat, W, W), matAtJunction: peak(mat, W, W, c0, c0, 8) };
       });
     };
+    /** r11.2 item B (owner: margin strands looked cut off): every strand of
+     * margin colony i (its hyphae, runners and cords, not the laterals
+     * branching off them; with an end inside the mat) visibly joins the mat.
+     * From the displayed band pixels (linear luminance, 3x3 CSS px max): the
+     * strand's level is its median 40-64 px from the centre; its rendered
+     * start, walking out from the colony end, is the first 1 px sample at
+     * >= 50% of that level, which must lie within the mat radius + 2 px, and
+     * the straight path from the centre to it may not have a run of more than
+     * 4 px below that level. (Same rule as the evidence script radial.py.) */
+    window.__colonyGapProbe = (i) => {
+      const k = field.marginKnots[i];
+      if (!k) return null;
+      const half = 70,
+        by = k.y - field.top,
+        over = bands.filter((q) => by + half > q.y0 && by - half < q.y0 + q.h);
+      if (!over.length || over.some((b) => !b.ready || b.job || !b.cv.width)) return { resident: false };
+      const W = Math.round(2 * half * d),
+        cv = document.createElement("canvas");
+      cv.width = cv.height = W;
+      const cx = cv.getContext("2d");
+      for (const b of over) cx.drawImage(b.cv, -Math.round((k.x - half - field.left) * d), Math.round((b.y0 - (by - half)) * d));
+      const img = cx.getImageData(0, 0, W, W).data;
+      cv.width = cv.height = 0;
+      const lin = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      const at = (x, y) => {
+        let m = 0;
+        const px = Math.round((x - k.x + half) * d),
+          py = Math.round((y - k.y + half) * d),
+          r = Math.max(1, Math.round(1.5 * d));
+        for (let yy = py - r; yy <= py + r; yy++)
+          for (let xx = px - r; xx <= px + r; xx++) {
+            if (xx < 0 || yy < 0 || xx >= W || yy >= W) continue;
+            const o = (yy * W + xx) * 4;
+            m = Math.max(m, (0.2126 * lin(img[o]) + 0.7152 * lin(img[o + 1]) + 0.0722 * lin(img[o + 2])) * (img[o + 3] / 255));
+          }
+        return m;
+      };
+      const hz = field.strands.find((p) => p.haze && p.marginRoot === k),
+        matR = hz ? Math.max(...hz.haze.filter((l) => l.r < 20).map((l) => Math.hypot(l.x - k.x, l.y - k.y) + l.r)) : MAT_R,
+        routes = field.marginRoutes.flatMap((r) => (r.wrap ? [...r.paths, r.wrap] : r.paths)),
+        attached = field.strands.filter((p) => {
+          if (p.tuft || p.introParent) return false;
+          const d0 = Math.min(Math.hypot(p.points[0].x - k.x, p.points[0].y - k.y), Math.hypot(p.points.at(-1).x - k.x, p.points.at(-1).y - k.y));
+          return d0 < matR + 4 && (p.marginRoot === k || p.endFade?.includes(k) || (routes.includes(p) && (p.points[0] === k || p.points.at(-1) === k)));
+        });
+      const rows = [];
+      for (const p of attached) {
+        const pts = p.points,
+          near = Math.hypot(pts[0].x - k.x, pts[0].y - k.y) <= Math.hypot(pts.at(-1).x - k.x, pts.at(-1).y - k.y),
+          seq = near ? pts : [...pts].reverse(),
+          samples = [];
+        for (let j = 1; j < seq.length; j++) {
+          const a = seq[j - 1],
+            b = seq[j],
+            L = Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1e-6);
+          if (Math.hypot(a.x - k.x, a.y - k.y) > half - 4) break;
+          for (let u = 0; u < L; u += 1) {
+            const x = a.x + ((b.x - a.x) * u) / L,
+              y = a.y + ((b.y - a.y) * u) / L;
+            samples.push([x, y, Math.hypot(x - k.x, y - k.y), at(x, y)]);
+          }
+        }
+        let outer = samples.filter((q) => q[2] >= 40 && q[2] <= 64).map((q) => q[3]);
+        if (!outer.length) outer = samples.slice(-8).map((q) => q[3]);
+        outer.sort((a, b) => a - b);
+        const level = outer.length ? (outer[(outer.length - 1) >> 1] + outer[outer.length >> 1]) / 2 : 0,
+          thr = 0.5 * level,
+          start = level > 1e-5 ? samples.find((q) => q[3] >= thr) : null;
+        if (!start) {
+          rows.push({ invisible: true });
+          continue;
+        }
+        const D = Math.hypot(start[0] - k.x, start[1] - k.y);
+        let run = 0,
+          gap = 0;
+        for (let u = 0; u <= D + 1e-6; u += 1) {
+          const f = u / Math.max(D, 1e-6);
+          if (at(k.x + (start[0] - k.x) * f, k.y + (start[1] - k.y) * f) >= thr) run = 0;
+          else gap = Math.max(gap, ++run);
+        }
+        rows.push({ startDist: +D.toFixed(1), gap, wrap: !!p.wrap });
+      }
+      const vis = rows.filter((r) => !r.invisible);
+      return {
+        resident: true, matR, strands: rows.length, invisible: rows.length - vis.length, maxStartDist: Math.max(0, ...vis.map((r) => r.startDist)),
+        maxGap: Math.max(0, ...vis.map((r) => r.gap)), startsBeyondMat: vis.filter((r) => r.startDist > matR + 2).length, rows,
+      };
+    };
+    /** r11.2 load-in probe: share of each margin colony's mat (its tufts,
+     * drawn length x alpha) in the bands now, and its glow build-up. */
+    const matTufts = new Map(field.marginKnots.map((k) => [k, []]));
+    for (const p of field.strands) if (p.tuft && matTufts.has(p.marginRoot)) matTufts.get(p.marginRoot).push(p);
+    window.__marginMatProbe = () =>
+      field.marginKnots.map((k) => {
+        let have = 0,
+          all = 0;
+        for (const p of matTufts.get(k)) {
+          all += p.arc[p.rasterEnd] * p.alpha;
+          have += p.arc[Math.min(p.rasterEnd, Math.floor(p.drawn || 0))] * p.alpha;
+        }
+        return { x: k.x, y: k.y, ink: all ? have / all : 1, glow: intro ? smooth((introTime() / (INTRO_MS / 1000) - 0.04) / 0.7) : 1, tufts: matTufts.get(k).length };
+      });
     window.__marginPulseProbe = (t) => {
-      const trips = marginTrips(t),
+      const trips = marginTrips(t).filter((s) => !s.residueOnly),
         base = (scene ? scene.hero.top : 0) + Math.max(0, Math.floor((scrollY - (scene ? scene.hero.top : 0) - field.top) / field.height)) * field.height;
       return {
-        active: trips.map((s) => s.side), periods: marginSchedules.map((s) => s.period), intensity: 0.75, heroInterval,
+        active: trips.map((s) => s.side), periods: marginSchedules.map((s) => s.period), intensity: MP.GAIN, heroInterval,
+        reach: trips.map((s) => s.leg.leak?.maxFine ?? 0), built: marginSchedules.flatMap((s) => s.legs).filter((l) => l.leak).length,
         legs: trips.map((s) => ({ side: s.side, y0: base + Math.min(s.leg.p.points[0].y, s.leg.p.points.at(-1).y), y1: base + Math.max(s.leg.p.points[0].y, s.leg.p.points.at(-1).y) })),
       };
+    };
+    /** r11.2 cascade probe: per side, the hops (page y of each receiving
+     * colony, duration, gain), the start times and what is active at time t. */
+    window.__cascadeProbe = (t = clock.elapsed) => ({
+      built: cascades.every((c) => c.hops.every((h) => h.leak)),
+      sides: cascades.map((c) => ({
+        side: c.side, starts: c.starts.map((e) => Math.round(e * 1e6) / 1e6), events: c.events, span: c.span, period: c.period,
+        hops: c.hops.map((h) => ({ copy: h.copy, nodeY: (scene ? scene.hero.top : 0) + h.nodeCopy * field.height + h.node.y, nodeX: h.node.x, len: Math.round(h.len), dur: +h.dur.toFixed(2), off: +h.off.toFixed(2), gain: +h.gain.toFixed(3), reach: h.leak?.maxFine ?? null, wrap: !!h.p.wrap })),
+      })),
+      active: cascadeAt(t).map(({ c, age, crest }) => ({ side: c.side, age, crest, hop: c.hops.findLastIndex((h) => age >= h.off) })),
+    });
+    /** r11.2 life probe: visible arc (px) of strands at time t (static strands
+     * report their full length), and the living populations. */
+    window.__lifeProbe = {
+      field: (list, t) => {
+        lifeStamp++;
+        return list.map((p) => (p.dyn ? lifeAt(p, t).vis : p.arc[p.arc.length - 1]));
+      },
+      hero: (list, t) => (scene?.visibleArcs ? scene.visibleArcs(list, t) : list.map((P) => P.len)),
+      stats: () => {
+        const own = lifeList.filter((p) => !p.dyn.follow),
+          strands = field.strands.filter((p) => !p.tuft);
+        return {
+          living: lifeList.length, strands: strands.length, tips: own.filter((p) => p.dyn.base > 0).length, whole: own.filter((p) => !p.dyn.base).length,
+          followers: lifeList.length - own.length, mains: strands.filter((p) => !p.hair).length, livingMains: strands.filter((p) => !p.hair && p.dyn).length,
+          tipLen: own.filter((p) => p.dyn.base > 0).map((p) => +p.dyn.len.toFixed(1)), periods: own.map((p) => +p.dyn.period.toFixed(1)), layer: { ...lifeStats },
+          // [average, peak] px/s of growth and retreat (trapezoid profile, 15% ease)
+          speeds: own.flatMap((p) => [p.dyn.len / p.dyn.g, p.dyn.len / p.dyn.r].map((v) => [+v.toFixed(2), +(v / 0.85).toFixed(2)])),
+          hero: scene?.lifeStats ? scene.lifeStats() : null,
+        };
+      },
     };
     // Diagnostic seeks show the established field (the intro is a load-in only).
     window.__setUnderstoryTime = (t) => {
@@ -1440,8 +1821,8 @@ export function createField({ stage, state, reduce }) {
     };
     /** Capture hook: render the field intro at `ms` (forward seeks are incremental). */
     window.__setFieldIntro = (ms, t = ms / 1000) => {
-      if (!intro || (intro.manual !== null && ms < intro.manual)) {
-        intro = { start: 0, heroAt: null, cursor: 0, manual: ms, list: statics() };
+      if (!intro || intro.manual === null || ms < intro.manual) {
+        intro = { start: 0, cursor: 0, manual: ms, list: statics() };
         resetTile();
       }
       intro.manual = ms;
@@ -1449,7 +1830,7 @@ export function createField({ stage, state, reduce }) {
       introStep(performance.now(), true);
       schedule();
       paint(t, true);
-      return { drawn: field.strands.filter((p) => p.static && p.drawn >= p.points.length - 1).length, statics: intro?.list.length ?? 0, done: !intro };
+      return { drawn: field.strands.filter((p) => p.static && p.rasterEnd > 0 && p.drawn >= p.rasterEnd).length, statics: intro?.list.length ?? 0, done: !intro };
     };
     lastVersion = -1;
     paint(frozen ?? clock.elapsed, true);
@@ -1457,31 +1838,778 @@ export function createField({ stage, state, reduce }) {
     schedule();
     stages.push(+(performance.now() - t0).toFixed(1));
   }
+  /** Independent margin trips at time t: the current cycle's crest (at most
+   * one per side, never while that side carries a cascade) and the previous
+   * cycle's fading residue. */
   function marginTrips(t) {
     const viewTop = scrollY,
-      viewBottom = scrollY + innerHeight;
-    return marginSchedules.flatMap((s) => {
+      viewBottom = scrollY + innerHeight,
+      out = [];
+    for (const s of marginSchedules) {
       const elapsed = t - s.phase;
-      if (elapsed < 0 || !s.legs.length) return [];
-      const cycle = Math.floor(elapsed / s.period),
-        age = elapsed % s.period;
-      // Pick the leg crossing the current viewport when the trip starts.
-      let leg = s.chosen.get(cycle);
-      if (!leg) {
-        const pageY = (q) => (scene ? scene.hero.top : 0) + q.y;
-        const k = Math.floor((viewTop - (scene ? scene.hero.top : 0) - field.top) / field.height);
-        const shift = Math.max(0, k) * field.height;
-        leg = s.legs
-          .map((l) => ({ l, score: Math.abs((pageY(l.p.points[0]) + pageY(l.p.points.at(-1))) / 2 + shift - (viewTop + viewBottom) / 2) }))
-          .sort((a, b) => a.score - b.score)[0].l;
-        s.chosen.set(cycle, leg);
-        if (s.chosen.size > 8) s.chosen.delete(s.chosen.keys().next().value);
+      if (elapsed < 0 || !s.legs.length) continue;
+      const cycle = Math.floor(elapsed / s.period);
+      for (const cy of [cycle - 1, cycle]) {
+        if (cy < 0) continue;
+        const age = elapsed - cy * s.period;
+        // Pick the leg crossing the current viewport when the trip starts.
+        let leg = s.chosen.get(cy);
+        if (!leg) {
+          const pageY = (q) => (scene ? scene.hero.top : 0) + q.y;
+          const k = Math.floor((viewTop - (scene ? scene.hero.top : 0) - field.top) / field.height);
+          const shift = Math.max(0, k) * field.height;
+          leg = s.legs
+            .map((l) => ({ l, score: Math.abs((pageY(l.p.points[0]) + pageY(l.p.points.at(-1))) / 2 + shift - (viewTop + viewBottom) / 2) }))
+            .sort((a, b) => a.score - b.score)[0].l;
+          s.chosen.set(cy, leg);
+          if (s.chosen.size > 8) s.chosen.delete(s.chosen.keys().next().value);
+        }
+        const crestEnd = leg.leak ? leg.leak.crestEnd : leg.duration + MP.TAIL,
+          end = leg.leak ? leg.leak.end : crestEnd;
+        if (age >= end) continue;
+        // A cascade owns its side: no independent crest overlaps it.
+        const start = t - age;
+        if (cascadeBusy(s.side, start, start + crestEnd)) continue;
+        out.push({ side: s.side, leg, age, leak: leg.leak, gain: MP.GAIN, p: leg.p, duration: leg.duration, speed: MP.FAST, residueOnly: age >= crestEnd || cy < cycle });
       }
-      return age < leg.duration + 5 ? [{ ...s, leg, age }] : [];
-    });
+    }
+    return out;
+  }
+  /** Whether a cascade's crest on `side` overlaps [t0, t1]. */
+  function cascadeBusy(side, t0, t1) {
+    for (const c of cascades) {
+      if (c.side !== side) continue;
+      for (const S of c.starts)
+        for (const m of [-1, 0, 1]) {
+          const a = S + m * c.period;
+          if (a < t1 + 1 && a + c.span + 1 > t0) return true;
+        }
+    }
+    return false;
   }
   const envelope = (dt) => (dt < 1.4 ? Math.sin(((dt / 1.4) * Math.PI) / 2) ** 2 : Math.cos((((dt - 1.4) / 4.2) * Math.PI) / 2) ** 2) * 0.7;
 
+  // ---- r11.2 passive life ----
+  /** Visible arc (px from the strand start) and cycle state of a living strand
+   * at time t, memoised per paint (lifeStamp). Followers emerge behind their
+   * parent's advancing tip and vanish before it retreats past them. */
+  function lifeAt(p, t) {
+    const y = p.dyn;
+    if (y.stamp === lifeStamp) return y;
+    y.stamp = lifeStamp;
+    if (reduce.matches) {
+      y.vis = y.base + y.len;
+      y.state = 1;
+    } else if (y.follow) {
+      const q = lifeAt(y.parent, t);
+      y.vis = Math.max(0, Math.min(y.len, (q.vis - y.at - LIFE.FOLLOW_LAG) * LIFE.FOLLOW_GAIN));
+      y.state = q.state;
+    } else {
+      const cy = tipCycle(t + y.phase, y.period, y.g, y.h, y.r);
+      y.vis = y.base + y.len * cy.f;
+      y.state = cy.state;
+      // During the load-in a tip never runs ahead of its own growth front.
+      if (intro && intro.dA !== undefined) y.vis = Math.min(y.vis, (p.heroFamily ? p.heroRoot.front : intro.dA) - p.s0);
+    }
+    return y;
+  }
+  const lifeGroups = new Map();
+  const lerpPt = (pts, e) => {
+    const k = Math.floor(e),
+      a = pts[k],
+      b = pts[Math.min(pts.length - 1, k + 1)],
+      u = e - k;
+    return [a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u];
+  };
+  /** Adds the arc range [s0, s1] of a strand (and its fine hairs) to quantised
+   * stroke groups: the chunk weights, taper and widths of drawRange, so a tip
+   * continues its rastered base seamlessly. */
+  function lifePiece(p, s0, s1, mul, core = false) {
+    if (s1 <= s0 + 0.05) return;
+    const pts = p.points,
+      n = pts.length - 1,
+      i0 = indexAt(p, s0),
+      i1 = indexAt(p, s1);
+    if (!core && !p.fuzz && p.fuzzSeed >= 0) p.fuzz = makeFuzz(p, p.fuzzSeed);
+    const fz = core ? null : p.fuzz;
+    let f = 0;
+    if (fz) while (f < fz.length && fz[f] < i0) f += 7;
+    for (let c0 = Math.floor(i0 / CH) * CH; c0 < i1; c0 += CH) {
+      const a = Math.max(c0, i0),
+        b = Math.min(c0 + CH, n, i1);
+      if (b <= a) continue;
+      const mid = pts[Math.min(n, c0 + CH / 2)],
+        w = p.margin ? marginWeight(mid.x) : columnWeight(mid.x),
+        distal = c0 + CH / 2 > n * 0.5;
+      let fade = 1;
+      if (p.fades) for (let k = Math.floor(a); k <= Math.min(n, Math.ceil(b)); k++) fade = Math.min(fade, p.fades[k]);
+      const ga = p.alpha * fieldAlpha * w * lightMul * (distal ? p.taper : 1) * mul * fade;
+      if (ga < 0.004) {
+        if (fz) while (f < fz.length && fz[f] < b) f += 7;
+        continue;
+      }
+      const lw = p.width * (distal ? 0.7 : 1),
+        key = (core ? 1e7 : 0) + Math.min(999, Math.round(ga * 240)) * 1000 + Math.round(lw * 40);
+      let path = lifeGroups.get(key);
+      if (!path) lifeGroups.set(key, (path = new Path2D()));
+      const ka = Math.floor(a),
+        kb = Math.floor(b),
+        q0 = lerpPt(pts, a);
+      path.moveTo(q0[0], q0[1]);
+      for (let k = ka + 1; k <= kb; k++) path.lineTo(pts[k].x, pts[k].y);
+      if (b > kb) {
+        const q1 = lerpPt(pts, b);
+        path.lineTo(q1[0], q1[1]);
+      }
+      if (fz && f < fz.length && fz[f] < b) {
+        const hk = Math.min(999, Math.round(ga * 0.6 * 240)) * 1000 + Math.round(Math.max(0.28, p.width * 0.55) * 40);
+        let hp = lifeGroups.get(hk);
+        if (!hp) lifeGroups.set(hk, (hp = new Path2D()));
+        for (; f < fz.length && fz[f] < b; f += 7) {
+          hp.moveTo(fz[f + 1], fz[f + 2]);
+          hp.quadraticCurveTo(fz[f + 3], fz[f + 4], fz[f + 5], fz[f + 6]);
+        }
+      }
+    }
+  }
+  function flushLife(ctx) {
+    ctx.lineCap = "butt";
+    for (const [key, path] of lifeGroups) {
+      ctx.strokeStyle = key >= 1e7 ? core : glow;
+      ctx.globalAlpha = Math.floor((key % 1e7) / 1000) / 240;
+      ctx.lineWidth = (key % 1000) / 40;
+      ctx.stroke(path);
+    }
+    lifeGroups.clear();
+    ctx.globalAlpha = 1;
+  }
+  const RETREAT_STEPS = [0.75, 0.5, 0.28, 0.1],
+    TIP_GLOW = light ? 0.45 : 0.8;
+  /** One living strand: the regrowing part, a slight glow at a growing tip,
+   * and a die-back that fades from the tip toward the base. */
+  function lifeStrand(p, t) {
+    const y = lifeAt(p, t),
+      s0 = y.follow ? 0 : y.base,
+      s1 = y.vis;
+    if (s1 <= s0 + 0.05) return false;
+    if (y.state === 2) {
+      const F = Math.min(y.follow ? 10 : 36, (s1 - s0) * 0.6 + 3),
+        q = F / RETREAT_STEPS.length;
+      lifePiece(p, s0, s1 - F, 1);
+      RETREAT_STEPS.forEach((m, k) => lifePiece(p, s1 - F + k * q, s1 - F + (k + 1) * q, m));
+    } else {
+      lifePiece(p, s0, s1, 1);
+      // A soft glow over the last ~14 px of a growing tip (never a spark).
+      if (y.state === 0 && !y.follow && s1 < y.base + y.len - 0.5) {
+        lifePiece(p, Math.max(s0, s1 - 14), Math.max(s0, s1 - 6), TIP_GLOW * 0.5, true);
+        lifePiece(p, Math.max(s0, s1 - 6), s1, TIP_GLOW, true);
+      }
+    }
+    return true;
+  }
+  // ---- life tiles ----
+  const lifeTiles = new Map(),
+    lifePool = [],
+    lifeStats = { drawn: 0, ms: 0, redraws: 0, tiles: 0, dirty: 0, maxMs: 0 };
+  /** Living strands by 64 px bins of scene y (a tile repaint visits only its
+   * bins, not the whole list). */
+  let lifeBins = null;
+  function lifeNear(y0, y1) {
+    if (!lifeBins) {
+      lifeBins = new Map();
+      for (const p of lifeList)
+        for (let b = Math.floor(p.box[1] / 64); b <= Math.floor(p.box[3] / 64); b++) (lifeBins.get(b) || lifeBins.set(b, []).get(b)).push(p);
+    }
+    const out = new Set();
+    for (let b = Math.floor(y0 / 64); b <= Math.floor(y1 / 64); b++) for (const p of lifeBins.get(b) || []) out.add(p);
+    return out;
+  }
+  /** Bounds (scene coords) of the arc range [a0, a1] of a polyline. */
+  function arcBox(pts, arcs, a0, a1, pad) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      if (arcs[i] < a0 - 2 && (i + 1 >= pts.length || arcs[i + 1] < a0)) continue;
+      if (arcs[i] > a1 + 2) break;
+      const q = pts[i];
+      if (q.x < x0) x0 = q.x;
+      if (q.y < y0) y0 = q.y;
+      if (q.x > x1) x1 = q.x;
+      if (q.y > y1) y1 = q.y;
+    }
+    return x0 === Infinity ? null : [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+  }
+  const LIFE_DIRTY_PAD = 40; // retreat fade tail, tip glow and fuzz around a moving tip
+  /** Page copies of the field that intersect page range [y0, y1]. */
+  function copiesIn(y0, y1) {
+    const heroTop = scene ? scene.hero.top : 0,
+      out = [];
+    const k0 = Math.floor((y0 - heroTop - field.top - field.height) / field.height),
+      k1 = Math.floor((y1 - heroTop - field.top) / field.height);
+    for (let k = Math.max(scene ? 0 : -1e9, k0); k <= k1; k++) out.push(heroTop + k * field.height);
+    return out;
+  }
+  /** The tile range around the viewport (page coords). */
+  const tileRows = (scroll) => [Math.floor((scroll - LIFE_PAD) / LIFE_TILE), Math.floor((scroll + height + LIFE_PAD) / LIFE_TILE)];
+  function tileAt(col, row, create) {
+    const key = row * 1024 + col;
+    let tl = lifeTiles.get(key);
+    if (!tl && create) {
+      const cv = lifePool.pop() || document.createElement("canvas");
+      cv.width = Math.ceil(LIFE_TILE * d);
+      cv.height = Math.ceil(LIFE_TILE * d);
+      cv.style.cssText = `position:absolute;left:${col * LIFE_TILE}px;top:${row * LIFE_TILE}px;width:${LIFE_TILE}px;height:${LIFE_TILE}px`;
+      lifeInner.appendChild(cv);
+      tl = { cv, cx: cv.getContext("2d"), col, row, x: col * LIFE_TILE, y: row * LIFE_TILE, dirty: true, empty: true };
+      lifeTiles.set(key, tl);
+    }
+    return tl;
+  }
+  function dropTile(tl) {
+    lifeTiles.delete(tl.row * 1024 + tl.col);
+    tl.cv.remove();
+    if (lifePool.length < 24) lifePool.push(tl.cv);
+    else tl.cv.width = tl.cv.height = 0;
+  }
+  /** Marks every tile a page rectangle touches as dirty. */
+  function dirtyRect(x0, y0, x1, y1, r0, r1) {
+    const c0 = Math.max(0, Math.floor(x0 / LIFE_TILE)),
+      c1 = Math.min(Math.ceil(width / LIFE_TILE) - 1, Math.floor(x1 / LIFE_TILE)),
+      ra = Math.max(r0, Math.floor(y0 / LIFE_TILE)),
+      rb = Math.min(r1, Math.floor(y1 / LIFE_TILE));
+    for (let r = ra; r <= rb; r++) for (let cc = c0; cc <= c1; cc++) tileAt(cc, r, true).dirty = true;
+  }
+  /** Repaints one tile: every living strand (each field copy, the hero) that
+   * overlaps it, clipped to the tile. */
+  function paintTile(tl, t, A) {
+    const g = tl.cx,
+      X0 = tl.x,
+      Y0 = tl.y,
+      X1 = X0 + LIFE_TILE,
+      Y1 = Y0 + LIFE_TILE;
+    const full = Math.ceil(LIFE_TILE * d);
+    if (tl.cv.width !== full) tl.cv.width = tl.cv.height = full; // was an empty placeholder
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = "source-over";
+    g.clearRect(0, 0, full, full);
+    g.globalCompositeOperation = light ? "source-over" : "lighter";
+    let drawn = 0;
+    for (const base of copiesIn(Y0, Y1)) {
+      for (const p of lifeNear(Y0 - base, Y1 - base)) {
+        const b = p.box;
+        if (b[2] < X0 || b[0] > X1 || b[3] + base < Y0 || b[1] + base > Y1) continue;
+        drawn += lifeStrand(p, t);
+      }
+      g.setTransform(d, 0, 0, d, -X0 * d, (base - Y0) * d);
+      flushLife(g);
+    }
+    if (scene?.drawLife) {
+      const top = scene.hero.top;
+      if (top + scene.hero.H > Y0 && top < Y1) {
+        g.setTransform(d, 0, 0, d, -X0 * d, (top - Y0) * d);
+        g.lineCap = "butt";
+        drawn += scene.drawLife(g, t, A, X0, X1, Y0 - top, Y1 - top);
+      }
+    }
+    tl.dirty = false;
+    tl.empty = !drawn;
+    // A tile with nothing living keeps a 1x1 placeholder (no canvas memory).
+    if (tl.empty) tl.cv.width = tl.cv.height = 1;
+    tl.cv.style.visibility = tl.empty ? "hidden" : "";
+    return drawn;
+  }
+  /** One life tick: the visible arc of every living strand near the viewport
+   * is compared with what its tiles show; the tiles a change touches repaint.
+   * `all` repaints every tile in range (seeks, switches). */
+  function lifeTick(t, A, scroll, all = false) {
+    const t0 = performance.now(),
+      [r0, r1] = tileRows(scroll),
+      cols = Math.ceil(width / LIFE_TILE);
+    lifeStamp++;
+    // Tiles leaving the range are released; new rows start dirty.
+    for (const tl of [...lifeTiles.values()]) if (tl.row < r0 || tl.row > r1) dropTile(tl);
+    const fresh = [];
+    for (let r = r0; r <= r1; r++) if (!lifeTiles.has(r * 1024)) fresh.push(r);
+    const Y0 = r0 * LIFE_TILE,
+      Y1 = (r1 + 1) * LIFE_TILE,
+      bases = copiesIn(Y0, Y1);
+    const mark = (box, base, a, b) => {
+      if (box && b !== undefined) dirtyRect(box[0], box[1] + base, box[2], box[3] + base, r0, r1);
+    };
+    for (const p of lifeList) {
+      let inRange = false;
+      for (const base of bases) if (p.box[3] + base >= Y0 && p.box[1] + base <= Y1) inRange = true;
+      if (!inRange) continue;
+      const y = lifeAt(p, t),
+        s0 = y.follow ? 0 : y.base,
+        last = p.lifeShown;
+      if (last && !all && Math.abs(last.vis - y.vis) < 0.3 && last.state === y.state) continue;
+      const lo = Math.min(last ? last.vis : s0, y.vis) - LIFE_DIRTY_PAD,
+        hi = Math.max(last ? last.vis : y.vis, y.vis) + 4;
+      p.lifeShown = { vis: y.vis, state: y.state };
+      if (window.__dbgT) { const kk = y.follow ? "cF" : !p.static ? "cN" : y.base > 0 ? "cT" : "cW"; window.__dbgT[kk] = (window.__dbgT[kk] || 0) + 1; } /* DIAG-TEMP */
+      if (all) continue;
+      const box = arcBox(p.points, p.arc, Math.max(0, lo), hi, 14); // fuzz hairs overhang the polyline
+      for (const base of bases) mark(box, base, lo, hi);
+    }
+    if (scene?.lifeChanges) {
+      const top = scene.hero.top;
+      if (top + scene.hero.H > Y0 && top < Y1) for (const b of scene.lifeChanges(t, A, all)) dirtyRect(b[0], b[1] + top, b[2], b[3] + top, r0, r1);
+    }
+    // Rows that just came into range: every column that has life repaints.
+    for (const r of all ? Array.from({ length: r1 - r0 + 1 }, (_, i) => r0 + i) : fresh) for (let cc = 0; cc < cols; cc++) tileAt(cc, r, true).dirty = true;
+    // Visible tiles first; a live tick stops after ~6 ms (the rest repaint on
+    // the next frames), diagnostic seeks (frozen clock) repaint everything.
+    let n = 0,
+      drawn = 0;
+    const order = [...lifeTiles.values()].filter((tl) => tl.dirty);
+    order.sort((a, b) => Math.abs(a.y + LIFE_TILE / 2 - scroll - height / 2) - Math.abs(b.y + LIFE_TILE / 2 - scroll - height / 2));
+    for (const tl of order) {
+      if (frozen === null && n && performance.now() - t0 > 6) break;
+      drawn += paintTile(tl, t, A);
+      n++;
+    }
+    lifePending = order.length > n;
+    lifeStats.drawn = drawn;
+    lifeStats.dirty = n;
+    lifeStats.tiles = lifeTiles.size;
+    lifeStats.ms = performance.now() - t0;
+    lifeStats.maxMs = Math.max(lifeStats.maxMs, lifeStats.ms);
+    lifeStats.redraws++;
+  }
+  function placeLife(scroll) {
+    const ty = -Math.round(scroll * d) / d;
+    if (ty !== lifeY) {
+      lifeInner.style.transform = `translate3d(0,${ty}px,0)`;
+      lifeY = ty;
+    }
+  }
+
+  // ---- r11.2 margin pulses and cascades: leak routes built in idle slices ----
+  const MP_BLOOM = [0, 0.2, 0.32, 0.44, 0.56, 0.68, 0.8, 0.92, 1.05, 1.2, 1.4];
+  /** Cascade (owner): a hero pulse relays colony by colony down a side of the
+   * page. Hops take 1.5-3 s (HOP_V px/s, clamped), each colony re-emits after
+   * RELAY s, brightness tapers by TAPER per hop to at least FLOOR, the leak is
+   * shorter than an independent margin pulse (CUTOFF px of fine distance). */
+  const CAS = Object.freeze({ HOP_V: 260, HOP_MIN: 1.5, HOP_MAX: 3, RELAY: 0.45, SLOW: 30, CUTOFF: 340, LAMBDA: 170, TAPER: 0.965, FLOOR: 0.62, EVERY: 2 });
+  const LEAK_MP = Object.freeze({ fast: MP.FAST, slow: MP.SLOW, cutoff: MP.CUTOFF, lambda: MP.LAMBDA });
+  const boxAdd = (b, x0, y0, x1, y1) => {
+    if (x0 < b[0]) b[0] = x0;
+    if (y0 < b[1]) b[1] = y0;
+    if (x1 > b[2]) b[2] = x1;
+    if (y1 > b[3]) b[3] = y1;
+  };
+  /** Dijkstra from a leg's cord through the field graph (`o.fast` px/s on the
+   * cord, `o.slow` through fine threads, cut off at `o.cutoff` px of fine
+   * distance), then the lit segments as cached vector groups with their
+   * bounds: 0.3 s arrival buckets x amplitude level x (main | hair) for the
+   * crest, 4 s bands x near/far for the residue; living (cycling) parts stay
+   * per-frame. Returns the leak. */
+  function* leakLeg(leg, o = LEAK_MP) {
+    const { vs, ss } = graph,
+      at = new Map(),
+      fine = new Map(),
+      heap = [],
+      onLeg = new Set(leg.p.segments),
+      push = (v) => {
+        let i = heap.length;
+        heap.push(v);
+        while (i) {
+          const q = (i - 1) >> 1;
+          if (heap[q][0] <= v[0]) break;
+          heap[i] = heap[q];
+          i = q;
+        }
+        heap[i] = v;
+      },
+      pop = () => {
+        const top = heap[0],
+          last = heap.pop();
+        if (heap.length) {
+          let i = 0;
+          while (i * 2 + 1 < heap.length) {
+            let k = i * 2 + 1;
+            if (k + 1 < heap.length && heap[k + 1][0] < heap[k][0]) k++;
+            if (heap[k][0] >= last[0]) break;
+            heap[i] = heap[k];
+            i = k;
+          }
+          heap[i] = last;
+        }
+        return top;
+      };
+    let dist = 0;
+    leg.p.points.forEach((v, j) => {
+      if (j) dist += Math.hypot(v.x - leg.p.points[j - 1].x, v.y - leg.p.points[j - 1].y);
+      at.set(v.id, dist / o.fast);
+      fine.set(v.id, 0);
+      push([dist / o.fast, v.id]);
+    });
+    const duration = dist / o.fast;
+    let pops = 0;
+    while (heap.length) {
+      const [time, id] = pop();
+      if (++pops % 4000 === 0) yield "leak";
+      if (time > at.get(id) + 1e-5) continue;
+      const v = vs[id];
+      for (const si of v.edges) {
+        const sg = ss[si];
+        if (!sg.field) continue;
+        const q = sg.a === v ? sg.b : sg.a,
+          cord = onLeg.has(sg),
+          dd = cord ? 0 : fine.get(id) + sg.len,
+          next = time + sg.len / (cord ? o.fast : o.slow);
+        if (dd > o.cutoff || next >= (at.get(q.id) ?? Infinity)) continue;
+        at.set(q.id, next);
+        fine.set(q.id, dd);
+        push([next, q.id]);
+      }
+    }
+    const buckets = new Map(),
+      residue = new Map(),
+      late = [];
+    let arrivalMax = 0,
+      maxFine = 0,
+      count = 0,
+      n = 0;
+    const group = (map, key, make) => map.get(key) || (map.set(key, make()), map.get(key));
+    for (const sg of ss) {
+      if (++n % 6000 === 0) yield "leak-list";
+      if (!sg.field) continue;
+      const ta = at.get(sg.a.id),
+        tb = at.get(sg.b.id);
+      if (ta === undefined && tb === undefined) continue;
+      const a = ta === undefined || (tb !== undefined && tb < ta) ? sg.b : sg.a,
+        cord = onLeg.has(sg),
+        dd = fine.get(a.id) + (cord ? 0 : sg.len / 2),
+        p = sg.fieldPath;
+      if (dd > o.cutoff || !p) continue;
+      const mx = (sg.a.x + sg.b.x) / 2,
+        my = (sg.a.y + sg.b.y) / 2,
+        w = (p.margin ? marginWeight(mx) : columnWeight(mx)) * (p.endFade ? endFadeAt(p, { x: mx, y: my }) : 1),
+        amp = cord ? w : Math.exp(-dd / o.lambda) * w;
+      if (amp < 0.05) continue;
+      const arrival = at.get(a.id) + sg.len / (cord ? o.fast : o.slow) / 2,
+        main = !p.hair && !cord ? 1 : 0,
+        x0 = Math.min(sg.a.x, sg.b.x) - 3,
+        y0 = Math.min(sg.a.y, sg.b.y) - 3,
+        x1 = Math.max(sg.a.x, sg.b.x) + 3,
+        y1 = Math.max(sg.a.y, sg.b.y) + 3;
+      count++;
+      arrivalMax = Math.max(arrivalMax, arrival);
+      maxFine = Math.max(maxFine, dd);
+      const living = p.dyn && p.arc[Math.min(p.arc.length - 1, (sg.fieldIndex || 0) + 1)] > (p.dyn.follow ? 0 : p.dyn.base) + 0.5;
+      if (living) {
+        late.push({ s: sg, p, i: sg.fieldIndex || 0, arrival, amp, main });
+        continue;
+      }
+      const level = cord ? 5 : Math.min(4, Math.floor(amp * 5)),
+        bucket = group(buckets, Math.floor(arrival / MP.STEP), () => new Map()),
+        it = group(bucket, level * 2 + main, () => ({ path: new Path2D(), amp: cord ? amp : (level + 0.5) / 5, cord, main, box: [Infinity, Infinity, -Infinity, -Infinity] }));
+      it.path.moveTo(sg.a.x, sg.a.y);
+      it.path.lineTo(sg.b.x, sg.b.y);
+      boxAdd(it.box, x0, y0, x1, y1);
+      if (!cord) {
+        const far = dd >= 160 ? 1 : 0,
+          band = Math.floor(arrival / MP.RSTEP),
+          layer = group(residue, band * 2 + far, () => ({ arrival: (band + 0.5) * MP.RSTEP, far, items: new Map(), box: [Infinity, Infinity, -Infinity, -Infinity] })),
+          rl = Math.min(2, Math.floor(amp * 3)),
+          ri = group(layer.items, rl * 2 + main, () => ({ path: new Path2D(), amp: (rl + 0.6) / 3, main }));
+        ri.path.moveTo(sg.a.x, sg.a.y);
+        ri.path.lineTo(sg.b.x, sg.b.y);
+        boxAdd(layer.box, x0, y0, x1, y1);
+      }
+    }
+    late.sort((x, y) => x.arrival - y.arrival);
+    const res = [...residue.values()].sort((x, y) => x.arrival - y.arrival);
+    return {
+      buckets, residue: res, late, arrivalMax, maxFine, count, duration, crestEnd: Math.max(duration, arrivalMax) + MP.TAIL,
+      end: Math.max(arrivalMax + MP.TAIL, arrivalMax + MP.RES_HOLD + arrivalMax * MP.RES_BACK + MP.RES_FADE, duration + 7),
+    };
+  }
+  /** Arrival bloom of a margin colony: its own felt and hyphae in radial bands
+   * (computed once per colony). */
+  const blooms = new Map();
+  function bloomFor(node) {
+    if (blooms.has(node)) return blooms.get(node);
+    const bands = MP_BLOOM.slice(0, -1).map((r0, k) => ({ r0, r1: MP_BLOOM[k + 1], groups: new Map() })),
+      R = MP.BLOOM_R * 1.4;
+    for (const p of field.strands) {
+      if (p.box[0] > node.x + R || p.box[2] < node.x - R || p.box[1] > node.y + R || p.box[3] < node.y - R) continue;
+      const pts = p.points,
+        base = p.alpha * fieldAlpha * marginWeight(node.x);
+      for (let i = 1; i < pts.length; i++) {
+        if (p.rasterEnd !== undefined && i > p.rasterEnd) break;
+        const q = pts[i],
+          r = Math.hypot(q.x - node.x, q.y - node.y) / MP.BLOOM_R;
+        if (r >= 1.4) continue;
+        let bi = 0;
+        while (bi < MP_BLOOM.length - 2 && r >= MP_BLOOM[bi + 1]) bi++;
+        const al = Math.min(15, Math.round(Math.min(1, base * 1.4) * 15)),
+          kw = Math.round(((p.width || 0.4) + 0.15) * 5);
+        if (!al) continue;
+        const g = bands[bi].groups,
+          key = al * 64 + kw;
+        if (!g.has(key)) g.set(key, new Path2D());
+        g.get(key).moveTo(pts[i - 1].x, pts[i - 1].y);
+        g.get(key).lineTo(q.x, q.y);
+      }
+    }
+    blooms.set(node, bands);
+    return bands;
+  }
+  /** Leaks are built in idle slices: independent legs first, then cascade hops. */
+  function buildMarginLeaks() {
+    const jobs = [];
+    for (const s of marginSchedules) for (const l of s.legs) jobs.push(() => leakLeg(l));
+    for (const c of cascades)
+      for (const h of c.hops) {
+        jobs.push(function* () {
+          const key = h.p.id + ":" + h.dur.toFixed(3);
+          h.leak = c.cache.get(key) || (yield* leakLeg({ p: h.p }, { fast: h.speed, slow: CAS.SLOW, cutoff: CAS.CUTOFF, lambda: CAS.LAMBDA }));
+          c.cache.set(key, h.leak);
+          return h.leak;
+        });
+      }
+    let i = 0,
+      gen = null,
+      owner = null;
+    const legs = marginSchedules.flatMap((s) => s.legs);
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      if (disposed) return;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 6) {
+        if (!gen) {
+          if (i >= jobs.length) {
+            for (const k of field.marginKnots) bloomFor(k);
+            return;
+          }
+          owner = i < legs.length ? legs[i] : null;
+          gen = jobs[i++]();
+          if (!gen.next) gen = null;
+          continue;
+        }
+        const r = gen.next();
+        if (r.done) {
+          if (owner) owner.leak = r.value;
+          gen = null;
+        }
+      }
+      ch.port2.postMessage(0);
+    };
+    ch.port2.postMessage(0);
+  }
+  /** Cascade routes and start times per side (deterministic): hops follow the
+   * side's cords colony by colony down every page copy to the page bottom; a
+   * cascade starts on every CAS.EVERY-th hero pulse reaching or leaving the
+   * side's hero colony, never overlapping the previous one on that side. */
+  function buildCascades() {
+    if (!scene?.sched || !field.layout.enabled) return [];
+    const docH = document.documentElement.scrollHeight,
+      heroTop = scene.hero.top,
+      copies = Math.max(1, Math.ceil((docH - heroTop - field.top) / field.height)),
+      P = scene.sched.period,
+      first = window.MyceliumHero?.firstPulseAt ?? INTRO_MS / 1000 + 2.5 * INTRO_SCALE;
+    return field.marginRoutes.map((r, side) => {
+      const src = r.source,
+        lead = r.paths[0] && r.paths[0].points[0] === src ? r.paths[0] : null,
+        tile = r.paths.filter((p) => p !== lead),
+        hops = [],
+        pageY = (c, q) => heroTop + c * field.height + q.y;
+      const push = (p, copy, node, nodeCopy) => {
+        const len = p.arc ? p.arc[p.arc.length - 1] : p.segments.reduce((n, sg) => n + sg.len, 0),
+          dur = Math.max(CAS.HOP_MIN, Math.min(CAS.HOP_MAX, len / CAS.HOP_V));
+        hops.push({ p, copy, node, nodeCopy, len, dur, speed: len / dur, leak: null, off: 0, gain: 0 });
+      };
+      outer: for (let c = 0; c < copies; c++) {
+        if (c === 0 && lead) push(lead, 0, lead.points.at(-1), 0);
+        for (const p of tile) {
+          if (pageY(c, p.points.at(-1)) > docH - 40) break outer;
+          push(p, c, p.points.at(-1), c);
+        }
+        if (!r.wrap || pageY(c + 1, r.knots[0]) > docH - 40) break;
+        push(r.wrap, c, r.knots[0], c + 1);
+      }
+      let off = 0;
+      hops.forEach((h, i) => {
+        h.off = off;
+        h.gain = MP.GAIN * Math.max(CAS.FLOOR, Math.pow(CAS.TAPER, i));
+        off += h.dur + CAS.RELAY;
+      });
+      const span = hops.length ? hops.at(-1).off + hops.at(-1).dur + MP.TAIL : 0,
+        events = [];
+      for (const tr of scene.sched.trips) {
+        if (tr.route.from === src.source) events.push(tr.start);
+        for (const l of tr.route.landings) if (l.node === src.source && l.time >= 1.5) events.push(tr.start + l.time);
+      }
+      events.sort((a, b) => a - b);
+      const starts = [];
+      let n = 0;
+      for (const e of events) {
+        if (e < first || (starts.length && e < starts.at(-1) + span + 2)) continue;
+        if (n++ % CAS.EVERY === side % CAS.EVERY) starts.push(e);
+      }
+      if (!starts.length && hops.length) for (let e = first + 6 + side * 20; e < P - span; e += 3 * heroInterval) starts.push(e);
+      while (starts.length > 1 && starts.at(-1) + span + 2 > starts[0] + P) starts.pop(); // the schedule repeats every P
+      return { side: r.side, hops, starts, events: [...new Set(events.map((e) => Math.round(e * 1e6) / 1e6))], span, period: P, cache: new Map() };
+    });
+  }
+  /** Active cascades at time t: [{ c, age }] (age since it left the hero). */
+  function cascadeAt(t, side = null) {
+    const out = [];
+    for (const c of cascades) {
+      if (side !== null && c.side !== side) continue;
+      const tt = ((t % c.period) + c.period) % c.period;
+      for (const S of c.starts)
+        for (const age of [tt - S, tt + c.period - S]) {
+          const end = c.hops.reduce((m, h) => Math.max(m, h.off + (h.leak ? h.leak.end : h.dur + 12)), c.span);
+          if (age >= 0 && age < end && t - age >= 0) out.push({ c, age, crest: age < c.span });
+        }
+    }
+    return out;
+  }
+  const mpResidue = (leak, layer, age) => {
+    const rise = smooth((age - layer.arrival - 0.6) / 2.6);
+    if (rise <= 0) return 0;
+    const F = leak.arrivalMax + MP.RES_HOLD + (leak.arrivalMax - layer.arrival) * MP.RES_BACK - layer.far * MP.RES_FAR;
+    return MP.RES * rise * (1 - smooth((age - F) / MP.RES_FADE));
+  };
+  /** One margin trip or cascade hop on the live layer (scene coordinates of
+   * its field copy): residue, crest, living parts, route knots.
+   * trip = { leak, age, gain, p, duration, speed, residueOnly } */
+  function drawMarginTrip(trip, t, add, shift) {
+    const leak = trip.leak,
+      age = trip.age,
+      G = trip.gain * (light ? 0.4 : 1),
+      dirty = (b) => b[0] < Infinity && add(b[0], b[1] + shift, b[2], b[3] + shift);
+    lx.lineCap = "butt";
+    if (!leak) {
+      if (trip.residueOnly) return;
+      // Not built yet: the crest along the cord only.
+      lx.strokeStyle = core;
+      let dist = 0;
+      for (const sg of trip.p.segments) {
+        const dt = age - dist / trip.speed;
+        dist += sg.len;
+        if (dt < 0 || dt > MP.TAIL) continue;
+        lx.globalAlpha = envelope(dt) * G * 0.85 * marginWeight((sg.a.x + sg.b.x) / 2);
+        lx.lineWidth = 1.1;
+        lx.beginPath();
+        lx.moveTo(sg.a.x, sg.a.y);
+        lx.lineTo(sg.b.x, sg.b.y);
+        lx.stroke();
+        add(Math.min(sg.a.x, sg.b.x) - 3, Math.min(sg.a.y, sg.b.y) + shift - 3, Math.max(sg.a.x, sg.b.x) + 3, Math.max(sg.a.y, sg.b.y) + shift + 3);
+      }
+      return;
+    }
+    // Residue: what the pulse lit lingers faintly, then retreats far-edge first.
+    lx.strokeStyle = glow;
+    for (const layer of leak.residue) {
+      const a = mpResidue(leak, layer, age);
+      if (a < 0.006) continue;
+      for (const it of layer.items.values()) {
+        lx.globalAlpha = Math.min(1, a * it.amp * (light ? 0.5 : 0.9) * trip.gain);
+        lx.lineWidth = it.main ? 0.7 : 0.5;
+        lx.stroke(it.path);
+      }
+      dirty(layer.box);
+    }
+    if (trip.residueOnly) return;
+    // The crest: rolling arrival buckets (cord body + core, fine leak).
+    const lo = Math.max(0, Math.floor((age - MP.TAIL) / MP.STEP)),
+      hi = Math.floor(age / MP.STEP);
+    for (let i = lo; i <= hi; i++) {
+      const bucket = leak.buckets.get(i);
+      if (!bucket) continue;
+      const dt = age - (i + 0.5) * MP.STEP;
+      if (dt < 0 || dt > MP.TAIL) continue;
+      const env = envelope(dt) * (trip.cascade ? 1 : Math.exp((-i * MP.STEP * MP.FAST) / 2000));
+      if (env < 0.012) continue;
+      for (const it of bucket.values()) {
+        if (it.cord) {
+          lx.strokeStyle = core;
+          lx.globalAlpha = Math.min(1, env * (light ? 0.1 : 0.22) * G * it.amp);
+          lx.lineWidth = 4.2;
+          lx.stroke(it.path);
+          lx.globalAlpha = Math.min(1, env * (light ? 0.34 : 0.85) * G * it.amp);
+          lx.lineWidth = 1.1;
+          lx.stroke(it.path);
+        } else {
+          lx.strokeStyle = glow;
+          lx.globalAlpha = Math.min(1, env * it.amp * 0.85 * G * (it.main ? 1.25 : 1));
+          lx.lineWidth = it.main ? 0.85 : 0.55;
+          lx.stroke(it.path);
+        }
+        dirty(it.box);
+      }
+    }
+    // Living parts glow only where drawn now.
+    for (const it of leak.late) {
+      const dt = age - it.arrival;
+      if (dt > MP.TAIL) continue;
+      if (dt < 0) break;
+      if (!segmentShown(it.p, it.i, t)) continue;
+      const ga = Math.min(1, envelope(dt) * it.amp * 0.8 * G),
+        key = 1e7 + Math.round(ga * 240) * 1000 + Math.round((it.main ? 0.85 : 0.55) * 40);
+      if (ga < 0.004) continue;
+      let path = lifeGroups.get(key);
+      if (!path) lifeGroups.set(key, (path = new Path2D()));
+      path.moveTo(it.s.a.x, it.s.a.y);
+      path.lineTo(it.s.b.x, it.s.b.y);
+      add(Math.min(it.s.a.x, it.s.b.x) - 3, Math.min(it.s.a.y, it.s.b.y) + shift - 3, Math.max(it.s.a.x, it.s.b.x) + 3, Math.max(it.s.a.y, it.s.b.y) + shift + 3);
+    }
+    flushLife(lx);
+    // Knots on the route brighten as the crest passes.
+    for (const kn of trip.p.knots || []) {
+      const dt = age - (trip.p.arc?.[kn.i] ?? 0) / trip.speed;
+      if (dt < 0 || dt > MP.TAIL) continue;
+      drawKnot(lx, kn, envelope(dt) * G * 0.85 * marginWeight(kn.x) * (trip.p.endFade ? endFadeAt(trip.p, kn) : 1), 1.4);
+      add(kn.x - 8, kn.y + shift - 8, kn.x + 8, kn.y + shift + 8);
+    }
+  }
+  /** Arrival bloom: a narrow ring travelling from the colony core out to its rim. */
+  function drawBloom(node, landed, gain, add, shift) {
+    if (landed < 0 || landed >= 7) return;
+    const bands = bloomFor(node),
+      front = 0.2 + (landed / 4.8) * 1.25;
+    lx.strokeStyle = core;
+    for (const b of bands) {
+      if (!b.r0) continue;
+      const mid = (b.r0 + b.r1) / 2,
+        g = Math.exp(-(((mid - front) / 0.16) ** 2)) * smooth((landed - 0.15) / 0.6) * (0.55 + 0.45 * Math.min(1, mid)) * smooth((7 - landed) / 2);
+      if (g < 0.02) continue;
+      for (const [key, path] of b.groups) {
+        lx.globalAlpha = Math.min(1, (Math.floor(key / 64) / 15) * g * (light ? 0.34 : 0.7) * gain);
+        lx.lineWidth = (key % 64) / 5;
+        lx.stroke(path);
+      }
+    }
+    add(node.x - MP.BLOOM_R * 1.5, node.y + shift - MP.BLOOM_R * 1.5, node.x + MP.BLOOM_R * 1.5, node.y + shift + MP.BLOOM_R * 1.5);
+  }
+  /** Everything margin-pulse related for page copy k (independent trips and cascades). */
+  function drawMarginCopy(k, t, add, shift) {
+    for (const trip of marginTrips(t)) {
+      drawMarginTrip(trip, t, add, shift);
+      const node = trip.p.points.at(-1);
+      if (!trip.residueOnly && field.marginKnots.includes(node)) drawBloom(node, trip.age - trip.duration, MP.GAIN, add, shift);
+    }
+    for (const { c, age } of cascadeAt(t))
+      for (const h of c.hops) {
+        const ha = age - h.off;
+        if (ha < 0) break;
+        if (h.copy === k && ha < (h.leak ? h.leak.end : h.dur + MP.TAIL))
+          drawMarginTrip({ leak: h.leak, age: ha, gain: h.gain, p: h.p, duration: h.dur, speed: h.speed, cascade: true, residueOnly: ha > (h.leak ? h.leak.crestEnd : h.dur + MP.TAIL) }, t, add, shift);
+        if (h.nodeCopy === k) drawBloom(h.node, ha - h.dur, h.gain, add, shift);
+      }
+  }
+  /** Whether segment i of a field strand is drawn now (static base grown, or
+   * inside the living tip's visible extent). */
+  function segmentShown(p, i, t) {
+    const end = p.arc[Math.min(p.arc.length - 1, i + 1)];
+    if (p.dyn && end > (p.dyn.follow ? 0 : p.dyn.base) + 0.5) return lifeAt(p, t).vis >= end;
+    return !(intro && p.drawn < i + 1);
+  }
   function paint(T, force = false) {
     if (disposed || !attached) return;
     const begin = performance.now(),
@@ -1492,6 +2620,7 @@ export function createField({ stage, state, reduce }) {
       heroTop = scene ? scene.hero.top : 0,
       oy = heroTop - scroll; // page-space origin of scene coordinates
     let heroCost = 0;
+    lifeStamp++;
     if (intro && (reduced || document.hidden)) endIntro();
     if (intro && intro.manual === null) introStep(begin);
     // Bakes are batched to 4 s while running (one static redraw per batch at most).
@@ -1508,6 +2637,17 @@ export function createField({ stage, state, reduce }) {
       if (scene) placeHero(oy);
       lastScroll = scroll;
     }
+    // ---- life layer (r11.2): page-anchored tiles; a tick repaints what changed ----
+    const DT = window.__dbgT, dq = (k, t0, cx) => { if (!DT) return; if (cx) cx.getImageData(0, 0, 1, 1); DT[k] = (DT[k] || 0) + performance.now() - t0; }; /* DIAG-TEMP */
+    let dt0 = performance.now(); /* DIAG-TEMP */
+    if (DT) DT.frames = (DT.frames || 0) + 1; /* DIAG-TEMP */
+    if (window.__dbgNoLife) {} /* DIAG-TEMP */ else if (force || intro || lifePending || scroll !== lifeScroll || begin - lifeDrawn >= 1000 / LIFE_HZ - 2) {
+      lifeTick(t, A, scroll, force);
+      lifeDrawn = begin;
+      lifeScroll = scroll;
+    }
+    placeLife(scroll);
+    dq("life", dt0); dt0 = performance.now(); /* DIAG-TEMP */
     // ---- live layer ----
     const lb = performance.now();
     // Dirty-rect live layer: clear only what was drawn last frame.
@@ -1532,6 +2672,7 @@ export function createField({ stage, state, reduce }) {
       if (hb[0] < Infinity) add(hb[0], hb[1] + oy, hb[2], hb[3] + oy);
       heroCost = performance.now() - h0;
     }
+    dq("hero", dt0, lx); dt0 = performance.now(); /* DIAG-TEMP */
     const origin = oy + field.top,
       first = Math.floor(-origin / field.height),
       settle = intro ? 0 : smooth((performance.now() - introEnded) / (2500 * INTRO_SCALE));
@@ -1542,25 +2683,35 @@ export function createField({ stage, state, reduce }) {
       lx.translate(0, y - field.top);
       lx.strokeStyle = glow;
       const shift = y - field.top;
-      if (settle > 0)
-        for (const p of liveStrands) {
-          if (p.box[3] + shift < 0 || p.box[1] + shift > height) continue;
-          const v = life(p, t, reduced);
-          if (v.alpha <= 0 || v.extent <= 0) continue;
-          drawRange(lx, p, 0, v.extent, v.alpha * fieldAlpha * settle);
-          add(p.box[0], p.box[1] + shift, p.box[2], p.box[3] + shift);
-        }
+      // r11.2 intro: the margin mats' glow builds with their tufts.
+      if (intro) {
+        const gm = smooth((introTime() / (INTRO_MS / 1000) - 0.04) / 0.7);
+        if (gm > 0)
+          for (const p of field.strands) {
+            if (!p.haze || !p.static || p.box[3] + shift < 0 || p.box[1] + shift > height) continue;
+            // The first page copy's bands fade in over their top 280 px (CSS mask).
+            drawHaze(lx, p, p.alpha * fieldAlpha * gm, scene && k === 0 ? (y) => Math.max(0, Math.min(1, (y - field.top) / 280)) : null);
+            add(p.box[0], p.box[1] + shift, p.box[2], p.box[3] + shift);
+          }
+      }
       // Intro: the growing rim is brightest (pulse-like light at every tip).
       if (intro && tips.length) {
         lx.strokeStyle = core;
         lx.lineCap = "butt";
+        // r11.2: mat tufts never glow (hundreds of glowing felt tips read as a
+        // flash), and the glow fades out over the last 12% of the intro.
+        const tipFade = smooth((1 - introTime() / (INTRO_MS / 1000)) / 0.12);
         for (const [p, at] of tips) {
+          if (p.tuft || tipFade <= 0) continue;
           const q = p.points[Math.floor(at)];
           if (q.y + shift < -20 || q.y + shift > height + 20) continue;
           const w = p.margin ? marginWeight(q.x) : columnWeight(q.x);
           if (w <= 0.01) continue;
           const from = Math.max(0, at - 7);
-          lx.globalAlpha = Math.min(1, (light ? 0.35 : 0.6) * w * lightMul * (p.hair ? 0.6 : 1));
+          // ...and a tip's glow rises as it leaves its source (no flash at a colony).
+          const emerge = smooth(((p.s0 || 0) + p.arc[Math.floor(at)] - 16) / 48);
+          if (emerge <= 0) continue;
+          lx.globalAlpha = Math.min(1, (light ? 0.35 : 0.6) * w * lightMul * (p.hair ? 0.6 : 1)) * tipFade * emerge;
           lx.lineWidth = p.width * 1.6;
           lx.beginPath();
           lx.moveTo(p.points[Math.floor(from)].x, p.points[Math.floor(from)].y);
@@ -1579,58 +2730,11 @@ export function createField({ stage, state, reduce }) {
           lx.drawImage(s.cv, s.x0, s.y0, s.w, s.h);
           add(s.x0, s.y0 + shift, s.x0 + s.w, s.y0 + s.h + shift);
         }
-      if (!reduced && !intro)
-        for (const trip of marginTrips(t)) {
-          lx.strokeStyle = core;
-          lx.lineCap = "butt";
-          const gain = 0.75 * (light ? 0.34 : 0.85);
-          for (const item of trip.leg.segments) {
-            const dt = trip.age - item.arrival;
-            if (dt < 0 || dt > 5.6) continue;
-            const s = item.s,
-              mw = marginWeight((s.a.x + s.b.x) / 2) * (trip.leg.p.endFade ? endFadeAt(trip.leg.p, { x: (s.a.x + s.b.x) / 2, y: (s.a.y + s.b.y) / 2 }) : 1),
-              env = envelope(dt);
-            lx.globalAlpha = env * gain * mw * 0.3;
-            lx.lineWidth = 4;
-            lx.beginPath();
-            lx.moveTo(s.a.x, s.a.y);
-            lx.lineTo(s.b.x, s.b.y);
-            lx.stroke();
-            lx.globalAlpha = env * gain * mw;
-            lx.lineWidth = 1.1;
-            lx.stroke();
-          }
-          // Knots on the route brighten as the crest passes.
-          for (const kn of trip.leg.p.knots || []) {
-            const dt = trip.age - (trip.leg.p.arc?.[kn.i] ?? 0) / 80;
-            if (dt < 0 || dt > 5.6) continue;
-            drawKnot(lx, kn, envelope(dt) * gain * marginWeight(kn.x) * (trip.leg.p.endFade ? endFadeAt(trip.leg.p, kn) : 1), 1.4);
-          }
-          add(trip.leg.p.box[0] - 140, trip.leg.p.box[1] + shift - 140, trip.leg.p.box[2] + 140, trip.leg.p.box[3] + shift + 140);
-          const node = trip.leg.p.points.at(-1),
-            age = trip.age - trip.leg.duration;
-          if (age >= 0 && age < 5) {
-            // Short peripheral leak along the receiving tuft's own hyphae.
-            lx.strokeStyle = core;
-            for (const p of field.strands) {
-              if (!p.margin || (p.marginRoot || p.points[0]) !== node) continue;
-              let distance = p.marginDistance || 0;
-              for (const s of p.segments) {
-                const dt = age - distance / 35;
-                distance += s.len;
-                if (distance > 135 || dt < 0 || dt > 3) continue;
-                lx.globalAlpha = Math.sin((dt / 3) * Math.PI) ** 2 * gain * Math.exp(-distance / 67.5) * marginWeight(s.a.x);
-                lx.lineWidth = Math.max(0.3, s.width * 1.5);
-                lx.beginPath();
-                lx.moveTo(s.a.x, s.a.y);
-                lx.lineTo(s.b.x, s.b.y);
-                lx.stroke();
-              }
-            }
-          }
-        }
+      if (!reduced && !intro && !scene?.pulsesOff && !window.__dbgNoMargin) /* DIAG-TEMP */
+        drawMarginCopy(k, t, add, shift);
       lx.restore();
     }
+    dq("margin", dt0, lx); dt0 = performance.now(); /* DIAG-TEMP */
     // Hero pulses leak into field threads along their actual arrival times.
     if (scene?.activeTrips && !reduced && !scene.pulsesOff) {
       lx.save();
@@ -1645,22 +2749,23 @@ export function createField({ stage, state, reduce }) {
           const sy = (s.a.y + s.b.y) / 2 + oy;
           if (sy < -20 || sy > height + 20) continue;
           const p = s.fieldPath;
-          if (p && !p.static) {
-            const v = life(p, t, false);
-            if (v.extent < (s.fieldIndex || 0) + 1 || v.alpha <= 0) continue;
-          }
-          if (p && p.static && intro && p.drawn < (s.fieldIndex || 0) + 1) continue;
-          lx.globalAlpha = envelope(dt) * item.amp * (light ? 0.24 : 0.75);
+          if (p && !segmentShown(p, s.fieldIndex || 0, t)) continue;
+          const ga = Math.min(1, envelope(dt) * item.amp * (light ? 0.24 : 0.75));
+          if (ga < 0.004) continue;
           add(Math.min(s.a.x, s.b.x) - 3, Math.min(s.a.y, s.b.y) + oy - 3, Math.max(s.a.x, s.b.x) + 3, Math.max(s.a.y, s.b.y) + oy + 3);
-          lx.lineWidth = Math.max(0.5, s.width * 1.8);
-          lx.beginPath();
-          lx.moveTo(s.a.x, s.a.y);
-          lx.lineTo(s.b.x, s.b.y);
-          lx.stroke();
+          // r11.2: batched into quantised groups (was one stroke per segment).
+          const key = 1e7 + Math.round(ga * 240) * 1000 + Math.round(Math.max(0.5, s.width * 1.8) * 40);
+          let path = lifeGroups.get(key);
+          if (!path) lifeGroups.set(key, (path = new Path2D()));
+          path.moveTo(s.a.x, s.a.y);
+          path.lineTo(s.b.x, s.b.y);
         }
+      flushLife(lx);
       lx.restore();
     }
     lx.globalAlpha = 1;
+    dq("leak", dt0, lx); /* DIAG-TEMP */
+    if (DT && box[0] < Infinity) DT.dirtyArea = (DT.dirtyArea || 0) + (Math.min(width, box[2]) - Math.max(0, box[0])) * (Math.min(height, box[3]) - Math.max(0, box[1])) / (width * height); /* DIAG-TEMP */
     dirty = box[0] < Infinity ? box : null;
     const cost = performance.now() - begin;
     metrics.frames++;
@@ -1729,6 +2834,7 @@ export function createField({ stage, state, reduce }) {
     }
     x.clearRect(0, 0, scene.hero.W, scene.hero.H);
     x.drawImage(hc, 0, 0, scene.hero.W, scene.hero.H);
+    scene.drawIntroCores?.(x);
   }
   let heroY = NaN,
     heroShown = true;
@@ -1852,5 +2958,8 @@ export function createField({ stage, state, reduce }) {
     colonySprites.clear();
     live.width = live.height = 0;
     live.remove();
+    for (const tl of lifeTiles.values()) tl.cv.width = tl.cv.height = 0;
+    lifeTiles.clear();
+    lifeBox.remove();
   };
 }

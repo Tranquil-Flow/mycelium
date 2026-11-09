@@ -438,8 +438,8 @@ function sceneClock() {
  * field and margins. Every intro timing is designed at INTRO_BASE_MS (6 s) and
  * multiplied by INTRO_SCALE, so a longer intro is the same shape, slower.
  *
- * PRODUCTION_INTRO_MS is the production load-in. It is the single place to
- * change at promotion (6000 | 9000 | 12000: the owner's pick; see R11-2-READY).
+ * PRODUCTION_INTRO_MS is the production load-in: 9 s (owner's pick, x1.5, r11.2).
+ * It is the single place to change (6000 | 9000 | 12000; see R11-2-READY).
  *
  * STAGING ONLY (r11.2 speed comparison): when the server-injected staging
  * controls exist (the Electric toggle [data-bg-choice] or the intro selector
@@ -449,7 +449,7 @@ function sceneClock() {
  * Production never injects either control, so it never reads the parameter
  * or the key. */
 const INTRO_BASE_MS = 6000,
-  PRODUCTION_INTRO_MS = 6000,
+  PRODUCTION_INTRO_MS = 9000,
   STAGING_INTRO_CHOICES = Object.freeze([6000, 9000, 12000]),
   STAGING_INTRO_DEFAULT_MS = 9000,
   STAGING_INTRO_KEY = "mycelium-staging-intro-v1";
@@ -465,7 +465,40 @@ function introMs(doc = typeof document === "undefined" ? null : document, loc = 
 }
 const INTRO_MS = introMs(),
   INTRO_SCALE = INTRO_MS / INTRO_BASE_MS;
+/** r11.2 passive life (owner: strands must visibly grow and fade back; "if a
+ * human is paused at a point on the page, should be able to visibly see it is
+ * growing/fading"). One cycle of a living tip: it regrows (g s), holds (h s),
+ * dies back tip-first (r s), then rests (the remainder of the period). Grow
+ * and retreat move at a near-constant speed (a trapezoid profile, 15% ease at
+ * each end), so a tip travels at 8-20 px/s while active, never a slow creep.
+ * Returns the extent fraction f (0..1) and the state (0 grow, 1 hold,
+ * 2 retreat, 3 rest). Hero and field share it. */
+const LIFE_CYCLE = Object.freeze({ G: 0.38, H: 0.24, R: 0.28, V_GROW: [7, 10], V_BACK: [7, 9], HOLD: [0.16, 0.12], REST_MIN: 2.5, EASE: 0.15 });
+function trap(u, a = LIFE_CYCLE.EASE) {
+  const v = 1 / (1 - a);
+  if (u <= 0) return 0;
+  if (u >= 1) return 1;
+  if (u < a) return (v * u * u) / (2 * a);
+  if (u <= 1 - a) return v * (u - a / 2);
+  return 1 - (v * (1 - u) * (1 - u)) / (2 * a);
+}
+/** Per-strand timing from three hashes: average speeds 7-17 (grow) and 7-16
+ * (retreat) px/s, so the peak is <= 20 px/s; period at least `period0`. */
+function lifeTiming(len, period0, h1, h2, h3) {
+  const { V_GROW, V_BACK, HOLD, REST_MIN } = LIFE_CYCLE,
+    g = len / (V_GROW[0] + V_GROW[1] * h1),
+    r = len / (V_BACK[0] + V_BACK[1] * h2),
+    hold = (HOLD[0] + HOLD[1] * h3) * period0;
+  return { period: Math.max(period0, g + hold + r + REST_MIN), g, h: hold, r };
+}
+function tipCycle(tau, period, g = LIFE_CYCLE.G * period, h = LIFE_CYCLE.H * period, r = LIFE_CYCLE.R * period) {
+  const u = ((tau % period) + period) % period;
+  if (u < g) return { f: trap(u / g), state: 0 };
+  if (u < g + h) return { f: 1, state: 1 };
+  if (u < g + h + r) return { f: 1 - trap((u - g - h) / r), state: 2 };
+  return { f: 0, state: 3 };
+}
 export {
   rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock,
-  INTRO_BASE_MS, PRODUCTION_INTRO_MS, STAGING_INTRO_CHOICES, STAGING_INTRO_DEFAULT_MS, STAGING_INTRO_KEY, INTRO_MS, INTRO_SCALE, introMs,
+  INTRO_BASE_MS, PRODUCTION_INTRO_MS, STAGING_INTRO_CHOICES, STAGING_INTRO_DEFAULT_MS, STAGING_INTRO_KEY, INTRO_MS, INTRO_SCALE, introMs, LIFE_CYCLE, tipCycle, lifeTiming,
 };
