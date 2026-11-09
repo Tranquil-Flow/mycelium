@@ -2863,6 +2863,23 @@ export function createField({ stage, state, reduce }) {
       flushLife(lx);
       lx.restore();
     }
+    // r11.2c: the moving light fades out under the hero copy (text-safe zone,
+    // see textSafeMask in mycelium-hero.js): one destination-out blit of the
+    // soft mask, limited to what was drawn this frame.
+    const safe = scene?.textSafe;
+    if (safe && box[0] < Infinity) {
+      const sx0 = Math.max(box[0], safe.x),
+        sy0 = Math.max(box[1], safe.y + oy, 0),
+        sx1 = Math.min(box[2], safe.x + safe.w),
+        sy1 = Math.min(box[3], safe.y + oy + safe.h, height);
+      if (sx1 > sx0 && sy1 > sy0) {
+        const k = safe.k;
+        lx.globalCompositeOperation = "destination-out";
+        lx.globalAlpha = 1;
+        lx.drawImage(safe.canvas, (sx0 - safe.x) * k, (sy0 - oy - safe.y) * k, (sx1 - sx0) * k, (sy1 - sy0) * k, sx0, sy0, sx1 - sx0, sy1 - sy0);
+        metrics.textSafeBlits = (metrics.textSafeBlits || 0) + 1;
+      }
+    }
     lx.globalAlpha = 1;
     dirty = box[0] < Infinity ? box : null;
     const cost = performance.now() - begin;

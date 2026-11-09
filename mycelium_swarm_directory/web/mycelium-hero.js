@@ -113,6 +113,77 @@ function readLayout(canvas) {
   };
 }
 
+/** r11.2c text-safe zone for the moving light (hero pulses, their field
+ * leaks, margin pulses and cascades, intro rims). Static strands already fade
+ * to 5% near the hero copy (protector), but the pulse light was drawn at full
+ * strength and dropped the contrast under the H1, lead and CTAs to 1.0-2.7:1
+ * at pulse peaks. The live layer is attenuated under every text line box (and
+ * the CTA buttons) in and just below the hero to TEXT_SAFE.floor, ramping back
+ * to full over TEXT_SAFE.soft px (smoothstep, no visible edge). The floor is
+ * the static strands' own floor near text, so a pulse fades with its strand. Returned as a
+ * soft alpha mask (alpha = removed fraction) in scene coordinates at half CSS
+ * resolution, for one destination-out blit per frame. */
+export const TEXT_SAFE = Object.freeze({ floor: 0.05, pad: 6, soft: 64, softMobile: 44, scale: 0.5 });
+function* textSafeMask(section, L, out) {
+  const top = L.top,
+    rects = [],
+    soft = L.mobile ? TEXT_SAFE.softMobile : TEXT_SAFE.soft,
+    pad = TEXT_SAFE.pad,
+    add = (r) => {
+      if (r.width < 1 || r.height < 1) return;
+      const t = r.top + scrollY - top;
+      if (t > L.H + 200 || r.bottom + scrollY - top < -40) return;
+      rects.push({ l: r.left - pad, r: r.right + pad, t: t - pad, b: r.bottom + scrollY - top + pad });
+    };
+  const roots = [section.querySelector(".hero-copy"), section.nextElementSibling].filter(Boolean);
+  for (const root of roots) {
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walk.nextNode())) {
+      if (!n.textContent.trim() || n.parentElement.closest(".btn,.card")) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) add(r);
+    }
+    for (const e of root.querySelectorAll(".btn")) add(e.getBoundingClientRect());
+  }
+  // The demo status keeps its reserved box (its copy changes when live).
+  for (const e of section.querySelectorAll(".apex-demo")) add(e.getBoundingClientRect());
+  if (!rects.length) return;
+  const k = TEXT_SAFE.scale,
+    x0 = Math.max(0, Math.floor(Math.min(...rects.map((r) => r.l)) - soft)),
+    y0 = Math.floor(Math.min(...rects.map((r) => r.t)) - soft),
+    x1 = Math.min(L.W, Math.ceil(Math.max(...rects.map((r) => r.r)) + soft)),
+    y1 = Math.ceil(Math.max(...rects.map((r) => r.b)) + soft),
+    w = Math.max(1, Math.ceil((x1 - x0) * k)),
+    h = Math.max(1, Math.ceil((y1 - y0) * k)),
+    cv = document.createElement("canvas");
+  cv.width = w;
+  cv.height = h;
+  const cx = cv.getContext("2d"),
+    im = cx.createImageData(w, h),
+    px = im.data;
+  for (let j = 0; j < h; j++) {
+    const y = y0 + (j + 0.5) / k,
+      near = rects.filter((r) => y > r.t - soft && y < r.b + soft);
+    if (!near.length) continue;
+    for (let i = 0; i < w; i++) {
+      const x = x0 + (i + 0.5) / k;
+      let keep = 1;
+      for (const r of near) {
+        const dx = Math.max(r.l - x, 0, x - r.r),
+          dy = Math.max(r.t - y, 0, y - r.b),
+          v = TEXT_SAFE.floor + (1 - TEXT_SAFE.floor) * smooth(Math.hypot(dx, dy) / soft);
+        if (v < keep) keep = v;
+      }
+      px[(j * w + i) * 4 + 3] = Math.round((1 - keep) * 255);
+    }
+    if (j % 24 === 23) yield "text-safe";
+  }
+  cx.putImageData(im, 0, 0);
+  out.mask = { canvas: cv, x: x0, y: y0, w: x1 - x0, h: y1 - y0, k, rects: rects.length, floor: TEXT_SAFE.floor, soft };
+}
+
 /** Pure geometry builder (a generator: yields between bounded work units). */
 function* buildGeometry(L, budget, out = {}) {
   const { W, Hh, H, mobile } = L,
@@ -2793,6 +2864,11 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     if (disposed) return;
     if (!reduce.matches) await run(makeBreath(g));
+    // r11.2c: the text-safe zone for the pulse light (see textSafeMask).
+    const safeOut = {};
+    if (!reduce.matches) await run(textSafeMask(canvas.closest("section") || canvas.parentElement, L, safeOut));
+    if (disposed) return;
+    scene.textSafe = safeOut.mask || null;
     await nextTask();
     if (disposed) return;
     const tc = performance.now();
