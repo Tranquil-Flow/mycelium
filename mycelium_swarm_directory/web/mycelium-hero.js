@@ -367,7 +367,9 @@ function* buildGeometry(L, budget, out = {}) {
     return P;
   }
   /** Forward-pointing fringe hairs at Poisson positions (no comb, no asterisk). */
-  function fringe(P, rate, o) {
+  // r11.3: a generator with a time-bounded yield per hair (one long cord's
+  // fringe was a 75-94 ms task at 1440/1920); same RNG order, same hairs.
+  function* fringe(P, rate, o) {
     let s = -Math.log(1 - R()) / rate;
     while (s < P.len) {
       const at = along(P, s),
@@ -378,6 +380,7 @@ function* buildGeometry(L, budget, out = {}) {
         kind: "hair", t0: at.t + 0.8 + R() * 2.5, v: P.v * 0.8, w0: o.w, w1: o.w * 0.7, a0: o.a, a1: o.a * 0.55, tone: R() < 0.12 ? 1 : 0, unit: P.unit, branch: P.branch, cord: -1,
       });
       s += -Math.log(1 - R()) / (rate * (0.5 + u));
+      if (budget()) yield "fringe-hair";
     }
   }
 
@@ -481,7 +484,7 @@ function* buildGeometry(L, budget, out = {}) {
       P.fringed = true;
       const sb = c.subs[P.sub || 0] || c.subs[0],
         rOut = Math.hypot(P.pts.at(-1).x - sb.x, P.pts.at(-1).y - sb.y) / sb.R;
-      if (rOut > 0.22) fringe(P, 1 / 7, { len: 6, maxLen: 22, w: 0.16, a: 0.27 });
+      if (rOut > 0.22) yield* fringe(P, 1 / 7, { len: 6, maxLen: 22, w: 0.16, a: 0.27 });
       budget() && (yield "fringe");
     }
   }
@@ -621,7 +624,7 @@ function* buildGeometry(L, budget, out = {}) {
         tone: f % 9 === 0 ? 1 : 0, source: from.source, unit: o.unit,
       });
       if (P) laidFibres++;
-      if (P && R() < 0.7) fringe(P, (1 / 15) * o.fringe, { len: 10, maxLen: 40, w: 0.19, a: 0.24 });
+      if (P && R() < 0.7) yield* fringe(P, (1 / 15) * o.fringe, { len: 10, maxLen: 40, w: 0.19, a: 0.24 });
       budget() && (yield "fibre");
     }
     // Brush tip: 2-5 fibrous fingers splaying forwards.
@@ -641,7 +644,7 @@ function* buildGeometry(L, budget, out = {}) {
           }, 1);
           if (P) {
             edge(end, P.pts[0], 0.3, 0.2, 0, -1, tEnd);
-            fringe(P, 1 / 14, { len: 6, maxLen: 18, w: 0.17, a: 0.24 });
+            yield* fringe(P, 1 / 14, { len: 6, maxLen: 18, w: 0.17, a: 0.24 });
           }
         }
       }
@@ -837,7 +840,12 @@ function* buildGeometry(L, budget, out = {}) {
   yield "explorers";
   // ---- r11 persistent fuzz: every persistent strand carries short, fine, acute
   // hairs at about the density the pulse makes visible (owner: no bare lines).
+  // r11.3: its own small generator with a periodic time check (the first
+  // hair came 36-44 ms after resuming here, inside this ~4000-line generator).
+  yield* (function* fuzzPass() {
+  let n = 0;
   for (const P of paths.slice()) {
+    if ((++n & 511) === 0 && budget()) yield "fuzz";
     if (P.fringed || P.len < 24) continue;
     const k = P.kind;
     let rate = 0;
@@ -847,9 +855,10 @@ function* buildGeometry(L, budget, out = {}) {
     else if (k === "cord-fibre") rate = R() < 0.4 ? FUZZ_RATE * 0.8 : 0;
     if (!rate) continue;
     P.fringed = true;
-    fringe(P, rate, { len: 6.5, maxLen: 20, w: 0.19, a: 0.3 });
+    yield* fringe(P, rate, { len: 6.5, maxLen: 20, w: 0.19, a: 0.3 });
     budget() && (yield "fuzz");
   }
+  })();
   // ---- r11 hyphal knots: small tangled balls ON strands and cords and inside
   // mats, in small irregular groups (shared recipe: r11-coordination.md). The
   // wound fibres are graph edges (a passing pulse lights them); soft lobes are
@@ -991,7 +1000,7 @@ function* buildGeometry(L, budget, out = {}) {
       near = colonies.map(() => []);
     let n = 0;
     for (const P of paths) {
-      if (++n % 1500 === 0 && budget()) yield "monotone";
+      if ((++n & 255) === 0 && budget()) yield "monotone";
       const m = P.pts[P.pts.length >> 1];
       // Recycling explorer units live on the life layer, not in the static
       // colony: the profile is measured on what stays.
@@ -1020,7 +1029,7 @@ function* buildGeometry(L, budget, out = {}) {
     // Cords strengthen toward the node and overlap the mat edge.
     n = 0;
     for (const P of paths) {
-      if (++n % 3000 === 0 && budget()) yield "monotone";
+      if ((++n & 511) === 0 && budget()) yield "monotone"; // r11.3: finer checks (was every 3000 paths)
       if (P.kind !== "cord-fibre" && P.kind !== "cord-centre") continue;
       for (let i = 0; i < P.pts.length; i++) {
         const q = P.pts[i],
@@ -1031,7 +1040,13 @@ function* buildGeometry(L, budget, out = {}) {
         W[i] = Math.min(0.95, W[i] * (1 + 0.5 * (1 - smooth((r - 0.15 * colonies[c].R0) / (0.35 * colonies[c].R0)))));
       }
     }
-    for (const list of mine) for (const P of list) aw(P);
+    // r11.3: the work copies in time-bounded slices (one 50-80 ms task at 1920).
+    n = 0;
+    for (const list of mine)
+      for (const P of list) {
+        aw(P);
+        if ((++n & 255) === 0 && budget()) yield "monotone";
+      }
     const fills = new Map();
     const commit = () => {
       for (const P of work) {
@@ -1083,7 +1098,7 @@ function* buildGeometry(L, budget, out = {}) {
             for (let q = i + 1; q <= j; q++) g.path.lineTo(P.pts[q].x, P.pts[q].y);
             g.n += j - i;
           }
-          if (++k % 400 === 0 && budget()) yield "monotone";
+          if ((++k & 31) === 0 && budget()) yield "monotone"; // r11.3: was every 400 paths
         }
         // Stroked in flushed batches (a 1 px read forces the raster), so no
         // slice holds the whole colony's raster work.
@@ -1168,7 +1183,9 @@ function* buildGeometry(L, budget, out = {}) {
           return Math.max(1, Math.min(2, Math.pow(gl, 0.85))); // luminance grows faster than ink: damped
         });
         if (!changed) break;
-        for (const P of mine[ci])
+        let np = 0;
+        for (const P of mine[ci]) {
+          if ((++np & 127) === 0 && budget()) yield "monotone"; // r11.3
           for (let i = 0; i < P.pts.length; i++) {
             const q = P.pts[i],
               u = Math.hypot(q.x - nd.x, q.y - nd.y) / STEP - 0.5,
@@ -1177,6 +1194,7 @@ function* buildGeometry(L, budget, out = {}) {
               gk = step[k0] + (step[Math.min(K - 1, k0 + 1)] - step[k0]) * f;
             if (gk !== 1) P.aw[i] = Math.min(0.95, P.aw[i] * gk);
           }
+        }
         for (let k = 0; k < K; k++) gain[k] *= step[k];
       }
       // Residual dips (where cords and web, which are not scaled, set the
@@ -1230,11 +1248,15 @@ function* buildGeometry(L, budget, out = {}) {
   // intro. A late fork could inherit a shift that pushed it past the intro end
   // (6% of a 1440 colony's mat ink was still missing 3 s after it). The
   // subtree moves earlier as one, so nothing starts before its parent part.
+  // r11.3: time-bounded yields (this tail was one 31-50 ms task).
+  yield "mat-limit";
   {
     const LIMIT = ageOfIntro(MAT_DONE),
       kids = new Map(),
       roots = [];
+    let n = 0;
     for (const P of paths) {
+      if ((++n & 1023) === 0 && budget()) yield "mat-limit";
       if (!(P.matShift > 0)) continue;
       if (P.matHost && P.matHost.matShift === P.matShift) (kids.get(P.matHost) || kids.set(P.matHost, []).get(P.matHost)).push(P);
       else roots.push(P);
@@ -1251,10 +1273,13 @@ function* buildGeometry(L, budget, out = {}) {
     for (const P of roots) {
       const over = subEnd(P) - LIMIT;
       if (over > 0) shiftAll(P, Math.min(over, P.matShift));
+      if ((++n & 63) === 0 && budget()) yield "mat-limit";
     }
   }
   // Recycle units: per-unit period and phase from independent hashes.
+  let nu = 0;
   for (const u of units) {
+    if ((++nu & 63) === 0 && budget()) yield "units";
     if (!u.paths.length) continue;
     u.start = Math.min(...u.paths.map((p) => p.t0));
     u.grow = Math.max(...u.paths.map((p) => p.done)) - u.start;
@@ -1620,6 +1645,19 @@ export function createHero(canvas, { stage, state, reduce }) {
    * now cross-fade over XFADE_MS instead of one blit; growth during the fade
    * is drawn into both the old and the new raster. */
   const XFADE_MS = 1600;
+  /** r11.3: forces a canvas's recorded drawing to raster now by sampling one
+   * pixel into a 1x1 canvas, without a getImageData readback (repeated
+   * readbacks move a canvas off the GPU; the 30 MB re-bake raster then cost
+   * 23-53 ms to draw at every cross-fade step at 1920 DPR2). */
+  let flushCv = null;
+  function rasterNow(cv) {
+    if (!flushCv) {
+      flushCv = document.createElement("canvas");
+      flushCv.width = flushCv.height = 1;
+    }
+    flushCv.getContext("2d").drawImage(cv, 0, 0, 1, 1, 0, 0, 1, 1);
+    flushCv.width = 1; // reset: never hold a snapshot of the source
+  }
   const bakeTargets = () => (growth.xfade ? [growth.xfade.ox, growth.xfade.nx] : [sx]);
   function snapshot() {
     const cv = document.createElement("canvas");
@@ -1740,13 +1778,37 @@ export function createHero(canvas, { stage, state, reduce }) {
     if (!growth.changed) return false;
     growth.changed = false;
     scene.hero.version++;
-    growth.commit = growth.active.map((P) => [P, P.drawn]).concat(growth.recent.map((P) => [P, rasterLen(P)]));
+    // r11.3: flat reused buffers (a [P, e] pair per growing path, ~36k per
+    // frame at 1920, made the intro frames allocation- and GC-heavy).
+    const n = growth.active.length + growth.recent.length;
+    if (!growth.cP || growth.cP.length < n) {
+      growth.cP = new Array(Math.ceil(n * 1.5));
+      growth.cE = new Float64Array(Math.ceil(n * 1.5));
+    }
+    const cP = growth.cP,
+      cE = growth.cE;
+    let k = 0;
+    for (const P of growth.active) {
+      cP[k] = P;
+      cE[k++] = P.drawn;
+    }
+    for (const P of growth.recent) {
+      cP[k] = P;
+      cE[k++] = rasterLen(P);
+    }
+    growth.commit = k;
     growth.recent = [];
     return true;
   }
   function commitPresented() {
-    if (!growth.commit) return;
-    for (const [P, e] of growth.commit) P.presented = Math.max(P.presented, e);
+    if (growth.commit === null) return;
+    const cP = growth.cP,
+      cE = growth.cE;
+    for (let i = 0; i < growth.commit; i++) {
+      const P = cP[i];
+      P.presented = Math.max(P.presented, cE[i]);
+      cP[i] = null;
+    }
     growth.commit = null;
   }
   // Recycling paths (distal explorer units) are drawn live: they fade and regrow.
@@ -1831,7 +1893,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           pieces = 0;
           t0 = performance.now();
           flushPieces(ox, groups);
-          ox.getImageData(0, 0, 1, 1); // raster this batch now, not all at the swap
+          rasterNow(off); // raster this batch now, not all at the swap
           yield "!rebake";
           if (growth.epoch !== epoch) return false;
         }
@@ -1843,11 +1905,26 @@ export function createHero(canvas, { stage, state, reduce }) {
       if (growth.epoch !== epoch) return (off.width = off.height = 0);
       if (!any) break;
     }
-    // The swap: the last few pieces, knots, cores and felt fills, one blit.
+    // The swap: the last few pieces, knots, cores and felt fills.
+    // r11.3: rastered in a task of their own; the cross-fade starts in the
+    // next one, after drawing what grew in between (one 40-107 ms task).
     for (const _ of catchUp(false));
     flushPieces(ox, groups);
-    for (const P of g.paths) if (P.knot && P.drawn > 0 && P.drawn >= rasterLen(P) - 1e-6) drawKnot(ox, P.knot);
-    if (growth.coresDrawn) drawCores(ox, g, growth.age);
+    const knotted = new Set(),
+      cored = growth.coresDrawn;
+    for (const P of g.paths)
+      if (P.knot && P.drawn > 0 && P.drawn >= rasterLen(P) - 1e-6) {
+        drawKnot(ox, P.knot);
+        knotted.add(P);
+      }
+    if (cored) drawCores(ox, g, growth.age);
+    rasterNow(off);
+    yield "!rebake";
+    if (growth.epoch !== epoch) return (off.width = off.height = 0);
+    for (const _ of catchUp(false));
+    flushPieces(ox, groups);
+    for (const P of g.paths) if (P.knot && !knotted.has(P) && P.drawn > 0 && P.drawn >= rasterLen(P) - 1e-6) drawKnot(ox, P.knot);
+    if (growth.coresDrawn && !cored) drawCores(ox, g, growth.age);
     startXfade(off); // cross-fade, not one blit (owner: rings popped in)
     for (const P of g.paths) P.aOld = null;
     growth.changed = true;
@@ -1863,7 +1940,8 @@ export function createHero(canvas, { stage, state, reduce }) {
    * passes). The glow is drawn onto the hero now and kept on the colony
    * (fill2) so rebuilds draw it with the cores. Dark only. */
   const dips = { started: false, done: false };
-  function ringsOf(data, w, h, ox0, oy0, n, K, scale) {
+  // r11.3: a generator, yielding every 16 measured rows (one 20-90 ms task per pass).
+  function* ringsOf(data, w, h, ox0, oy0, n, K, scale) {
     const STEP = 8,
       SECT = 24,
       lin = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4),
@@ -1872,7 +1950,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       rgb = new Float64Array(K * 3),
       rc = new Float64Array(K),
       stride = Math.max(1, Math.round(scale));
-    for (let yy = 0; yy < h; yy += stride)
+    for (let yy = 0, row = 0; yy < h; yy += stride) {
+      if ((++row & 15) === 0) yield;
       for (let xx = 0; xx < w; xx += stride) {
         const dx = (ox0 + xx + 0.5) / scale - n.x,
           dy = (oy0 + yy + 0.5) / scale - n.y,
@@ -1891,6 +1970,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         rgb[k * 3 + 2] += b;
         rc[k]++;
       }
+    }
     const M = [];
     for (let k = 0; k < K; k++) {
       const v = [];
@@ -1957,7 +2037,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         tx.globalCompositeOperation = "lighter";
         tx.setTransform(d, 0, 0, d, -(n.x - R) * d, -(n.y - R) * d);
         if (added.some((v) => v > 0)) colonyFill(tx, { node: n, fill: { r: K * 8, stops: ringStops(added, K) } }, glowRgb, 1);
-        const rings = ringsOf(tx.getImageData(0, 0, S, S).data, S, S, (n.x - R) * d, (n.y - R) * d, n, K, d),
+        const rings = yield* ringsOf(tx.getImageData(0, 0, S, S).data, S, S, (n.x - R) * d, (n.y - R) * d, n, K, d),
           M = rings.M;
         first ??= M;
         last = M;
@@ -2221,7 +2301,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     }));
     let n = 0;
     for (const P of g.paths) {
-      if (++n % 2000 === 0) yield "bloom";
+      if ((++n & 127) === 0 && budget()) yield "bloom"; // r11.3: time-bounded (was every 2000 paths)
       if (P.unit >= 0 || P.dyn || P.cord >= 0 || P.kind === "explorer" || P.t0 >= START_AGE - 10) continue;
       const bl = blooms[P.pts[0].source];
       if (!bl) continue;
@@ -2249,8 +2329,18 @@ export function createHero(canvas, { stage, state, reduce }) {
   // Segments grouped by quantised alpha/width into a few Path2D strokes.
   /** Segments grouped by quantised alpha/width into a few cached Path2D strokes. */
   function segGroups(segs, alphaMul, widthAdd) {
+    for (const r = segGroupsGen(segs, alphaMul, widthAdd, null); ; ) {
+      const n = r.next();
+      if (n.done) return n.value;
+    }
+  }
+  /** r11.3: segGroups with time-bounded yields when `slice` is set (the
+   * breath sprites built a whole colony's groups in one 30-78 ms task). */
+  function* segGroupsGen(segs, alphaMul, widthAdd, slice) {
     const groups = new Map();
+    let n = 0;
     for (const [a, q, w, al] of segs) {
+      if (slice && (++n & 511) === 0 && budget()) yield slice;
       const ka = Math.min(15, Math.round(Math.min(1, al * alphaMul) * 15)),
         kw = Math.round((w + widthAdd) * 5);
       if (!ka) continue;
@@ -2317,7 +2407,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         let pops = 0;
         while (heap.a.length) {
           const [time, id] = heap.pop();
-          if (++pops % 12000 === 0) yield "route";
+          if ((++pops & 1023) === 0 && budget()) yield "route"; // r11.3: time-bounded (was every 12000 pops, 30-45 ms)
           if (time > at[id] + 0.00001) continue;
           const v = vs[id];
           for (const si of v.edges) {
@@ -2338,7 +2428,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         let count = 0, highwayCount = 0, fineCount = 0, maxFine = 0;
         let seen = 0;
         for (const s of ss) {
-          if (++seen % 15000 === 0) yield "route-list";
+          if ((++seen & 1023) === 0 && budget()) yield "route-list";
           const highway = s.cord >= 0,
             a = at[s.a.id] <= at[s.b.id] ? s.a : s.b,
             dd = fine[a.id] + (highway ? 0 : s.len / 2);
@@ -2681,10 +2771,17 @@ export function createHero(canvas, { stage, state, reduce }) {
     for (const b of scene.blooms) {
       // r11.2: the whole colony breathes, strongest at its core and fading
       // outward (a 0.32-1.05 R0 annulus alone read as a brighter ring).
-      const segs = b.bands.filter((x) => x.r1 <= 1.05).flatMap((x) =>
-        x.segs.map(([a, q, w, al]) => [a, q, w, al * (1 - 0.65 * smooth((Math.hypot(q.x - b.node.x, q.y - b.node.y) / b.R0 - 0.1) / 0.95))]),
-      );
+      // r11.3: built and grouped in time-bounded slices (same order and values).
+      const segs = [];
+      for (const x of b.bands) {
+        if (!(x.r1 <= 1.05)) continue;
+        for (const [a, q, w, al] of x.segs) {
+          segs.push([a, q, w, al * (1 - 0.65 * smooth((Math.hypot(q.x - b.node.x, q.y - b.node.y) / b.R0 - 0.1) / 0.95))]);
+          if ((segs.length & 511) === 0 && budget()) yield "breath";
+        }
+      }
       if (!segs.length) continue;
+      const groups = yield* segGroupsGen(segs, 0.7, 0, "breath");
       const r = b.R0 * 1.05,
         im = document.createElement("canvas"),
         size = Math.ceil(r * 2);
@@ -2693,7 +2790,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       const x = im.getContext("2d");
       x.setTransform(d, 0, 0, d, -(b.node.x - r) * d, -(b.node.y - r) * d);
       x.globalCompositeOperation = light ? "source-over" : "lighter";
-      paintSegs(x, segs, palette.glow, 0.7, 0);
+      strokeGroups(x, groups, palette.glow);
       Object.assign(im.style, { left: b.node.x - r + "px", top: b.node.y - r + "px", width: size + "px", height: size + "px", animationDuration: (11 + R() * 7).toFixed(2) + "s", animationDelay: (-R() * 18).toFixed(2) + "s" });
       im.dataset.colony = b.node.source;
       breathBox.append(im);
@@ -2802,17 +2899,24 @@ export function createHero(canvas, { stage, state, reduce }) {
       // from where it was held, at its own speed from now (never drawn whole
       // in one step); its forks keep at least its delay, so nothing grows
       // ahead of the part it springs from.
-      const Anow = Number.isFinite(growth.age) ? growth.age : 0;
-      for (const P of g.paths) {
-        P.pre = undefined;
-        if (!queued.has(P) && growable(P, g) && P.drawn < rasterLen(P) - 1e-6) {
-          const v0 = P.pts[0],
-            par = v0.owner >= 0 && v0.owner !== P.id ? g.paths[v0.owner] : null,
-            own = Anow - (P.t0 + (P.matShift || 0) + (P.drawn || 0) / P.v);
-          P.resumeDelay = Math.max(0, own, par?.resumeDelay || 0);
-          growth.pending.push(P);
+      // r11.3: in time-bounded slices (one ~40 ms task at 1920); "now" is
+      // read per path, so a path resumes from the age it is queued at.
+      await run((function* () {
+        let n = 0;
+        for (const P of g.paths) {
+          if ((++n & 1023) === 0 && budget()) yield "resume";
+          P.pre = undefined;
+          if (!queued.has(P) && growable(P, g) && P.drawn < rasterLen(P) - 1e-6) {
+            const Anow = Number.isFinite(growth.age) ? growth.age : 0,
+              v0 = P.pts[0],
+              par = v0.owner >= 0 && v0.owner !== P.id ? g.paths[v0.owner] : null,
+              own = Anow - (P.t0 + (P.matShift || 0) + (P.drawn || 0) / P.v);
+            P.resumeDelay = Math.max(0, own, par?.resumeDelay || 0);
+            growth.pending.push(P);
+          }
         }
-      }
+      })());
+      if (disposed) return;
       // Final colony alphas over the whole static raster (see rebakeStatic):
       // after the scene is ready. Inside the build it held the compositor's
       // attach (and with it the field's load-in) back by ~4 s, so the field
@@ -2993,12 +3097,19 @@ export function createHero(canvas, { stage, state, reduce }) {
      * hyphae, cotton, mat hyphae and their hairs; drawn length x alpha) that
      * is in the static raster now, plus the core/felt-fill build-up. */
     const matPaths = g.colonies.map(() => []);
-    for (const P of g.paths) {
-      if (!(P.matShift > 0) || !growable(P, g)) continue;
-      const v = P.pts[0],
-        ci = g.colonies.findIndex((c) => Math.hypot(v.x - c.node.x, v.y - c.node.y) < c.R0 * 1.2);
-      if (ci >= 0) matPaths[ci].push(P);
-    }
+    // r11.3: in time-bounded slices (a ~30 ms part at 1920).
+    await run((function* () {
+      let n = 0;
+      for (const P of g.paths) {
+        if ((++n & 1023) === 0 && budget()) yield "mat-probe";
+        if (!(P.matShift > 0) || !growable(P, g)) continue;
+        const v = P.pts[0],
+          ci = g.colonies.findIndex((c) => Math.hypot(v.x - c.node.x, v.y - c.node.y) < c.R0 * 1.2);
+        if (ci >= 0) matPaths[ci].push(P);
+      }
+    })());
+    tp = performance.now();
+    if (disposed) return;
     window.__colonyMatProbe = () =>
       g.colonies.map((c, i) => {
         let have = 0,
