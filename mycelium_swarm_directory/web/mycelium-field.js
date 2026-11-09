@@ -188,7 +188,9 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
   // r11.2b compact (< 1100 px): edge colonies partly off-screen, scaled to the
   // width (MK), and a denser sparse field (1.35x) so every scroll position of
   // a phone carries visible mycelium. Wider viewports are byte-identical.
-  const compact = !layout.enabled && layout.compact,
+  // Home page only: app pages keep their sparse r10 column (a compact colony
+  // under the /swarms/ footer dropped its contrast to 3.6:1).
+  const compact = !layout.enabled && layout.compact && document.body.classList.contains("apex"),
     MK = compact ? Math.max(0.5, Math.min(0.8, w / 960)) : 1;
   const baseCount = Math.round((w * height) / 26000),
     count = Math.round(baseCount * (compact ? 1.35 : 1.2));
@@ -871,11 +873,12 @@ export function createField({ stage, state, reduce }) {
     if (intro && intro.start === null) intro.start = now ?? performance.now();
   };
 
-  // r11.2b: compact edge colonies pulse and cascade at 0.55 of the margin gain,
-  // only along the edge cords (never the hero join, which crosses the hero
-  // copy), and their leaks stay within ~50 px of the cord: on a phone the text
-  // column reaches to ~20 px from the edge (contrast at pulse peaks).
-  const mpGain = () => (field.layout.enabled ? MP.GAIN : MP.GAIN * 0.55),
+  // r11.2b: compact edge colonies (< 1100 px) carry no margin pulses or
+  // cascades: on a phone the text column reaches to ~20 px from the edge, and
+  // even at 0.35 of the margin gain with leaks cut to ~50 px a crest dropped
+  // the busiest pixel under body text to 4.1:1 (3.0:1 at 0.7 and 600 px).
+  // They grow, breathe and live like the desktop margins.
+  const mpGain = () => MP.GAIN,
     COMPACT_LEAK = Object.freeze({ cutoff: 48, lambda: 24 });
   const marginWeight = (px) => {
     const l = field.layout;
@@ -1608,7 +1611,7 @@ export function createField({ stage, state, reduce }) {
     if (await stage("intro")) return;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
-      const legs = r.paths.filter((p) => field.layout.enabled || p.points[0] !== r.source).map((p) => {
+      const legs = r.paths.filter(() => field.layout.enabled).map((p) => {
         let distance = 0;
         const segments = p.segments.map((s) => {
           const start = distance;
@@ -2508,7 +2511,7 @@ export function createField({ stage, state, reduce }) {
    * cascade starts on every CAS.EVERY-th hero pulse reaching or leaving the
    * side's hero colony, never overlapping the previous one on that side. */
   function buildCascades() {
-    if (!scene?.sched || !(field.layout.enabled || field.marginKnots.length)) return [];
+    if (!scene?.sched || !field.layout.enabled) return [];
     const docH = document.documentElement.scrollHeight,
       heroTop = scene.hero.top,
       copies = Math.max(1, Math.ceil((docH - heroTop - field.top) / field.height)),
