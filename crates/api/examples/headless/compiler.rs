@@ -401,9 +401,14 @@ impl Compiler {
         });
         Ok(())
     }
+    /// Signal the build worker's Stop (its scans check it once per chunk)
+    /// without joining it; [`Self::teardown`] does this first.
+    pub(super) fn signal_stop(&self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     pub(super) fn teardown(&mut self) -> Result<(), String> {
         self.retired = true;
-        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.signal_stop();
         if let Some(worker) = self.worker.take() {
             match worker.join() {
                 Ok(Ok((artifact, _))) => self.artifact = Some(artifact),
