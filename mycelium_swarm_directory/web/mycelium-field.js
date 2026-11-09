@@ -2865,7 +2865,9 @@ export function createField({ stage, state, reduce }) {
     }
     // r11.2c: the moving light fades out under the hero copy (text-safe zone,
     // see textSafeMask in mycelium-hero.js): one destination-out blit of the
-    // soft mask, limited to what was drawn this frame.
+    // soft mask, limited to what was drawn this frame. Nearest-neighbour: the
+    // 2 px mask cells sit on a 64 px ramp (no visible steps), and a filtered
+    // upscale cost ~3.7 ms per frame in headless software raster (now ~0.9).
     const safe = scene?.textSafe;
     if (safe && box[0] < Infinity) {
       const sx0 = Math.max(box[0], safe.x),
@@ -2876,7 +2878,9 @@ export function createField({ stage, state, reduce }) {
         const k = safe.k;
         lx.globalCompositeOperation = "destination-out";
         lx.globalAlpha = 1;
+        lx.imageSmoothingEnabled = false;
         lx.drawImage(safe.canvas, (sx0 - safe.x) * k, (sy0 - oy - safe.y) * k, (sx1 - sx0) * k, (sy1 - sy0) * k, sx0, sy0, sx1 - sx0, sy1 - sy0);
+        lx.imageSmoothingEnabled = true;
         metrics.textSafeBlits = (metrics.textSafeBlits || 0) + 1;
       }
     }
