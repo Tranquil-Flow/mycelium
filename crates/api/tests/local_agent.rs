@@ -1195,3 +1195,98 @@ fn the_slice_fetcher_publishes_only_verified_bytes() {
     );
     fs::remove_dir_all(&root).unwrap_or_default();
 }
+
+/// Proves: a verified local clone is published only into a private directory of the slice root
+/// (`_clone_verified` -> `_private_dir(final.parent)`): a parent folder that is a symlink is refused
+/// by name and nothing lands where it points; an ordinary clone publishes the verified bytes with no
+/// range read.
+#[test]
+fn a_clone_is_never_published_through_a_symlinked_parent_folder() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let plan = &work["node_slice_plan"];
+    let digest = plan["node_plan_digest"].as_str().expect("digest");
+    let root = scratch("clone-parent");
+    WorkHost::new(root.clone());
+    let snapshot = |clone_root: Option<PathBuf>| {
+        SnapshotRangeTransport::new(
+            root.join("snapshot"),
+            plan["model_id"].as_str().expect("id"),
+            plan["resolved_commit"].as_str().expect("commit"),
+            clone_root,
+        )
+    };
+    let never = || false;
+    // The verified slice an earlier run left on this Mac: the clone candidates.
+    let earlier = root.join("earlier");
+    fs::create_dir_all(&earlier).expect("earlier");
+    slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &earlier,
+        &mut snapshot(None),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("earlier slice");
+    // An ordinary clone: every file is cloned and verified, no range is read.
+    let cloned = root.join("cloned");
+    fs::create_dir_all(&cloned).expect("cloned");
+    let report = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &cloned,
+        &mut snapshot(Some(earlier.clone())),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("cloned slice");
+    assert_eq!(
+        (
+            report["cloned_bytes"].clone(),
+            report["range_requests"].clone()
+        ),
+        (json!(2223), json!(0)),
+        "{report}"
+    );
+    for file in plan["files"].as_array().expect("files") {
+        let path = cloned.join(file["path"].as_str().expect("path"));
+        assert_eq!(json!(sha_hex(&path)), file["content_digest"]);
+        assert_eq!(
+            fs::metadata(&path).expect("meta").permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    // The slice's `stage-0/` folder is a symlink to a folder outside the slice root.
+    let outside = root.join("outside");
+    fs::create_dir_all(&outside).expect("outside");
+    let dest = root.join("dest");
+    fs::create_dir_all(&dest).expect("dest");
+    std::os::unix::fs::symlink(&outside, dest.join("stage-0")).expect("symlink");
+    let refused = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &dest,
+        &mut snapshot(Some(earlier)),
+        1 << 20,
+        1 << 20,
+        &never,
+    );
+    let listed: Vec<_> = fs::read_dir(&outside)
+        .expect("outside")
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(
+        refused.as_ref().map_err(|e| e.0.as_str()).err(),
+        Some("slice_destination_invalid"),
+        "{refused:?}; outside the slice root: {listed:?}"
+    );
+    assert!(
+        listed.is_empty(),
+        "published through the symlink: {listed:?}"
+    );
+    fs::remove_dir_all(&root).unwrap_or_default();
+}

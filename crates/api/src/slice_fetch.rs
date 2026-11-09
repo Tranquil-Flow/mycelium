@@ -370,7 +370,7 @@ fn clone_verified(row: &Value, root: &Path, transport: &mut dyn SliceTransport) 
             && meta.uid() == rustix::process::geteuid().as_raw()
             && meta.len() == size
     };
-    let published = (|| -> std::io::Result<bool> {
+    let verified = (|| -> std::io::Result<bool> {
         let source = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
@@ -378,8 +378,18 @@ fn clone_verified(row: &Value, root: &Path, transport: &mut dyn SliceTransport) 
         if !owned(&source.metadata()?) {
             return Ok(false);
         }
-        // std's copy clones on APFS; the digest below decides what is published.
-        fs::copy(&candidate, &partial)?;
+        // `_clone_file(fd, partial)`: an APFS clone of the file just opened and checked, never the
+        // path again (CLONE_NOFOLLOW); no clone falls back to fetching. The digest below decides.
+        if rustix::fs::fclonefileat(
+            &source,
+            rustix::fs::CWD,
+            &partial,
+            rustix::fs::CloneFlags::NOFOLLOW,
+        )
+        .is_err()
+        {
+            return Ok(false);
+        }
         let meta = fs::symlink_metadata(&partial)?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -389,19 +399,19 @@ fn clone_verified(row: &Value, root: &Path, transport: &mut dyn SliceTransport) 
             return Ok(false);
         }
         fs::set_permissions(&partial, fs::Permissions::from_mode(0o600))?;
-        let final_path = root.join(path);
-        if let Some(parent) = final_path.parent() {
-            fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(parent)?;
-        }
-        fs::rename(&partial, &final_path)?;
         Ok(true)
     })()
     .unwrap_or(false);
+    // `_private_dir(final.parent)`: a parent that is not a private directory of the slice root
+    // (a symlink) is refused by name, never followed.
+    let final_path = root.join(path);
+    let parent = match final_path.parent() {
+        Some(parent) if verified => private_dir(parent),
+        _ => Ok(()),
+    };
+    let published = parent.is_ok() && verified && fs::rename(&partial, &final_path).is_ok();
     remove_tree(&work);
-    Ok(published)
+    parent.map(|()| published)
 }
 
 /// `_fetch_segment`: one digest-verified segment; (data, range requests, bytes received).
