@@ -46,6 +46,9 @@ pub enum Action {
     ModelCancel,
     LocalContributorStart,
     LocalContributorStop,
+    /// `swarm_publish.ROUTES` app mode only; a host without listing custody answers as before.
+    SwarmPublish,
+    SwarmUnpublish,
 }
 impl Action {
     pub fn from_path(path: &str) -> Result<Self, PublicError> {
@@ -88,6 +91,8 @@ impl Action {
             "/api/model/cancel" => Self::ModelCancel,
             "/api/local-contributor/start" => Self::LocalContributorStart,
             "/api/local-contributor/stop" => Self::LocalContributorStop,
+            "/api/swarm/publish" => Self::SwarmPublish,
+            "/api/swarm/unpublish" => Self::SwarmUnpublish,
             _ => return Err(refuse("unknown_action")),
         })
     }
@@ -112,6 +117,9 @@ impl Action {
             // member_leave.leave_action: role, shape, confirmation and mode are checked in that order
             // by the persistent backend (a single code here could not keep the order).
             Leave => (true, "invalid_request"),
+            // swarm_publish.action: the role is checked before the shape, by the listing
+            // custody itself, so hosts without one keep answering `unknown_action`.
+            SwarmPublish | SwarmUnpublish => (true, "invalid_request"),
             Revoke => (exact(body, &["node_id", "generation"]), "invalid_request"),
             RevokeSelf => (
                 exact(body, &["confirm"]) && body["confirm"] == true,

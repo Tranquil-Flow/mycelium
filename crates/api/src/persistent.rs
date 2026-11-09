@@ -251,6 +251,15 @@ pub trait Host: Send {
             "stopping" => true, "identity_retained" => true, "evidence_retained" => true,
         })
     }
+    /// `POST /api/swarm/publish` / `unpublish` (`swarm_publish.action`, app mode): hosts that own
+    /// listing custody (`swarm::publisher::app::AppPublisher`) route them there. Default: the
+    /// host has none, and answers exactly as before these routes were recognized.
+    fn swarm_publish(&mut self, _body: &Map<String, Value>) -> Result<Json, PublicError> {
+        Err(PublicError::new(400, "unknown_action"))
+    }
+    fn swarm_unpublish(&mut self, _body: &Map<String, Value>) -> Result<Json, PublicError> {
+        Err(PublicError::new(400, "unknown_action"))
+    }
     /// `self.public_relay` and its `status()['state']`.
     fn relay_state(&self) -> RelayState {
         RelayState::Absent
@@ -1010,6 +1019,8 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 }
                 self.inner.prepare(action, body)
             }
+            // The listing custody checks closed/role/shape itself (see Host::swarm_publish).
+            SwarmPublish | SwarmUnpublish => Ok(()),
             PairPreview => {
                 if self.host.closed() {
                     return Err(PublicError::new(400, "application_closed"));
@@ -1158,6 +1169,8 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 })
             }
             Action::Quit => self.host.quit(),
+            Action::SwarmPublish => self.host.swarm_publish(body),
+            Action::SwarmUnpublish => self.host.swarm_unpublish(body),
             // app.py:1618-1640 @ f4e366e9. `_cancel_acquisition` / `_stop_local_contributor` have nothing to
             // stop on a host without them; the authority's stop closes its seed runtime.
             Action::Stop => {

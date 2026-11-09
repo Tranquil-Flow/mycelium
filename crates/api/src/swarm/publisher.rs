@@ -7,6 +7,7 @@
 //! it starts no thread. Call reconcile on transitions and at the source heartbeat cadence.
 //! Unlike v0.1.4's best-effort offline beat, stop/unlist deletes the listing and retains
 //! debt across restart. Directory deletion retires an ID: a later run gets a fresh ID.
+pub mod app;
 mod client;
 pub mod host;
 pub use client::DirectoryClient;
@@ -182,6 +183,26 @@ impl SwarmPublisher {
             .open(path)
             .map_err(|_| Error::new("swarm_publish_storage_failed"))?;
         Self::from_connection(storage(Connection::open(path))?, key, directory, origin)
+    }
+    /// The directory origin an existing private state file is bound to, read without adopting
+    /// it, so a host can reopen retained debt at startup with the matching client.
+    pub fn bound_origin(path: &Path) -> Result<Option<String>, Error> {
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(Error::new("swarm_publish_storage_failed")),
+            Ok(m) if !m.file_type().is_file() => {
+                return Err(Error::new("swarm_publish_storage_failed"));
+            }
+            Ok(_) => {}
+        }
+        let db = storage(Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ))?;
+        storage(
+            db.query_row("SELECT origin FROM publisher WHERE id=1", [], |r| r.get(0))
+                .optional(),
+        )
     }
     fn from_connection(
         db: Connection,
