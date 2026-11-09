@@ -518,7 +518,7 @@ function tipCycle(tau, period, g = LIFE_CYCLE.G * period, h = LIFE_CYCLE.H * per
  *   2nd (60 Hz display) or every 2nd-4th (120 Hz) vsync instead (see skip):
  *   a steady 30-60 Hz, never a dropped run of frames. A fast host keeps 60 Hz
  *   (or more) throughout; a 120 Hz display redraws at 60 Hz while work is
- *   pending. Starved work (below half its share: frames heavier than the
+ *   pending. Starved work (below 3/4 of its share: frames heavier than the
  *   vsync period, e.g. software raster) runs plain MAX ms slices, as before.
  * - Hidden tabs, or no frame for 4 periods: unpaced MAX ms slices (a tab
  *   hidden mid-build still finishes), with a timer fallback.
@@ -610,7 +610,7 @@ const pacer = (() => {
       sh = share(t);
     // Starved (frames heavier than the vsync period, e.g. software raster):
     // plain MAX ms slices, as before the pacer, until the share recovers.
-    if (sh < target() / 2) {
+    if (sh < target() * 0.75) {
       stats.floor++;
       return t + MAX;
     }
