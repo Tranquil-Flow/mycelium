@@ -61,11 +61,11 @@ def test_page_build_has_no_long_task(local, width):  # noqa: F811
         page.wait_for_selector(READY, state='attached', timeout=60000)
         t = page.evaluate('__myceliumScene.timings')
         stages = page.evaluate('__understoryMetrics.attachStages')
-        assert len(stages) >= 4 and max(stages) < 30, stages
-        assert t['completeTask'] < 30 and t['readyTask'] < 30, t
+        assert len(stages) >= 4 and max(stages) < 30, str((stages, t))
+        assert t['completeTask'] < 30 and t['readyTask'] < 30, str((stages, t))
         assert t['maxSlice'] < 50, t
-        # The 6 s intro contract is unchanged.
-        assert page.evaluate('MyceliumField.INTRO_MS') == 6000 and page.evaluate('MyceliumHero.INTRO_MS') == 6000
+        # Production intro is the owner's 9 s pick (D61; was 6 s when this was written).
+        assert page.evaluate('MyceliumField.INTRO_MS') == 9000 and page.evaluate('MyceliumHero.INTRO_MS') == 9000
         assert page.get_attribute('#page-mycelium', 'data-intro') in ('running', 'done')
         assert sum(page.evaluate('__cls')) == 0
         browser.close()

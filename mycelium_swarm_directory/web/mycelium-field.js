@@ -169,8 +169,8 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
  * converges on a bright point. Drawing only: graph, routes and RNG unchanged. */
 const MAT_R = 24, // r11.2 dense felt core radius of a margin colony (CSS px)
   MAT_FELT = 260;
-const FADE_R0 = 4, // r11.2: inside the denser felt core (r11.1: 11 / 32 left a visible gap)
-  FADE_R1 = 18;
+const FADE_R0 = 5, // r11.2b: 5 / 20 (r11.2: 4 / 18 left the junction 2-3% over the mat peak; r11.1: 11 / 32 left a visible gap)
+  FADE_R1 = 20;
 
 /** Generator: lays the field into the shared graph; returns the field record. */
 export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, h, top: pageTop = 0, budget = () => false, seedOk = () => true }) {
@@ -1582,17 +1582,6 @@ export function createField({ stage, state, reduce }) {
       rasterStatic();
     }
     if (await stage()) return;
-    // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
-    // the compositor attaches (they appeared at once with the field fronts
-    // already 40-60% out); the hero composite keeps showing as before.
-    if (!reduce.matches && !document.hidden)
-      for (const el of [bandBox, lifeBox, live]) {
-        el.style.opacity = "0";
-        el.getBoundingClientRect();
-        el.style.transition = "opacity 0.9s ease-out";
-        el.style.opacity = "";
-      }
-    attached = true;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
       const legs = r.paths.map((p) => {
@@ -1613,8 +1602,22 @@ export function createField({ stage, state, reduce }) {
       const first = (window.MyceliumHero?.firstPulseAt ?? INTRO_MS / 1000 + 2.5 * INTRO_SCALE) + 1.5;
       return { ...r, legs, period, phase: Math.max(first, landing + 3 + 8.5 * (INTRO_SCALE - 1)) + side * (period / 2), chosen: new Map() };
     });
+    if (await stage()) return;
     cascades = buildCascades();
+    if (await stage()) return; // r11.2b: schedules, cascades and leaks in separate tasks (one 30-32 ms stage at 1920)
     buildMarginLeaks();
+    if (await stage()) return;
+    // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
+    // the compositor attaches (they appeared at once with the field fronts
+    // already 40-60% out); the hero composite keeps showing as before.
+    if (!reduce.matches && !document.hidden)
+      for (const el of [bandBox, lifeBox, live]) {
+        el.style.opacity = "0";
+        el.getBoundingClientRect();
+        el.style.transition = "opacity 0.9s ease-out";
+        el.style.opacity = "";
+      }
+    attached = true;
     const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
       paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,

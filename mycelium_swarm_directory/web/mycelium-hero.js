@@ -1560,9 +1560,16 @@ export function createHero(canvas, { stage, state, reduce }) {
     return cv;
   }
   function startXfade(neu) {
-    finishXfade();
-    const old = snapshot(),
+    // r11.2b: a running cross-fade is never cut short. The dip glow started
+    // ~0.7 s into the re-bake's fade and finished it in one blit (+6.7k px in
+    // 100 ms at 6 s); the new fade now starts from the blend on screen.
+    const prev = growth.xfade,
+      old = snapshot(),
       nx = neu.getContext("2d");
+    if (prev) {
+      prev.old.width = prev.old.height = 0;
+      if (prev.neu !== neu) prev.neu.width = prev.neu.height = 0;
+    }
     nx.setTransform(sx.getTransform());
     growth.xfade = { old, neu, ox: old.getContext("2d"), nx, t0: performance.now() };
     stepXfade();
@@ -1912,9 +1919,16 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     // All dip glows fade in together (cross-fade, not one blit).
     if (fills.length) {
-      finishXfade();
-      const neu = snapshot(),
-        nx = neu.getContext("2d");
+      // The target is the running fade's target (or the raster) plus the glows.
+      let neu;
+      if (growth.xfade) {
+        neu = document.createElement("canvas");
+        neu.width = canvas.width;
+        neu.height = canvas.height;
+        neu.getContext("2d").drawImage(growth.xfade.neu, 0, 0);
+        neu.getContext("2d").setTransform(sx.getTransform());
+      } else neu = snapshot();
+      const nx = neu.getContext("2d");
       nx.globalCompositeOperation = "lighter";
       for (const f of fills) colonyFill(nx, f, glowRgb, 1);
       startXfade(neu);
@@ -2888,6 +2902,17 @@ export function createHero(canvas, { stage, state, reduce }) {
       pulseTail: TAIL,
       unitClock: (P, A, T) => unitClock(P, g.units, A, T),
     });
+    // r11.2b: the probes below run in their own task (completeTask was
+    // 30-35 ms at 1920 with everything in one).
+    const parts = (scene.timings.completeParts = []);
+    let tp = tc;
+    const part = async () => {
+      parts.push(+(performance.now() - tp).toFixed(1));
+      await nextTask();
+      tp = performance.now();
+      return disposed;
+    };
+    if (await part()) return;
     /** r11.2 load-in probe: share of each colony's mat ink (radiating colony
      * hyphae, cotton, mat hyphae and their hairs; drawn length x alpha) that
      * is in the static raster now, plus the core/felt-fill build-up. */
@@ -2910,6 +2935,7 @@ export function createHero(canvas, { stage, state, reduce }) {
         }
         return { ink: all ? have / all : 1, cores: growth.coresDrawn ? 1 : matGrow(c, growth.age), paths: matPaths[i].length };
       });
+    if (await part()) return;
     window.__growthGeometry = { nodes: g.nodes.map((n) => ({ x: n.x, y: n.y, id: n.source })), cords: g.linkCords.map((c) => ({ from: c.a.source, to: c.b.source, length: c.length })), segments: g.ss.length };
     let rootPaths = null;
     Object.defineProperty(window, "__rootPaths", {
@@ -2954,6 +2980,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       const fused = g.paths.filter((P, i) => P.fused && now[i][0] >= P.len - 1e-6);
       return { activeTips, regressingTips, retreatingTips, fusions: fused.length, connectedSplits: fused.filter((P) => P.pts.at(-1).edges.length >= 3).length };
     };
+    if (await part()) return;
     window.__cordAudit = g.cords.map((C) => ({ id: C.id, link: C.link, fibres: C.fibres, w0: C.width0, w1: C.width1, length: C.length, brush: C.brush }));
     // r11 item 3: fuzz along persistent strands (hairs whose base lies on the strand).
     window.__fuzzAudit = () => {
@@ -2988,6 +3015,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     // linear luminance of the baked raster in 24x24 CSS px windows; a colony's
     // core window is compared with every window along every cord beyond the
     // colony mats (and peak brightness, p98, with the same windows).
+    if (await part()) return;
     window.__colonyDensity = () => {
       const W = canvas.width,
         H = canvas.height,
@@ -3085,13 +3113,15 @@ export function createHero(canvas, { stage, state, reduce }) {
       });
       return { segments: eligible.length, length: eligible.reduce((n, s) => n + s.len, 0), width: w, height: h, nodeClearance: 90, cordVertexClearance: 32 };
     };
+    if (await part()) return;
     window.__graphAudit = {
       vertices: g.vs.length, segments: g.ss.length, isolated: g.vs.filter((v) => !v.edges.length).length, cap: CAP,
       routes: g.routes.map((r) => ({ from: r.from, to: r.to, duration: r.duration, activated: r.count, highway: r.highway, fine: r.fine, buckets: r.buckets.size, maxFine: r.maxFine, arrivalMin: r.arrivalMin, arrivalMax: r.arrivalMax })),
     };
     window.__pulseTrips = sched.trips.map((t) => ({ from: t.route.from, to: t.route.to, start: t.start, arrival: t.start + t.route.duration, end: t.start + t.route.arrivalMax + TAIL }));
     // The compositor attaches in its own task(s).
-    scene.timings.completeTask = performance.now() - tc;
+    parts.push(+(performance.now() - tp).toFixed(1));
+    scene.timings.completeTask = Math.max(...parts);
     await nextTask();
     if (disposed) return;
     const tr = performance.now();
