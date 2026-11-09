@@ -227,19 +227,18 @@ pub fn check_work_preview(
         .map(str::to_owned)
 }
 
+/// `limits_for(offer)`: this member's share-derived worker limits for the offer's run, if any.
+pub type LimitsFor = Box<dyn Fn(&Value) -> Option<Value> + Send>;
+
 /// `StandingAcceptor`.
 pub struct StandingAcceptor {
     root: PathBuf,
-    limits_for: Option<Box<dyn Fn(&Value) -> Option<Value> + Send>>,
+    limits_for: Option<LimitsFor>,
     handled: BTreeSet<String>,
     last: Option<Value>,
 }
 impl StandingAcceptor {
-    /// `limits_for(offer)`: this member's share-derived worker limits for the offer's run, if any.
-    pub fn new(
-        root: PathBuf,
-        limits_for: Option<Box<dyn Fn(&Value) -> Option<Value> + Send>>,
-    ) -> Self {
+    pub fn new(root: PathBuf, limits_for: Option<LimitsFor>) -> Self {
         Self {
             root,
             limits_for,
