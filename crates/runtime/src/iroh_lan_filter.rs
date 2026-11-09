@@ -73,7 +73,9 @@
 //! peer's (DHCP may have handed it on), so the address loses its own lane and
 //! every other source gets the whole B11 table back. A returning peer waits in
 //! that table under its B11 share once, as before B14, and is learned again
-//! by its next verified handshake. An unreadable budget expires at once.
+//! by its next verified handshake. An unreadable budget expires at once. A
+//! recycle (B11) carries a host that is live at that moment as seen then
+//! (B15f): the recycle itself ends its connection.
 use crate::iroh_host::LanPolicy;
 use budgets::{BudgetId, Entries};
 use iroh::endpoint::transports::{
@@ -311,12 +313,26 @@ impl Admission {
     /// bounds, signed peer hosts/keys and learned hosts of those keys (B14:
     /// the same socket and key, so what was verified still holds); no pins,
     /// history, receive-filter entries or counters (they described the closed
-    /// endpoint).
-    pub(crate) fn successor(&self) -> Result<Arc<Self>, Error> {
+    /// endpoint). A learned host with a live authenticated connection at `now`
+    /// is carried as seen at `now` (B15f, REVIEW-laneB15 F1): the recycle ends
+    /// that connection, and the closing endpoint's pins never mark it, so its
+    /// staleness counts from here; an idle host keeps its own instant. A
+    /// poisoned pin table marks nothing (fail narrow, as `lanes`).
+    pub(crate) fn successor(&self, now: Instant) -> Result<Arc<Self>, Error> {
         let next = Self::new(self.policy.clone(), self.capacity, self.remembered);
         let hosts = self.hosts.read().map_err(|_| Error::Unavailable)?.clone();
         let keys = self.keys.read().map_err(|_| Error::Unavailable)?.clone();
-        let learned = self.learned.read().map_err(|_| Error::Unavailable)?.clone();
+        let live: HashSet<IpAddr> = self
+            .pins
+            .read()
+            .map(|pins| pins.authenticated.keys().map(|a| a.ip()).collect())
+            .unwrap_or_default();
+        let mut learned = self.learned.read().map_err(|_| Error::Unavailable)?.clone();
+        for host in learned.values_mut() {
+            if live.contains(&host.source.ip()) && host.seen < now {
+                host.seen = now;
+            }
+        }
         *next.hosts.write().map_err(|_| Error::Unavailable)? = hosts;
         *next.keys.write().map_err(|_| Error::Unavailable)? = keys;
         *next.learned.write().map_err(|_| Error::Unavailable)? = learned;
