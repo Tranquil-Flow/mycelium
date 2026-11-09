@@ -66,7 +66,15 @@ export function beadLike(members) {
   return false;
 }
 
-export function placeKnots({ strands, junctions, marginKnots, layout, w, top, height }) {
+export function placeKnots(opts) {
+  for (const r = placeKnotsGen(opts); ; ) {
+    const n = r.next();
+    if (n.done) return n.value;
+  }
+}
+/** r11.3: placeKnots with time-bounded yields (the field build's last step
+ * was one 30-50 ms task at 1440/1920); same RNG order, same knots. */
+function* placeKnotsGen({ strands, junctions, marginKnots, layout, w, top, height, budget = () => false }) {
   const R = rng("r11-hyphal-knots"),
     knots = [];
   const nearColony = (q) => marginKnots.reduce((m, k) => Math.min(m, Math.hypot(q.x - k.x, q.y - k.y)), Infinity);
@@ -149,7 +157,9 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
   for (let k = 0; k < colonyTarget && colonyCands.length; k++) {
     const c = colonyCands[Math.floor(R() * colonyCands.length)];
     tryGroup(c.p, c.i);
+    if ((k & 15) === 15 && budget()) yield "knots";
   }
+  if (budget()) yield "knots";
   // Sparse field: mostly at junctions, sometimes mid-strand.
   const mains = strands.filter((p) => p.static && !p.hair && p.points.length > 12);
   for (let k = 0, made = 0; made < sparseTarget && k < sparseTarget * 6; k++) {
@@ -161,6 +171,7 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
       const p = mains[Math.floor(R() * mains.length)];
       made += tryGroup(p, 2 + Math.floor(R() * (p.points.length - 4)));
     }
+    if ((k & 15) === 15 && budget()) yield "knots";
   }
   return knots;
 }
@@ -411,9 +422,16 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
           return p;
         };
         // Felt: the soft core (random headings, tightly curled, short).
-        for (let j = 0; j < Math.round(56 * MK); j++) tuft(curl(inMat(), R() * 6.283, (6 + R() * 12) * MK, 0.32), 0.22 + R() * 0.16, 0.62);
+        // r11.3: time-bounded yields inside a colony (one colony was a 78 ms task).
+        for (let j = 0; j < Math.round(56 * MK); j++) {
+          tuft(curl(inMat(), R() * 6.283, (6 + R() * 12) * MK, 0.32), 0.22 + R() * 0.16, 0.62);
+          if ((j & 7) === 7 && budget()) yield "margin";
+        }
         // Forward fuzz: near-parallel along the fan, gently curving, heavy-tailed lengths.
-        for (let j = 0; j < Math.round(36 * MK); j++) tuft(curl(inMat(0.7), fan + gauss(R) * 0.45, (8 + 34 * Math.pow(R(), 1.6)) * MK, 0.07), 0.22 + R() * 0.14, 0.6);
+        for (let j = 0; j < Math.round(36 * MK); j++) {
+          tuft(curl(inMat(0.7), fan + gauss(R) * 0.45, (8 + 34 * Math.pow(R(), 1.6)) * MK, 0.07), 0.22 + R() * 0.14, 0.6);
+          if ((j & 7) === 7 && budget()) yield "margin";
+        }
         // A short rear/side fringe.
         for (let j = 0; j < 8; j++) tuft(curl(inMat(), fan + Math.PI + gauss(R) * 0.9, 4 + R() * 6, 0.12), 0.2, 0.45);
         // Long hyphae stay graph-connected to the colony vertex through two
@@ -451,6 +469,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
           p.marginRoot = centre;
           p.endFade = [centre]; // r11.1: emerges from the felt, never from the vertex
           mainRoots.push(p);
+          if (budget()) yield "margin";
         }
         // r11: runners leave the colony for the content column (ref-8 sparse
         // hyphae flowing inwards), so text sections carry mycelium as in r9.
@@ -462,6 +481,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
           p.runner = true;
           p.endFade = [centre];
           mainRoots.push(p);
+          if (budget()) yield "margin";
         }
         budget() && (yield "margin");
       }
@@ -640,7 +660,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     r.wrap = p;
   }
   yield "knots";
-  const hyphalKnots = placeKnots({ strands, junctions, marginKnots, layout, w, top, height });
+  const hyphalKnots = yield* placeKnotsGen({ strands, junctions, marginKnots, layout, w, top, height, budget });
   const rootAudit = {
     mainStrands: rooted.length, lateralCount, minLateralsPer100px: Number.isFinite(minLateralsPer100px) ? minLateralsPer100px : 0, loneThreads: rooted.filter((p) => !p.laterals).length,
     web: { orders, spacingCV, spectralPeakFraction: Math.max(...power) / power.reduce((n, v) => n + v, 0), fusions: webFusions, spacingSamples: gaps.length },
@@ -1634,17 +1654,6 @@ export function createField({ stage, state, reduce }) {
     if (await stage("cascades")) return; // r11.2b: schedules, cascades and leaks in separate tasks (one 30-32 ms stage at 1920)
     buildMarginLeaks();
     if (await stage("leaks")) return;
-    // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
-    // the compositor attaches (they appeared at once with the field fronts
-    // already 40-60% out); the hero composite keeps showing as before.
-    if (!reduce.matches && !document.hidden)
-      for (const el of [bandBox, lifeBox, live]) {
-        el.style.opacity = "0";
-        el.getBoundingClientRect();
-        el.style.transition = "opacity 0.9s ease-out";
-        el.style.opacity = "";
-      }
-    attached = true;
     const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
       paths: field.strands.length, branches: field.strands.filter((p) => !p.static).length, fusions: field.fusions.length, nodes: field.marginKnots.length, sporeNodes: 0,
@@ -1899,6 +1908,20 @@ export function createField({ stage, state, reduce }) {
       paint(t, true);
       return { drawn: field.strands.filter((p) => p.static && p.rasterEnd > 0 && p.drawn >= p.rasterEnd).length, statics: intro?.list.length ?? 0, done: !intro };
     };
+    // r11.3: the audits and probes above in a task of their own; the fade-in,
+    // the attach and the first forced paint in the next (one 33-39 ms stage).
+    if (await stage("audit")) return;
+    // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
+    // the compositor attaches (they appeared at once with the field fronts
+    // already 40-60% out); the hero composite keeps showing as before.
+    if (!reduce.matches && !document.hidden)
+      for (const el of [bandBox, lifeBox, live]) {
+        el.style.opacity = "0";
+        el.getBoundingClientRect();
+        el.style.transition = "opacity 0.9s ease-out";
+        el.style.opacity = "";
+      }
+    attached = true;
     lastVersion = -1;
     paint(frozen ?? clock.elapsed, true);
     c.dataset.ready = "1";
@@ -2482,13 +2505,18 @@ export function createField({ stage, state, reduce }) {
       owner = null;
     const legs = marginSchedules.flatMap((s) => s.legs);
     const ch = new MessageChannel();
+    let kb = 0;
     ch.port1.onmessage = () => {
       if (disposed) return;
       const t0 = performance.now();
       while (performance.now() - t0 < 6) {
         if (!gen) {
           if (i >= jobs.length) {
-            for (const k of field.marginKnots) bloomFor(k);
+            // r11.3: the margin blooms in 6 ms slices too (all at once was
+            // one 70 ms task at 1920 DPR2, inside the intro on a fast host).
+            const knots = field.marginKnots;
+            while (kb < knots.length && performance.now() - t0 < 6) bloomFor(knots[kb++]);
+            if (kb < knots.length) ch.port2.postMessage(0);
             return;
           }
           owner = i < legs.length ? legs[i] : null;
