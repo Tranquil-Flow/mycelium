@@ -97,7 +97,7 @@ class Tree(HTMLParser):
                 self.today -= 1
             if t == tag:
                 break
-        if tag == 'article':
+        if tag in ('article', 'section'):
             self.aim = None
         if tag == 'tr' and self.row:
             self.rows[self.table].append(self.row)
@@ -132,10 +132,12 @@ def test_vision_route_serves_both_versions_with_the_site_csp(directory):
     assert headers['Cache-Control'] == 'no-store' and 'Set-Cookie' not in headers
     html = body.decode()
     assert html.count('data-panel="simple"') == 1 and html.count('data-panel="technical"') == 1
-    for line in ('AI that belongs to the people who use it', 'The short version', "What we're building towards",
-                 'Where we are', 'Part of something bigger', 'The problem, precisely', 'What Mycelium does today',
+    for line in ('AI that belongs to the people who use it', 'The short version', 'How it works', "Who's in charge",
+                 'Access is not charity', 'Built for the people usually left out', 'Where we are',
+                 "What we haven't solved", 'Part of something bigger', 'The problem, precisely', 'What Mycelium does today',
                  'Honest limits today', 'Where the architecture is going', 'The wider stack (CCAI)', 'Principles',
-                 'We take no venture capital, so no investor can buy control.'):
+                 'We take no venture capital, so there are no investors to repay',
+                 "<strong>We're building AI owned by the people who use it.</strong>"):
         assert line in html, line
     assert 'Our vision' in html and '<title>About · Mycelium</title>' in html
     assert '<h1 id="vision-title">AI that belongs to the people who use it</h1>' in html
@@ -163,17 +165,27 @@ def test_old_vision_route_is_a_permanent_redirect_to_about(directory):
 
 
 def test_every_direction_claim_sits_next_to_an_honest_today_line():
+    # Simple v3 (owner, 9 Nov): each direction section ends with its 'Today' line.
     tree = parse(VISION)
-    assert set(tree.aims) == {'yours', 'no-one-in-charge', 'fair', 'trust'}
-    assert tree.aims['no-one-in-charge']['today'].startswith('Today,')
-    assert 'the person who starts a swarm coordinates it' in tree.aims['no-one-in-charge']['today']
-    trust = tree.aims['trust']
-    assert 'verify' in trust['text'] and "can't read" in trust['text']
-    assert trust['today'].startswith('Today,') and 'can see what they process' in trust['today']
+    assert set(tree.aims) == {'how', 'in-charge', 'access', 'solved'}
+    for aim in tree.aims.values():
+        assert aim['today'].startswith('Today'), aim
+    assert 'download it for Apple-silicon Macs' in tree.aims['how']['today']
+    assert 'the person who starts a swarm coordinates it' in tree.aims['in-charge']['today']
+    access = tree.aims['access']
+    assert 'will fund a shared AI Commons' in access['text'] and 'no payments' in access['today']
+    assert 'The Commons is designed, not built.' in access['today']
+    solved = tree.aims['solved']
+    assert 'Did the right model answer' in solved['text'] and 'can see what they process' in solved['today']
+    assert 'told real answers from imitations 90–95% of the time in early tests on one model' in solved['text']
+    # Today's platform support is stated once (in How it works), not in the stage table.
+    simple = tree.panels['simple']
+    assert simple.count('Apple') == 1 and 'about 95% of the time' not in simple
+    assert "AI will shape how the rest of us live and work, and whoever owns it will decide how. We'd rather that be all of us." in simple
     stages = tree.rows['stages']
     assert [r[0] for r in stages] == ['1. Trusted swarms', '2. Connected communities', '3. A shared commons',
                                       '4. Proof instead of trust']
-    assert [r[2].strip() for r in stages] == ['Working now as an early preview on Apple silicon Macs',
+    assert [r[2].strip() for r in stages] == ['Working now as an early preview',
                                               'Designed; first model-checking tools in testing', 'Designed', 'Research']
     assert [r[2] for r in tree.rows['layers']] == ['Built: early preview', 'Designed', 'Planned']
     technical = tree.panels['technical']
@@ -390,6 +402,41 @@ def test_zero_layout_shift_no_third_parties_and_header_fit(directory, width, hei
         browser.close()
 
 
+@pytest.mark.parametrize('width', [390, 768, 1440])
+def test_simple_v3_reads_comfortably(directory, width):
+    """Simple v3: comfortable measure, Today lines in the Today treatment, the
+    closing line as a pull-quote, the same two buttons, nothing overflowing."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = new_page(browser, directory, width=width, height=900)
+        page.goto(directory.origin + '/about')
+        page.wait_for_timeout(600)
+        info = page.evaluate("""(()=>{const panel=document.querySelector('[data-panel=simple]');
+          const paras=[...panel.querySelectorAll('.sect > p:not(.vision-close)')];
+          const close=panel.querySelector('.vision-close'), cs=getComputedStyle(close);
+          const today=[...panel.querySelectorAll('.sect > p.goal-today')];
+          const chars=(p)=>{const c=getComputedStyle(p),probe=document.createElement('span');
+            probe.style.cssText='display:inline-block;width:10ch;position:absolute;visibility:hidden';p.append(probe);
+            const ch=probe.getBoundingClientRect().width/10;probe.remove();
+            return (p.getBoundingClientRect().width-parseFloat(c.paddingLeft)-parseFloat(c.paddingRight))/ch};
+          return {maxChars:Math.max(...paras.map(chars)),
+            overflow:document.documentElement.scrollWidth>innerWidth,
+            today:today.map(p=>[getComputedStyle(p).backgroundColor, p.firstElementChild.tagName, p.textContent.slice(0,6)]),
+            close:[cs.borderLeftStyle, parseFloat(cs.borderLeftWidth), parseFloat(cs.fontSize) > parseFloat(getComputedStyle(paras[0]).fontSize)],
+            sections:[...panel.querySelectorAll('.sect > h2')].map(h=>h.textContent),
+            buttons:[...panel.querySelectorAll('.vision-cta a')].map(a=>[a.textContent,a.getAttribute('href')])}})()""")
+        assert not info['overflow'], info
+        assert info['maxChars'] <= 68.5, info  # 68ch text measure (~80 characters), Today lines included
+        assert len(info['today']) == 4 and all(t[1] == 'STRONG' and t[2].startswith('Today') and t[0] != 'rgba(0, 0, 0, 0)' for t in info['today']), info
+        assert info['close'] == ['solid', 3.0, True], info
+        assert info['sections'] == ['The short version', 'How it works', "Who's in charge", 'Access is not charity',
+                                    'Built for the people usually left out', 'Where we are', "What we haven't solved",
+                                    'Part of something bigger']
+        assert info['buttons'] == [['Download Mycelium', '/swarms/#contributing'], ['Read the technical version →', '#panel-technical']]
+        assert sum(page.evaluate('window.__cls')) == 0
+        browser.close()
+
+
 def test_stage_and_layer_tables_stack_into_cards_on_phones(directory):
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -437,7 +484,7 @@ HIDE_TEXT = "*,*::before,*::after{color:transparent!important;-webkit-text-fill-
 
 @pytest.mark.parametrize('theme', ['dark', 'light'])
 @pytest.mark.parametrize('glow', ['green', 'blue'])
-@pytest.mark.parametrize('width,height', [(390, 844), (1440, 900)])
+@pytest.mark.parametrize('width,height', [(390, 844), (768, 1000), (1440, 900)])
 def test_text_contrast_on_the_actual_backdrop(directory, theme, glow, width, height):
     """Backdrop pixels under each glyph (1 px dilated), field drawn, motion frozen."""
     worst = []
