@@ -92,8 +92,9 @@ def test_margin_pulses_nearly_hero_level(local):  # noqa: F811
     crest per side and >= 0.9 of the hero's rate."""
     with sync_playwright() as p:
         browser, page, errors = _open(p, local, 1440)
-        for _ in range(100):
-            if page.evaluate('__marginPulseProbe(0).built') >= len(page.evaluate('__marginPulseProbe(0).periods')):
+        for _ in range(300):  # every leg's leak is built (idle slices after ready)
+            mp = page.evaluate('__marginPulseProbe(0)')
+            if mp['built'] >= mp['legs_total']:
                 break
             page.wait_for_timeout(100)
         probe = page.evaluate('Array.from({length:400},(_,i)=>__marginPulseProbe(i/2))')

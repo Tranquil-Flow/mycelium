@@ -1397,7 +1397,8 @@ export function createField({ stage, state, reduce }) {
       if (p.tuft && p.marginRoot && !par) {
         const u = Math.min(1, Math.hypot(p.points[0].x - p.marginRoot.x, p.points[0].y - p.marginRoot.y) / (MAT_R * 1.6)),
           hq = hash01(k * 31 + 7);
-        p.introFrac = 0.03 + 0.69 * Math.min(1, 0.6 * u + 0.4 * hash01(k * 37 + 3)) * (hq < 0.08 ? 0.15 : 1);
+        p.matKey = Math.min(1, 0.6 * u + 0.4 * hash01(k * 37 + 3)) * (hq < 0.08 ? 0.15 : 1);
+        p.introFrac = 0.03 + 0.69 * p.matKey; // replaced below by the ink-ranked schedule
       } else if (!par && !p.introStart && (p.marginRoot || p.runner || p.endFade?.includes(p.points[0]))) {
         // Hyphae, runners and cords leaving a margin colony set off one by one.
         p.introFrac = 0.01 + 0.22 * hash01(k * 41 + 13);
@@ -1411,6 +1412,25 @@ export function createField({ stage, state, reduce }) {
       // Fuzz is generated lazily on the strand's first raster (no start-up long task).
       p.fuzzSeed = p.static && (!p.hair || p.order === 1) && !p.tuft ? k : -1;
       k++;
+    }
+    // The tufts sit mostly near the centre, so a schedule by radius alone
+    // finished 99% of a mat's ink by half the intro. Ranked by the same key, a
+    // tuft starts when the tufts before it hold its share of the colony's ink:
+    // the mat fills at a steady rate from 0.03 to 0.72 of the intro.
+    {
+      const byRoot = new Map();
+      for (const p of field.strands) if (p.matKey !== undefined) (byRoot.get(p.marginRoot) || byRoot.set(p.marginRoot, []).get(p.marginRoot)).push(p);
+      for (const list of byRoot.values()) {
+        list.sort((a, b) => a.matKey - b.matKey);
+        const ink = (p) => p.arc[p.arc.length - 1] * p.alpha,
+          total = list.reduce((n, p) => n + ink(p), 0) || 1;
+        let acc = 0;
+        for (const p of list) {
+          p.introFrac = 0.03 + 0.69 * (acc / total);
+          acc += ink(p);
+          delete p.matKey;
+        }
+      }
     }
     // Time-scheduled tufts (and anything rooted on them) take their front offset.
     for (const p of field.strands) {
@@ -1761,6 +1781,7 @@ export function createField({ stage, state, reduce }) {
       return {
         active: trips.map((s) => s.side), periods: marginSchedules.map((s) => s.period), intensity: MP.GAIN, heroInterval,
         reach: trips.map((s) => s.leg.leak?.maxFine ?? 0), built: marginSchedules.flatMap((s) => s.legs).filter((l) => l.leak).length,
+        legs_total: marginSchedules.flatMap((s) => s.legs).length,
         legs: trips.map((s) => ({ side: s.side, y0: base + Math.min(s.leg.p.points[0].y, s.leg.p.points.at(-1).y), y1: base + Math.max(s.leg.p.points[0].y, s.leg.p.points.at(-1).y) })),
       };
     };

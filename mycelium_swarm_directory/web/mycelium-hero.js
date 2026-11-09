@@ -1768,6 +1768,8 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     return { M, mean: (k) => [rgb[k * 3] / rc[k], rgb[k * 3 + 1] / rc[k], rgb[k * 3 + 2] / rc[k]], lin };
   }
+  /** Gradient stops for per-ring glow values: flat over each 8 px ring. */
+  const ringStops = (added, K) => added.flatMap((v, q) => [[(q + 0.15) / K, v], [(q + 0.85) / K, v]]);
   function* dipsGen(g) {
     const glowRgb = hexRgb(palette.glow),
       glow = glowRgb.split(",").map(Number),
@@ -1809,17 +1811,19 @@ export function createHero(canvas, { stage, state, reduce }) {
       const added = new Array(K).fill(0);
       let first = null,
         last = null;
-      // Up to 8 measured passes: raising one ring's glow also lifts its
-      // neighbours (gradient stops interpolate), so a ring next to a bump can
-      // take several passes (4 left a 5-7% bump at a 1920 colony).
-      const PASSES = 8;
+      // Measured passes. Each ring's glow is flat across the ring (two stops,
+      // 15% blends at its edges): with one stop per ring centre, raising a
+      // ring also lifted its neighbours by half as much, and the correction
+      // chased an outer bump inward without converging (a 4.5% ring stayed at
+      // a 1920 colony after 8 passes).
+      const PASSES = 6;
       for (let pass = 0; pass < PASSES; pass++) {
         tx.globalCompositeOperation = "copy";
         tx.setTransform(1, 0, 0, 1, 0, 0);
         tx.drawImage(off, 0, 0);
         tx.globalCompositeOperation = "lighter";
         tx.setTransform(d, 0, 0, d, -(n.x - R) * d, -(n.y - R) * d);
-        if (added.some((v) => v > 0)) colonyFill(tx, { node: n, fill: { r: K * 8, stops: added.map((v, q) => [(q + 0.5) / K, v]) } }, glowRgb, 1);
+        if (added.some((v) => v > 0)) colonyFill(tx, { node: n, fill: { r: K * 8, stops: ringStops(added, K) } }, glowRgb, 1);
         const rings = ringsOf(tx.getImageData(0, 0, S, S).data, S, S, (n.x - R) * d, (n.y - R) * d, n, K, d),
           M = rings.M;
         first ??= M;
@@ -1845,7 +1849,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       off.width = off.height = tmp.width = tmp.height = 0;
       c.dips = { before: first, after: last, added: added.slice() };
       if (added.some((v) => v > 0)) {
-        const f = { r: K * 8, stops: added.map((v, q) => [(q + 0.5) / K, v]) };
+        const f = { r: K * 8, stops: ringStops(added, K) };
         sx.save();
         sx.globalCompositeOperation = "lighter";
         colonyFill(sx, { node: n, fill: f }, glowRgb, 1);
