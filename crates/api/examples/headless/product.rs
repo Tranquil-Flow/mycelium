@@ -124,8 +124,14 @@ enum Built {
 fn log_set_aside(set_aside: &SetAside) {
     // The daemon log names what was moved and why; nothing else about the window is printed.
     eprintln!(
-        "product_evidence_state_set_aside: {} {}",
-        set_aside.reason, set_aside.file_name
+        "product_evidence_state_set_aside: {} {}{}",
+        set_aside.reason,
+        set_aside.file_name,
+        if set_aside.synced {
+            ""
+        } else {
+            " (directory sync failed)"
+        }
     );
 }
 
@@ -245,6 +251,12 @@ impl ProductRoutes for Routes {
         });
         if let Ok(set_aside) = &result {
             log_set_aside(set_aside);
+            *slot = Slot::Empty;
+        } else if matches!(&result, Err(AppError("product_evidence_state_not_refused")))
+            && matches!(&*slot, Slot::Refused { swarm: bound, .. } if *bound == swarm)
+        {
+            // A cached refusal whose window no longer refuses (B15, FU1): it is forgotten, so the
+            // next request builds the application again instead of staying refused until a restart.
             *slot = Slot::Empty;
         }
         product_app::reset_reply(result)
