@@ -192,3 +192,57 @@ fn refused_handshakes_at_a_learned_host_do_not_hold_its_lane() {
         "refused handshakes at the learned host still hold its lane"
     );
 }
+
+/// Fresh-port Initials every host outside the learned one (`3..=6`) gets
+/// admitted at `now`: the waiting room's size (each host keeps its B11 share).
+fn waiting_room(lan: &Admission, now: Instant) -> usize {
+    (3..=6)
+        .map(|host| flood(lan, host, 50_000 + 1_000 * host, 4 * slots(), now))
+        .sum()
+}
+
+/// B15 (REVIEW-laneB14 F2): a learned host expires one `MembershipTtl` after
+/// its last authenticated connection ended (or after it was learned, if none
+/// is live): the waiting room is restored to the whole B11 table and the old
+/// address loses its own lane. A host with a live authenticated connection
+/// never expires; one inside the window still keeps the room shrunk.
+#[test]
+fn a_learned_host_expires_one_membership_ttl_after_its_last_connection() {
+    let (ttl, hs) = (span(B::MembershipTtl), span(B::SidecarLocalHandshake));
+    let owner = key();
+    // Inside the window (no live connection): still shrunk.
+    let fresh = admission();
+    fresh.set_keys(&[owner]).unwrap();
+    let learned_at = Instant::now();
+    fresh.learn(on(1, 9), &owner);
+    let inside = waiting_room(&fresh, learned_at + ttl - hs);
+    assert!(
+        (1..=2).contains(&inside),
+        "{inside} waiting-room slots inside the window (the host is not stale yet)"
+    );
+    // A live authenticated connection (the accept path's promoted pin).
+    let lan = admission();
+    lan.set_keys(&[owner]).unwrap();
+    let mut live = lan.pin_provisional([on(1, 9)]).unwrap();
+    live.promote().unwrap();
+    lan.learn(on(1, 9), &owner);
+    let held = Instant::now() + ttl + hs;
+    let while_live = waiting_room(&lan, held);
+    assert!(
+        (1..=2).contains(&while_live),
+        "{while_live} waiting-room slots: a host with a live connection expired"
+    );
+    drop(live);
+    let closed = Instant::now();
+    let stale = (closed + ttl + hs).max(held + hs);
+    assert_eq!(
+        waiting_room(&lan, stale),
+        4 * share(),
+        "a stale learned host still keeps the waiting room shrunk"
+    );
+    assert_eq!(
+        flood(&lan, 1, 60_000, slots(), stale + hs),
+        share(),
+        "a stale learned address keeps its own lane"
+    );
+}
