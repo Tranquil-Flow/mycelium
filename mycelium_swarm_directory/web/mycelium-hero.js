@@ -1935,17 +1935,28 @@ export function createHero(canvas, { stage, state, reduce }) {
   /** The living periphery at scene age A, time T (life layer, hero coordinates). */
   let lifeBins = null,
     lifeBinsOf = null;
+  const lifeRanges = new Map();
   /** Living paths whose box meets [y0, y1] (64 px bins of hero y). */
   function lifeNear(g, y0, y1) {
     if (!Number.isFinite(y0) || !Number.isFinite(y1)) return g.lifeList;
     if (lifeBinsOf !== g.lifeList) {
       lifeBinsOf = g.lifeList;
       lifeBins = new Map();
+      lifeRanges.clear();
       for (const P of g.lifeList)
         for (let b = Math.floor(P.box[1] / 64); b <= Math.floor(P.box[3] / 64); b++) (lifeBins.get(b) || lifeBins.set(b, []).get(b)).push(P);
     }
-    const out = new Set();
-    for (let b = Math.floor(y0 / 64); b <= Math.floor(y1 / 64); b++) for (const P of lifeBins.get(b) || []) out.add(P);
+    const b0 = Math.floor(y0 / 64),
+      b1 = Math.floor(y1 / 64),
+      key = b0 * 4096 + b1;
+    let out = lifeRanges.get(key);
+    if (!out) {
+      const set = new Set();
+      for (let b = b0; b <= b1; b++) for (const P of lifeBins.get(b) || []) set.add(P);
+      out = [...set];
+      if (lifeRanges.size > 512) lifeRanges.clear();
+      lifeRanges.set(key, out);
+    }
     return out;
   }
   function drawLife(ctx, T, A, g, x0 = -Infinity, x1 = Infinity, y0 = -Infinity, y1 = Infinity) {
@@ -2772,10 +2783,13 @@ export function createHero(canvas, { stage, state, reduce }) {
             s0 = y.follow ? 0 : y.base;
           }
           const last = P.lifeShown;
-          if (last && !all && Math.abs(last.vis - vis) < 0.3 && last.state === state) continue;
-          const lo = Math.max(0, Math.min(last ? last.vis : s0, vis) - 40),
+          if (last && !all && Math.abs(last.vis - vis) < 1 && last.state === state) continue; // as the field (LIFE_STEP)
+          const lo = Math.max(0, Math.min(last ? last.vis : s0, vis) - (state === 2 || last?.state === 2 || !last ? 34 : 14)),
             hi = Math.max(last ? last.vis : vis, vis) + 4;
-          P.lifeShown = { vis, state };
+          if (last) {
+            last.vis = vis;
+            last.state = state;
+          } else P.lifeShown = { vis, state };
           if (all) continue;
           let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
           for (let i = 0; i < P.pts.length; i++) {

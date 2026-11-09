@@ -656,9 +656,12 @@ const LIFE = Object.freeze({ TIP_P: 0.18, LATERAL_P: 0.1, MIN_LEN: 50, TIP_MIN: 
  * far-edge first, and an arrival bloom travelling out to the colony rim. At
  * most one per side; rate ~0.93 of the hero's. */
 const MP = Object.freeze({ GAIN: 0.92, FAST: 38, SLOW: 22, CUTOFF: 600, LAMBDA: 276, STEP: 0.3, TAIL: 5.6, RSTEP: 4, RES: 0.15, RES_HOLD: 2, RES_BACK: 0.2, RES_FAR: 3, RES_FADE: 6, RATE: 0.93, BLOOM_R: 48 });
-const LIFE_HZ = 24, // life ticks per second (each repaints only what changed)
+const LIFE_HZ = 15, // life ticks per second (each repaints only what changed)
   LIFE_TILE = 128, // CSS px; the life layer is a page-anchored grid of tiles
-  LIFE_PAD = 192; // tiles kept above and below the viewport
+  LIFE_PAD = 192, // tiles kept above and below the viewport
+  // A strand repaints when its tip has moved 1 CSS px (2 device px at DPR2):
+  // at 8-20 px/s that is 8-20 repaints a second, not one every tick.
+  LIFE_STEP = 1;
 
 /** Shared load-in contract (design/r11-coordination.md): everything starts at
  * the first rendered frame and is established by INTRO_MS, with ease-out pacing. */
@@ -810,6 +813,8 @@ export function createField({ stage, state, reduce }) {
     lifeList = [],
     lifeStamp = 0,
     lifeY = NaN,
+    lifeRows = [NaN, NaN],
+    lifeNearby = null,
     lifeScroll = NaN,
     lifePending = false,
     lifeDrawn = -Infinity,
@@ -1447,6 +1452,8 @@ export function createField({ stage, state, reduce }) {
     for (const p of field.strands) if (p.points[0].owner !== undefined) anchors.add(p.points[0]); // hero vertices
     lifeList = [];
     lifeBins = null;
+    lifeNearby = null;
+    lifeRows = [NaN, NaN];
     let j = 0;
     for (const p of field.strands) {
       if (performance.now() - t > 8) {
@@ -2034,15 +2041,27 @@ export function createField({ stage, state, reduce }) {
     lifeStats = { drawn: 0, ms: 0, redraws: 0, tiles: 0, dirty: 0, maxMs: 0 };
   /** Living strands by 64 px bins of scene y (a tile repaint visits only its
    * bins, not the whole list). */
-  let lifeBins = null;
+  let lifeBins = null,
+    lifeRanges = new Map();
   function lifeNear(y0, y1) {
     if (!lifeBins) {
       lifeBins = new Map();
+      lifeRanges = new Map();
       for (const p of lifeList)
         for (let b = Math.floor(p.box[1] / 64); b <= Math.floor(p.box[3] / 64); b++) (lifeBins.get(b) || lifeBins.set(b, []).get(b)).push(p);
     }
-    const out = new Set();
-    for (let b = Math.floor(y0 / 64); b <= Math.floor(y1 / 64); b++) for (const p of lifeBins.get(b) || []) out.add(p);
+    // Tile rows ask for the same few bin ranges: built once, as arrays.
+    const b0 = Math.floor(y0 / 64),
+      b1 = Math.floor(y1 / 64),
+      key = b0 * 4096 + b1;
+    let out = lifeRanges.get(key);
+    if (!out) {
+      const set = new Set();
+      for (let b = b0; b <= b1; b++) for (const p of lifeBins.get(b) || []) set.add(p);
+      out = [...set];
+      if (lifeRanges.size > 512) lifeRanges.clear();
+      lifeRanges.set(key, out);
+    }
     return out;
   }
   /** Bounds (scene coords) of the arc range [a0, a1] of a polyline. */
@@ -2059,7 +2078,9 @@ export function createField({ stage, state, reduce }) {
     }
     return x0 === Infinity ? null : [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
-  const LIFE_DIRTY_PAD = 40; // retreat fade tail, tip glow and fuzz around a moving tip
+  // Dirty reach behind a changed tip: the retreat fade tail (<= 36 px) while
+  // dying back, the tip glow (14 px) otherwise.
+  const lifePad = (state) => (state === 2 ? 40 : 18);
   /** Page copies of the field that intersect page range [y0, y1]. */
   function copiesIn(y0, y1) {
     const heroTop = scene ? scene.hero.top : 0,
@@ -2076,8 +2097,7 @@ export function createField({ stage, state, reduce }) {
     let tl = lifeTiles.get(key);
     if (!tl && create) {
       const cv = lifePool.pop() || document.createElement("canvas");
-      cv.width = Math.ceil(LIFE_TILE * d);
-      cv.height = Math.ceil(LIFE_TILE * d);
+      cv.width = cv.height = 1; // sized by its first paint (if anything lives there)
       cv.style.cssText = `position:absolute;left:${col * LIFE_TILE}px;top:${row * LIFE_TILE}px;width:${LIFE_TILE}px;height:${LIFE_TILE}px`;
       lifeInner.appendChild(cv);
       tl = { cv, cx: cv.getContext("2d"), col, row, x: col * LIFE_TILE, y: row * LIFE_TILE, dirty: true, empty: true };
@@ -2108,7 +2128,26 @@ export function createField({ stage, state, reduce }) {
       X1 = X0 + LIFE_TILE,
       Y1 = Y0 + LIFE_TILE;
     const full = Math.ceil(LIFE_TILE * d);
-    if (tl.cv.width !== full) tl.cv.width = tl.cv.height = full; // was an empty placeholder
+    // Tiles no living strand reaches stay 1x1 placeholders for good; the rest
+    // keep their backing store (re-allocating a tile whenever its strands
+    // had all died back cost more than the paint).
+    if (tl.cands === undefined) {
+      tl.cands = false;
+      for (const base of copiesIn(Y0, Y1))
+        for (const p of lifeNear(Y0 - base, Y1 - base)) {
+          const b = p.box;
+          if (!(b[2] < X0 || b[0] > X1 || b[3] + base < Y0 || b[1] + base > Y1)) tl.cands = true;
+        }
+      if (scene?.lifeChanges && scene.hero.top + scene.hero.H > Y0 && scene.hero.top < Y1) tl.cands = true;
+    }
+    if (!tl.cands) {
+      tl.dirty = false;
+      tl.empty = true;
+      tl.cv.width = tl.cv.height = 1;
+      tl.cv.style.visibility = "hidden";
+      return 0;
+    }
+    if (tl.cv.width !== full) tl.cv.width = tl.cv.height = full;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
@@ -2134,8 +2173,6 @@ export function createField({ stage, state, reduce }) {
     }
     tl.dirty = false;
     tl.empty = !drawn;
-    // A tile with nothing living keeps a 1x1 placeholder (no canvas memory).
-    if (tl.empty) tl.cv.width = tl.cv.height = 1;
     tl.cv.style.visibility = tl.empty ? "hidden" : "";
     return drawn;
   }
@@ -2148,7 +2185,11 @@ export function createField({ stage, state, reduce }) {
       cols = Math.ceil(width / LIFE_TILE);
     lifeStamp++;
     // Tiles leaving the range are released; new rows start dirty.
-    for (const tl of [...lifeTiles.values()]) if (tl.row < r0 || tl.row > r1) dropTile(tl);
+    if (r0 !== lifeRows[0] || r1 !== lifeRows[1]) {
+      for (const tl of [...lifeTiles.values()]) if (tl.row < r0 || tl.row > r1) dropTile(tl);
+      lifeRows = [r0, r1];
+      lifeNearby = null;
+    }
     const fresh = [];
     for (let r = r0; r <= r1; r++) if (!lifeTiles.has(r * 1024)) fresh.push(r);
     const Y0 = r0 * LIFE_TILE,
@@ -2157,17 +2198,22 @@ export function createField({ stage, state, reduce }) {
     const mark = (box, base, a, b) => {
       if (box && b !== undefined) dirtyRect(box[0], box[1] + base, box[2], box[3] + base, r0, r1);
     };
-    for (const p of lifeList) {
-      let inRange = false;
-      for (const base of bases) if (p.box[3] + base >= Y0 && p.box[1] + base <= Y1) inRange = true;
-      if (!inRange) continue;
+    if (!lifeNearby) {
+      const set = new Set();
+      for (const base of bases) for (const p of lifeNear(Y0 - base, Y1 - base)) set.add(p);
+      lifeNearby = [...set];
+    }
+    for (const p of lifeNearby) {
       const y = lifeAt(p, t),
         s0 = y.follow ? 0 : y.base,
         last = p.lifeShown;
-      if (last && !all && Math.abs(last.vis - y.vis) < 0.3 && last.state === y.state) continue;
-      const lo = Math.min(last ? last.vis : s0, y.vis) - LIFE_DIRTY_PAD,
+      if (last && !all && Math.abs(last.vis - y.vis) < LIFE_STEP && last.state === y.state) continue;
+      const lo = Math.min(last ? last.vis : s0, y.vis) - Math.max(lifePad(y.state), last ? lifePad(last.state) : 40),
         hi = Math.max(last ? last.vis : y.vis, y.vis) + 4;
-      p.lifeShown = { vis: y.vis, state: y.state };
+      if (last) {
+        last.vis = y.vis;
+        last.state = y.state;
+      } else p.lifeShown = { vis: y.vis, state: y.state };
       if (window.__dbgT) { const kk = y.follow ? "cF" : !p.static ? "cN" : y.base > 0 ? "cT" : "cW"; window.__dbgT[kk] = (window.__dbgT[kk] || 0) + 1; } /* DIAG-TEMP */
       if (all) continue;
       const box = arcBox(p.points, p.arc, Math.max(0, lo), hi, 14); // fuzz hairs overhang the polyline
