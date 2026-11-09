@@ -2931,6 +2931,7 @@ export function createHero(canvas, { stage, state, reduce }) {
   function introFrame(now) {
     introRaf = 0;
     if (disposed || scene.ready) return;
+    pacer.tick(now);
     // r11.4: 60 Hz while the build runs on a 120 Hz display (see pacer.skip).
     if (pacer.skip(now - introDrawn)) {
       introRaf = requestAnimationFrame(introFrame);

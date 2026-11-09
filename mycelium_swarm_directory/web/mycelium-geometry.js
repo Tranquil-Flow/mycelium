@@ -518,7 +518,7 @@ function tipCycle(tau, period, g = LIFE_CYCLE.G * period, h = LIFE_CYCLE.H * per
  *   2nd (60 Hz display) or every 2nd-4th (120 Hz) vsync instead (see skip):
  *   a steady 30-60 Hz, never a dropped run of frames. A fast host keeps 60 Hz
  *   (or more) throughout; a 120 Hz display redraws at 60 Hz while work is
- *   pending. Starved work (below 3/4 of its share: frames heavier than the
+ *   pending. Starved work (below half its share: frames heavier than the
  *   vsync period, e.g. software raster) runs plain MAX ms slices, as before.
  * - Hidden tabs, or no frame for 4 periods: unpaced MAX ms slices (a tab
  *   hidden mid-build still finishes), with a timer fallback.
@@ -539,15 +539,26 @@ const pacer = (() => {
     turn = 0,
     every = 1, // animations redraw on every `every`-th vsync
     judged = 0,
+    ext = -Infinity, // last frame reported by the page's own animation loop
     ch = null;
   const jobs = [],
     spans = [], // [start, end] of the slices inside the last WIN ms
     stats = { slices: 0, waits: 0, floor: 0, unpaced: 0, maxSlice: 0, maxAt: "", every: [], log: [] };
   const now = () => performance.now();
   const target = () => SHARE[Math.min(SHARE.length - 1, Math.min(...jobs.map((j) => j.prio)))];
-  function frame(t) {
+  // The page's animation loops report their frames (tick); the pacer runs
+  // its own requestAnimationFrame only when none has for 40 ms (an extra
+  // callback per frame read as a leaked loop in the style-toggle rAF count).
+  const external = () => now() - ext < 40;
+  function own(t) {
     raf = 0;
+    if (external()) return;
+    frame(t);
+    if (jobs.length && !raf) raf = requestAnimationFrame(own);
+  }
+  function frame(t) {
     const d = t - last;
+    if (d === 0) return;
     // A period from undropped intervals only (60 or 120 Hz alike).
     if (d > 5 && d < period * 1.4) period = Math.min(20, Math.max(6, period + (d - period) * 0.2));
     last = t;
@@ -566,10 +577,7 @@ const pacer = (() => {
       else every = Math.max(lo, every);
       if (every !== was && stats.every.length < 64) stats.every.push([Math.round(t), every, +sh.toFixed(2)]);
     }
-    if (jobs.length) {
-      post();
-      raf = requestAnimationFrame(frame);
-    }
+    if (jobs.length) post();
   }
   function post() {
     if (posted) return;
@@ -582,7 +590,7 @@ const pacer = (() => {
       ch.port1.onmessage = slice;
     }
     post();
-    if (hasWindow && !raf) raf = requestAnimationFrame(frame);
+    if (hasWindow && !raf && !external()) raf = requestAnimationFrame(own);
   }
   function share(t) {
     while (spans.length && spans[0][1] < t - WIN) spans.shift();
@@ -592,6 +600,7 @@ const pacer = (() => {
   }
   function wait() {
     stats.waits++;
+    if (hasWindow && !raf && !external()) raf = requestAnimationFrame(own);
     clearTimeout(timer);
     // No frame within 4 periods (throttled or hidden): go on unpaced.
     timer = setTimeout(() => {
@@ -610,7 +619,7 @@ const pacer = (() => {
       sh = share(t);
     // Starved (frames heavier than the vsync period, e.g. software raster):
     // plain MAX ms slices, as before the pacer, until the share recovers.
-    if (sh < target() * 0.75) {
+    if (sh < target() / 2) {
       stats.floor++;
       return t + MAX;
     }
@@ -649,6 +658,11 @@ const pacer = (() => {
   }
   return {
     stats,
+    /** The page's animation loops call this at the top of every rAF callback. */
+    tick(t) {
+      ext = now();
+      frame(t);
+    },
     /** Adds a job; its run(deadline) is called in later tasks until it returns true. */
     add(job) {
       jobs.push(job);

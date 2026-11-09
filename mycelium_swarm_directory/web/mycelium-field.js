@@ -2974,6 +2974,7 @@ export function createField({ stage, state, reduce }) {
   let tickDrawn = -Infinity;
   function tick(now) {
     raf = 0;
+    pacer.tick(now);
     // r11.4: 60 Hz while background work runs on a 120 Hz display (see pacer.skip).
     if (pacer.skip(now - tickDrawn)) return schedule();
     tickDrawn = now;
@@ -3035,6 +3036,7 @@ export function createField({ stage, state, reduce }) {
   function buildTick(now) {
     buildRaf = 0;
     if (disposed || attached) return;
+    pacer.tick(now);
     firstFrame(now);
     if (scene) {
       const oy = scene.hero.top - scrollY;
