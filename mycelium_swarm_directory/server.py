@@ -44,6 +44,14 @@ GLOW_SWITCH_END = b'data-glow-choice="blue" aria-pressed="false">Blue</button></
 STAGING_STYLE_SWITCH = ('<div class="glow-switch style-switch" role="group" aria-label="Background style (staging only)">'
                         '<button type="button" data-bg-choice="mycelium" aria-pressed="true">Mycelium</button>'
                         '<button type="button" data-bg-choice="electric" aria-pressed="false">Electric</button></div>').encode()
+# STAGING ONLY: load-in duration comparison (r11 intro 6 s vs 12 s). The control
+# is injected on the staging home page only; it reloads with one of these exact
+# request targets, which only a staging server accepts (production: 404).
+STAGING_INTRO_SWITCH = ('<div class="glow-switch style-switch intro-switch" role="group" aria-label="Load-in duration (staging only)">'
+                        '<span class="lbl">Intro</span>'
+                        '<button type="button" data-intro-choice="6" aria-pressed="true">6s</button>'
+                        '<button type="button" data-intro-choice="12" aria-pressed="false">12s</button></div>').encode()
+STAGING_INTRO_PATHS = frozenset({'/?intro=6', '/?intro=12', '/?intro=1x', '/?intro=2x'})
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
 WEB_STAGING = Path(__file__).resolve().parent / 'web_staging'
@@ -170,6 +178,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = self.path
+        if self.server.staging_samples and path in STAGING_INTRO_PATHS:
+            path = '/'  # STAGING ONLY: the page reads ?intro= itself
         if any(part in path for part in ('..', '%', '?', '#', '\\')):
             return self._json(404, {'error': 'route_unknown'})
         if path in ASSETS:
@@ -177,7 +187,8 @@ class _Handler(BaseHTTPRequestHandler):
             raw = (WEB / name).read_bytes()
             if self.server.staging_samples and name in ('apex.html', 'index.html'):
                 raw = raw.replace(b'<header class="top">', STAGING_BANNER + b'<header class="top">', 1)
-                raw = raw.replace(GLOW_SWITCH_END, GLOW_SWITCH_END + STAGING_STYLE_SWITCH, 1)
+                raw = raw.replace(GLOW_SWITCH_END, GLOW_SWITCH_END + STAGING_STYLE_SWITCH
+                                  + (STAGING_INTRO_SWITCH if name == 'apex.html' else b''), 1)
             return self._send(200, raw, kind)
         if self.server.staging_samples and path in STAGING_ASSETS:
             name, kind = STAGING_ASSETS[path]

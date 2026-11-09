@@ -10,7 +10,7 @@
  * transforms on scroll (never re-rastered on scroll), and a viewport-sized live
  * layer (fronts, pulses, blooms).
  */
-import { rng, gauss, smooth, persistWalk, measurePaths, auditPaths, sceneClock } from "./mycelium-geometry.js";
+import { rng, gauss, smooth, persistWalk, measurePaths, auditPaths, sceneClock, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 
 function contentBounds(offset = 0) {
   const main = document.querySelector("main"),
@@ -589,9 +589,9 @@ function life(p, t, reduce) {
 
 /** Shared load-in contract (design/r11-coordination.md): everything starts at
  * the first rendered frame and is established by INTRO_MS, with ease-out pacing. */
-export const INTRO_MS = 6000;
+export const INTRO_MS = SHARED_INTRO_MS; // 6000 by default (shared, see mycelium-geometry.js)
 const easeOut = (u) => 1 - Math.pow(1 - Math.max(0, Math.min(1, u)), 3);
-const HERO_EDGE_S = 3.6; // fallback: hero reaches its edges (~0.75 of its 0-4.5 s growth)
+const HERO_EDGE_S = 3.6 * INTRO_SCALE; // fallback: hero reaches its edges (~0.75 of its 0-4.5 s growth at 6 s)
 let introUsed = false; // switches (theme, hue, style, resize) never replay the intro
 
 function rgba(colour, a) {
@@ -713,7 +713,7 @@ export function createField({ stage, state, reduce }) {
       : null;
   introUsed = true;
   const introTime = (now = performance.now()) => (!intro ? INTRO_MS / 1000 : intro.manual !== null ? intro.manual / 1000 : intro.start === null ? 0 : (now - intro.start) / 1000);
-  window.MyceliumField = Object.freeze({ INTRO_MS, get introProgress() { return Math.min(1, introTime() / (INTRO_MS / 1000)); } });
+  window.MyceliumField = Object.freeze({ INTRO_MS, INTRO_SCALE, get introProgress() { return Math.min(1, introTime() / (INTRO_MS / 1000)); } });
   const firstFrame = (now) => {
     if (intro && intro.start === null) intro.start = now ?? performance.now();
   };
@@ -1139,10 +1139,10 @@ export function createField({ stage, state, reduce }) {
     const t = introTime(now);
     if (intro.heroAt === null) {
       const hp = window.MyceliumHero?.introProgress;
-      if (typeof hp === "number" ? hp >= 0.75 : t >= HERO_EDGE_S) intro.heroAt = Math.min(t, 5);
+      if (typeof hp === "number" ? hp >= 0.75 : t >= HERO_EDGE_S) intro.heroAt = Math.min(t, 5 * INTRO_SCALE);
     }
     const dA = easeOut(t / (INTRO_MS / 1000)) * span.A,
-      dH = intro.heroAt === null ? -1 : easeOut((t - intro.heroAt) / Math.max(0.8, INTRO_MS / 1000 - intro.heroAt)) * span.H;
+      dH = intro.heroAt === null ? -1 : easeOut((t - intro.heroAt) / Math.max(0.8 * INTRO_SCALE, INTRO_MS / 1000 - intro.heroAt)) * span.H;
     const list = intro.list,
       t0 = performance.now();
     let drawn = false,
@@ -1328,7 +1328,9 @@ export function createField({ stage, state, reduce }) {
       });
       const period = Math.max(heroInterval / 0.9, ...legs.map((l) => l.duration + 8));
       const landing = scene?.routes?.[0]?.landings.find((l) => l.node === r.source.source)?.time || 0;
-      return { ...r, legs, period, phase: landing + 3 + side * 9, chosen: new Map() };
+      // A longer intro delays the first hero trip by (6 + 2.5 s) * (scale - 1);
+      // margin trips keep the same relation to it.
+      return { ...r, legs, period, phase: landing + 3 + side * 9 + 8.5 * (INTRO_SCALE - 1), chosen: new Map() };
     });
     const fuzzCount = () => field.strands.reduce((n, p) => n + (p.fuzz ? p.fuzz.length / 7 : 0), 0);
     window.__understoryAudit = {
@@ -1532,7 +1534,7 @@ export function createField({ stage, state, reduce }) {
     }
     const origin = oy + field.top,
       first = Math.floor(-origin / field.height),
-      settle = intro ? 0 : smooth((performance.now() - introEnded) / 2500);
+      settle = intro ? 0 : smooth((performance.now() - introEnded) / (2500 * INTRO_SCALE));
     for (let k = Math.max(scene ? 0 : -1e9, first - 1); k <= first + 1; k++) {
       const y = origin + k * field.height;
       if (y > height || y + field.height < 0) continue;

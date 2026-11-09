@@ -8,13 +8,13 @@
  * recycling outer explorers, pulses and blooms are drawn per frame (by the
  * page compositor in mycelium-field.js). The disposer owns every resource.
  */
-import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock } from "./mycelium-geometry.js";
+import { rng, gauss, hash01, smooth, persistWalk, steerWalk, arcLengths, measurePaths, auditPaths, rootLaterals, sceneClock, INTRO_MS as SHARED_INTRO_MS, INTRO_SCALE } from "./mycelium-geometry.js";
 import { extendFieldGraph } from "./mycelium-field.js";
 
 export const START_AGE = 110; // visitors arrive to a mature core with living rims
 // r11 load-in: the hero grows out from its nodes over the first INTRO_S seconds
 // (shared contract with the field lane), then runs at the normal rate.
-export const INTRO_MS = 6000;
+export const INTRO_MS = SHARED_INTRO_MS; // 6000 by default (shared, see mycelium-geometry.js)
 const INTRO_S = INTRO_MS / 1000,
   INTRO_POW = 1.6;
 let introPlayed = false; // module state: theme/hue/style re-mounts never replay
@@ -1497,7 +1497,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     const R = rng("r10-breath-trips"),
       trips = [];
     // r11: the first trip departs after the load-in intro.
-    let start = 2.5 + INTRO_S,
+    let start = INTRO_S + 2.5 * INTRO_SCALE, // 8.5 s at 6 s; 17 s at 12 s
       from = 0,
       previous = -1;
     for (let i = 0; i < 90; i++) {
@@ -1732,7 +1732,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     if (t >= INTRO_S) return START_AGE + (t - INTRO_S);
     return START_AGE * (1 - Math.pow(1 - Math.max(0, t) / INTRO_S, INTRO_POW));
   }
-  const introRunning = () => intro.on && intro.override === null && intro.skipAt === null && scene.clock.elapsed < INTRO_S + 0.25;
+  const introRunning = () => intro.on && intro.override === null && intro.skipAt === null && scene.clock.elapsed < INTRO_S + 0.25 * INTRO_SCALE;
   scene.ageAt = ageAt;
   scene.intro = intro;
   // Compositors that predate ageAt read startAge (A = startAge + t); the
@@ -1746,7 +1746,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     },
   });
   scene.introProgress = () => Math.max(0, Math.min(1, ageAt(scene.clock.elapsed) / START_AGE));
-  window.MyceliumHero = { INTRO_MS, introProgress: () => (window.__myceliumScene === scene && !scene.disposed ? scene.introProgress() : 1) };
+  window.MyceliumHero = { INTRO_MS, firstPulseAt: INTRO_S + 2.5 * INTRO_SCALE, introProgress: () => (window.__myceliumScene === scene && !scene.disposed ? scene.introProgress() : 1) };
   const onHidden = () => {
     // A tab hidden mid-intro returns to the established state, not a replay.
     if (document.hidden && introRunning()) intro.skipAt = scene.clock.elapsed;

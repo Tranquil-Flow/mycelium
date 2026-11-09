@@ -558,6 +558,12 @@ button {
 .style-switch {
   margin-inline-start: 6px;
 }
+.intro-switch .lbl {
+  align-self: center;
+  padding: 0 6px 0 8px;
+  font: 12px var(--sans);
+  color: var(--muted);
+}
 @media (max-width: 1180px) {
   .top .wrap:has(.style-switch),
   .apex .top .wrap:has(.style-switch) {

@@ -78,6 +78,9 @@ _STAGING_DIRECTORY_ASSET_PATHS = frozenset(
         "/swarms/mycelium-geometry-electric.js",
     }
 )
+# STAGING ONLY: the exact load-in comparison targets (r11 intro 6 s vs 12 s);
+# forwarded unchanged to the staging directory, never accepted in production.
+_STAGING_INTRO_PATHS = frozenset({"/?intro=6", "/?intro=12", "/?intro=1x", "/?intro=2x"})
 _STAGING_PUBLIC_HOST = "next.mycelium.now"
 
 
@@ -1024,9 +1027,12 @@ def _directory_route_decision(method: str, raw_path: str, staging: bool = False)
     """Allow only the directory's own page assets and ``/swarms/api/v1/*``.
 
     Judged on the raw request target: no dot segments, escapes, queries,
-    fragments, backslashes or empty segments ever reach the directory.
+    fragments, backslashes or empty segments ever reach the directory
+    (staging only: the exact ``/?intro=`` comparison targets).
     """
 
+    if staging and method in {"GET", "HEAD"} and raw_path in _STAGING_INTRO_PATHS:
+        return True, 200, "ok"
     if not raw_path.startswith("/") or any(
         part in raw_path for part in _DIRECTORY_FORBIDDEN_PATH_PARTS
     ):

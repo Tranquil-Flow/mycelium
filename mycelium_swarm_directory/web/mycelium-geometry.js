@@ -434,4 +434,23 @@ function sceneClock() {
     },
   };
 }
-export { rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock };
+/** Shared r11 load-in duration (design/r11-coordination.md): ONE value for hero,
+ * field and margins; every intro timing is a multiple of INTRO_SCALE, so a
+ * longer intro is the same shape, slower. Default 6 s.
+ * STAGING ONLY: the URL parameter `?intro=12` (seconds, 3-30) or `?intro=2x`
+ * is read only when the server-injected staging control [data-intro-choice]
+ * exists (next.mycelium.now with staging samples, as for the Electric toggle);
+ * production never injects it, so production never reads the parameter. */
+const INTRO_BASE_MS = 6000;
+function introMs(doc = typeof document === "undefined" ? null : document, loc = typeof location === "undefined" ? null : location) {
+  if (!doc || !loc || !doc.querySelector("[data-intro-choice]")) return INTRO_BASE_MS;
+  const v = new URLSearchParams(loc.search).get("intro");
+  if (v === null) return INTRO_BASE_MS;
+  const m = /^([0-9]+(?:\.[0-9]+)?)(x?)$/.exec(v);
+  if (!m) return INTRO_BASE_MS;
+  const ms = m[2] ? +m[1] * INTRO_BASE_MS : +m[1] * 1000;
+  return ms >= 3000 && ms <= 30000 ? Math.round(ms) : INTRO_BASE_MS;
+}
+const INTRO_MS = introMs(),
+  INTRO_SCALE = INTRO_MS / INTRO_BASE_MS;
+export { rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock, INTRO_BASE_MS, INTRO_MS, INTRO_SCALE, introMs };
