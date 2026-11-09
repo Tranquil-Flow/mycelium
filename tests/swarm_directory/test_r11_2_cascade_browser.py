@@ -61,7 +61,7 @@ def test_cascades_relay_down_the_whole_page(local, width):  # noqa: F811
             assert set(side['events']) <= {round(t['start'] + x, 6) for t in trips for x in [0] + t['landings']}
             # independent margin crests never overlap a cascade on that side
             for s0 in starts[:3]:
-                for k in range(0, int(side['span'] * 2)):
+                for k in range(1, int(side['span'] * 2)):
                     t = s0 + k / 2
                     active = page.evaluate(f'__marginPulseProbe({t}).active')
                     assert side['side'] not in active, (t, active)

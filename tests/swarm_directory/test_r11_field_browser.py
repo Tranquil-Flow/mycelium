@@ -44,9 +44,15 @@ def test_field_is_full_dpr_hairy_knotted_and_r9_dense_behind_text(local):  # noq
         audit = page.evaluate('__understoryAudit')
         # (9) Crisp: the cached tile is rastered at device pixels, not CSS pixels.
         assert audit['dpr'] == 2 and audit['tileScale'] == 2, audit
-        # (3) Every persistent non-tuft strand carries fine hairs.
-        bare = page.evaluate('''()=>__myceliumScene.field.strands.filter(p=>p.static&&!p.tuft&&(!p.hair||p.order===1)
-          &&p.arc[p.arc.length-1]>40&&!(p.fuzz&&p.fuzz.length)).length''')  # rastered by now
+        # (3) Every persistent non-tuft strand carries fine hairs. (r11.2: strands
+        # that regrow whole have no static raster, rasterEnd 0, and live on the
+        # life layer; bands far from the viewport raster in idle slices.)
+        for _ in range(100):
+            bare = page.evaluate('''()=>__myceliumScene.field.strands.filter(p=>p.static&&!p.tuft&&(!p.hair||p.order===1)
+              &&p.rasterEnd>0&&p.arc[p.arc.length-1]>40&&!(p.fuzz&&p.fuzz.length)).length''')
+            if bare == 0:
+                break
+            page.wait_for_timeout(200)
         assert bare == 0 and audit['fuzz'] > 5000, (bare, audit['fuzz'])
         # (7) Sparse, varied, grouped knots; none under glyphs; no arcs anywhere on the field.
         radii = audit['knotRadii']
@@ -86,20 +92,20 @@ def test_knots_never_sit_under_text_and_glyphs_have_a_local_halo(local):  # noqa
 def test_intro_contract_and_living_field(local):  # noqa: F811
     with sync_playwright() as p:
         browser, page, errors = _open(p, local, 1440)
-        assert page.evaluate('MyceliumField.INTRO_MS') == 6000
+        assert page.evaluate('MyceliumField.INTRO_MS') == 9000  # r11.2: the owner's 9 s pick
         state = page.get_attribute('#page-mycelium', 'data-intro')
         assert state in ('running', 'done'), state  # never 'skipped' on a fresh load
-        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=20000)
+        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=30000)
         assert page.evaluate('MyceliumField.introProgress') == 1
         # Capture hook: early intro is sparse, the end matches the established field.
         early = page.evaluate('__setFieldIntro(800)')
         assert early['drawn'] < early['statics']
-        late = page.evaluate('__setFieldIntro(6000)')
+        late = page.evaluate('__setFieldIntro(9000)')
         assert late['done'] or late['drawn'] == late['statics'], late
         browser.close()
         # Never frozen: below the fold the live layer changes over time (growth, breathing, pulses).
         browser, page, errors = _open(p, local, 1440)
-        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=20000)
+        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=30000)
         page.evaluate('scrollTo(0,1300)')
         page.wait_for_timeout(600)
         snap = "document.querySelector('.page-mycelium-live').toDataURL()"
@@ -186,7 +192,7 @@ def test_knot_groups_are_irregular_and_colonies_have_no_point_centre(local):  # 
 def test_scrolling_moves_full_dpr_field_bands_without_reraster(local):  # noqa: F811
     with sync_playwright() as p:
         browser, page, errors = _open(p, local, 1920, dpr=2)
-        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=20000)
+        page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=30000)
         page.evaluate('__setUnderstoryTime(24)')
         for _ in range(50):  # (CSP: no string wait_for_function)
             if page.evaluate('__understoryAudit.bandBytes || 0') > 0:

@@ -126,20 +126,22 @@ def test_load_in_grows_out_from_empty_and_never_replays(local):
     with sync_playwright() as p:
         browser, page, errors = _open(p, local, 1440, init=[LONGTASKS])
         scene = page.evaluate('({intro:__myceliumScene.intro,first:__myceliumScene.timings.firstPaint,INTRO_MS:MyceliumHero.INTRO_MS})')
-        assert scene['intro']['on'] and scene['INTRO_MS'] == 6000
+        # r11.2: production plays the owner's 9 s pick (PRODUCTION_INTRO_MS); times scale with it.
+        k = scene['INTRO_MS'] / 6000
+        assert scene['intro']['on'] and scene['INTRO_MS'] == 9000
         assert scene['first'] < 150, scene
         # The intro is still running when the scene is ready (~1-2 s in).
         assert 0 < page.evaluate('MyceliumHero.introProgress()') < 1
         # Frozen-clock growth: from (nearly) empty at t=0 to established by 6 s.
         counts = []
-        for t in (0.02, 0.8, 1.6, 3, 4.5, 6, 24):
+        for t in (0.02, 0.8 * k, 1.6 * k, 3 * k, 4.5 * k, 6 * k, 24 * k):
             page.evaluate(f'__setPulseTime({t})')
             counts.append(_hero_alpha(page))
         full = counts[-1]
         assert counts[0] < 0.02 * full, counts
         assert all(a < b for a, b in zip(counts[:4], counts[1:5])), counts
         assert counts[5] >= 0.95 * full, counts
-        page.wait_for_timeout(6500)
+        page.wait_for_timeout(int(6500 * k))
         assert not [t for t in page.evaluate('__lt') if t[1] > 120], page.evaluate('__lt')
         # A hue switch re-mounts without replaying the intro.
         page.click('[data-glow-choice="blue"]')
