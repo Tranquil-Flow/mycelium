@@ -78,9 +78,9 @@ _STAGING_DIRECTORY_ASSET_PATHS = frozenset(
         "/swarms/mycelium-geometry-electric.js",
     }
 )
-# STAGING ONLY: the exact load-in comparison targets (r11 intro 6 s vs 12 s);
+# STAGING ONLY: the exact load-in comparison targets (r11.2 intro 6 / 9 / 12 s);
 # forwarded unchanged to the staging directory, never accepted in production.
-_STAGING_INTRO_PATHS = frozenset({"/?intro=6", "/?intro=12", "/?intro=1x", "/?intro=2x"})
+_STAGING_INTRO_PATHS = frozenset({"/?intro=6", "/?intro=9", "/?intro=12"})
 _STAGING_PUBLIC_HOST = "next.mycelium.now"
 
 

@@ -1,9 +1,11 @@
-"""STAGING-ONLY load-in duration comparison (owner, 9 Nov 2026): the r11 intro
-is one shared duration (default 6 s) that scales every intro timing; on
-next.mycelium.now with staging samples, ``/?intro=12`` or ``/?intro=2x`` plays
-it at 12 s (established at 12 s, first hero pulse at 12 + 5 = 17 s). Production
-never injects the control, refuses the query, and never reads the parameter.
-Real local stack only."""
+"""STAGING-ONLY load-in duration comparison (owner, 9 Nov 2026: "maybe just x1.5
+actually, although would also like a x2 as well to compare all 3"). The r11
+intro is one shared duration that scales every intro timing. On
+next.mycelium.now with staging samples the selector offers 6 / 9 / 12 s (9 s is
+the default), ``/?intro=6|9|12`` picks one directly, and a click persists the
+choice under a staging-only localStorage key. Production never injects the
+control, refuses the query, never reads the parameter or the key, and plays
+PRODUCTION_INTRO_MS. Real local stack only."""
 import time
 import urllib.error
 import urllib.request
@@ -18,7 +20,8 @@ from test_site_v2_browser import CLS, local  # noqa: F401  (fixture)
 from test_r11_hero_browser import _hero_alpha
 
 READY = '#page-mycelium[data-ready="1"]'
-TARGETS = ['/?intro=6', '/?intro=12', '/?intro=1x', '/?intro=2x']
+TARGETS = ['/?intro=6', '/?intro=9', '/?intro=12']
+KEY = 'mycelium-staging-intro-v1'
 # Hero age map: START_AGE * (1 - (1 - t / INTRO_S) ** 1.6).
 AGE = lambda u: 110 * (1 - (1 - u) ** 1.6)  # noqa: E731
 
@@ -37,7 +40,7 @@ def test_proxy_accepts_the_intro_targets_only_on_staging(monkeypatch):
         assert proxy._directory_route_decision('GET', target) == (False, 404, 'public_route_not_found')
         assert proxy._directory_route_decision('GET', target, True)[0] is True
         assert proxy._directory_route_decision('POST', target, True)[0] is False
-    for other in ('/?intro=13', '/?intro=12&x=1', '/swarms/?intro=12', '/?t=3', '/?Intro=12'):
+    for other in ('/?intro=13', '/?intro=12&x=1', '/swarms/?intro=12', '/?t=3', '/?Intro=12', '/?intro=2x', '/?intro=1x', '/?intro=9.0'):
         assert proxy._directory_route_decision('GET', other, True)[0] is False, other
     monkeypatch.setenv('MYCELIUM_STAGING_SAMPLES', '1')
     assert not proxy._staging_style_assets('mycelium.now')
@@ -59,7 +62,8 @@ def test_intro_control_and_targets_need_flag_and_staging_origin(local, monkeypat
         assert status == 200 and (b'data-intro-choice' in home) is staging
         if staging:
             labels = [part.split(b'>', 1)[1].split(b'<', 1)[0] for part in home.split(b'data-intro-choice=')[1:]]
-            assert labels == [b'6s', b'12s'] and b'<span class="lbl">Intro</span>' in home
+            assert labels == [b'6s', b'9s default', b'12s'] and b'<span class="lbl">Intro</span>' in home
+            assert b'data-intro-choice="9" aria-pressed="true"' in home
         for target in TARGETS:
             status, body = fetch(srv.origin + target)
             assert (status, body == home) == ((200, True) if staging else (404, False)), (target, status)
@@ -71,13 +75,15 @@ def test_intro_control_and_targets_need_flag_and_staging_origin(local, monkeypat
         srv.close()
 
 
-def _page(p, url, reduced=None, hidden=False, route_from=None):
+def _page(p, url, reduced=None, hidden=False, route_from=None, stored=None):
     browser = p.chromium.launch()
     kw = {'reduced_motion': reduced} if reduced else {}
     context = browser.new_context(viewport={'width': 1440, 'height': 900}, color_scheme='dark', **kw)
     context.add_init_script(CLS)
     if hidden:
         context.add_init_script("Object.defineProperty(document,'hidden',{configurable:true,get:()=>true})")
+    if stored is not None:
+        context.add_init_script(f"localStorage.setItem('{KEY}','{stored}')")
     page = context.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
@@ -108,26 +114,36 @@ def _done_at(page, limit_s):
     raise AssertionError('intro never done')
 
 
+def _production_ms():
+    import re
+    from pathlib import Path
+    source = (Path(server.__file__).resolve().parent / 'web' / 'mycelium-geometry.js').read_text()
+    return int(re.search(r'PRODUCTION_INTRO_MS = (\d+)', source).group(1))
+
+
 def test_production_never_reads_the_parameter(local):  # noqa: F811
     local['directory'].staging_samples = False
     origin = local['directory'].origin
     with sync_playwright() as p:
-        browser, page, errors = _page(p, origin + '/?intro=12', route_from=origin + '/')
-        assert page.locator('[data-intro-choice]').count() == 0
-        assert page.evaluate('[MyceliumHero.INTRO_MS, MyceliumField.INTRO_MS, MyceliumField.INTRO_SCALE, MyceliumHero.firstPulseAt]') == [6000, 6000, 1, 8.5]
+        browser, page, errors = _page(p, origin + '/?intro=12', route_from=origin + '/', stored='12000')
+        assert page.locator('[data-intro-choice], [data-bg-choice]').count() == 0
+        ms = _production_ms()
+        got = page.evaluate('[MyceliumHero.INTRO_MS, MyceliumField.INTRO_MS, MyceliumField.INTRO_SCALE, MyceliumHero.firstPulseAt]')
+        assert got[:3] == [ms, ms, ms / 6000] and abs(got[3] - 8.5 * ms / 6000) < 1e-9, got
         assert not errors, errors
         browser.close()
 
 
-@pytest.mark.parametrize('target,ms', [('/', 6000), ('/?intro=12', 12000), ('/?intro=2x', 12000)])
-def test_staging_intro_scales_every_timing(local, target, ms):  # noqa: F811
+@pytest.mark.parametrize('target,stored,ms', [('/', None, 9000), ('/?intro=6', None, 6000), ('/?intro=12', '6000', 12000),
+                                              ('/', '12000', 12000), ('/', 'junk', 9000)])
+def test_staging_intro_scales_every_timing(local, target, stored, ms):  # noqa: F811
     local['directory'].staging_samples = True
     scale = ms / 6000
     with sync_playwright() as p:
-        browser, page, errors = _page(p, local['directory'].origin + target)
+        browser, page, errors = _page(p, local['directory'].origin + target, stored=stored)
         assert page.evaluate('[MyceliumHero.INTRO_MS, MyceliumField.INTRO_MS, MyceliumField.INTRO_SCALE]') == [ms, ms, scale]
         pressed = page.evaluate("[...document.querySelectorAll('[data-intro-choice]')].map(b=>b.getAttribute('aria-pressed'))")
-        assert pressed == (['true', 'false'] if ms == 6000 else ['false', 'true'])
+        assert pressed == [str(ms == c).lower() for c in (6000, 9000, 12000)]
         # Field and margins: still growing past the 6 s mark at 12 s, established by ~INTRO_MS.
         done = _done_at(page, 40)
         assert ms / 1000 - 0.3 <= done <= ms / 1000 + 4, done
@@ -136,9 +152,9 @@ def test_staging_intro_scales_every_timing(local, target, ms):  # noqa: F811
         for u in (0.25, 0.5, 0.75, 1.0):
             assert abs(page.evaluate(f'__myceliumScene.ageAt({u * ms / 1000})') - AGE(u)) < 1e-6
         assert abs(page.evaluate(f'__myceliumScene.ageAt({ms / 1000 + 3})') - 113) < 1e-6
-        # First hero pulse at INTRO_S + 2.5 s * scale: 8.5 s (6 s) or 17 s (12 s).
+        # First hero pulse at INTRO_S + 2.5 s * scale: 8.5 s (6 s), 12.75 s (9 s) or 17 s (12 s).
         first = 8.5 * scale
-        assert page.evaluate('MyceliumHero.firstPulseAt') == first
+        assert abs(page.evaluate('MyceliumHero.firstPulseAt') - first) < 1e-9
         assert abs(page.evaluate('__pulseTrips[0].start') - first) < 1e-9
         # Frozen growth: same fraction at the same fraction of the intro.
         frac = []
@@ -169,23 +185,47 @@ def test_reduced_motion_and_hidden_tabs_stay_instant_with_the_parameter(local, m
         browser.close()
 
 
-def test_intro_control_reloads_with_the_parameter_without_shifting(local):  # noqa: F811
+def test_intro_control_persists_the_choice_and_reloads_without_shifting(local):  # noqa: F811
     local['directory'].staging_samples = True
     origin = local['directory'].origin
     with sync_playwright() as p:
         browser, page, errors = _page(p, origin + '/')
+        assert page.evaluate('MyceliumHero.INTRO_MS') == 9000  # the staging default
         page.wait_for_timeout(500)
         assert sum(page.evaluate('__cls')) == 0
         page.click('[data-intro-choice="12"]')
         page.wait_for_url(origin + '/?intro=12')
         page.wait_for_selector(READY, state='attached', timeout=30000)
         assert page.evaluate('MyceliumHero.INTRO_MS') == 12000
+        assert page.evaluate(f"localStorage.getItem('{KEY}')") == '12000'
         assert page.get_attribute('[data-intro-choice="12"]', 'aria-pressed') == 'true'
         page.wait_for_timeout(1500)
         assert sum(page.evaluate('__cls')) == 0, page.evaluate('window.__clsDetails')
+        # The stored choice holds on a plain reload of / and on the swarms app (staging).
+        page.goto(origin + '/')
+        page.wait_for_selector(READY, state='attached', timeout=30000)
+        assert page.evaluate('[MyceliumHero.INTRO_MS, MyceliumField.INTRO_MS]') == [12000, 12000]
+        page.goto(origin + '/swarms/')
+        page.wait_for_selector(READY, state='attached', timeout=30000)
+        assert page.evaluate('MyceliumField.INTRO_MS') == 12000
+        page.goto(origin + '/')
+        page.wait_for_selector(READY, state='attached', timeout=30000)
         page.click('[data-intro-choice="6"]')
-        page.wait_for_url(origin + '/')
+        page.wait_for_url(origin + '/?intro=6')
         page.wait_for_selector(READY, state='attached', timeout=30000)
         assert page.evaluate('MyceliumHero.INTRO_MS') == 6000
+        assert page.evaluate(f"localStorage.getItem('{KEY}')") == '6000'
         assert not errors, errors
         browser.close()
+
+
+def test_production_default_is_one_constant():
+    """Promotion picks the owner's duration by editing PRODUCTION_INTRO_MS only."""
+    import re
+    from pathlib import Path
+    web = Path(server.__file__).resolve().parent / 'web'
+    geometry = (web / 'mycelium-geometry.js').read_text()
+    assert len(re.findall(r'PRODUCTION_INTRO_MS = (\d+)', geometry)) == 1
+    for name in ('mycelium-hero.js', 'mycelium-field.js', 'design.js'):
+        source = (web / name).read_text()
+        assert not re.search(r'INTRO_MS\s*=\s*\d', source), name  # no second literal

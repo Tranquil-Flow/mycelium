@@ -44,14 +44,16 @@ GLOW_SWITCH_END = b'data-glow-choice="blue" aria-pressed="false">Blue</button></
 STAGING_STYLE_SWITCH = ('<div class="glow-switch style-switch" role="group" aria-label="Background style (staging only)">'
                         '<button type="button" data-bg-choice="mycelium" aria-pressed="true">Mycelium</button>'
                         '<button type="button" data-bg-choice="electric" aria-pressed="false">Electric</button></div>').encode()
-# STAGING ONLY: load-in duration comparison (r11 intro 6 s vs 12 s). The control
-# is injected on the staging home page only; it reloads with one of these exact
-# request targets, which only a staging server accepts (production: 404).
+# STAGING ONLY: load-in duration comparison (r11.2: 6 s / 9 s / 12 s, 9 s default).
+# The control is injected on the staging home page only; a choice reloads with
+# one of these exact request targets, which only a staging server accepts
+# (production: 404, and production pages never read the parameter).
 STAGING_INTRO_SWITCH = ('<div class="glow-switch style-switch intro-switch" role="group" aria-label="Load-in duration (staging only)">'
                         '<span class="lbl">Intro</span>'
-                        '<button type="button" data-intro-choice="6" aria-pressed="true">6s</button>'
+                        '<button type="button" data-intro-choice="6" aria-pressed="false">6s</button>'
+                        '<button type="button" data-intro-choice="9" aria-pressed="true" title="Default (x1.5)">9s default</button>'
                         '<button type="button" data-intro-choice="12" aria-pressed="false">12s</button></div>').encode()
-STAGING_INTRO_PATHS = frozenset({'/?intro=6', '/?intro=12', '/?intro=1x', '/?intro=2x'})
+STAGING_INTRO_PATHS = frozenset({'/?intro=6', '/?intro=9', '/?intro=12'})
 API = '/swarms/api/v1'
 WEB = Path(__file__).resolve().parent / 'web'
 WEB_STAGING = Path(__file__).resolve().parent / 'web_staging'

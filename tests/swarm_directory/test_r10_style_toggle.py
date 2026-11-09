@@ -119,6 +119,11 @@ def test_staging_toggle_switches_one_renderer_persists_and_never_shifts(local): 
         page.on('request', lambda r: requests.append(r.url))
         page.goto(origin + '/')
         page.wait_for_function(READY)
+        # r11.2: the staging load-in defaults to 9 s; take the baseline once it is established.
+        for _ in range(300):
+            if page.evaluate("()=>document.getElementById('page-mycelium')?.dataset.intro!=='running' && !!(window.__myceliumScene && __myceliumScene.ready)"):
+                break
+            page.wait_for_timeout(100)
         page.wait_for_timeout(2500)
         # Default r10; the electric renderer is not even requested.
         assert page.get_attribute('[data-bg-choice="mycelium"]', 'aria-pressed') == 'true'

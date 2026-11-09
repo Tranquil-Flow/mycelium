@@ -435,22 +435,37 @@ function sceneClock() {
   };
 }
 /** Shared r11 load-in duration (design/r11-coordination.md): ONE value for hero,
- * field and margins; every intro timing is a multiple of INTRO_SCALE, so a
- * longer intro is the same shape, slower. Default 6 s.
- * STAGING ONLY: the URL parameter `?intro=12` (seconds, 3-30) or `?intro=2x`
- * is read only when the server-injected staging control [data-intro-choice]
- * exists (next.mycelium.now with staging samples, as for the Electric toggle);
- * production never injects it, so production never reads the parameter. */
-const INTRO_BASE_MS = 6000;
-function introMs(doc = typeof document === "undefined" ? null : document, loc = typeof location === "undefined" ? null : location) {
-  if (!doc || !loc || !doc.querySelector("[data-intro-choice]")) return INTRO_BASE_MS;
+ * field and margins. Every intro timing is designed at INTRO_BASE_MS (6 s) and
+ * multiplied by INTRO_SCALE, so a longer intro is the same shape, slower.
+ *
+ * PRODUCTION_INTRO_MS is the production load-in. It is the single place to
+ * change at promotion (6000 | 9000 | 12000: the owner's pick; see R11-2-READY).
+ *
+ * STAGING ONLY (r11.2 speed comparison): when the server-injected staging
+ * controls exist (the Electric toggle [data-bg-choice] or the intro selector
+ * [data-intro-choice], both only on next.mycelium.now with staging samples),
+ * the duration is `?intro=6|9|12` (seconds), else the choice stored under
+ * STAGING_INTRO_KEY, else STAGING_INTRO_DEFAULT_MS (9 s, the owner's lean).
+ * Production never injects either control, so it never reads the parameter
+ * or the key. */
+const INTRO_BASE_MS = 6000,
+  PRODUCTION_INTRO_MS = 6000,
+  STAGING_INTRO_CHOICES = Object.freeze([6000, 9000, 12000]),
+  STAGING_INTRO_DEFAULT_MS = 9000,
+  STAGING_INTRO_KEY = "mycelium-staging-intro-v1";
+function introMs(doc = typeof document === "undefined" ? null : document, loc = typeof location === "undefined" ? null : location, store = null) {
+  if (!doc || !loc || !doc.querySelector("[data-bg-choice], [data-intro-choice]")) return PRODUCTION_INTRO_MS;
   const v = new URLSearchParams(loc.search).get("intro");
-  if (v === null) return INTRO_BASE_MS;
-  const m = /^([0-9]+(?:\.[0-9]+)?)(x?)$/.exec(v);
-  if (!m) return INTRO_BASE_MS;
-  const ms = m[2] ? +m[1] * INTRO_BASE_MS : +m[1] * 1000;
-  return ms >= 3000 && ms <= 30000 ? Math.round(ms) : INTRO_BASE_MS;
+  if (v !== null && /^(6|9|12)$/.test(v)) return +v * 1000;
+  try {
+    const s = +(store || localStorage).getItem(STAGING_INTRO_KEY);
+    if (STAGING_INTRO_CHOICES.includes(s)) return s;
+  } catch {}
+  return STAGING_INTRO_DEFAULT_MS;
 }
 const INTRO_MS = introMs(),
   INTRO_SCALE = INTRO_MS / INTRO_BASE_MS;
-export { rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock, INTRO_BASE_MS, INTRO_MS, INTRO_SCALE, introMs };
+export {
+  rng, gauss, hash01, smooth, setup, regionGain, persistWalk, steerWalk, wander, dendriteWalk, arcLengths, resample, measurePaths, auditPaths, rootLaterals, sceneClock,
+  INTRO_BASE_MS, PRODUCTION_INTRO_MS, STAGING_INTRO_CHOICES, STAGING_INTRO_DEFAULT_MS, STAGING_INTRO_KEY, INTRO_MS, INTRO_SCALE, introMs,
+};

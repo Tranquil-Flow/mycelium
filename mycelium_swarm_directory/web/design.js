@@ -3,7 +3,7 @@
 import { drawSpore } from "./spore-print.js";
 import { createHero } from "./mycelium-hero.js";
 import { createField } from "./mycelium-field.js";
-import { INTRO_MS } from "./mycelium-geometry.js";
+import { INTRO_MS, STAGING_INTRO_KEY } from "./mycelium-geometry.js";
 
 const stage = document.body;
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
@@ -86,14 +86,18 @@ function rebuild() {
   delete document.documentElement.dataset.bgStyle;
   mount({ createHero, createField });
 }
-// STAGING ONLY: load-in duration comparison. The server injects
-// [data-intro-choice] only on the staging home page; each choice reloads the
-// page with its exact ?intro= target (read once, in mycelium-geometry.js).
+// STAGING ONLY: load-in duration comparison (6 / 9 / 12 s). The server injects
+// [data-intro-choice] only on the staging home page. A choice is stored under
+// the staging-only key and replays the load-in at its exact ?intro= target;
+// the duration itself is read once, in mycelium-geometry.js.
 for (const button of document.querySelectorAll("[data-intro-choice]")) {
-  button.setAttribute("aria-pressed", String(+button.dataset.introChoice * 1000 === INTRO_MS));
+  const ms = +button.dataset.introChoice * 1000;
+  button.setAttribute("aria-pressed", String(ms === INTRO_MS));
   button.addEventListener("click", () => {
-    if (+button.dataset.introChoice * 1000 === INTRO_MS) return;
-    location.assign(button.dataset.introChoice === "6" ? "/" : "/?intro=" + button.dataset.introChoice);
+    try {
+      localStorage.setItem(STAGING_INTRO_KEY, String(ms));
+    } catch {}
+    location.assign("/?intro=" + button.dataset.introChoice);
   });
 }
 for (const button of styleButtons)
