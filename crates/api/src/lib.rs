@@ -44,6 +44,7 @@ pub mod pairing_windows;
 pub mod peer;
 pub mod persistent;
 pub mod preferences;
+pub mod process_identity;
 pub mod product_projector;
 pub mod qr;
 pub mod registry;

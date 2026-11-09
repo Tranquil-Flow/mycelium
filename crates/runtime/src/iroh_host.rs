@@ -2,14 +2,30 @@
 //! Explicit local-only Router endpoint ownership. No public relays, address
 //! lookup, wildcard sockets or default N0 preset. This is the sidecar's local
 //! mode, not a production internet-discovery policy.
+//!
+//! Direct-LAN paths after the handshake (iroh 1.0.2 + noq 1.3.0, verified in the
+//! pinned sources): the endpoint config always enables QUIC multipath and n0 NAT
+//! traversal (`iroh-1.0.2/src/endpoint/quic.rs:153-162`; the builder ignores
+//! smaller values, `quic.rs:472-481,537-546`). An AUTHENTICATED peer can
+//! therefore advertise extra candidates (ADD_ADDRESS / REACH_OUT,
+//! `noq-proto-1.3.0/src/n0_nat_traversal.rs:456-506,556-582,789-821`) that this
+//! endpoint probes and then opens as paths (`iroh-1.0.2/src/socket/remote_map/
+//! remote_state.rs:385-449,515-568,924-946`) from its one bound socket, to any
+//! address, outside the allow-list. Relay, address lookup, net-report probes
+//! (empty relay map, `socket.rs:794-801`) and the portmapper (feature off) stay
+//! disabled; only bound sockets are local candidates (`socket.rs:1955-1961`).
+//! The public API has no path filter, so a direct-LAN host watches every
+//! connection and closes it (`LAN_PATH_REFUSED`) as soon as any path's remote
+//! address is outside the allow-list; see `confine`.
 pub use crate::iroh_cleanup::{HostCloseReport, close_endpoint_and_native};
-use budgets::MonoInstant;
+use budgets::{BudgetId, Entries, MonoInstant};
 use iroh::{
-    Endpoint, EndpointAddr, RelayMode,
+    Endpoint, EndpointAddr, RelayMode, TransportAddr,
     endpoint::{Connection, presets},
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Mutex,
     time::Duration,
 };
 use tokio::sync::watch;
@@ -52,6 +68,31 @@ impl LanPolicy {
     pub fn allows(&self, ip: IpAddr) -> bool {
         !never(ip) && (private_lan(ip) || self.extra.contains(&ip))
     }
+}
+/// Application close code of a direct-LAN connection that gained a path outside
+/// the allow-list (reason `lan_path_refused`).
+pub const LAN_PATH_REFUSED: u32 = 3;
+fn budget(id: BudgetId) -> Result<Duration, Error> {
+    Ok(Duration::from_millis(
+        id.span(Entries::ZERO)
+            .map_err(|_| Error::Unavailable)?
+            .millis(),
+    ))
+}
+/// A remote transport address that is not an allow-listed IP (a relay or
+/// custom address is outside by definition).
+fn outside_addr(addr: &TransportAddr, policy: &LanPolicy) -> bool {
+    match addr {
+        TransportAddr::Ip(addr) => !policy.allows(addr.ip()),
+        _ => true,
+    }
+}
+/// Any currently open path of `connection` outside the allow-list.
+fn outside(connection: &Connection, policy: &LanPolicy) -> bool {
+    connection
+        .paths()
+        .iter()
+        .any(|path| outside_addr(path.remote_addr(), policy))
 }
 fn never(ip: IpAddr) -> bool {
     ip.is_unspecified() || ip.is_multicast() || matches!(ip, IpAddr::V4(v4) if v4.is_broadcast())
@@ -116,6 +157,17 @@ pub struct LoopbackHost<'a> {
     lan: Option<LanPolicy>,
     /// Bridges `Endpoint::watch_addr` into the watch channel the address gate reads.
     address_task: Option<tokio::task::JoinHandle<()>>,
+    /// Direct LAN: one path watch per admitted connection (see `confine`).
+    path_guards: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+}
+impl LoopbackHost<'_> {
+    fn abort_path_guards(&self) {
+        if let Ok(mut guards) = self.path_guards.lock() {
+            for guard in guards.drain(..) {
+                guard.abort();
+            }
+        }
+    }
 }
 impl Drop for LoopbackHost<'_> {
     fn drop(&mut self) {
@@ -126,6 +178,7 @@ impl Drop for LoopbackHost<'_> {
         if let Some(task) = self.address_task.take() {
             task.abort();
         }
+        self.abort_path_guards();
     }
 }
 pub(crate) fn outside_runtime() -> Result<(), Error> {
@@ -271,6 +324,7 @@ impl<'a> LoopbackHost<'a> {
             mode,
             lan: lan.map(|(_, policy)| policy),
             address_task: None,
+            path_guards: Mutex::new(Vec::new()),
         };
         allowance(clock, deadline)?;
         Ok(host)
@@ -403,24 +457,35 @@ impl<'a> LoopbackHost<'a> {
     }
     /// TLS authenticates an endpoint, not membership. Pass the connection to
     /// RouterReceiver::new with the independent current allow-list binding.
+    ///
+    /// Direct LAN: one inbound handshake gets at most `SidecarLocalHandshake`
+    /// (a peer that starts a handshake and never finishes it is dropped as
+    /// `Authentication`, so callers keep accepting within their own deadline),
+    /// and the admitted connection is confined to allow-listed paths.
     pub fn accept(&self, clock: &impl Clock, deadline: MonoInstant) -> Result<Connection, Error> {
         outside_runtime()?;
         let endpoint = self.endpoint()?;
         let wait = allowance(clock, deadline)?;
+        let handshake = budget(BudgetId::SidecarLocalHandshake)?;
         let connection = self.runtime.block_on(async {
             tokio::time::timeout(wait, async {
                 let incoming = endpoint.accept().await.ok_or(Error::Unavailable)?;
+                let Some(policy) = &self.lan else {
+                    return incoming.await.map_err(|_| Error::Authentication);
+                };
                 // Direct LAN: an inbound path from outside the allow-list is
                 // refused before any handshake work, whatever key it presents.
-                if let Some(policy) = &self.lan {
-                    let allowed = matches!(incoming.remote_addr(),
-                        iroh::endpoint::IncomingAddr::Ip(addr) if policy.allows(addr.ip()));
-                    if !allowed {
-                        incoming.refuse();
-                        return Err(Error::Authentication);
-                    }
+                let allowed = matches!(incoming.remote_addr(),
+                    iroh::endpoint::IncomingAddr::Ip(addr) if policy.allows(addr.ip()));
+                if !allowed {
+                    incoming.refuse();
+                    return Err(Error::Authentication);
                 }
-                incoming.await.map_err(|_| Error::Authentication)
+                // A stalled handshake must not hold the caller's window.
+                tokio::time::timeout(handshake, incoming)
+                    .await
+                    .map_err(|_| Error::Authentication)?
+                    .map_err(|_| Error::Authentication)
             })
             .await
             .map_err(|_| Error::Expired)?
@@ -429,7 +494,56 @@ impl<'a> LoopbackHost<'a> {
             connection.close(0u32.into(), b"deadline");
             return Err(error);
         }
+        self.confine(&connection)?;
         Ok(connection)
+    }
+    /// Direct LAN: refuse a connection that already runs over a path outside
+    /// the allow-list, then watch it for its lifetime and close it
+    /// (`LAN_PATH_REFUSED`) once holepunching/multipath has opened one. A no-op
+    /// in every other mode. Each tick checks the open paths AND the endpoint's
+    /// address book for the peer, which keeps every address a path was ever
+    /// opened to (`Source::Connection`), so a short-lived extra path that iroh
+    /// already closed as redundant is still caught. The public API offers no
+    /// pre-send filter: probes to a peer-advertised candidate can leave before
+    /// the first tick (see the module note). The watch holds only a weak handle
+    /// and ends with the connection; close/drop of the host aborts any left.
+    fn confine(&self, connection: &Connection) -> Result<(), Error> {
+        let Some(policy) = self.lan.clone() else {
+            return Ok(());
+        };
+        if outside(connection, &policy) {
+            connection.close(LAN_PATH_REFUSED.into(), b"lan_path_refused");
+            return Err(Error::Authentication);
+        }
+        let tick = budget(BudgetId::SidecarReceivePollWait)?;
+        let weak = connection.weak_handle();
+        let (endpoint, remote) = (self.endpoint()?.clone(), connection.remote_id());
+        let guard = self.runtime.spawn(async move {
+            let closed = weak.closed();
+            tokio::pin!(closed);
+            loop {
+                tokio::select! {
+                    _ = &mut closed => return,
+                    () = tokio::time::sleep(tick) => {}
+                }
+                let known = endpoint.remote_info(remote).await;
+                let Some(connection) = weak.upgrade() else {
+                    return;
+                };
+                let seen = known.is_some_and(|info| {
+                    info.addrs()
+                        .any(|known| outside_addr(known.addr(), &policy))
+                });
+                if seen || outside(&connection, &policy) {
+                    connection.close(LAN_PATH_REFUSED.into(), b"lan_path_refused");
+                    return;
+                }
+            }
+        });
+        let mut guards = self.path_guards.lock().map_err(|_| Error::Unavailable)?;
+        guards.retain(|g| !g.is_finished());
+        guards.push(guard);
+        Ok(())
     }
     pub fn connect(
         &self,
@@ -462,6 +576,7 @@ impl<'a> LoopbackHost<'a> {
             connection.close(0u32.into(), b"deadline");
             return Err(error);
         }
+        self.confine(&connection)?;
         Ok(connection)
     }
     /// Closes admission before waiting. A failed/expired close retains endpoint
@@ -474,6 +589,7 @@ impl<'a> LoopbackHost<'a> {
         if let Some(task) = self.address_task.take() {
             task.abort();
         }
+        self.abort_path_guards();
         outside_runtime()?;
         let wait = allowance(clock, deadline);
         if let Some(endpoint) = &self.endpoint {

@@ -144,7 +144,24 @@ impl Worker {
         }
     }
     fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {
-        let link = match Link::new(client, duration(BudgetId::MemberChosenWall)?) {
+        Self::from_child_within(child, client, cancel, duration(BudgetId::MemberChosenWall))
+    }
+    /// `wall` is the link's frame wait; it is a parameter so the failure branch
+    /// for an unavailable budget is reachable from a test. Every failure kills
+    /// and reaps the exact child before returning.
+    fn from_child_within(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        wall: Result<Duration>,
+    ) -> Result<Self> {
+        let linked = wall.and_then(|wall| {
+            Link::new(client, wall).map_err(|error| {
+                eprintln!("native_socket_failed: {error}");
+                Error("native_socket_failed")
+            })
+        });
+        let link = match linked {
             Ok(link) => link,
             Err(error) => {
                 let mut child = child;
@@ -154,8 +171,7 @@ impl Worker {
                 child
                     .wait()
                     .map_err(|_| Error("native_worker_reap_failed"))?;
-                eprintln!("native_socket_failed: {error}");
-                return Err(Error("native_socket_failed"));
+                return Err(error);
             }
         };
         Ok(Self {

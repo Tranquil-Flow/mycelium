@@ -138,9 +138,9 @@ fn run() -> Result<()> {
     let mut proof_digest: Option<String> = None;
     let mut left = false;
     let input = control::Input::start(owner_control.is_some())?;
-    let status: remote::Status = std::sync::Arc::new(std::sync::Mutex::new(
+    let status: remote::Status = remote::Live::new(
         json!({"joined":false,"left":false,"worker_pid":null,"route_ready":false}),
-    ));
+    );
     let control_channel = match owner_control {
         Some(owner) => {
             let channel = remote::start(
@@ -597,10 +597,13 @@ fn run() -> Result<()> {
             Ok(value) => json!({"ok":true,"result":value}),
             Err(code) => json!({"ok":false,"code":code}),
         };
+        // The worker child is still owned (unreaped) here: bind its pid now.
+        let worker_pid = native.as_ref().and_then(NativeShard::worker_pid);
+        status.record_worker(worker_pid);
         if let Ok(mut s) = status.lock() {
             s["joined"] = json!(session.is_some());
             s["left"] = json!(left);
-            s["worker_pid"] = json!(native.as_ref().and_then(NativeShard::worker_pid));
+            s["worker_pid"] = json!(worker_pid);
             s["native_owned"] = json!(native.is_some());
             s["shard_owned"] = json!(shard.is_some());
             s["last_operation"] =

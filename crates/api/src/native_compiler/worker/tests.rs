@@ -241,3 +241,32 @@ fn step_cancel_flag_does_not_cancel_later_close_exchange() {
     assert_eq!(evidence["worker_reaped"], true);
     std::fs::remove_dir_all(&root).unwrap();
 }
+/// worker.rs:147: when the link's frame-wait budget is unavailable, the
+/// just-spawned child must still be killed and reaped before the error returns.
+/// A child left behind would contradict the caller's "an error proves no child
+/// remains" contract.
+#[test]
+fn unavailable_link_budget_still_kills_and_reaps_the_child() {
+    let child = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = rustix::process::Pid::from_child(&child);
+    let (client, _server) = UnixStream::pair().unwrap();
+    let refused = Worker::from_child_within(
+        child,
+        client,
+        Arc::new(AtomicBool::new(false)),
+        Err(Error("budget_unavailable")),
+    );
+    assert!(refused.is_err());
+    // Already reaped by the worker: no status left to collect (ECHILD). A
+    // leaked child would be collected here instead.
+    let leftover = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
+    assert_eq!(
+        leftover.map(|s| s.map(|(p, _)| p)),
+        Err(rustix::io::Errno::CHILD),
+        "the child outlived a failed worker start"
+    );
+}
