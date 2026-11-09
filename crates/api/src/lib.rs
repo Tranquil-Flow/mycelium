@@ -23,6 +23,7 @@ pub mod http;
 pub mod installation_descriptor;
 pub mod join_client;
 pub mod join_link;
+pub mod joined_owner;
 pub mod joined_shard;
 pub mod leave;
 pub mod local_agent;
