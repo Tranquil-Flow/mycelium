@@ -708,9 +708,11 @@ pub(super) fn consent_file(dir: &std::path::Path) -> std::path::PathBuf {
 /// REVIEW-laneB16 F5 (v0.1.4 order, `app.py:1742-1757`): the member operator's
 /// `--consent-file` limits are checked BEFORE the member joins anything. A
 /// decision this Mac cannot honour (here: a memory cap above 3/4 of the
-/// stated device memory; and a policy outside the offered choices) ends the
-/// member at launch with the closed code, before it reads a command, writes
-/// an identity or pairs; it is never first refused after a seed join.
+/// stated device memory; the same against this Mac's MEASURED memory when the
+/// file states none (REVIEW-laneB16f FU2, v0.1.4 `app.py:1754` measures it);
+/// and a policy outside the offered choices) ends the member at launch with
+/// the closed code, before it reads a command, writes an identity or pairs;
+/// it is never first refused after a seed join.
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
 fn product_member_refuses_an_unusable_consent_file_before_joining() {
@@ -721,28 +723,51 @@ fn product_member_refuses_an_unusable_consent_file_before_joining() {
     let caps = json!({"storage_bytes":4_000_000_000u64,"max_memory_bytes":15_000_000_000u64,"max_wall_seconds":600,"max_commands":1000});
     let mut bad_policy = policy.clone();
     bad_policy["power"] = json!("always");
-    for (name, policy, caps, code) in [
+    // This Mac's physical memory: a cap of all of it is above the 3/4 bound.
+    let measured: u64 = String::from_utf8(
+        Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .parse()
+    .unwrap();
+    let mut whole_mac = caps.clone();
+    whole_mac["max_memory_bytes"] = json!(measured);
+    let stated = Some(16_000_000_000u64);
+    for (name, policy, caps, code, device) in [
         (
             "memory",
             policy.clone(),
             caps,
             "standing_consent_memory_exceeds_device",
+            stated,
+        ),
+        (
+            "memory-measured",
+            policy.clone(),
+            whole_mac,
+            "standing_consent_memory_exceeds_device",
+            None,
         ),
         (
             "policy",
             bad_policy,
             json!({"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}),
             "consent_required",
+            stated,
         ),
     ] {
         let file = root.join(format!("{name}.json"));
-        fs::write(
-            &file,
-            json!({"device_memory_bytes":16_000_000_000u64,"policy":policy,
-                "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":caps}})
-            .to_string(),
-        )
-        .unwrap();
+        let mut decision = json!({"policy":policy,
+            "consent":{"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":caps}});
+        if let Some(device) = device {
+            decision["device_memory_bytes"] = json!(device);
+        }
+        fs::write(&file, decision.to_string()).unwrap();
         let member_root = root.join(format!("member-{name}"));
         // Exact owned child, killed and reaped on any failure path.
         struct Reap(Child);
