@@ -465,6 +465,9 @@ impl LocalAgent {
         node_plan: &Value,
         run_id: &str,
     ) -> Result<(), Failure> {
+        // A fetch can end after the step's own collect: read its result before deciding to start
+        // one (`_drive_slice` reads `_slice_result` the thread already wrote).
+        self.collect_slice();
         let root = host.slice_root(run_id)?;
         if self
             .slice_job

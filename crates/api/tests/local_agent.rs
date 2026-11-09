@@ -900,6 +900,149 @@ fn stop_cancels_a_running_slice_fetch_between_segments() {
     fs::remove_dir_all(&root).unwrap_or_default();
 }
 
+fn secs(n: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(n)
+}
+/// Signals once its fetch thread has fully exited (thread-local destructors run after the thread's
+/// result is stored, so the agent's `JoinHandle::is_finished` is already true).
+struct OnExit(std::sync::mpsc::Sender<()>);
+impl Drop for OnExit {
+    fn drop(&mut self) {
+        // The receiver is gone only when the test already failed.
+        self.0.send(()).unwrap_or_default();
+    }
+}
+thread_local! {
+    static ON_EXIT: std::cell::RefCell<Option<OnExit>> = const { std::cell::RefCell::new(None) };
+}
+/// A source that fails its first read once the test releases it.
+struct Gone {
+    release: std::sync::mpsc::Receiver<()>,
+    exited: std::sync::mpsc::Sender<()>,
+}
+impl SliceTransport for Gone {
+    fn read_range(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: u64,
+        _: u64,
+    ) -> Result<Vec<u8>, SliceError> {
+        ON_EXIT.with(|e| *e.borrow_mut() = Some(OnExit(self.exited.clone())));
+        // A failing test drops the sender: the read then fails at once.
+        self.release.recv_timeout(secs(30)).unwrap_or_default();
+        Err(SliceError("slice_test_source_gone".into()))
+    }
+}
+
+/// Proves: a fetch that ends while the agent is mid-step is collected, never started again: its
+/// refusal is reported on that same tick and the source is asked for exactly once
+/// (`_drive_slice` reads the thread's result before deciding to start one).
+#[test]
+fn a_fetch_that_ends_mid_step_is_reported_not_started_again() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let root = scratch("ends-mid-step");
+    let mut host = WorkHost::new(root.clone());
+    let (release, gone_release) = std::sync::mpsc::channel();
+    let (exited_tx, exited) = std::sync::mpsc::channel();
+    struct MidStep<'a> {
+        host: &'a mut WorkHost,
+        gone: Option<Gone>,
+        transports: usize,
+        armed: bool,
+        release: std::sync::mpsc::Sender<()>,
+        exited: std::sync::mpsc::Receiver<()>,
+    }
+    impl AgentHost for MidStep<'_> {
+        fn announcement(&mut self) -> Result<Option<Value>, api::local_agent::ExchangeUnavailable> {
+            self.host.announcement()
+        }
+        fn member(&mut self) -> Option<String> {
+            self.host.member()
+        }
+        fn run_active(&mut self) -> bool {
+            self.host.run_active()
+        }
+        fn resource_check(&mut self) -> Option<String> {
+            self.host.resource_check()
+        }
+        fn prepared_model(&mut self) -> Result<(String, String), Failure> {
+            self.host.prepared_model()
+        }
+        fn describe(&mut self, r: &str, d: &str, s: Option<&str>) -> Result<Value, Failure> {
+            self.host.describe(r, d, s)
+        }
+        fn native_control(&mut self) -> Result<Value, Failure> {
+            self.host.native_control()
+        }
+        fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
+            self.host.pending_offer()
+        }
+        /// Called after the step collected nothing and before the slice is driven: the running fetch
+        /// ends exactly here.
+        fn member_caps(&mut self) -> Result<Value, Failure> {
+            if std::mem::take(&mut self.armed) {
+                self.release.send(()).expect("release the read");
+                self.exited
+                    .recv_timeout(secs(30))
+                    .expect("the fetch thread exited");
+            }
+            self.host.member_caps()
+        }
+        fn storage_cap(&mut self) -> Result<u64, Failure> {
+            self.host.storage_cap()
+        }
+        fn slice_root(&mut self, r: &str) -> Result<PathBuf, Failure> {
+            self.host.slice_root(r)
+        }
+        fn slice_transport(&mut self, _: &Value) -> Option<Box<dyn SliceTransport>> {
+            self.transports += 1;
+            self.gone
+                .take()
+                .map(|g| Box::new(g) as Box<dyn SliceTransport>)
+        }
+        fn sink(&mut self, r: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
+            self.host.sink(r)
+        }
+        fn clock(&mut self) -> f64 {
+            self.host.clock()
+        }
+    }
+    let mut collect = work.clone();
+    collect["phase"] = json!("collect");
+    host.announcement = Some(collect);
+    let mut agent = LocalAgent::new();
+    let mut mid = MidStep {
+        host: &mut host,
+        gone: Some(Gone {
+            release: gone_release,
+            exited: exited_tx,
+        }),
+        transports: 0,
+        armed: false,
+        release,
+        exited,
+    };
+    assert_eq!(agent.tick(&mut mid)["state"], "reported");
+    mid.host.announcement = Some(work);
+    let status = agent.tick(&mut mid);
+    assert_eq!(status["state"], "downloading_slice", "{status}");
+    mid.armed = true;
+    let status = agent.tick(&mut mid);
+    let transports = mid.transports;
+    agent.join_slice();
+    assert_eq!(
+        (status["state"].clone(), status["detail"].clone()),
+        (json!("error"), json!("slice_test_source_gone")),
+        "{status}"
+    );
+    assert_eq!(transports, 1, "the ended fetch was started again");
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
 /// A transport that serves a wrong byte for the first read of each segment and counts rejects.
 struct Flaky {
     inner: SnapshotRangeTransport,
