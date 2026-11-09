@@ -162,6 +162,14 @@ export function placeKnots({ strands, junctions, marginKnots, layout, w, top, he
   return knots;
 }
 
+/** r11.1 cottony core: every strand that reaches a margin colony vertex other
+ * than the mat's own tufts (the cords, the long hyphae and runners leaving the
+ * mat, their laterals, field threads crossing it) fades out inside the mat,
+ * from full strength FADE_R1 px from the vertex to zero at FADE_R0, so nothing
+ * converges on a bright point. Drawing only: graph, routes and RNG unchanged. */
+const FADE_R0 = 11,
+  FADE_R1 = 32;
+
 /** Generator: lays the field into the shared graph; returns the field record. */
 export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, h, top: pageTop = 0, budget = () => false, seedOk = () => true }) {
   const R = rng("r10-sparse-field"),
@@ -315,6 +323,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     const end = branch.points.at(-1),
       near = (grid.get(gk(end.x, end.y)) || []).find((c) => c.p !== branch && c.p !== parent);
     if (near) fusions.push({ point: end, parent: branch, birth: branch.birth + branch.points.length * 0.5 });
+    budget() && (yield "field-live");
   }
   if (!fusions.length && live.length) fusions.push({ point: live[0].points.at(-1), parent: live[0], birth: live[0].birth });
   yield "field-live";
@@ -331,6 +340,10 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     pts[pts.length - 1] = b;
     const p = add(pts, { width, alpha: 0.95, margin: true });
     p.introStart = 0;
+    // r11.1 cottony core: the cord dissolves into each colony mat it joins (no
+    // bright point where two cords converge on the colony vertex). Drawing
+    // only; the graph and the pulse route are unchanged.
+    p.endFade = [a, b].filter((v) => marginKnots.includes(v));
     return p;
   };
   if (layout.enabled)
@@ -419,6 +432,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
             walk = persistWalk(o, hh, 140 + R() * 220, R, { ...sparseWalk, pull: undefined });
           const p = add([...inner, ...walk], { width: 0.45, alpha: 0.75, margin: true });
           p.marginRoot = centre;
+          p.endFade = [centre]; // r11.1: emerges from the felt, never from the vertex
           mainRoots.push(p);
         }
         // r11: runners leave the colony for the content column (ref-8 sparse
@@ -429,6 +443,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
             { inner, o } = leave(hh);
           const p = add([...inner, ...persistWalk(o, hh, 380 + R2() * 420, R2, { ...sparseWalk, k: 0.016, pull: undefined })], { width: 0.5, alpha: 0.8 });
           p.runner = true;
+          p.endFade = [centre];
           mainRoots.push(p);
         }
         budget() && (yield "margin");
@@ -501,6 +516,7 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
       const child = add(points, { width: parent.width * (order === 1 ? 0.6 : 0.7), alpha: parent.alpha * (order === 1 ? 0.62 : 0.8), birth: parent.birth ? parent.birth + at * 0.5 : 0, hair: true, order, margin: parent.margin, phase: parent.phase, period: parent.period });
       child.introParent = parent;
       child.introAt = arc[at];
+      if (parent.endFade?.length) child.endFade = parent.endFade;
       if (order <= 2 && parent.static) junctions.push({ p: parent, i: at });
       child.marginRoot = parent.marginRoot || parent.points[0];
       child.marginDistance = (parent.marginDistance || 0) + arc[at];
@@ -533,6 +549,23 @@ export function* extendFieldGraph({ vs, ss, paths, vertex, edge, nodes = [], w, 
     }
     power.push(re * re + im * im);
   }
+  // Strands crossing a colony core (not its own felt) dissolve there too.
+  if (marginKnots.length)
+    for (const p of strands) {
+      if (p.tuft) continue;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const q of p.points) {
+        if (q.x < x0) x0 = q.x;
+        if (q.x > x1) x1 = q.x;
+        if (q.y < y0) y0 = q.y;
+        if (q.y > y1) y1 = q.y;
+      }
+      for (const k of marginKnots) {
+        if (k.x < x0 - FADE_R1 || k.x > x1 + FADE_R1 || k.y < y0 - FADE_R1 || k.y > y1 + FADE_R1 || p.endFade?.includes(k)) continue;
+        if (p.points.some((q) => Math.hypot(q.x - k.x, q.y - k.y) < FADE_R1)) (p.endFade ||= []).push(k);
+      }
+      budget() && (yield "core-fade");
+    }
   yield "knots";
   const hyphalKnots = placeKnots({ strands, junctions, marginKnots, layout, w, top, height });
   const rootAudit = {
@@ -656,6 +689,7 @@ export function createField({ stage, state, reduce }) {
     graph = null,
     disposed = false,
     raf = 0,
+    attached = false,
     frozen = null,
     clock = scene?.clock || sceneClock(),
     lastScroll = NaN,
@@ -698,6 +732,30 @@ export function createField({ stage, state, reduce }) {
     column = apex ? (light ? 0.4 : 0.7) : 0.32;
   const columnWeight = (px) => column + (1 - column) * marginWeight(px);
   const CH = 10;
+  const endFadeAt = (p, q) => {
+    let f = 1;
+    for (const e of p.endFade) f *= smooth((Math.hypot(q.x - e.x, q.y - e.y) - FADE_R0) / (FADE_R1 - FADE_R0));
+    return f;
+  };
+  /** Linear gradient along points [k0, k1] of a fading strand: each point's
+   * fade at its projection on the chunk's start->end axis (monotone stops). */
+  function fadeGradient(ctx, p, k0, k1, colour) {
+    const pts = p.points,
+      a = pts[k0],
+      b = pts[Math.min(pts.length - 1, k1)],
+      dx = b.x - a.x,
+      dy = b.y - a.y,
+      L2 = dx * dx + dy * dy || 1,
+      g = ctx.createLinearGradient(a.x, a.y, b.x, b.y),
+      c = typeof colour === "string" ? colour : glow;
+    let last = 0;
+    for (let k = k0; k <= Math.min(pts.length - 1, k1); k++) {
+      const t = Math.max(last, Math.min(1, ((pts[k].x - a.x) * dx + (pts[k].y - a.y) * dy) / L2));
+      g.addColorStop(t, rgba(c, p.fades[k]));
+      last = t;
+    }
+    return g;
+  }
   const hazeIn = rgba(glow, 0.16),
     hazeMid = rgba(glow, 0.07),
     hazeOut = rgba(glow, 0);
@@ -730,12 +788,22 @@ export function createField({ stage, state, reduce }) {
     }
     const fz = detail ? p.fuzz : null;
     if (fz) while (f < fz.length && fz[f] < from) f += 7;
+    const fades = p.fades; // r11.1: per-point fade into a colony core (fading strands only)
     for (let c0 = Math.floor(from / CH) * CH; c0 < end; c0 += CH) {
       const j = Math.min(c0 + CH, Math.ceil(end)),
         i0 = Math.max(c0, from),
         mid = pts[Math.min(n, c0 + CH / 2)],
         w = p.margin ? marginWeight(mid.x) : columnWeight(mid.x);
-      let skip = w <= 0.01;
+      // A chunk reaching a colony core keeps its single path (no extra joints,
+      // so no beads) and fades along it through a linear-gradient stroke.
+      let fmin = 1,
+        fmax = 0;
+      if (fades)
+        for (let k = Math.floor(i0); k <= j; k++) {
+          if (fades[k] < fmin) fmin = fades[k];
+          if (fades[k] > fmax) fmax = fades[k];
+        }
+      let skip = w <= 0.01 || (fades && fmax <= 0.004);
       if (!skip && yr) {
         // Band culling: chunks wholly outside this band (plus hair overhang) are skipped.
         let y0 = Infinity,
@@ -755,11 +823,13 @@ export function createField({ stage, state, reduce }) {
         ga = alpha * w * lightMul * (distal ? p.taper : 1);
       ctx.globalAlpha = ga;
       ctx.lineWidth = p.width * (distal ? 0.7 : 1);
-      ctx.beginPath();
       const k0 = Math.floor(i0),
         u = i0 - k0,
         a0 = pts[k0],
         b0 = pts[Math.min(n, k0 + 1)];
+      const plain = ctx.strokeStyle;
+      if (fades && fmin < 1) ctx.strokeStyle = fadeGradient(ctx, p, k0, j, plain);
+      ctx.beginPath();
       ctx.moveTo(a0.x + (b0.x - a0.x) * u, a0.y + (b0.y - a0.y) * u);
       for (let k = k0 + 1; k <= j; k++) {
         const fr = Math.min(1, end - k + 1);
@@ -777,9 +847,10 @@ export function createField({ stage, state, reduce }) {
         }
         ctx.stroke();
       }
+      if (fades && fmin < 1) ctx.strokeStyle = plain;
     }
     if (detail && p.knots)
-      for (const k of p.knots) if (k.i >= from && k.i < end && !k.underText && (!yr || (k.y > yr[0] - 10 && k.y < yr[1] + 10))) drawKnot(ctx, k, alpha * (p.margin ? marginWeight(k.x) : columnWeight(k.x)) * lightMul);
+      for (const k of p.knots) if (k.i >= from && k.i < end && !k.underText && (!yr || (k.y > yr[0] - 10 && k.y < yr[1] + 10))) drawKnot(ctx, k, alpha * (p.margin ? marginWeight(k.x) : columnWeight(k.x)) * lightMul * (p.endFade ? endFadeAt(p, k) : 1));
   }
   const knotCore = rgba(light ? glow : core, 1),
     knotMid = rgba(glow, 0.55),
@@ -1118,10 +1189,17 @@ export function createField({ stage, state, reduce }) {
     introEnded = performance.now();
     c.dataset.intro = "done";
   }
-  function prepare() {
-    let k = 0;
+  /** Per-strand arcs, boxes, fades and intro offsets, in bounded slices
+   * (`yieldTask` ends the current task; parents precede children). */
+  async function prepare(yieldTask) {
+    let k = 0,
+      t = performance.now();
     span = { A: 1, H: 1 };
     for (const p of field.strands) {
+      if (performance.now() - t > 8) {
+        if (await yieldTask()) return;
+        t = performance.now();
+      }
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       const arc = new Float32Array(p.points.length);
       for (let i = 0; i < p.points.length; i++) {
@@ -1134,6 +1212,9 @@ export function createField({ stage, state, reduce }) {
       }
       p.box = [x0 - 14, y0 - 14, x1 + 14, y1 + 14]; // fuzz and knots overhang the polyline
       p.arc = arc;
+      if (p.endFade?.length) {
+        if (!p.fades) p.fades = Float32Array.from(p.points, (q) => endFadeAt(p, q));
+      } else p.endFade = null;
       const par = p.introParent;
       p.heroFamily = !!(p.heroFamily || par?.heroFamily);
       p.s0 = par ? (par.s0 ?? 0) + (p.introAt ?? 0) : p.introStart ?? 0;
@@ -1198,12 +1279,30 @@ export function createField({ stage, state, reduce }) {
     colonySprites.set(knot, s);
     return s;
   }
-  function attach() {
+  /** A fresh task: attach() runs in short stages (r11.1: one ~55-90 ms task at 1920 before). */
+  const nextTask = () => new Promise((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => resolve();
+    ch.port2.postMessage(0);
+  });
+  async function attach() {
+    // Each stage (and each prepare slice) is its own task; durations are recorded.
+    const stages = (metrics.attachStages = []);
+    let t0 = performance.now();
+    const stage = async () => {
+      stages.push(+(performance.now() - t0).toFixed(1));
+      await nextTask();
+      t0 = performance.now();
+      return disposed;
+    };
     field = scene ? scene.field : field;
     graph = scene ? scene.graph : graph;
-    prepare();
+    await prepare(stage);
+    if (disposed) return;
     liveStrands = field.strands.filter((p) => !p.static);
+    if (await stage()) return;
     const knotsHidden = markKnotsUnderText();
+    if (await stage()) return;
     if (intro && !(intro.start !== null && introTime() >= INTRO_MS / 1000)) {
       resetTile();
       intro.list = statics();
@@ -1214,6 +1313,8 @@ export function createField({ stage, state, reduce }) {
       c.dataset.intro = "skipped";
       rasterStatic();
     }
+    if (await stage()) return;
+    attached = true;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
       const legs = r.paths.map((p) => {
@@ -1255,6 +1356,54 @@ export function createField({ stage, state, reduce }) {
       morphology = null;
     Object.defineProperty(window.__understoryAudit, "straightness", { enumerable: true, get: () => (straightness ??= measurePaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points })))) });
     Object.defineProperty(window.__understoryAudit, "morphology", { enumerable: true, get: () => (morphology ??= auditPaths(field.strands.filter((p) => !p.hair).map((p) => ({ kind: "understory", points: p.points }))).understory) });
+    /** r11.1: brightness where the margin cords meet a margin colony, read from
+     * the displayed band pixels, against the mat's own peak (the colony's tufts
+     * rastered alone with the same renderer). Linear luminance x alpha, mean of
+     * 3x3 CSS px windows; junction = windows centred within 8 px of the vertex
+     * where the cords end. */
+    window.__marginJunctionProbe = () => {
+      const lin = (v) => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      const lum = (data, k) => (0.2126 * lin(data[k]) + 0.7152 * lin(data[k + 1]) + 0.0722 * lin(data[k + 2])) * (data[k + 3] / 255);
+      const peak = (img, W, H, cx, cy, rad) => {
+        const lm = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) lm[i] = lum(img, i * 4);
+        const h = Math.max(1, Math.round(1.5 * d));
+        let best = 0;
+        for (let y = h; y < H - h; y++)
+          for (let x = h; x < W - h; x++) {
+            if (rad !== undefined && Math.hypot(x - cx, y - cy) > rad * d) continue;
+            let s = 0;
+            for (let yy = -h; yy < h; yy++) for (let xx = -h; xx < h; xx++) s += lm[(y + yy) * W + x + xx];
+            best = Math.max(best, s / (4 * h * h));
+          }
+        return best;
+      };
+      const ends = new Set(field.marginRoutes.flatMap((r) => r.paths.flatMap((p) => [p.points[0], p.points.at(-1)])));
+      return field.marginKnots.filter((k) => ends.has(k)).map((k) => {
+        const half = 30,
+          by = k.y - field.top,
+          over = bands.filter((q) => by + half > q.y0 && by - half < q.y0 + q.h);
+        if (!over.length || over.some((b) => !b.ready || b.job || !b.cv.width)) return { x: k.x, y: k.y, resident: false };
+        const W = Math.round(2 * half * d),
+          s = document.createElement("canvas");
+        s.width = s.height = W;
+        const sx = s.getContext("2d");
+        for (const b of over) sx.drawImage(b.cv, -Math.round((k.x - half - field.left) * d), Math.round((b.y0 - (by - half)) * d));
+        const shown = sx.getImageData(0, 0, W, W).data;
+        s.width = s.height = 0;
+        const m = document.createElement("canvas");
+        m.width = m.height = W;
+        const mx = m.getContext("2d");
+        mx.setTransform(d, 0, 0, d, -(k.x - half) * d, -(k.y - half) * d);
+        mx.strokeStyle = glow;
+        mx.globalCompositeOperation = light ? "source-over" : "lighter";
+        for (const p of field.strands) if (p.static && p.tuft && p.marginRoot === k) drawRange(mx, p, 0, p.points.length - 1, p.alpha * fieldAlpha, true);
+        const mat = mx.getImageData(0, 0, W, W).data;
+        m.width = m.height = 0;
+        const c0 = half * d;
+        return { x: k.x, y: k.y, resident: true, junction: peak(shown, W, W, c0, c0, 8), shownPeak: peak(shown, W, W), matPeak: peak(mat, W, W), matAtJunction: peak(mat, W, W, c0, c0, 8) };
+      });
+    };
     window.__marginPulseProbe = (t) => {
       const trips = marginTrips(t),
         base = (scene ? scene.hero.top : 0) + Math.max(0, Math.floor((scrollY - (scene ? scene.hero.top : 0) - field.top) / field.height)) * field.height;
@@ -1304,6 +1453,7 @@ export function createField({ stage, state, reduce }) {
     paint(frozen ?? clock.elapsed, true);
     c.dataset.ready = "1";
     schedule();
+    stages.push(+(performance.now() - t0).toFixed(1));
   }
   function marginTrips(t) {
     const viewTop = scrollY,
@@ -1331,7 +1481,7 @@ export function createField({ stage, state, reduce }) {
   const envelope = (dt) => (dt < 1.4 ? Math.sin(((dt / 1.4) * Math.PI) / 2) ** 2 : Math.cos((((dt - 1.4) / 4.2) * Math.PI) / 2) ** 2) * 0.7;
 
   function paint(T, force = false) {
-    if (disposed || !field) return;
+    if (disposed || !attached) return;
     const begin = performance.now(),
       reduced = reduce.matches,
       t = reduced ? 32 : T,
@@ -1436,7 +1586,7 @@ export function createField({ stage, state, reduce }) {
             const dt = trip.age - item.arrival;
             if (dt < 0 || dt > 5.6) continue;
             const s = item.s,
-              mw = marginWeight((s.a.x + s.b.x) / 2),
+              mw = marginWeight((s.a.x + s.b.x) / 2) * (trip.leg.p.endFade ? endFadeAt(trip.leg.p, { x: (s.a.x + s.b.x) / 2, y: (s.a.y + s.b.y) / 2 }) : 1),
               env = envelope(dt);
             lx.globalAlpha = env * gain * mw * 0.3;
             lx.lineWidth = 4;
@@ -1452,7 +1602,7 @@ export function createField({ stage, state, reduce }) {
           for (const kn of trip.leg.p.knots || []) {
             const dt = trip.age - (trip.leg.p.arc?.[kn.i] ?? 0) / 80;
             if (dt < 0 || dt > 5.6) continue;
-            drawKnot(lx, kn, envelope(dt) * gain * marginWeight(kn.x), 1.4);
+            drawKnot(lx, kn, envelope(dt) * gain * marginWeight(kn.x) * (trip.leg.p.endFade ? endFadeAt(trip.leg.p, kn) : 1), 1.4);
           }
           add(trip.leg.p.box[0] - 140, trip.leg.p.box[1] + shift - 140, trip.leg.p.box[2] + 140, trip.leg.p.box[3] + shift + 140);
           const node = trip.leg.p.points.at(-1),
@@ -1546,12 +1696,12 @@ export function createField({ stage, state, reduce }) {
     schedule();
   }
   function schedule() {
-    const moving = !disposed && !!field && !reduce.matches && !document.hidden && frozen === null;
+    const moving = !disposed && attached && !reduce.matches && !document.hidden && frozen === null;
     metrics.paused = !moving;
     const pm = window.__pulseMetrics;
     if (pm) {
       pm.paused = !moving;
-      pm.reason = reduce.matches ? "reduced-motion" : document.hidden ? "hidden" : frozen !== null ? "frozen" : !field ? "building" : "running";
+      pm.reason = reduce.matches ? "reduced-motion" : document.hidden ? "hidden" : frozen !== null ? "frozen" : !attached ? "building" : "running";
     }
     const box = document.querySelector(".mycelium-breath");
     if (box) box.classList.toggle("paused", !moving);
@@ -1596,7 +1746,7 @@ export function createField({ stage, state, reduce }) {
   let buildRaf = 0;
   function buildTick(now) {
     buildRaf = 0;
-    if (disposed || field) return;
+    if (disposed || attached) return;
     firstFrame(now);
     if (scene) {
       const oy = scene.hero.top - scrollY;
@@ -1617,11 +1767,11 @@ export function createField({ stage, state, reduce }) {
       clock.pause();
       endIntro(); // hidden tab or reduced motion: the final state immediately
     }
-    if (field) paint(frozen ?? clock.elapsed, true);
+    if (attached) paint(frozen ?? clock.elapsed, true);
     schedule();
   };
   const scrolled = () => {
-    if (!field) return;
+    if (!attached) return;
     if (frozen !== null || reduce.matches) paint(frozen ?? clock.elapsed);
     else schedule();
   };
@@ -1629,8 +1779,7 @@ export function createField({ stage, state, reduce }) {
     buildRaf = requestAnimationFrame(buildTick);
     scene.onReady(() => {
       if (disposed) return;
-      cancelAnimationFrame(buildRaf);
-      attach();
+      attach(); // the build presenter keeps running until attached
     });
   } else {
     // Swarms app pages: a standalone field graph, also built in slices.
@@ -1663,13 +1812,12 @@ export function createField({ stage, state, reduce }) {
       if (!r.done) return ch.port2.postMessage(0);
       field = r.value;
       graph = { vs, ss };
-      cancelAnimationFrame(buildRaf);
       attach();
     };
     ch.port2.postMessage(0);
   }
   const layoutObserver = new MutationObserver(() => {
-    if (!field) return;
+    if (!attached) return;
     const previous = field.layout;
     field.layout = contentBounds(previous.offset);
     if (window.__understoryAudit) window.__understoryAudit.protectedRects = field.layout.rects;

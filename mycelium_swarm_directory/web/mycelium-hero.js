@@ -392,7 +392,7 @@ function* buildGeometry(L, budget, out = {}) {
       lay(persistWalk(at, hh, len, fuzzR, { k: 0.03, run: 14, jit: 0.06, step: 2 }), {
         kind: "hair", source: c.i, t0: (at.birth || c.start) + 1 + fuzzR() * 4, v: c.vel * 0.7, w0: 0.2 + fuzzR() * 0.06, w1: 0.15, a0: 0.27 * (1 - 0.45 * u), a1: 0.11, tone: fuzzR() < 0.12 ? 1 : 0, cord: -1,
       });
-      if (k % 60 === 0 && budget()) yield "cotton";
+      if (budget()) yield "cotton"; // r11.1: checked every hair (k % 60 let one slice run 30-50 ms)
     }
   }
   // ---- D3/D5 rhizomorph cords: two halves grown from both colonies fuse mid-way ----
@@ -455,6 +455,7 @@ function* buildGeometry(L, budget, out = {}) {
       nx.push(-Math.sin(h));
       ny.push(Math.cos(h));
     }
+    let laidFibres = 0;
     for (let f = 0; f < F; f++) {
       // Staggered start/end: fibres join from the base over time (accretion).
       // Fibres emerge from the mat, not from one point at the node.
@@ -502,6 +503,7 @@ function* buildGeometry(L, budget, out = {}) {
         kind: "cord-fibre", cord: -1, group: id, s0, t0: o.t0 + s0 / o.v + delay, v: o.v, w0: fw * 1.15, w1: fw * 0.65, a0: CORD_A + R() * 0.07, a1: 0.06,
         tone: f % 9 === 0 ? 1 : 0, source: from.source, unit: o.unit,
       });
+      if (P) laidFibres++;
       if (P && R() < 0.7) fringe(P, (1 / 15) * o.fringe, { len: 10, maxLen: 40, w: 0.19, a: 0.24 });
       budget() && (yield "fibre");
     }
@@ -546,7 +548,7 @@ function* buildGeometry(L, budget, out = {}) {
     }
     C.width0 = o.w0;
     C.width1 = o.w1;
-    C.fibres = paths.filter((P) => P.group === id).length;
+    C.fibres = laidFibres; // = paths with group id (only this loop lays them); r11.1: no full scan of paths
     C.brush = !!o.brush;
     C.link = !!o.meet && !o.tributary;
     C.tributary = !!o.tributary;
@@ -667,7 +669,7 @@ function* buildGeometry(L, budget, out = {}) {
       walk: { k: 0.018, run: 35, jit: 0.035 }, forkMean: 22, forkAngle: [0.3, 0.6], firstFork: 8, forkLag: 1.5,
     }, 1);
     void P;
-    if (k % 40 === 0 && budget()) yield "mat";
+    if (budget()) yield "mat";
   }
   // ---- sparse ref-8 vocabulary: long fine explorers from rims and cords into gaps ----
   const sparse = (o) => ({
@@ -1017,6 +1019,12 @@ export function createHero(canvas, { stage, state, reduce }) {
       j.resolve(result.value);
     } else channel.port2.postMessage(0);
   }
+  /** A fresh task (r11.1): the completion work never shares a task with the last build slice. */
+  const nextTask = () => new Promise((resolve) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => resolve();
+    ch.port2.postMessage(0);
+  });
   function run(gen, onSlice) {
     return new Promise((resolve) => {
       job = { gen, resolve, onSlice };
@@ -1827,7 +1835,10 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     if (disposed) return;
     if (!reduce.matches) await run(makeBreath(g));
-    scene.timings.complete = performance.now() - begun;
+    await nextTask();
+    if (disposed) return;
+    const tc = performance.now();
+    scene.timings.complete = tc - begun;
     const straightness = () => measurePaths(g.paths.filter((P) => P.len >= 28 && !/hair|fibre/.test(P.kind)).map((P) => ({ kind: P.kind, points: P.pts })));
     let auditCache = null;
     const audit = () =>
@@ -2037,6 +2048,11 @@ export function createHero(canvas, { stage, state, reduce }) {
       routes: g.routes.map((r) => ({ from: r.from, to: r.to, duration: r.duration, activated: r.count, highway: r.highway, fine: r.fine, buckets: r.buckets.size, maxFine: r.maxFine, arrivalMin: r.arrivalMin, arrivalMax: r.arrivalMax })),
     };
     window.__pulseTrips = sched.trips.map((t) => ({ from: t.route.from, to: t.route.to, start: t.start, arrival: t.start + t.route.duration, end: t.start + t.route.arrivalMax + TAIL }));
+    // The compositor attaches in its own task(s).
+    scene.timings.completeTask = performance.now() - tc;
+    await nextTask();
+    if (disposed) return;
+    const tr = performance.now();
     Object.assign(canvas.dataset, {
       segments: g.ss.length, fusions: g.paths.filter((P) => P.fused).length, nodes: g.nodes.length, cords: g.linkCords.length, minWidth: 0.16, maxWidth: 12,
       palette: state.glow, renderMs: scene.timings.complete.toFixed(1), geometryMs: (scene.timings.geometry ?? 0).toFixed(1), graphVertices: g.vs.length, segmentCap: CAP, routes: g.routes.length,
@@ -2045,6 +2061,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     scene.built = true;
     scene.ready = true;
     for (const cb of scene.listeners.splice(0)) cb(scene);
+    scene.timings.readyTask = performance.now() - tr; // includes the compositor's first attach stage
   })();
   return () => {
     disposed = true;
