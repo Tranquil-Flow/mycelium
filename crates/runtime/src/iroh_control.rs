@@ -99,8 +99,13 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
             let exchange=async {
                 let _permit=timeout_at(deadline,self.slots.acquire()).await.map_err(|_| ControlError("control_carrier_busy"))?.map_err(|_| ControlError("carrier_unavailable"))?;
                 current_authority(authority,request.fence)?;
-                let connection=timeout_at(deadline,endpoint.connect(request.peer.clone(),transport::Channel::NodeControl.alpn())).await.map_err(|_| ControlError("control_connect_timeout"))?.map_err(|_| ControlError("control_connect_failed"))?;
+                // Through the host: a direct-LAN dial is mapped to the pre-send
+                // LAN transport, pinned to exactly the peer's addresses and
+                // confined like every other LAN connection.
+                let (target,pin)=self.host.dial_target(request.peer).map_err(|_| ControlError("invalid_control_destination"))?;
+                let connection=timeout_at(deadline,endpoint.connect(target,transport::Channel::NodeControl.alpn())).await.map_err(|_| ControlError("control_connect_timeout"))?.map_err(|_| ControlError("control_connect_failed"))?;
                 let connection=ControlConnection(connection);
+                self.host.confine(&connection.0,pin).map_err(|_| ControlError("control_path_refused"))?;
                 if connection.0.remote_id().as_bytes()!=&request.fence.endpoint_id { return Err(ControlError("control_peer_mismatch")); }
                 current_authority(authority,request.fence)?;
                 let (mut send,mut recv)=timeout_at(deadline,connection.0.open_bi()).await.map_err(|_| ControlError("control_open_timeout"))?.map_err(|_| ControlError("control_open_failed"))?;

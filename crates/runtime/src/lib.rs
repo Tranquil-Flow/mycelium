@@ -20,6 +20,8 @@ pub mod iroh_control_receive;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_host;
 #[cfg(feature = "iroh-adapter")]
+pub(crate) mod iroh_lan_filter;
+#[cfg(feature = "iroh-adapter")]
 pub mod iroh_managed;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_pool;

@@ -7,7 +7,7 @@
 #![cfg(all(feature = "iroh-adapter", unix))]
 use budgets::{BudgetId as B, ClockDomain, Entries, MonoInstant};
 use iroh::{
-    Endpoint, EndpointAddr, RelayMode, SecretKey, TransportAddr,
+    Endpoint, EndpointAddr, RelayMode, SecretKey,
     endpoint::{BindOpts, Connection, presets},
 };
 use runtime::iroh_host::{LanPolicy, LoopbackHost, NetworkMode, private_lan, validate_lan_peer};
@@ -401,18 +401,22 @@ fn two_socket_peer(rt: &tokio::runtime::Runtime, lan: IpAddr) -> (Endpoint, Sock
     (endpoint, on_lan)
 }
 fn outside(connection: &Connection, policy: &LanPolicy) -> Option<SocketAddr> {
-    connection
-        .paths()
-        .iter()
-        .find_map(|path| match path.remote_addr() {
-            TransportAddr::Ip(a) if !policy.allows(a.ip()) => Some(*a),
-            _ => None,
-        })
+    connection.paths().iter().find_map(|path| {
+        // A direct-LAN path is the pre-send LAN transport's address (B9).
+        match runtime::iroh_host::lan_path_addr(path.remote_addr()) {
+            Some(a) if !policy.allows(a.ip()) => Some(a),
+            Some(_) => None,
+            None => Some(SocketAddr::from(([0, 0, 0, 0], 0))),
+        }
+    })
 }
 /// L2: after the handshake, iroh 1.0.2 holepunching (QUIC NAT traversal plus
 /// multipath) may open a path to a candidate the authenticated peer advertised.
-/// A direct-LAN host must not keep a connection that runs over a path outside
-/// its allow-list: the peer observes the host closing it (`lan_path_refused`).
+/// A direct-LAN host must never keep a connection that runs over a path outside
+/// its allow-list. Since B9 the pre-send filter means such a path never opens
+/// (nothing is sent to it, `iroh_lan_hardening.rs`); should one ever open, the
+/// peer observes the host closing it (`lan_path_refused`; the monitor on its
+/// own is proven by fault injection in `iroh_lan_filter_tests.rs`).
 fn assert_extra_path_refused(our_side: &Connection, peer_closed: &mpsc::Receiver<String>) {
     let policy = LanPolicy::private_only();
     let end = Instant::now() + span(B::RouterClose);
@@ -423,11 +427,16 @@ fn assert_extra_path_refused(our_side: &Connection, peer_closed: &mpsc::Receiver
         }
         std::thread::yield_now();
     }
-    let reason = peer_closed.recv_timeout(span(B::RouterClose));
+    let closed_by_host = our_side.close_reason().is_some();
+    let reason = if closed_by_host || seen.is_some() {
+        peer_closed.recv_timeout(span(B::RouterClose))
+    } else {
+        Ok(String::from("never ran over an outside path"))
+    };
     assert!(
-        reason
-            .as_ref()
-            .is_ok_and(|r| r.contains("lan_path_refused")),
+        reason.as_ref().is_ok_and(|r| {
+            r.contains("lan_path_refused") || (seen.is_none() && !closed_by_host)
+        }),
         "extra path {seen:?} outside the allow-list was kept: peer close {reason:?}, \
          open paths {:?}",
         our_side

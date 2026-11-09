@@ -628,6 +628,9 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         &auth,
         "",
     );
+    if status != 202 {
+        eprintln!("stop not accepted: {}", diagnose(&e, &r.id, &all));
+    }
     assert_eq!(status, 202, "{body}");
     let delete_ms = ms(stop_at);
     let mut seen = e.handle.wait(usize::MAX, Duration::ZERO);
