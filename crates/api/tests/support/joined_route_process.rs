@@ -15,6 +15,7 @@ use api::{
         self,
         codec::NativeCodec,
         epoch::{Carriers, Epoch},
+        link::Stage,
     },
     joined_shard::{native, route},
     m16_requests::Host as _,
@@ -71,22 +72,28 @@ fn prepare(
         admit_native_load(&fx.resource_gate, &format!("node={i}"));
     }
     let began = Instant::now();
-    for &i in which {
-        let nonce = challenges.issue(&fx.ids[i], assigned(fx, i)).unwrap();
-        fx.nodes[i].send(
-            json!({"command":"prepare_native","range":fx.ranges[i],"tokens":tokens,
-            "nonce":nonce,"forbidden_source":fx.source}),
-        );
-    }
-    let admitted = which
-        .iter()
-        .map(|&i| {
-            let signed = fx.nodes[i].result_with(allowance());
-            challenges
-                .admit(&fx.seed.coordinator, &fx.offers[i], &signed)
-                .unwrap()
+    // Owner prepare step = PRODUCT code (api::joined_owner::link::prepare).
+    let ranges: Vec<[u64; 2]> = (0..fx.nodes.len()).map(|i| assigned(fx, i)).collect();
+    let mut stages: Vec<Stage<'_>> = fx
+        .nodes
+        .iter_mut()
+        .enumerate()
+        .filter(|(i, _)| which.contains(i))
+        .map(|(i, node)| Stage {
+            member: node,
+            offer: &fx.offers[i],
+            range: ranges[i],
         })
         .collect();
+    let admitted = joined_owner::link::prepare(
+        challenges,
+        &fx.seed.coordinator,
+        &mut stages,
+        tokens,
+        &fx.source,
+        allowance(),
+    )
+    .unwrap();
     eprintln!("B7e prepared {which:?} in {:.1} ms", ms(began));
     admitted
 }
@@ -539,7 +546,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     let reaped_ms = ms(killed);
     let dead_worker = e.worker_pids()[k];
     let worker_gone = wait_workers_gone(&[dead_worker]);
-    m16_route::record_stage_exit(&e.handle(), k, json!({"process_exited":true,"worker_absent":true,
+    m16_route::record_stage_exit(e.handle(), k, json!({"process_exited":true,"worker_absent":true,
         "member_pid":member_pid,"exit_signal":std::os::unix::process::ExitStatusExt::signal(&status),
         "worker_pid":dead_worker,"observed_by":"owner_test_driver"})).unwrap();
     collect(&e, &r, usize::MAX, &mut all);

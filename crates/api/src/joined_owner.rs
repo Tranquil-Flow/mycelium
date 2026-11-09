@@ -26,6 +26,8 @@ use std::{
 pub mod codec;
 pub mod consent;
 pub mod epoch;
+pub mod link;
+pub mod source;
 
 fn fail(code: &'static str) -> PublicError {
     PublicError::new(409, code)

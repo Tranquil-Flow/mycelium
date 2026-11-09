@@ -3,22 +3,19 @@
 //! driver; observation placement is controlled, native proofs/tokens are not.
 use super::process::Node;
 use super::*;
-use api::{compiler_inputs, joined_shard::native};
+use api::{
+    compiler_inputs,
+    joined_owner::source::{ShardSource, transfer},
+    joined_shard::native,
+};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use budgets::{BudgetId as B, Entries};
-use runtime::{
-    artifact_journal::{DurableConfig, DurableObjects},
-    iroh_artifact_source::ArtifactService,
-    iroh_host::LoopbackHost,
-    sidecar_artifact::{grant_limits, serve_limits},
-};
 use std::{
     collections::BTreeMap,
     path::Path,
-    sync::{Arc, mpsc},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use transport::{Channel, Clock};
 pub(super) fn allowance() -> Duration {
     Duration::from_millis(B::MemberChosenWall.span(Entries::ZERO).unwrap().millis())
 }
@@ -365,136 +362,43 @@ pub(super) fn setup(count: usize, label: &str) -> Fixture {
         );
         hashes.push(hash.to_owned());
     }
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let (offer_tx, offer_rx) = mpsc::channel::<Value>();
-    let (accepting_tx, accepting_rx) = mpsc::channel();
-    let (received_tx, received_rx) = mpsc::channel();
-    let authority = seed.coordinator.clone();
-    let source_root = owner.clone();
-    let source_lan = lan.clone();
-    let source_thread = std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let clock = api::managed_carrier::HostClock::default();
-        let deadline = || {
-            clock
-                .monotonic()
-                .checked_add(B::MemberChosenWall.span(Entries::ZERO).unwrap())
-                .unwrap()
-        };
-        let mut host = match source_lan {
-            Some((ip, policy)) => LoopbackHost::bind_lan(
-                &rt,
-                &clock,
-                deadline(),
-                iroh::SecretKey::generate(),
-                &[Channel::ArtifactChunk],
-                ip,
-                policy,
-            ),
-            None => LoopbackHost::bind_protocols(
-                &rt,
-                &clock,
-                deadline(),
-                iroh::SecretKey::generate(),
-                &[Channel::ArtifactChunk],
-            ),
-        }
-        .unwrap();
-        let addr = host.address().unwrap();
-        let socket = *addr.ip_addrs().next().unwrap();
-        let signer = Identity::from_secret(
-            &addr.id.to_string(),
-            &app_host::random(32).unwrap().try_into().unwrap(),
-        )
-        .unwrap();
-        ready_tx.send((addr, signer.public_key_record())).unwrap();
-        for (hash, emitted_path) in hashes.into_iter().zip(emitted_paths) {
-            let store = DurableObjects::open(DurableConfig {
-                objects: objects.clone(),
-                state_dir: source_root.join("journal"),
-                fence_capacity: B::ArtifactMaxFence.count().unwrap().get() as usize,
-                clock_skew_ms: grant_limits().unwrap().clock_skew_ms,
-                now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
-            })
-            .unwrap();
-            let end = Instant::now() + allowance();
-            store
-                .verify_bounded(&hash, &|| {
-                    if Instant::now() < end {
-                        Ok(())
-                    } else {
-                        Err(runtime::iroh_artifact::ArtifactError(
-                            "source_verify_deadline".into(),
-                        ))
-                    }
-                })
-                .unwrap();
-            accepting_tx.send(()).unwrap();
-            let offer = offer_rx.recv_timeout(allowance()).unwrap();
-            let wrapped = joined_shard::JoinedSource::new(authority.clone(), offer, store).unwrap();
-            let service = ArtifactService::new(
-                Identity::from_secret(signer.endpoint_id(), &signer.secret_bytes()).unwrap(),
-                authority.signer().public_key_record(),
-                grant_limits().unwrap(),
-                Arc::new(wrapped),
-                serve_limits().unwrap(),
-                Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
-            )
-            .unwrap();
-            let connection = host.accept(&clock, deadline()).unwrap();
-            rt.block_on(service.serve_connection(connection)).unwrap();
-            received_rx.recv_timeout(allowance()).unwrap();
-            // Disposable producer only: the received file now has its own verified
-            // bytes. Do not claim a retained output or refund the producer ledger.
-            fs::remove_file(objects.join(hash.strip_prefix("sha256:").unwrap())).unwrap();
-            fs::remove_file(emitted_path).unwrap();
-        }
-        host.close(&clock, deadline()).unwrap();
-        drop(host);
-        drop(rt);
-        assert!(std::net::UdpSocket::bind(socket).is_ok());
-    });
-    let (addr, key) = ready_rx.recv_timeout(allowance()).unwrap();
+    // Owner transfer step = PRODUCT code (api::joined_owner::source, B16): the
+    // member's own consent is requested first, then the compiled bytes are
+    // verified, the seed-signed offer issued and exactly that offer served.
+    let shard_source = ShardSource::start(
+        seed.coordinator.clone(),
+        objects.clone(),
+        owner.join("journal"),
+        lan.clone(),
+    )
+    .unwrap();
     let mut offers = Vec::new();
     let mut paths = Vec::new();
     for (i, node) in nodes.iter_mut().take(count).enumerate() {
-        // Establish durable journal genesis and verify bytes BEFORE issuing the
-        // grant. Issuing first correctly trips the source ledger-reset fence.
-        accepting_rx.recv_timeout(allowance()).unwrap();
-        // The seed signs the source's dial addresses into the grant (LAN members
-        // dial only those); loopback keeps the unsigned-hint grant shape.
-        let signed_addrs: Vec<std::net::SocketAddr> = if lan.is_some() {
-            addr.ip_addrs().copied().collect()
-        } else {
-            Vec::new()
-        };
-        let offer = joined_shard::issue_with_source_addrs(
+        let done = transfer(
+            &shard_source,
             &seed.coordinator,
+            node,
             &registrations[i],
             &format!("b7c-transfer-{i}"),
             &document["node_files"][&ids[i]][0],
             &document["node_slice_plans"][&ids[i]],
-            &addr.id.to_string(),
-            &key,
-            &signed_addrs,
+            allowance(),
         )
         .unwrap();
-        offer_tx.send(offer.clone()).unwrap();
-        node.send(json!({"command":"receive","offer":offer,"source_id":addr.id.to_string(),"source_socket":addr.ip_addrs().next().unwrap()}));
-        let received = node.result_with(allowance());
-        received_tx.send(()).unwrap();
-        paths.push(PathBuf::from(received["path"].as_str().unwrap()));
-        offers.push(offer);
+        // Disposable producer only: the received file now has its own verified
+        // bytes. Do not claim a retained output or refund the producer ledger.
+        fs::remove_file(objects.join(hashes[i].strip_prefix("sha256:").unwrap())).unwrap();
+        fs::remove_file(&emitted_paths[i]).unwrap();
+        paths.push(PathBuf::from(done.received["path"].as_str().unwrap()));
         eprintln!(
             "B7c received node={i} bytes={} elapsed={:?}",
-            received["received_bytes"],
+            done.received["received_bytes"],
             began.elapsed()
         );
+        offers.push(done.offer);
     }
-    source_thread.join().unwrap();
+    shard_source.close().unwrap();
     Fixture {
         root,
         seed,

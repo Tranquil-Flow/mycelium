@@ -842,3 +842,152 @@ fn product_consent_is_member_side_and_reaches_the_owner_signed() {
     seed.close();
     fs::remove_dir_all(&root).unwrap();
 }
+
+/// The test driver's member handle is a product `MemberLink` (stdin operator
+/// channel, or the signed remote channel when `B8_MEMBER_CONTROL=remote`).
+impl api::joined_owner::link::MemberLink for Node {
+    fn begin(&mut self, command: Value) -> Result<(), api::joined_owner::link::Refusal> {
+        self.send(command);
+        Ok(())
+    }
+    fn finish(&mut self, within: Duration) -> Result<Value, api::joined_owner::link::Refusal> {
+        let v = self
+            .replies
+            .recv_timeout(within)
+            .map_err(|_| api::joined_owner::link::Refusal("member_reply_timeout".into()))?;
+        if v["ok"] == true {
+            Ok(v["result"].clone())
+        } else {
+            Err(api::joined_owner::link::Refusal(
+                v["code"].as_str().unwrap_or("member_refused").to_owned(),
+            ))
+        }
+    }
+}
+/// B16 S2 (rows 6/3): the owner's transfer step is product code. It asks the
+/// member for its own consent first and serves nothing to a member without it
+/// (stdin mode: that member's local operator has not decided yet); then it
+/// verifies the compiled bytes, issues the seed-signed offer, serves exactly
+/// that offer over the artifact carrier and returns the member's verified
+/// receipt.
+#[test]
+#[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
+fn product_owner_transfer_serves_only_a_consenting_member() {
+    use api::joined_owner::{
+        link::MemberLink,
+        source::{ShardSource, transfer},
+    };
+    let root = std::env::temp_dir().join(format!("b16-transfer-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    let owner = root.join("owner");
+    fs::create_dir(&owner).unwrap();
+    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b16-transfer", None).unwrap();
+    let member_root = root.join("member");
+    let mut node = Node::start(&member_root);
+    let request = node.call(json!({"command":"pair_request"}));
+    let (signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
+    let issuer = handoff::Coordinator {
+        signer,
+        swarm_id: "b16-transfer".into(),
+        seed_url: seed.seed_url.clone(),
+    };
+    let ttl = B::PyFinalMyceliumNodeMembershipMessageTtlSecondsL137C37
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    let approved = handoff::approve_pairing(&owner, true, Some(&issuer), &request, &json!(ttl),
+        &json!({"storage_bytes":4_000_000_000u64,"network_bytes_per_day":4_000_000_000u64,"background_allowed":false}),
+        app_host::now(), &handoff::Entropy::os).unwrap();
+    let registration = node.call(json!({"command":"accept","handoff":approved.to_value(),
+        "ca_pem":String::from_utf8(seed.options().ca_pem.unwrap()).unwrap(),"seed_address":seed.address}));
+    let node_id = registration["message"]["member"]["node_id"].clone();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let mut recipe = case["node_plans"]["node-0"].clone();
+    recipe["node_id"] = node_id;
+    recipe.as_object_mut().unwrap().remove("node_plan_digest");
+    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+    let file = case["node_files"]["node-0"][0].clone();
+    let encoded = case["shard_files"][file["path"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("deployment/")
+        .unwrap()]
+    .as_str()
+    .unwrap();
+    let bytes: Vec<u8> = (0..encoded.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&encoded[i..i + 2], 16).unwrap())
+        .collect();
+    let objects = owner.join("objects");
+    fs::create_dir(&objects).unwrap();
+    let hash = file["content_digest"].as_str().unwrap();
+    fs::write(objects.join(hash.strip_prefix("sha256:").unwrap()), &bytes).unwrap();
+    let source = ShardSource::start(
+        seed.coordinator.clone(),
+        objects,
+        owner.join("journal"),
+        None,
+    )
+    .unwrap();
+    let within = allowance();
+    if node.remote.is_none() {
+        // No member-side decision yet: refused before any offer or byte.
+        let refused = transfer(
+            &source,
+            &seed.coordinator,
+            &mut node,
+            &registration,
+            "b16-transfer-0",
+            &file,
+            &recipe,
+            within,
+        )
+        .err()
+        .unwrap();
+        assert_eq!(refused.0, "member_consent_required");
+        let held = node.call(json!({"command":"discard"}));
+        assert_eq!(
+            held["nothing_owned"], true,
+            "no custody was started: {held}"
+        );
+    }
+    member_consent(&mut node, &registration, &seed.coordinator);
+    let done = transfer(
+        &source,
+        &seed.coordinator,
+        &mut node,
+        &registration,
+        "b16-transfer-1",
+        &file,
+        &recipe,
+        within,
+    )
+    .unwrap();
+    assert_eq!(done.received["received_bytes"], bytes.len());
+    assert_eq!(done.offer["message"]["transfer"], file);
+    let path = PathBuf::from(done.received["path"].as_str().unwrap());
+    if node.remote.is_none() {
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            bytes,
+            "verified bytes at the member"
+        );
+    }
+    source.close().unwrap();
+    let discarded = node.call(json!({"command":"discard"}));
+    assert_eq!(discarded["inert_bytes_discarded"], true);
+    assert!(!path.exists());
+    assert_eq!(
+        MemberLink::call(&mut node, json!({"command":"discard"}), within).unwrap()["nothing_owned"],
+        true
+    );
+    node.close();
+    seed.close();
+    fs::remove_dir_all(root).unwrap();
+}
