@@ -1582,6 +1582,16 @@ export function createField({ stage, state, reduce }) {
       rasterStatic();
     }
     if (await stage()) return;
+    // r11.2c (owner: abrupt load-in): the field layers fade in over 0.9 s when
+    // the compositor attaches (they appeared at once with the field fronts
+    // already 40-60% out); the hero composite keeps showing as before.
+    if (!reduce.matches && !document.hidden)
+      for (const el of [bandBox, lifeBox, live]) {
+        el.style.opacity = "0";
+        el.getBoundingClientRect();
+        el.style.transition = "opacity 0.9s ease-out";
+        el.style.opacity = "";
+      }
     attached = true;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {

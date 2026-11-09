@@ -193,6 +193,13 @@ def test_scrolling_moves_full_dpr_field_bands_without_reraster(local):  # noqa: 
     with sync_playwright() as p:
         browser, page, errors = _open(p, local, 1920, dpr=2)
         page.wait_for_selector('#page-mycelium[data-intro="done"]', state='attached', timeout=30000)
+        # r11.2c: the colony monotone pass, its cross-faded re-bake and the dip
+        # glow finish after ready; each redraws the hero composite once.
+        for _ in range(300):
+            if page.evaluate('!!__myceliumScene.timings.dipsDone'):
+                break
+            page.wait_for_timeout(100)
+        page.wait_for_timeout(2000)
         page.evaluate('__setUnderstoryTime(24)')
         for _ in range(50):  # (CSP: no string wait_for_function)
             if page.evaluate('__understoryAudit.bandBytes || 0') > 0:

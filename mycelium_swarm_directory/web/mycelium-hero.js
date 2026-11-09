@@ -1384,9 +1384,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       grad.addColorStop(1, "rgba(0,0,0,0)");
       ctx.globalAlpha = (light ? 0.08 : 0.15) * grow * p;
       ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillRect(n.x - r, n.y - r, 2 * r, 2 * r); // the gradient is clear at r (no arc on the field)
       colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
       if (c.fill2) colonyFill(ctx, { node: c.node, fill: c.fill2 }, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
       if (box) {
