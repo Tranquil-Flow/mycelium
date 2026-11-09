@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::{
     fs,
     io::{BufRead, BufReader, Read},
+    net::{Ipv4Addr, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -60,9 +61,25 @@ fn names(dir: &Path) -> Vec<String> {
     out
 }
 fn launch(root: &Path) -> Child {
+    launch_with(root, None)
+}
+/// The launcher, optionally under a descriptor limit (`ulimit -n`, then `exec`: the same pid).
+fn launch_with(root: &Path, descriptors: Option<u32>) -> Child {
     fs::create_dir_all(root).unwrap();
     fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
-    Command::new(profile_dir().join("examples/headless"))
+    let launcher = profile_dir().join("examples/headless");
+    let mut command = match descriptors {
+        None => Command::new(launcher),
+        Some(limit) => {
+            let mut shell = Command::new("/bin/sh");
+            shell
+                .arg("-c")
+                .arg(format!("ulimit -n {limit} && exec \"$0\" \"$@\""))
+                .arg(launcher);
+            shell
+        }
+    };
+    command
         .args(["--headless", "--offline", "--state-root"])
         .arg(root)
         .env("HOME", root)
@@ -298,4 +315,79 @@ fn sigterm_closes_the_launcher_as_v014() {
 #[test]
 fn sigint_closes_the_launcher_as_v014() {
     run("sigint", Signal::INT);
+}
+
+/// B15f (REVIEW-laneB15 F2): a listener that ends without a quit closes the launcher as a quit
+/// does: the helper loops end, the transient control files go away and the exit reports the
+/// listener's failure (exit 3). Here `accept` fails (EMFILE): the launcher runs under a small
+/// descriptor limit and the test holds connections until the listener is gone. Before, nothing
+/// closed the core when the listener ended without panicking, and the process waited for a
+/// signal.
+#[test]
+fn a_listener_that_ends_without_a_quit_closes_the_launcher() {
+    build();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("b15f-listener-{}", std::process::id()));
+    fs::remove_dir_all(&root).unwrap_or(());
+    let mut child = launch_with(&root, Some(64));
+    let guard = ReapOnDrop(&mut child);
+    let child = &mut *guard.0;
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let (ready_send, ready) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut first = String::new();
+        stdout.read_line(&mut first).unwrap_or(0);
+        ready_send.send(first).unwrap_or(());
+        let mut rest = String::new();
+        stdout.read_to_string(&mut rest).unwrap_or(0);
+    });
+    let announced = ready.recv_timeout(patience()).unwrap_or_default();
+    assert!(announced.contains("launcher_started"), "{announced:?}");
+    let control: Value =
+        serde_json::from_str(&fs::read_to_string(root.join("native-control.json")).unwrap())
+            .unwrap();
+    let port = u16::try_from(control["port"].as_u64().unwrap()).unwrap();
+    // Held, idle connections use up the launcher's descriptors until `accept` fails.
+    let mut held = Vec::new();
+    while let Ok(stream) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
+        held.push(stream);
+        assert!(
+            held.len() < 1024,
+            "the listener never ended under its descriptor limit"
+        );
+    }
+    drop(held);
+    let waited = Instant::now() + patience();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < waited,
+            "the launcher kept running after its listener ended (it waits for a signal)"
+        );
+        thread::sleep(poll());
+    };
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap_or(0);
+    reader.join().unwrap_or(());
+    assert_eq!(status.code(), Some(3), "{status:?} {stderr}");
+    assert!(
+        stderr.contains("launcher_failed") && stderr.contains("listener_accept_failed"),
+        "the exit does not report the listener's failure: {stderr}"
+    );
+    let after = names(&root);
+    for file in ["native-control.json", "open-demo.html"] {
+        assert!(
+            !after.iter().any(|n| n == file),
+            "{file} left behind: {after:?}"
+        );
+    }
+    fs::remove_dir_all(&root).unwrap_or(());
 }
