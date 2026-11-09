@@ -47,10 +47,11 @@ def test_no_hosted_chat_page_or_chat_api_exists_on_the_public_origin(method, pat
 
 def test_the_proxy_serves_exactly_the_named_directory_assets_and_no_inference_route():
     assets = proxy._DIRECTORY_ASSET_PATHS
-    assert assets == {'/', '/apex.js', '/vision', '/swarms/vision.css', '/swarms/vision.js', '/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css', '/swarms/design.css', '/swarms/theme.js', '/swarms/design.js', '/swarms/mycelium-geometry.js', '/swarms/mycelium-hero.js', '/swarms/mycelium-field.js', '/swarms/spore-print.js'}
+    assert assets == {'/', '/apex.js', '/about', '/vision', '/swarms/about.css', '/swarms/about.js', '/swarms', '/swarms/', '/swarms/swarms.js', '/swarms/swarms.css', '/swarms/site.css', '/swarms/design.css', '/swarms/theme.js', '/swarms/design.js', '/swarms/mycelium-geometry.js', '/swarms/mycelium-hero.js', '/swarms/mycelium-field.js', '/swarms/spore-print.js'}
     # every file the directory server serves is one of them, and the web folder holds only those files
-    assert set(server.ASSETS) == assets
-    assert sorted(path.name for path in WEB.iterdir()) == ['apex.html', 'apex.js', 'design.css', 'design.js', 'index.html', 'mycelium-field.js', 'mycelium-geometry.js', 'mycelium-hero.js', 'site.css', 'spore-print.js', 'swarms.css', 'swarms.js', 'theme.js', 'vision.css', 'vision.html', 'vision.js']
+    # (plus the old /vision path, which the directory answers with a 301 to /about)
+    assert set(server.ASSETS) | set(server.REDIRECTS) == assets
+    assert sorted(path.name for path in WEB.iterdir()) == ['about.css', 'about.html', 'about.js', 'apex.html', 'apex.js', 'design.css', 'design.js', 'index.html', 'mycelium-field.js', 'mycelium-geometry.js', 'mycelium-hero.js', 'site.css', 'spore-print.js', 'swarms.css', 'swarms.js', 'theme.js']
 
 
 def test_the_directory_server_itself_does_not_answer_chat_paths():

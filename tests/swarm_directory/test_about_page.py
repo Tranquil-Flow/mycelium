@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""/vision: the owner-approved vision page (Simple | Technical) and its links.
+"""/about: the owner-approved vision page (Simple | Technical) and its links.
+
+Renamed from /vision (owner, 9 Nov 2026): the route is /about, /vision is a
+301 to /about (browsers keep the #fragment), the header link is 'About', the
+homepage's closing link 'About Mycelium →' and the title 'About · Mycelium';
+the page keeps its 'Our vision' eyebrow and H1.
 
 Static checks pin the route, the copy boundaries ("Today" next to every
 direction claim), the asset allowlists and staging isolation. Browser checks
@@ -26,7 +31,7 @@ from mycelium_swarm_directory.directory import Directory
 from mycelium_swarm_directory.server import DirectoryServer, csp
 from mycelium_swarm_directory.store import MemoryStore
 
-VISION = server.WEB / 'vision.html'
+VISION = server.WEB / 'about.html'
 HOME = server.WEB / 'apex.html'
 GLOW_KEY = 'mycelium-site-glow-v1'
 CLS = """window.__cls=[];new PerformanceObserver(l=>{for(const e of l.getEntries())
@@ -120,7 +125,7 @@ def parse(path):
 # ---- static: route, copy boundaries, allowlists, staging isolation ----
 
 def test_vision_route_serves_both_versions_with_the_site_csp(directory):
-    status, headers, body = fetch(directory.origin + '/vision')
+    status, headers, body = fetch(directory.origin + '/about')
     assert status == 200 and body == VISION.read_bytes()
     assert headers['Content-Type'] == 'text/html; charset=utf-8'
     assert headers['Content-Security-Policy'] == csp(False)
@@ -132,13 +137,29 @@ def test_vision_route_serves_both_versions_with_the_site_csp(directory):
                  'Honest limits today', 'Where the architecture is going', 'The wider stack (CCAI)', 'Principles',
                  'We take no venture capital, so no investor can buy control.'):
         assert line in html, line
-    assert 'Our vision' in html
+    assert 'Our vision' in html and '<title>About · Mycelium</title>' in html
+    assert '<h1 id="vision-title">AI that belongs to the people who use it</h1>' in html
     # Owner decisions: no Berlin, no tokens, CCAI named, no vault rename.
     lowered = html.lower()
     assert 'berlin' not in lowered and 'token' not in lowered and 'ddai' not in lowered
     assert 'Collective Commons AI' in html
-    for path in ('/vision/', '/vision.html', '/vision?mode=technical', '/vision#technical'):
-        assert fetch(directory.origin + path.replace('#', '%23'))[0] == 404
+    for path in ('/about/', '/about.html', '/about?mode=technical', '/about#technical', '/vision/', '/vision.html',
+                 '/vision?mode=technical', '/swarms/vision.css', '/swarms/vision.js', '/vision.html'):
+        assert fetch(directory.origin + path.replace('#', '%23'))[0] == 404, path
+
+
+def test_old_vision_route_is_a_permanent_redirect_to_about(directory):
+    for method in ('GET', 'HEAD'):
+        conn = http.client.HTTPConnection(directory.origin.split('//', 1)[1])
+        conn.request(method, '/vision')
+        response = conn.getresponse()
+        assert response.status == 301 and response.getheader('Location') == '/about', (method, response.status)
+        assert response.getheader('Content-Length') == '0' and response.read() == b''
+        assert response.getheader('Content-Security-Policy') == csp(False) and response.getheader('Set-Cookie') is None
+        conn.close()
+    # Through the apex proxy's allowlist too (the directory answers the 301).
+    assert proxy._directory_route_decision('GET', '/vision') == (True, 200, 'ok')
+    assert proxy._directory_route_decision('POST', '/vision')[0] is False
 
 
 def test_every_direction_claim_sits_next_to_an_honest_today_line():
@@ -162,16 +183,17 @@ def test_every_direction_claim_sits_next_to_an_honest_today_line():
     assert 'so this is research' in technical
 
 
-def test_header_and_homepage_link_to_vision():
+def test_header_and_homepage_link_to_about():
     for page in (HOME, VISION):
         html = page.read_text()
         nav = re.search(r'<nav class="row" aria-label="Project">(.*?)</nav>', html).group(1)
         hrefs = re.findall(r'href="([^"]+)"', nav)
-        assert hrefs == ['/vision', 'https://github.com/Tranquil-Flow/mycelium', '/swarms/'], (page.name, hrefs)
-    assert 'href="/vision" aria-current="page">Vision</a>' in VISION.read_text()
+        assert hrefs == ['/about', 'https://github.com/Tranquil-Flow/mycelium', '/swarms/'], (page.name, hrefs)
+    assert 'href="/about" aria-current="page">About</a>' in VISION.read_text()
+    assert '>Vision</a>' not in VISION.read_text() + HOME.read_text() and 'href="/vision"' not in HOME.read_text()
     closing = HOME.read_text().split('<h2>This is the first step</h2>', 1)[1].split('</section>', 1)[0]
-    assert '<a class="vision-link" href="/vision">Read our vision →</a>' in closing
-    vision_links = [a for a in parse(HOME).links if a.get('href') == '/vision']
+    assert '<a class="vision-link" href="/about">About Mycelium →</a>' in closing
+    vision_links = [a for a in parse(HOME).links if a.get('href') == '/about']
     assert len(vision_links) == 2
 
 
@@ -187,11 +209,15 @@ def test_vision_page_requests_only_same_origin_resources():
 
 
 def test_vision_assets_are_named_in_the_server_and_proxy_allowlists():
-    for path in ('/vision', '/swarms/vision.css', '/swarms/vision.js'):
+    for path in ('/about', '/swarms/about.css', '/swarms/about.js'):
         assert path in server.ASSETS and path in proxy._DIRECTORY_ASSET_PATHS
+    assert '/vision' in server.REDIRECTS and '/vision' not in server.ASSETS
+    for path in ('/swarms/vision.css', '/swarms/vision.js'):
+        assert path not in server.ASSETS and proxy._directory_route_decision('GET', path)[0] is False
+    for path in ('/about', '/swarms/about.css', '/swarms/about.js'):
         assert proxy._directory_route_decision('GET', path) == (True, 200, 'ok')
         assert proxy._directory_route_decision('POST', path)[0] is False
-    for path in ('/vision/', '/vision?x=1', '/vision.html', '/swarms/vision.html'):
+    for path in ('/about/', '/about?x=1', '/about.html', '/swarms/about.html', '/vision/', '/vision?x=1'):
         assert proxy._directory_route_decision('GET', path)[0] is False
 
 
@@ -207,7 +233,7 @@ def test_staging_banner_on_vision_only_with_flag_and_staging_origin(monkeypatch,
         monkeypatch.setenv('MYCELIUM_STAGING_SAMPLES', flag)
     srv = DirectoryServer(Directory(MemoryStore(), verify), public_origin=origin).start()
     try:
-        status, _, html = fetch(srv.origin + '/vision')
+        status, _, html = fetch(srv.origin + '/about')
         assert status == 200
         for marker in (b'staging-banner', b'data-bg-choice', b'style-switch'):
             assert (marker in html) is staging, marker
@@ -242,11 +268,24 @@ def state(page):
       shown:[...document.querySelectorAll('[data-panel]')].filter(p=>p.offsetParent).map(p=>p.dataset.panel)}))()""")
 
 
+def test_old_vision_links_land_on_about_keeping_the_fragment(directory):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = new_page(browser, directory)
+        page.goto(directory.origin + '/vision#technical')
+        assert page.url == directory.origin + '/about#technical'
+        assert state(page)['mode'] == 'technical' and page.title() == 'About · Mycelium'
+        page.goto(directory.origin + '/vision')
+        assert page.url == directory.origin + '/about'
+        assert page.outside == [], page.outside
+        browser.close()
+
+
 def test_switch_defaults_to_simple_persists_and_deep_links(directory):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = new_page(browser, directory)
-        page.goto(directory.origin + '/vision')
+        page.goto(directory.origin + '/about')
         s = state(page)
         assert s == {'mode': 'simple', 'hash': '', 'stored': None, 'selected': ['true', 'false'],
                      'tabindex': [0, -1], 'shown': ['simple']}
@@ -257,8 +296,8 @@ def test_switch_defaults_to_simple_persists_and_deep_links(directory):
         assert (s['mode'], s['hash'], s['stored'], s['selected'], s['shown']) == \
             ('technical', '#technical', 'technical', ['false', 'true'], ['technical'])
         page.reload()  # remembered, and reflected in the address
-        assert state(page)['mode'] == 'technical' and page.url.endswith('/vision#technical')
-        page.goto(directory.origin + '/vision')
+        assert state(page)['mode'] == 'technical' and page.url.endswith('/about#technical')
+        page.goto(directory.origin + '/about')
         assert state(page)['mode'] == 'technical' and page.url.endswith('#technical')
         # Keyboard: arrows move focus and selection; Home/End; focus is visible.
         tab = page.get_by_role('tab', name='Technical')
@@ -278,9 +317,9 @@ def test_switch_defaults_to_simple_persists_and_deep_links(directory):
 
         # A shared #technical link wins over a stored Simple choice and is not stored.
         page = new_page(browser, directory)
-        page.goto(directory.origin + '/vision')
+        page.goto(directory.origin + '/about')
         page.get_by_role('tab', name='Simple').click()
-        page.goto(directory.origin + '/vision#technical')
+        page.goto(directory.origin + '/about#technical')
         s = state(page)
         assert s['mode'] == 'technical' and s['stored'] == 'simple' and page.evaluate('scrollY') == 0
         # Back to Simple via an edited hash; then the in-page link to the technical version.
@@ -303,7 +342,7 @@ def test_without_javascript_both_versions_show_with_headings(directory):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = new_page(browser, directory, java_script_enabled=False)
-        page.goto(directory.origin + '/vision')
+        page.goto(directory.origin + '/about')
         for name in ('Simple', 'Technical'):
             expect(page.get_by_role('heading', name=name, exact=True)).to_be_visible()
         expect(page.get_by_text('The short version')).to_be_visible()
@@ -318,7 +357,7 @@ def test_zero_layout_shift_no_third_parties_and_header_fit(directory, width, hei
         browser = p.chromium.launch()
         for theme in ('dark', 'light'):
             page = new_page(browser, directory, width=width, height=height, theme=theme)
-            for path in ('/vision', '/vision#technical', '/'):
+            for path in ('/about', '/about#technical', '/'):
                 page.goto(directory.origin + path)
                 page.wait_for_timeout(1200)
                 assert sum(page.evaluate('window.__cls')) == 0, (width, theme, path)
@@ -333,18 +372,18 @@ def test_zero_layout_shift_no_third_parties_and_header_fit(directory, width, hei
                   return {inside:boxes.every(r=>r.bottom<=h.bottom+0.5&&r.right<=innerWidth+0.5&&r.left>=-0.5),
                           overlap, wide:document.documentElement.scrollWidth<=innerWidth}})()""")
                 assert fit == {'inside': True, 'overlap': False, 'wide': True}, (width, theme, path, fit)
-                vision = page.locator('header').get_by_role('link', name='Vision', exact=True)
+                vision = page.locator('header').get_by_role('link', name='About', exact=True)
                 expect(vision).to_be_visible()
-                expect(vision).to_have_attribute('href', '/vision')
+                expect(vision).to_have_attribute('href', '/about')
                 vision.focus()
                 expect(vision).to_be_focused()
                 if width <= 640:  # phone touch target (desktop matches the existing text links)
                     assert vision.evaluate("e=>e.getBoundingClientRect().height>=44")
-            home_link = page.get_by_role('link', name='Read our vision →')
+            home_link = page.get_by_role('link', name='About Mycelium →')
             home_link.scroll_into_view_if_needed()
             expect(home_link).to_be_visible()
             home_link.click()
-            page.wait_for_url(directory.origin + '/vision*')
+            page.wait_for_url(directory.origin + '/about*')
             assert state(page)['mode'] in ('simple', 'technical')
             assert page.outside == [], page.outside
             page.context.close()
@@ -356,7 +395,7 @@ def test_stage_and_layer_tables_stack_into_cards_on_phones(directory):
         browser = p.chromium.launch()
         for width, stacked in ((390, True), (1440, False)):
             page = new_page(browser, directory, width=width, height=900)
-            page.goto(directory.origin + '/vision#technical')
+            page.goto(directory.origin + '/about#technical')
             for name in ('layers',):
                 info = page.evaluate("""(n)=>{const t=document.querySelector(`[data-table=${n}]`);
                   const rows=[...t.querySelectorAll('tbody tr')];
@@ -364,7 +403,7 @@ def test_stage_and_layer_tables_stack_into_cards_on_phones(directory):
                           label:getComputedStyle(rows[0].cells[1],'::before').content}}""", name)
                 assert (info['display'] == 'block') is stacked and info['wide'], (width, info)
                 assert (info['label'] == '"Role"') is stacked
-            page.goto(directory.origin + '/vision#simple')
+            page.goto(directory.origin + '/about#simple')
             info = page.evaluate("""(()=>{const rows=[...document.querySelectorAll('[data-table=stages] tbody tr')];
               return rows.map(r=>[getComputedStyle(r).display, getComputedStyle(r.cells[2].firstElementChild).backgroundColor])})()""")
             assert len(info) == 4 and all((d == 'block') is stacked for d, _ in info)
@@ -407,7 +446,7 @@ def test_text_contrast_on_the_actual_backdrop(directory, theme, glow, width, hei
         page = new_page(browser, directory, width=width, height=height, theme=theme, glow=glow,
                         reduced_motion='reduce', bypass_csp=True)  # bypass only to inject the text-hiding probe
         for mode in ('simple', 'technical'):
-            page.goto(directory.origin + '/vision#' + mode)
+            page.goto(directory.origin + '/about#' + mode)
             page.wait_for_timeout(1500)
             total = page.evaluate('document.documentElement.scrollHeight')
             y = 0
@@ -448,7 +487,7 @@ def test_reduced_motion_runs_no_css_animation_on_the_vision_page(directory):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = new_page(browser, directory, reduced_motion='reduce')
-        page.goto(directory.origin + '/vision')
+        page.goto(directory.origin + '/about')
         page.wait_for_timeout(1200)
         assert page.evaluate("document.getAnimations().filter(a=>a.playState==='running').length") == 0
         page.get_by_role('tab', name='Technical').click()

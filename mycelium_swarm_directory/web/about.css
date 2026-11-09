@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-only
-   /vision: the homepage's header, palette, type and footer (design.css), a calm
+   /about (was /vision): the homepage's header, palette, type and footer (design.css), a calm
    field (the /swarms density) and a Simple | Technical switch. Every panel is
    in the HTML; the switch only hides the inactive one. */
 :root[data-vision-mode="simple"] [data-panel="technical"],

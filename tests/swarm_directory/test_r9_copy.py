@@ -3,8 +3,10 @@
 
 apex.html is pinned to the owner-approved positioning copy (9d9289b1: hero
 'AI for everyone, controlled by no one.', vision eyebrow 'AI, grown together')
-plus the header 'Vision' and closing 'Read our vision →' links; vision.html is
-pinned to the owner-approved vision copy v2 (9 Nov).
+plus the header 'About' and closing 'About Mycelium →' links (renamed from
+'Vision' / 'Read our vision →', owner 9 Nov); about.html (was vision.html) is
+pinned to the owner-approved vision copy v2 (9 Nov) with the title 'About ·
+Mycelium' and the header 'About' link.
 """
 import hashlib
 from html.parser import HTMLParser
@@ -28,7 +30,7 @@ class Copy(HTMLParser):
 
 def test_owner_directed_copy_is_pinned_except_hue_controls():
     web=Path(__file__).resolve().parents[2]/'mycelium_swarm_directory/web'
-    expected={'apex.html': '737fa9edf53301744f29ade18acc5b98afbe0f509f740bf6e816ec4088526174', 'vision.html': '913bf7e6ff98129cc3963af63edc03b907e914635e6bd662bb6de6e30b0d06ce', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
+    expected={'apex.html': 'f6691c436b61aa4e509fa9cf322fbfb6d7d45850746a7b435c32feeb4cca5fb7', 'about.html': 'c2e494be7c99ae8757e914a3cfa04033c256a3cf5a95cfdda0de1cfb44d00c5c', 'index.html': '40cd559de22190164797da49e45d2728a6c94aa8eaee4527720c33214120a9b3'}
     for name, digest in expected.items():
         parser=Copy(); parser.feed((web/name).read_text())
         assert hashlib.sha256(''.join(parser.parts).encode()).hexdigest() == digest, name

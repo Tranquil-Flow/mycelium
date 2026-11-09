@@ -62,9 +62,9 @@ STAGING_ASSETS = {'/swarms/mycelium-hero-electric.js': ('mycelium-hero-electric.
                   '/swarms/mycelium-geometry-electric.js': ('mycelium-geometry-electric.js', 'text/javascript; charset=utf-8')}
 ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/apex.js': ('apex.js', 'text/javascript; charset=utf-8'),
-          '/vision': ('vision.html', 'text/html; charset=utf-8'),
-          '/swarms/vision.css': ('vision.css', 'text/css; charset=utf-8'),
-          '/swarms/vision.js': ('vision.js', 'text/javascript; charset=utf-8'),
+          '/about': ('about.html', 'text/html; charset=utf-8'),
+          '/swarms/about.css': ('about.css', 'text/css; charset=utf-8'),
+          '/swarms/about.js': ('about.js', 'text/javascript; charset=utf-8'),
           '/swarms/design.css': ('design.css', 'text/css; charset=utf-8'),
           '/swarms/theme.js': ('theme.js', 'text/javascript; charset=utf-8'),
           '/swarms/design.js': ('design.js', 'text/javascript; charset=utf-8'),
@@ -77,6 +77,9 @@ ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),
           '/swarms/swarms.css': ('swarms.css', 'text/css; charset=utf-8'),
           '/swarms/site.css': ('site.css', 'text/css; charset=utf-8')}
+# The vision page was renamed About (owner, 9 Nov 2026): the old path is a
+# permanent redirect (browsers keep any #fragment across it).
+REDIRECTS = {'/vision': '/about'}
 DEMO_LABEL = ('Swarms are run by people and may be unavailable. No accounts, no email or tracking by this site. '
               'Your key stays in this browser. Cloudflare carries site traffic and can see your IP address and timing; '
               'for entries it hosts, it can also see prompts and replies.')
@@ -172,6 +175,18 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(raw)
         self.close_connection = True
 
+    def _redirect(self, location: str) -> None:
+        self.send_response(301)
+        self.send_header('Location', location)
+        self.send_header('Content-Length', '0')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Security-Policy', csp(self.server.directory.allow_loopback))
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.close_connection = True
+
     def _json(self, status: int, value: Any) -> None:
         self._send(status, json.dumps(value, separators=(',', ':'), ensure_ascii=False).encode())
 
@@ -190,11 +205,13 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ASSETS:
             name, kind = ASSETS[path]
             raw = (WEB / name).read_bytes()
-            if self.server.staging_samples and name in ('apex.html', 'index.html', 'vision.html'):
+            if self.server.staging_samples and name in ('apex.html', 'index.html', 'about.html'):
                 raw = raw.replace(b'<header class="top">', STAGING_BANNER + b'<header class="top">', 1)
                 raw = raw.replace(GLOW_SWITCH_END, GLOW_SWITCH_END + STAGING_STYLE_SWITCH
                                   + (STAGING_INTRO_SWITCH if name == 'apex.html' else b''), 1)
             return self._send(200, raw, kind)
+        if path in REDIRECTS:
+            return self._redirect(REDIRECTS[path])
         if self.server.staging_samples and path in STAGING_ASSETS:
             name, kind = STAGING_ASSETS[path]
             return self._send(200, (WEB_STAGING / name).read_bytes(), kind)
