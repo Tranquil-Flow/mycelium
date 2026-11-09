@@ -99,20 +99,33 @@ fn operator_consent(path: &str) -> Result<Value> {
     usable_decision(&body)?;
     Ok(body)
 }
+/// The device memory bounding the per-run memory cap: the decision's stated
+/// value, else this Mac's measured physical memory (v0.1.4 always measures,
+/// `app.py:1754` `host_memory_bytes`); `None` only when it cannot be read.
+fn device_memory(body: &Value) -> Option<u64> {
+    body["device_memory_bytes"].as_u64().or_else(|| {
+        let out = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        String::from_utf8(out.stdout)
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+            .filter(|m| *m > 0)
+    })
+}
 /// The member-side decision is one this Mac can honour: an offered resource
 /// policy (`consent_valid`, else `consent_required`) and grant caps within
-/// that policy and the stated device memory. Nothing is written.
+/// that policy and the device memory. Nothing is written.
 fn usable_decision(body: &Value) -> Result<()> {
     if !resource_policy::consent_valid(&body["policy"]) {
         return Err("consent_required".into());
     }
-    standing_consent::decision_caps(
-        &body["consent"],
-        &body["policy"],
-        body["device_memory_bytes"].as_u64(),
-    )
-    .map(|_| ())
-    .map_err(|e| e.0.to_owned())
+    standing_consent::decision_caps(&body["consent"], &body["policy"], device_memory(body))
+        .map(|_| ())
+        .map_err(|e| e.0.to_owned())
 }
 /// Record a member-side decision (local stdin operator or `--consent-file`):
 /// its resource policy and the unbound standing grant. v0.1.4 grants before
@@ -125,7 +138,7 @@ fn grant_decision(root: &std::path::Path, body: &Value) -> Result<()> {
         &body["consent"],
         &body["policy"],
         app_host::now(),
-        body["device_memory_bytes"].as_u64(),
+        device_memory(body),
     )
     .map(|_| ())
     .map_err(|e| e.0.to_owned())

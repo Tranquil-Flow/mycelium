@@ -1194,14 +1194,15 @@ fn product_epoch_streams_chat_over_its_gateway_and_close_frees_the_port() {
         assert_eq!(report["ack_delivered"], true, "{report}");
     }
 }
-/// REVIEW-laneB16 F3: the epoch gateway's owned connections are bounded and
-/// pruned. While as many connections as the gateway admits requests
-/// (`max_pending_requests`) are open, one more is answered at once with a
-/// typed 503 instead of another owned thread; once those clients go, their
-/// finished connections no longer count and the same gateway serves again
-/// (a list that never shrinks would keep refusing). Chat still completes.
+/// REVIEW-laneB16f FU1 (v0.1.4 parity, `request_gateway/service.py:349,458`): the
+/// epoch gateway caps ADMITTED requests (64, `gateway_capacity_exhausted`), not
+/// open connections. Connections that never send a request (no bearer needed)
+/// are bounded on their own, the oldest dropped for a newcomer, so a local
+/// process holding 64 of them cannot starve the owner's chat; event streams
+/// count against the admitted cap; Stop and status are never refused for
+/// capacity. Finished connections stop counting (REVIEW-laneB16 F3).
 #[test]
-fn product_epoch_gateway_bounds_and_prunes_its_connections() {
+fn product_epoch_gateway_caps_admitted_requests_and_keeps_stop_servable() {
     use std::io::{Read, Write};
     let s = swarm();
     let (epoch, members) = product_epoch(&s, &[5, 9, 3, 7]);
@@ -1210,49 +1211,92 @@ fn product_epoch_gateway_bounds_and_prunes_its_connections() {
         .unwrap()
         .get() as usize;
     let patience = span(B::RouterClose);
-    let held: Vec<std::net::TcpStream> = (0..cap)
-        .map(|_| std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap())
-        .collect();
-    let answer = |mut stream: std::net::TcpStream, request: &str| {
+    let connect = || {
+        let stream = std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap();
         stream.set_read_timeout(Some(patience)).unwrap();
-        if !request.is_empty() {
-            stream.write_all(request.as_bytes()).unwrap();
-        }
-        let mut text = String::new();
-        stream.read_to_string(&mut text).unwrap_or(0);
-        text
+        stream
     };
-    // Over the bound: answered before it sends anything, not held.
-    let over = std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap();
-    let busy = answer(over, "");
-    assert!(
-        busy.starts_with("HTTP/1.1 503") && busy.contains("joined_owner_gateway_busy"),
-        "connection {} past the bound was not refused: {busy:?}",
-        cap + 1
+    // 1. A local process holds `cap` connections and never sends a byte.
+    let idle: Vec<std::net::TcpStream> = (0..cap).map(|_| connect()).collect();
+    // 2. The owner's chat is still admitted and streams.
+    let (accepted, rx, reader) = chat(&epoch, 32);
+    let mut all = until_terminal(&rx, 2);
+    // ... because the oldest silent connection was dropped instead.
+    let mut first = &idle[0];
+    let mut probe = [0u8; 1];
+    assert_eq!(
+        first.read(&mut probe).unwrap_or(0),
+        0,
+        "the oldest silent connection is dropped"
     );
-    drop(held);
-    // The finished connections stop counting: a request is served again.
-    let probe = format!(
-        "GET /v1/inference/none HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-        epoch.addr()
+    let auth = format!(
+        "{}X-Mycelium-Session: {}\r\n",
+        bearer(&epoch),
+        accepted["session_token"].as_str().unwrap()
+    );
+    // 3. Submissions whose bodies never arrive hold the other admitted slots
+    // (the chat's own event stream holds one).
+    let held_request = format!(
+        "POST /v1/inference HTTP/1.1\r\nHost: {}\r\n{}Content-Type: application/json\r\nContent-Length: 64\r\n\r\n",
+        epoch.addr(),
+        bearer(&epoch)
+    );
+    let held: Vec<std::net::TcpStream> = (1..cap)
+        .map(|_| {
+            let mut stream = connect();
+            stream.write_all(held_request.as_bytes()).unwrap();
+            stream
+        })
+        .collect();
+    // 4. One more admitted request is refused with v0.1.4's code, never held.
+    let over_request = format!(
+        "POST /v1/inference HTTP/1.1\r\nHost: {}\r\n{}Content-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}",
+        epoch.addr(),
+        bearer(&epoch)
     );
     let end = Instant::now() + patience;
-    let served = loop {
-        let stream = std::net::TcpStream::connect_timeout(&epoch.addr(), patience).unwrap();
-        let text = answer(stream, &probe);
-        if !text.starts_with("HTTP/1.1 503") || Instant::now() >= end {
+    let refused = loop {
+        let mut over = connect();
+        over.write_all(over_request.as_bytes()).unwrap();
+        let mut text = String::new();
+        over.read_to_string(&mut text).unwrap_or(0);
+        if text.contains("gateway_capacity_exhausted") || Instant::now() >= end {
             break text;
         }
         std::thread::yield_now();
     };
     assert!(
-        served.starts_with("HTTP/1.1 ") && !served.starts_with("HTTP/1.1 503"),
-        "closed connections still count against the bound: {served:?}"
+        refused.starts_with("HTTP/1.1 503") && refused.contains("gateway_capacity_exhausted"),
+        "request {} past the admitted cap was not refused: {refused:?}",
+        cap + 1
     );
-    let (_, rx, reader) = chat(&epoch, 4);
-    let all = until_terminal(&rx, usize::MAX);
+    // 5. Status and Stop are served while every admitted slot is held.
+    let (status, body) =
+        sse_client::http(epoch.addr(), "GET", "/v1/qualification/current", &auth, "");
+    assert_eq!(status, 200, "status refused under load: {body}");
+    let path = format!("/v1/inference/{}", accepted["request_id"].as_str().unwrap());
+    let (status, body) = sse_client::http(epoch.addr(), "DELETE", &path, &auth, "");
+    assert_eq!(status, 202, "Stop refused under load: {body}");
+    all.extend(until_terminal(&rx, usize::MAX));
     reader.join().unwrap();
-    assert_eq!(token_ids(&all), vec![5, 9, 3, 7]);
+    assert_eq!(all.last().unwrap()["type"], "cancelled", "{all:?}");
+    // 6. Ended connections stop counting: once the held submissions go, a
+    // submission passes the gateway again and the spent epoch itself answers it.
+    drop(held);
+    drop(idle);
+    let end = Instant::now() + patience;
+    let answered = loop {
+        let (status, body) = post(&epoch, 1);
+        if status != 503 || Instant::now() >= end {
+            break (status, body);
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(
+        (answered.0, answered.1["error"].as_str()),
+        (409, Some("route_dropped")),
+        "finished connections still count: {answered:?}"
+    );
     epoch.close();
     for m in members {
         let report = m.thread.join().unwrap().unwrap();

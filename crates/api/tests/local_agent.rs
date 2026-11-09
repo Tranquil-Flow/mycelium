@@ -8,9 +8,11 @@
 use api::{
     installation_descriptor::{self, Failure, Member, Paths, Source},
     local_agent::{AgentHost, LocalAgent},
+    slice_fetch::{self, SliceError, SliceTransport, SnapshotRangeTransport},
 };
 use protocol::identity::Identity;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     os::unix::fs::{DirBuilderExt, PermissionsExt},
@@ -390,4 +392,603 @@ fn the_local_agent_equals_the_executed_oracle_tick_by_tick() {
         run(&rig, scenario, &rig.python);
     }
     assert_eq!(ticks, 29, "every recorded tick is replayed");
+}
+
+// ---- the work phase (FX-B18-MEMBER-WORK: probe `probe_member_work.py` runs the REAL v0.1.4
+// `DemoTargetAgent(local=True)` work phase with the REAL `fetch_node_slice` + `SnapshotRangeTransport` on a
+// stub actor/route/consent app and a scripted clock; two executions byte-identical). Compared per tick: the
+// agent status, the reports the owner's inbox receives, the routes the agent invoked and, once no fetch is
+// running, every published slice file with its digest. The descriptor is a fixed marker here (its bytes are
+// FX-L10-LOCAL-AGENT above).
+
+fn work_fixture() -> Value {
+    serde_json::from_str(include_str!("fixtures/oracle_member_work.json")).expect("fixture parses")
+}
+
+const SOURCES: [(&str, usize); 2] = [
+    ("model-00001.safetensors", 5000),
+    ("model-00002.safetensors", 3000),
+];
+/// The probe's deterministic snapshot bytes: an iterated sha256 chain seeded by the file name.
+fn source_bytes(name: &str, size: usize) -> Vec<u8> {
+    let mut seed: Vec<u8> = Sha256::digest(name.as_bytes()).to_vec();
+    let mut out = Vec::new();
+    while out.len() < size {
+        seed = Sha256::digest(&seed).to_vec();
+        out.extend_from_slice(&seed);
+    }
+    out.truncate(size);
+    out
+}
+fn sha_hex(path: &Path) -> String {
+    format!("sha256:{:x}", Sha256::digest(fs::read(path).expect("read")))
+}
+
+struct WorkHost {
+    root: PathBuf,
+    t: f64,
+    announcement: Option<Value>,
+    active: bool,
+    check: Option<String>,
+    native: Value,
+    cleanup: Option<Value>,
+    offer: Option<Value>,
+    caps: Value,
+    transport: bool,
+    sink: Vec<Value>,
+    actions: Vec<Value>,
+}
+impl WorkHost {
+    fn new(root: PathBuf) -> Self {
+        let snapshot = root.join("snapshot");
+        fs::create_dir_all(&snapshot).expect("snapshot");
+        for (name, size) in SOURCES {
+            fs::write(snapshot.join(name), source_bytes(name, size)).expect("source");
+        }
+        Self {
+            root,
+            t: 1000.0,
+            announcement: None,
+            active: true,
+            check: None,
+            native: json!({}),
+            cleanup: None,
+            offer: None,
+            caps: json!({}),
+            transport: true,
+            sink: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+    fn slices(&self) -> PathBuf {
+        self.root.join("model-source").join("slices")
+    }
+    fn action(&mut self, path: &str, body: Value) {
+        self.actions.push(json!([path, body]));
+    }
+}
+impl AgentHost for WorkHost {
+    fn announcement(&mut self) -> Result<Option<Value>, api::local_agent::ExchangeUnavailable> {
+        Ok(self.announcement.clone())
+    }
+    fn member(&mut self) -> Option<String> {
+        Some("node-local".into())
+    }
+    fn run_active(&mut self) -> bool {
+        self.active
+    }
+    fn resource_check(&mut self) -> Option<String> {
+        self.check.clone()
+    }
+    fn prepared_model(&mut self) -> Result<(String, String), Failure> {
+        let model = &self.announcement.as_ref().expect("announced")["model"];
+        Ok((
+            model["model_id"].as_str().expect("id").into(),
+            model["resolved_commit"].as_str().expect("commit").into(),
+        ))
+    }
+    /// The probe's descriptor marker; slice mode creates the per-run root as `_prepare_slice_root` does.
+    fn describe(&mut self, run: &str, _: &str, slice: Option<&str>) -> Result<Value, Failure> {
+        if slice.is_some() {
+            fs::create_dir_all(self.slices().join(run)).expect("slice root");
+        }
+        Ok(json!({"card": run, "slice": slice.is_some(),
+            "statement": {"issued_at": self.t, "expires_at": self.t + 600.0}}))
+    }
+    fn pending_cleanup(&mut self) -> Result<Option<Value>, Failure> {
+        Ok(self.cleanup.clone())
+    }
+    fn cleanup(&mut self, request: &Value) -> Result<(), Failure> {
+        self.action("/api/control/stop", json!({}));
+        self.native = json!({"state": "stopped"});
+        self.action(
+            "/api/staging/cleanup/accept",
+            json!({"offer_id": request["offer_id"], "archive_digest": request["archive_digest"],
+                "cleanup_acknowledged": true}),
+        );
+        self.cleanup = None;
+        Ok(())
+    }
+    fn stop_native(&mut self) -> Result<(), Failure> {
+        self.action("/api/control/stop", json!({}));
+        self.native = json!({"state": "stopped"});
+        Ok(())
+    }
+    fn native_control(&mut self) -> Result<Value, Failure> {
+        Ok(self.native.clone())
+    }
+    fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
+        Ok(self.offer.clone())
+    }
+    fn accept_work(&mut self, limits: &Value) -> Result<(), Failure> {
+        self.action(
+            "/api/work/preview",
+            json!({"limits": limits, "stage_acknowledged": true}),
+        );
+        self.action(
+            "/api/work/accept",
+            json!({"limits": limits, "preview": {"preview": "work-preview"}, "work_acknowledged": true}),
+        );
+        self.native = json!({"state": "running", "work_admitted": true});
+        self.offer = None;
+        Ok(())
+    }
+    fn member_caps(&mut self) -> Result<Value, Failure> {
+        Ok(self.caps.clone())
+    }
+    fn storage_cap(&mut self) -> Result<u64, Failure> {
+        Ok(10_000_000)
+    }
+    fn slice_root(&mut self, run: &str) -> Result<PathBuf, Failure> {
+        Ok(self.slices().join(run))
+    }
+    fn slice_transport(&mut self, a: &Value) -> Option<Box<dyn SliceTransport>> {
+        self.transport.then(|| {
+            Box::new(SnapshotRangeTransport::new(
+                self.root.join("snapshot"),
+                a["model"]["model_id"].as_str().unwrap_or_default(),
+                a["model"]["resolved_commit"].as_str().unwrap_or_default(),
+                None,
+            )) as Box<dyn SliceTransport>
+        })
+    }
+    fn sink(&mut self, report: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
+        self.sink.push(report.clone());
+        Ok(())
+    }
+    fn clock(&mut self) -> f64 {
+        self.t
+    }
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("b18-agent-{}-{name}", std::process::id()));
+    fs::remove_dir_all(&dir).unwrap_or_default();
+    fs::create_dir_all(&dir).expect("scratch");
+    fs::canonicalize(&dir).expect("canonical")
+}
+
+fn published(slices: &Path) -> Value {
+    let mut files = serde_json::Map::new();
+    fn walk(dir: &Path, base: &Path, files: &mut serde_json::Map<String, Value>) {
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, files);
+            } else {
+                let rel = path
+                    .strip_prefix(base)
+                    .expect("under")
+                    .to_string_lossy()
+                    .into_owned();
+                files.insert(rel, json!(sha_hex(&path)));
+            }
+        }
+    }
+    walk(slices, slices, &mut files);
+    Value::Object(files)
+}
+
+fn run_work(scenario: &Value) {
+    let name = scenario["name"].as_str().expect("name");
+    let root = scratch(name);
+    let mut host = WorkHost::new(root.clone());
+    let mut agent = LocalAgent::new();
+    let mut ticks = scenario["log"].as_array().expect("log").iter();
+    for op in scenario["ops"].as_array().expect("ops") {
+        let value = || op["value"].clone();
+        match op["op"].as_str().expect("op") {
+            "announce" => host.announcement = Some(value()),
+            "time" => host.t = op["t"].as_f64().expect("t"),
+            "native" => host.native = value(),
+            "cleanup" => host.cleanup = Some(value()),
+            "offer" => host.offer = Some(value()),
+            "caps" => host.caps = value(),
+            "refuse" => {
+                (host.active, host.check) = match op["value"].as_str() {
+                    None => (true, None),
+                    Some("owner_run_not_active") => (false, None),
+                    Some(other) => (true, Some(other.to_owned())),
+                };
+            }
+            "join" => agent.join_slice(),
+            "tick" => {
+                let want = ticks.next().expect("a recorded tick");
+                let at = format!("{name} @ {}", want["t"]);
+                let (reports, actions) = (host.sink.len(), host.actions.len());
+                let status = agent.tick(&mut host);
+                assert_eq!(status, want["status"], "{at}: status");
+                assert_eq!(
+                    json!(host.sink[reports..]),
+                    want["reports"],
+                    "{at}: reports"
+                );
+                assert_eq!(
+                    json!(host.actions[actions..]),
+                    want["actions"],
+                    "{at}: routes"
+                );
+                if status["state"] != "downloading_slice" {
+                    assert_eq!(
+                        published(&host.slices()),
+                        want["slice_files"],
+                        "{at}: slice files"
+                    );
+                }
+            }
+            other => panic!("unknown op {other}"),
+        }
+    }
+    assert!(
+        ticks.next().is_none(),
+        "{name}: every recorded tick is replayed"
+    );
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
+/// Proves: B-RUN-09 (each member reports its own work phase: an owner-requested cleanup runs first, a share its
+/// caps cannot hold is refused by name before any fetch, its slice is fetched and verified (`downloading_slice`
+/// -> `slice_ready`), a tampered or oversized slice is refused by name, the owner's contributor accepts its work
+/// offer, and `work_running`/`serving`/a blocked worker's code/what it waits for follow from its worker).
+#[test]
+fn the_work_phase_equals_the_executed_oracle_tick_by_tick() {
+    let fx = work_fixture();
+    let scenarios = fx["scenarios"].as_array().expect("scenarios");
+    assert_eq!(scenarios.len(), 7, "every recorded scenario is replayed");
+    let ticks: usize = scenarios
+        .iter()
+        .map(|s| s["log"].as_array().map_or(0, Vec::len))
+        .sum();
+    assert_eq!(ticks, 36, "every recorded tick is replayed");
+    for scenario in scenarios {
+        run_work(scenario);
+    }
+}
+
+fn work_announcement(fx: &Value) -> Value {
+    fx["scenarios"][0]["ops"]
+        .as_array()
+        .expect("ops")
+        .iter()
+        .find(|op| op["op"] == "announce" && op["value"]["phase"] == "work")
+        .expect("work announcement")["value"]
+        .clone()
+}
+
+/// Proves: the HTTP repository fallback (S1 model download) is never used for a slice: without an owner-served
+/// source the member refuses by name and reads no byte.
+#[test]
+fn a_member_without_an_owner_served_source_refuses_by_name() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let root = scratch("no-source");
+    let mut host = WorkHost::new(root.clone());
+    host.transport = false;
+    let mut agent = LocalAgent::new();
+    host.announcement = Some(json!({"phase": "collect", "run_id": work["run_id"],
+        "deployment_id": work["deployment_id"], "model": work["model"], "slice_mode": true,
+        "manifest_digest": work["manifest_digest"]}));
+    assert_eq!(agent.tick(&mut host)["state"], "reported");
+    host.announcement = Some(work);
+    for _ in 0..2 {
+        let status = agent.tick(&mut host);
+        assert_eq!(status["state"], "error", "{status}");
+        assert_eq!(
+            status["detail"],
+            slice_fetch::REPOSITORY_FALLBACK_NOT_PORTED
+        );
+    }
+    assert_eq!(published(&host.slices()), json!({}), "nothing fetched");
+    assert_eq!(
+        host.sink.last().expect("reported")["detail"],
+        "slice_repository_fallback_not_ported"
+    );
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
+/// A transport whose reads wait for the test to release them, one at a time.
+struct Gated {
+    inner: SnapshotRangeTransport,
+    gate: std::sync::mpsc::Receiver<()>,
+    reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl SliceTransport for Gated {
+    fn read_range(
+        &mut self,
+        m: &str,
+        c: &str,
+        p: &str,
+        o: u64,
+        l: u64,
+    ) -> Result<Vec<u8>, SliceError> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.gate
+            .recv()
+            .map_err(|_| SliceError("slice_test_gate_closed".into()))?;
+        self.inner.read_range(m, c, p, o, l)
+    }
+}
+
+/// Proves: Stop reaches a running slice fetch: the owner's `stopped` announcement ends it at the next segment,
+/// nothing partial is published, and the same run then reports the cancellation by name.
+#[test]
+fn stop_cancels_a_running_slice_fetch_between_segments() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let root = scratch("stop");
+    let mut host = WorkHost::new(root.clone());
+    let (release, gate) = std::sync::mpsc::channel();
+    let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    struct Once(Option<Gated>);
+    let mut gated = Once(Some(Gated {
+        inner: SnapshotRangeTransport::new(
+            root.join("snapshot"),
+            work["model"]["model_id"].as_str().expect("id"),
+            work["model"]["resolved_commit"].as_str().expect("commit"),
+            None,
+        ),
+        gate,
+        reads: reads.clone(),
+    }));
+    struct StopHost<'a>(&'a mut WorkHost, &'a mut Once);
+    impl AgentHost for StopHost<'_> {
+        fn announcement(&mut self) -> Result<Option<Value>, api::local_agent::ExchangeUnavailable> {
+            self.0.announcement()
+        }
+        fn member(&mut self) -> Option<String> {
+            self.0.member()
+        }
+        fn run_active(&mut self) -> bool {
+            self.0.run_active()
+        }
+        fn resource_check(&mut self) -> Option<String> {
+            self.0.resource_check()
+        }
+        fn prepared_model(&mut self) -> Result<(String, String), Failure> {
+            self.0.prepared_model()
+        }
+        fn describe(&mut self, r: &str, d: &str, s: Option<&str>) -> Result<Value, Failure> {
+            self.0.describe(r, d, s)
+        }
+        fn member_caps(&mut self) -> Result<Value, Failure> {
+            self.0.member_caps()
+        }
+        fn storage_cap(&mut self) -> Result<u64, Failure> {
+            self.0.storage_cap()
+        }
+        fn slice_root(&mut self, r: &str) -> Result<PathBuf, Failure> {
+            self.0.slice_root(r)
+        }
+        fn slice_transport(&mut self, _: &Value) -> Option<Box<dyn SliceTransport>> {
+            self.1
+                .0
+                .take()
+                .map(|g| Box::new(g) as Box<dyn SliceTransport>)
+        }
+        fn sink(&mut self, r: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
+            self.0.sink(r)
+        }
+        fn clock(&mut self) -> f64 {
+            self.0.clock()
+        }
+    }
+    let mut agent = LocalAgent::new();
+    let mut collect = work.clone();
+    collect["phase"] = json!("collect");
+    host.announcement = Some(collect);
+    assert_eq!(
+        agent.tick(&mut StopHost(&mut host, &mut gated))["state"],
+        "reported"
+    );
+    host.announcement = Some(work.clone());
+    let status = agent.tick(&mut StopHost(&mut host, &mut gated));
+    assert_eq!(status["state"], "downloading_slice", "{status}");
+    while reads.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        std::thread::yield_now();
+    }
+    let mut stopped = work.clone();
+    stopped["phase"] = json!("stopped");
+    host.announcement = Some(stopped);
+    assert_eq!(
+        agent.tick(&mut StopHost(&mut host, &mut gated))["state"],
+        "stopped"
+    );
+    release.send(()).expect("release the in-flight read");
+    agent.join_slice();
+    assert_eq!(
+        reads.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "no segment after Stop"
+    );
+    let run = work["run_id"].as_str().expect("run");
+    let files = published(&host.slices());
+    assert!(
+        files
+            .as_object()
+            .expect("map")
+            .keys()
+            .all(|k| !k.starts_with(&format!("{run}/stage-0"))),
+        "nothing partial is published: {files}"
+    );
+    host.announcement = Some(work);
+    let status = agent.tick(&mut StopHost(&mut host, &mut gated));
+    assert_eq!(status["state"], "error");
+    assert_eq!(status["detail"], "slice_fetch_cancelled");
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
+/// A transport that serves a wrong byte for the first read of each segment and counts rejects.
+struct Flaky {
+    inner: SnapshotRangeTransport,
+    corrupted: std::collections::BTreeSet<(String, u64)>,
+    rejects: usize,
+}
+impl SliceTransport for Flaky {
+    fn read_range(
+        &mut self,
+        m: &str,
+        c: &str,
+        p: &str,
+        o: u64,
+        l: u64,
+    ) -> Result<Vec<u8>, SliceError> {
+        let mut data = self.inner.read_range(m, c, p, o, l)?;
+        if self.corrupted.insert((p.to_owned(), o)) {
+            data[0] ^= 0xff;
+        }
+        Ok(data)
+    }
+    fn reject(&mut self, _: &str, _: u64, _: u64) -> bool {
+        self.rejects += 1;
+        true
+    }
+}
+
+/// Proves: the slice fetcher publishes only digest-verified bytes: a corrupted segment is re-fetched after the
+/// source rejects it, a fetch resumes from its journal, a mismatching existing file is a conflict, and the
+/// download / disk caps refuse before any read.
+#[test]
+fn the_slice_fetcher_publishes_only_verified_bytes() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let plan = &work["node_slice_plan"];
+    let digest = plan["node_plan_digest"].as_str().expect("digest");
+    let root = scratch("fetcher");
+    WorkHost::new(root.clone());
+    let snapshot = || {
+        SnapshotRangeTransport::new(
+            root.join("snapshot"),
+            plan["model_id"].as_str().expect("id"),
+            plan["resolved_commit"].as_str().expect("commit"),
+            None,
+        )
+    };
+    let dest = root.join("dest");
+    fs::create_dir_all(&dest).expect("dest");
+    let never = || false;
+    let mut flaky = Flaky {
+        inner: snapshot(),
+        corrupted: Default::default(),
+        rejects: 0,
+    };
+    let report =
+        slice_fetch::fetch_node_slice(plan, digest, &dest, &mut flaky, 1 << 20, 1 << 20, &never)
+            .expect("verified");
+    assert_eq!(flaky.rejects, 3, "each corrupted segment was rejected once");
+    assert_eq!(report["range_requests"], 6);
+    assert_eq!(report["state"], "slice_verified_not_loaded");
+    for file in plan["files"].as_array().expect("files") {
+        let path = dest.join(file["path"].as_str().expect("path"));
+        assert_eq!(json!(sha_hex(&path)), file["content_digest"]);
+        assert_eq!(
+            fs::metadata(&path).expect("meta").permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert!(!dest.join(".slice-work").exists(), "work files are removed");
+    // Idempotent: every byte is reused, no read.
+    let again = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &dest,
+        &mut snapshot(),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("reuse");
+    assert_eq!(
+        (
+            again["range_requests"].clone(),
+            again["reused_bytes"].clone()
+        ),
+        (json!(0), json!(2223))
+    );
+    // A different existing file is a conflict, never overwritten.
+    let a = dest.join(plan["files"][0]["path"].as_str().expect("path"));
+    fs::write(&a, b"other bytes").expect("write");
+    let refused = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &dest,
+        &mut snapshot(),
+        1 << 20,
+        1 << 20,
+        &never,
+    );
+    assert_eq!(
+        refused.expect_err("conflict").0,
+        "slice_destination_conflict"
+    );
+    // Caps refuse before reading.
+    for (download, disk, code) in [
+        (2199, 1 << 20, "slice_download_limit_exceeded"),
+        (1 << 20, 2222, "slice_disk_limit_exceeded"),
+    ] {
+        let mut gate = Flaky {
+            inner: snapshot(),
+            corrupted: Default::default(),
+            rejects: 0,
+        };
+        let refused =
+            slice_fetch::fetch_node_slice(plan, digest, &dest, &mut gate, download, disk, &never);
+        assert_eq!(refused.expect_err(code).0, code);
+        assert!(gate.corrupted.is_empty(), "{code}: no byte read");
+    }
+    // Resume: a journal of verified segments is reused, only the rest is fetched.
+    let resume = root.join("resume");
+    fs::create_dir_all(&resume).expect("resume");
+    let stop_after_first = std::sync::atomic::AtomicUsize::new(0);
+    // Calls: one per file before cloning, then one per segment: stop before a.bin's second segment.
+    let stop = || stop_after_first.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 3;
+    let cancelled = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &resume,
+        &mut snapshot(),
+        1 << 20,
+        1 << 20,
+        &stop,
+    );
+    assert_eq!(cancelled.expect_err("stopped").0, "slice_fetch_cancelled");
+    let progress = slice_fetch::slice_progress(plan, &resume).expect("progress");
+    assert_eq!(progress, json!({"done_bytes": 1000, "total_bytes": 2223}));
+    let done = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &resume,
+        &mut snapshot(),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("resumed");
+    assert_eq!(
+        (done["reused_bytes"].clone(), done["range_requests"].clone()),
+        (json!(1000), json!(2))
+    );
+    fs::remove_dir_all(&root).unwrap_or_default();
 }

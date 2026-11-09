@@ -50,6 +50,7 @@ use api::{
     run_exchange::{Announce, RunExchange},
     schema::{PublicError, Raised, STATUS_FIELDS, Snapshot},
     seed::SeedOptions,
+    slice_fetch::{SliceTransport, SnapshotRangeTransport},
     status::PublishedStatus,
     swarm::publisher::app::{AppPublisher, OwnerFacts},
     windows::PendingWindows,
@@ -597,7 +598,7 @@ impl AgentView<'_> {
             .ok_or_else(|| Failure::new("AttributeError", "demo_step_failed"))
     }
     /// `_prepare_slice_root(run_id)`: this Mac's empty per-run slice root inside its artifact cache.
-    fn slice_root(&self, run_id: &str) -> Result<String, Failure> {
+    fn prepare_slice_root(&self, run_id: &str) -> Result<String, Failure> {
         use std::os::unix::fs::DirBuilderExt;
         let base = self.acquisition()?.state_root().join("slices");
         let invalid = || Failure::new("ValueError", "slice_destination_invalid");
@@ -711,7 +712,7 @@ impl AgentHost for AgentView<'_> {
         };
         let source = match slice_manifest_digest {
             Some(digest) => Source::Slice {
-                source_root: self.slice_root(run_id)?,
+                source_root: self.prepare_slice_root(run_id)?,
                 manifest_digest: digest.to_owned(),
             },
             None => {
@@ -748,6 +749,48 @@ impl AgentHost for AgentView<'_> {
             &paths,
             now(),
         )
+    }
+    /// `OwnerRunConsent.member_caps`: `planning_caps(root)` (standing caps intersected with the policy).
+    fn member_caps(&mut self) -> Result<Value, Failure> {
+        let root = self
+            .core
+            .lock()
+            .map_err(|_| Failure::new("RuntimeError", "demo_step_failed"))?
+            .root
+            .clone();
+        Ok(planning_caps(&root).unwrap_or_else(|| json!({})))
+    }
+    /// `OwnerRunConsent.storage_cap`: `int(read_resource_policy(root)['storage_bytes'])`.
+    fn storage_cap(&mut self) -> Result<u64, Failure> {
+        let root = self
+            .core
+            .lock()
+            .map_err(|_| Failure::new("RuntimeError", "demo_step_failed"))?
+            .root
+            .clone();
+        resource_policy::read(&root)
+            .ok()
+            .flatten()
+            .and_then(|p| p.get("storage_bytes").and_then(Value::as_u64))
+            .ok_or_else(|| Failure::new("KeyError", "demo_step_failed"))
+    }
+    /// `slice_root(run_id)`: the per-run root `describe` prepared in this Mac's artifact cache.
+    fn slice_root(&mut self, run_id: &str) -> Result<PathBuf, Failure> {
+        Ok(self.acquisition()?.state_root().join("slices").join(run_id))
+    }
+    /// `SnapshotRangeTransport(source.source_root, ...)` over this Mac's own verified snapshot. The
+    /// compiled-bundle clone shortcut is not wired (the Rust compiler keeps no transfer bundle there),
+    /// so the owner's slice is read by range from the snapshot and verified like any other.
+    fn slice_transport(&mut self, _announcement: &Value) -> Option<Box<dyn SliceTransport>> {
+        let acquisition = self.acquisition().ok()?;
+        let (root, _) = acquisition.prepared_source().ok()?;
+        let model = acquisition.model();
+        Some(Box::new(SnapshotRangeTransport::new(
+            root,
+            model.model_id,
+            model.resolved_commit,
+            None,
+        )))
     }
     fn sink(&mut self, report: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
         self.exchange
