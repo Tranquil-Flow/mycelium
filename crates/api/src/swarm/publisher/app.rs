@@ -3,16 +3,24 @@
 //! `action`, `status`, `resume`, `close`), for whichever host owns the swarm lifecycle.
 //!
 //! Opt-in is explicit and off by default: until `/api/swarm/publish` succeeds no key, no state
-//! file and no directory client exist, and ticks do nothing. The listing key is this
-//! installation's own (`KEY_FILE`, 0600), never the node identity. Only lane-P documents cross
-//! the directory port; the owner-run facts are reduced to `OwnerView` here, so prompts,
-//! participants, registry origins and local paths never reach a listing.
+//! file and no directory client exist, and ticks do nothing. Each listing (swarm id) is signed
+//! by its own key, kept inside the private state file (`DB_FILE`, 0600) until the listing's
+//! withdrawal is confirmed and then replaced, never the node identity: listings are not
+//! linkable by key across swarms or over time. Only lane-P documents cross the directory port;
+//! the owner-run facts are reduced to `OwnerView` here, so prompts, participants, registry
+//! origins and local paths never reach a listing.
 //!
-//! Locking: `bound` serializes publisher work and is held across one bounded directory pass;
-//! `snapshot` is a separate short lock, so a status read never waits for the network.
+//! Locking: `state` (the binding and its private file) is only ever held for local work, so
+//! the owner's actions never wait for a directory. `work` serializes passes and is held across
+//! their exchanges, which run without `state`: each exchange is planned and committed under
+//! `state`, sent without it, then applied under it again (a rebinding in between ends the
+//! pass). `snapshot` is a separate short lock for status reads. On close, passes stop before
+//! their next exchange and the quit withdrawal is bounded by the caller's budget; whatever is
+//! unfinished stays durable debt for the next start.
 use super::{
-    DirectoryClient, DirectoryPort, Error, Listing, Phase, Status, SwarmPublisher,
+    DirectoryClient, DirectoryPort, Error, Listing, Phase, Status, Step, Stored, SwarmPublisher,
     host::{OwnerView, PublisherHost, Stop},
+    sync_parent,
 };
 use crate::{
     schema::PublicError,
@@ -21,15 +29,21 @@ use crate::{
 use ed25519_dalek::SigningKey;
 use serde_json::{Map, Value, json};
 use std::{
-    io::{Read, Write},
+    io::Read,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
-/// The installation's listing signing key (32 raw Ed25519 seed bytes, 0600).
+/// The B12 installation key file (32 raw Ed25519 seed bytes, 0600). No longer written: a
+/// retained B12 listing or debt is withdrawn with it (the key moves into `DB_FILE`), and with
+/// neither it is discarded unused.
 pub const KEY_FILE: &str = "swarm-publisher.key";
-/// The lane-P durable publisher state (opt-in, record, withdrawal debt).
+/// The durable publisher state (opt-in, record, withdrawal debt, the current listing key).
 pub const DB_FILE: &str = "swarm-publisher.sqlite3";
 
 /// Builds the directory port for a validated origin (default: [`DirectoryClient::new`]).
@@ -94,13 +108,55 @@ impl OwnerFacts {
 struct Bound {
     origin: String,
     host: PublisherHost,
+    port: Arc<dyn DirectoryPort>,
+    /// Which binding a pass planned against; a rebinding in between ends that pass.
+    epoch: u64,
+}
+
+/// Serializes directory passes. Unlike a mutex held across I/O, a closing caller can stop
+/// waiting for it at a deadline.
+struct Work {
+    busy: Mutex<bool>,
+    idle: Condvar,
+}
+struct WorkGuard<'a>(&'a Work);
+impl Work {
+    fn acquire(&self, until: Option<Instant>) -> Option<WorkGuard<'_>> {
+        let mut busy = lock(&self.busy);
+        while *busy {
+            busy = match until {
+                None => self.idle.wait(busy).unwrap_or_else(PoisonError::into_inner),
+                Some(until) => {
+                    let left = until.checked_duration_since(Instant::now())?;
+                    if left.is_zero() {
+                        return None;
+                    }
+                    self.idle
+                        .wait_timeout(busy, left)
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0
+                }
+            };
+        }
+        *busy = true;
+        Some(WorkGuard(self))
+    }
+}
+impl Drop for WorkGuard<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.busy) = false;
+        self.0.idle.notify_all();
+    }
 }
 
 pub struct AppPublisher {
     root: PathBuf,
     connect: Connect,
-    bound: Mutex<Option<Bound>>,
+    state: Mutex<Option<Bound>>,
+    work: Work,
     snapshot: Mutex<Value>,
+    closing: AtomicBool,
+    epochs: AtomicU64,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -165,8 +221,14 @@ impl AppPublisher {
         Self {
             root: root.into(),
             connect,
-            bound: Mutex::new(None),
+            state: Mutex::new(None),
+            work: Work {
+                busy: Mutex::new(false),
+                idle: Condvar::new(),
+            },
             snapshot: Mutex::new(unbound()),
+            closing: AtomicBool::new(false),
+            epochs: AtomicU64::new(0),
         }
     }
     /// The `swarm` status field. Never blocks on directory work.
@@ -177,69 +239,110 @@ impl AppPublisher {
     pub fn listing_enabled(&self) -> bool {
         lock(&self.snapshot)["enabled"] == true
     }
+    /// Whether a withdrawal is still owed (shown to a member too: it stays this host's debt).
+    pub fn withdrawal_pending(&self) -> bool {
+        lock(&self.snapshot)["phase"] == "withdraw_pending"
+    }
     fn refresh(&self, bound: &Bound, failure: Option<&Error>) {
         *lock(&self.snapshot) = status_value(&bound.origin, &bound.host.status(), failure);
     }
-    fn key(&self, create: bool) -> Result<SigningKey, Error> {
-        let path = self.root.join(KEY_FILE);
+    fn db(&self) -> PathBuf {
+        self.root.join(DB_FILE)
+    }
+    /// The B12 installation key, read as B12 did (regular 0600 file of exactly 32 bytes).
+    fn legacy_key(&self) -> Result<SigningKey, Error> {
         let invalid = || Error::new("swarm_publisher_key_invalid");
-        match std::fs::OpenOptions::new()
+        let mut file = std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(&path)
-        {
-            Ok(mut file) => {
-                let meta = file.metadata().map_err(|_| invalid())?;
-                if !meta.is_file() || meta.mode() & 0o077 != 0 || meta.len() != 32 {
-                    return Err(invalid());
-                }
-                let mut seed = [0u8; 32];
-                file.read_exact(&mut seed).map_err(|_| invalid())?;
-                Ok(SigningKey::from_bytes(&seed))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => {
-                let mut seed = [0u8; 32];
-                std::fs::File::open("/dev/urandom")
-                    .and_then(|mut f| f.read_exact(&mut seed))
-                    .map_err(|_| Error::new("swarm_entropy_unavailable"))?;
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .custom_flags(libc::O_NOFOLLOW)
-                    .open(&path)
-                    .map_err(|_| Error::new("swarm_publish_storage_failed"))?;
-                file.write_all(&seed)
-                    .and_then(|()| file.sync_all())
-                    .map_err(|_| Error::new("swarm_publish_storage_failed"))?;
-                Ok(SigningKey::from_bytes(&seed))
-            }
-            Err(_) => Err(invalid()),
+            .open(self.root.join(KEY_FILE))
+            .map_err(|_| invalid())?;
+        let meta = file.metadata().map_err(|_| invalid())?;
+        if !meta.is_file() || meta.mode() & 0o077 != 0 || meta.len() != 32 {
+            return Err(invalid());
+        }
+        let mut seed = [0u8; 32];
+        file.read_exact(&mut seed).map_err(|_| invalid())?;
+        Ok(SigningKey::from_bytes(&seed))
+    }
+    /// Once the state file holds the listing key, a B12 key file (or creation residue of one)
+    /// signs nothing more.
+    fn discard_legacy_key(&self) -> Result<(), Error> {
+        let path = self.root.join(KEY_FILE);
+        match std::fs::remove_file(&path) {
+            Ok(()) => sync_parent(&path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(Error::new("swarm_publish_storage_failed")),
         }
     }
-    fn open(&self, origin: &str, create: bool) -> Result<Bound, Error> {
-        let key = self.key(create)?;
-        let port = (self.connect)(origin)?;
-        let publisher = SwarmPublisher::open(&self.root.join(DB_FILE), key, port, origin)?;
-        Ok(Bound {
+    fn bind(&self, origin: &str, port: Arc<dyn DirectoryPort>, publisher: SwarmPublisher) -> Bound {
+        Bound {
             origin: origin.into(),
             host: PublisherHost::new(publisher),
-        })
+            port,
+            epoch: self.epochs.fetch_add(1, Ordering::SeqCst),
+        }
+    }
+    /// A fresh binding (and listing key) for `origin`, replacing state proven to owe nothing.
+    fn create(&self, origin: &str, listing: Option<Listing>) -> Result<Bound, Error> {
+        let port = (self.connect)(origin)?;
+        let publisher = SwarmPublisher::create_owned(&self.db(), port.clone(), origin, listing)?;
+        self.discard_legacy_key()?;
+        Ok(self.bind(origin, port, publisher))
+    }
+    /// Reopen retained state. Interrupted-creation residue and state that never listed anything
+    /// are replaced by a fresh binding when their key cannot be used; a record (listed, possibly
+    /// listed, or owed a withdrawal) keeps its key or is refused, never discarded.
+    fn reopen(
+        &self,
+        origin: &str,
+        obligated: bool,
+        listing: Option<Listing>,
+        keyed: bool,
+    ) -> Result<Bound, Error> {
+        let port = (self.connect)(origin)?;
+        let opened = if keyed {
+            SwarmPublisher::open_owned(&self.db(), port.clone(), origin, None)
+        } else if obligated {
+            self.legacy_key().and_then(|key| {
+                SwarmPublisher::open_owned(&self.db(), port.clone(), origin, Some(key))
+            })
+        } else {
+            // A B12 key that listed nothing retained may still have signed earlier listings.
+            Err(Error::new("swarm_publisher_key_invalid"))
+        };
+        match opened {
+            Ok(publisher) => {
+                self.discard_legacy_key()?;
+                Ok(self.bind(origin, port, publisher))
+            }
+            Err(error) if obligated => Err(error),
+            Err(_) => self.create(origin, listing),
+        }
     }
     fn resume_locked(&self, bound: &mut Option<Bound>) -> Result<bool, Error> {
         if bound.is_some() {
             return Ok(true);
         }
-        let Some(origin) = SwarmPublisher::bound_origin(&self.root.join(DB_FILE))? else {
-            return Ok(false);
+        let opened = match SwarmPublisher::inspect(&self.db()) {
+            Ok(Stored::Absent | Stored::Empty) => return Ok(false),
+            Ok(Stored::Bound {
+                origin,
+                obligated,
+                listing,
+                keyed,
+            }) => self
+                .reopen(&origin, obligated, listing, keyed)
+                .map_err(|e| (Some(origin), e)),
+            Err(e) => Err((None, e)),
         };
-        match self.open(&origin, false) {
+        match opened {
             Ok(b) => {
                 self.refresh(&b, None);
                 *bound = Some(b);
                 Ok(true)
             }
-            Err(e) => {
+            Err((origin, e)) => {
                 *lock(&self.snapshot) = json!({"enabled": false, "mode": "app",
                     "directory": origin, "phase": Phase::Failed, "error_code": e.code});
                 Err(e)
@@ -249,10 +352,11 @@ impl AppPublisher {
     /// Startup (`swarm_publish.resume`): reopen retained opt-in and withdrawal debt, if any.
     /// The host must keep ticking it even when the owner has since opted out.
     pub fn resume(&self) -> Result<bool, Error> {
-        self.resume_locked(&mut lock(&self.bound))
+        self.resume_locked(&mut lock(&self.state))
     }
     /// `POST /api/swarm/publish` (app mode). Records the explicit opt-in durably; the listing
     /// itself is published by a later tick once the run is serving and route-qualified.
+    /// Local work only: it never waits for a directory exchange in progress.
     pub fn publish(&self, is_owner: bool, body: &Map<String, Value>) -> Result<Value, PublicError> {
         if !is_owner {
             return Err(refuse("owner_role_required"));
@@ -304,7 +408,7 @@ impl AppPublisher {
             ),
         ]);
         docs::check_listing(&fields).map_err(|e| public(&e.into()))?;
-        let mut bound = lock(&self.bound);
+        let mut bound = lock(&self.state);
         self.resume_locked(&mut bound).map_err(|e| public(&e))?;
         if let Some(old) = bound.as_ref().filter(|b| b.origin != directory) {
             let status = old.host.status();
@@ -317,13 +421,15 @@ impl AppPublisher {
                     "swarm_directory_change_requires_unpublish",
                 ));
             }
-            // Nothing listed and no debt: the old binding holds no obligation.
+            // Nothing listed and no debt: no exchange can be in flight for the old binding
+            // (every exchange needs a record), and it holds no obligation. Replaced below.
             *bound = None;
-            std::fs::remove_file(self.root.join(DB_FILE))
-                .map_err(|_| PublicError::new(409, "swarm_publish_storage_failed"))?;
         }
         if bound.is_none() {
-            *bound = Some(self.open(directory, true).map_err(|e| public(&e))?);
+            *bound = Some(
+                self.create(directory, Some(listing.clone()))
+                    .map_err(|e| public(&e))?,
+            );
         }
         let b = bound
             .as_mut()
@@ -336,6 +442,7 @@ impl AppPublisher {
     }
     /// `POST /api/swarm/unpublish` (`{}` or `{"delete": true}`): revoke the opt-in now; the
     /// next tick deletes the listing (debt is durable until the directory confirms absence).
+    /// Local work only: it never waits for a directory exchange in progress.
     pub fn unpublish(
         &self,
         is_owner: bool,
@@ -348,7 +455,7 @@ impl AppPublisher {
         {
             return Err(refuse("invalid_request"));
         }
-        let mut bound = lock(&self.bound);
+        let mut bound = lock(&self.state);
         if !self.resume_locked(&mut bound).map_err(|e| public(&e))? {
             return Ok(self.status_json());
         }
@@ -362,28 +469,88 @@ impl AppPublisher {
         Ok(self.status_json())
     }
     /// One bounded pass after a lifecycle transition and on the host's periodic tick, off the
-    /// host's own lock. `None` while never opted in (no state, no network).
+    /// host's own lock. `None` while never opted in (no state, no network). Once closing, no
+    /// exchange is started.
     pub fn tick(&self, now: i64, facts: &OwnerFacts) -> Result<Option<Status>, Error> {
-        self.with_bound(|host| host.observe(now, facts.view()))
-    }
-    /// Before releasing custody on quit/leave/pause: one bounded withdrawal attempt. On an
-    /// unreachable directory the debt stays in the state file for the next start.
-    pub fn stop(&self, now: i64, event: Stop) -> Result<Option<Status>, Error> {
-        self.with_bound(|host| host.stop(now, event))
-    }
-    fn with_bound(
-        &self,
-        work: impl FnOnce(&mut PublisherHost) -> Result<Status, Error>,
-    ) -> Result<Option<Status>, Error> {
-        let mut bound = lock(&self.bound);
-        if !self.resume_locked(&mut bound)? {
-            return Ok(None);
+        if self.closing.load(Ordering::SeqCst) {
+            return Ok(self.current());
         }
-        let b = bound
-            .as_mut()
-            .ok_or_else(|| Error::new("swarm_publish_state_invalid"))?;
-        let result = work(&mut b.host);
-        self.refresh(b, result.as_ref().err());
-        result.map(|_| Some(b.host.status()))
+        self.pass(None, |host| host.begin_observe(now, facts.view()))
+    }
+    /// Before releasing custody on quit/leave/pause: one withdrawal attempt, bounded by the
+    /// directory client's own request budget. On an unreachable directory the debt stays in
+    /// the state file for the next start.
+    pub fn stop(&self, now: i64, event: Stop) -> Result<Option<Status>, Error> {
+        self.pass(None, |host| host.begin_stop(now, event))
+    }
+    /// Quit (`swarm_publish.close`): no new pass starts an exchange; a live listing becomes
+    /// durable withdrawal debt at once; then one withdrawal attempt that ends with `budget`,
+    /// including any wait for a pass already inside an exchange. Whatever is unfinished stays
+    /// debt for the next start. Only a storage failure is an error.
+    pub fn close(&self, now: i64, budget: Duration) -> Result<Option<Status>, Error> {
+        let until = Instant::now() + budget;
+        self.closing.store(true, Ordering::SeqCst);
+        {
+            let mut bound = lock(&self.state);
+            if !self.resume_locked(&mut bound)? {
+                return Ok(None);
+            }
+            let b = bound
+                .as_mut()
+                .ok_or_else(|| Error::new("swarm_publish_state_invalid"))?;
+            let marked = b.host.mark_stop(Stop::Quit);
+            self.refresh(b, marked.as_ref().err());
+            marked?;
+        }
+        self.pass(Some(until), |host| host.begin_stop(now, Stop::Quit))
+    }
+    fn current(&self) -> Option<Status> {
+        lock(&self.state).as_ref().map(|b| b.host.status())
+    }
+    /// One pass: planned and applied under `state`, each exchange sent without it. A pass
+    /// with a deadline (`close`) gives up waiting and sending at it; other passes stop before
+    /// their next exchange once closing. Every step is durable before its exchange, so a pass
+    /// ended early is like one ended by a crash: retried by the next pass or start.
+    fn pass(
+        &self,
+        until: Option<Instant>,
+        begin: impl FnOnce(&mut PublisherHost) -> Result<Step, Error>,
+    ) -> Result<Option<Status>, Error> {
+        let Some(_work) = self.work.acquire(until) else {
+            return Ok(self.current());
+        };
+        let (mut step, port, epoch) = {
+            let mut bound = lock(&self.state);
+            if !self.resume_locked(&mut bound)? {
+                return Ok(None);
+            }
+            let b = bound
+                .as_mut()
+                .ok_or_else(|| Error::new("swarm_publish_state_invalid"))?;
+            let step = begin(&mut b.host);
+            self.refresh(b, step.as_ref().err());
+            (step?, b.port.clone(), b.epoch)
+        };
+        loop {
+            // Callers get the custody's current status (as the snapshot), not the pass's
+            // own phase adjustment.
+            let call = match step {
+                Step::Done(_) => return Ok(self.current()),
+                Step::Call(call) => call,
+            };
+            let reply = match until {
+                Some(until) if Instant::now() >= until => return Ok(self.current()),
+                Some(until) => port.call_until(call.method, &call.path, &call.body, until),
+                None if self.closing.load(Ordering::SeqCst) => return Ok(self.current()),
+                None => port.call(call.method, &call.path, &call.body),
+            };
+            let mut bound = lock(&self.state);
+            let Some(b) = bound.as_mut().filter(|b| b.epoch == epoch) else {
+                return Ok(None);
+            };
+            let next = b.host.advance(call, reply);
+            self.refresh(b, next.as_ref().err());
+            step = next?;
+        }
     }
 }

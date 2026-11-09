@@ -47,6 +47,12 @@ echo "MYCELIUM_HEADLESS_RELEASE=$target/release/examples/headless" >> "$NEXTEST_
 filter = 'binary_id(=api::headless_leave_cleanup)'
 setup = "headless-release"
 
+# api::headless_swarm_publish (B12f) runs the same launcher: each of its tests used to nest a debug build
+# of it (about 40 s under quick load), which left its slowest test a few seconds inside the 60 s limit.
+[[profile.default.scripts]]
+filter = 'binary_id(=api::headless_swarm_publish)'
+setup = "headless-release"
+
 # quick skips, and never runs, these (each is still run by merge and nightly):
 #  * every #[ignore]d test (nextest skips them unless --run-ignored is given). The real two-host and
 #    two-device suites are all #[ignore]d ("explicit isolated native qualification", "requires local assets").

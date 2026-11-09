@@ -87,6 +87,27 @@ impl DirectoryClient {
 }
 impl DirectoryPort for DirectoryClient {
     fn call(&self, method: &str, path: &str, body: &[u8]) -> Result<Value, Error> {
+        self.exchange(method, path, body, None)
+    }
+    /// The registered request budget, ended earlier by a caller's deadline when that is sooner.
+    fn call_until(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+        deadline: Instant,
+    ) -> Result<Value, Error> {
+        self.exchange(method, path, body, Some(deadline))
+    }
+}
+impl DirectoryClient {
+    fn exchange(
+        &self,
+        method: &str,
+        path: &str,
+        body: &[u8],
+        cap: Option<Instant>,
+    ) -> Result<Value, Error> {
         if !matches!(method, "POST" | "GET")
             || !path.starts_with('/')
             || path
@@ -97,7 +118,9 @@ impl DirectoryPort for DirectoryClient {
         }
         let budget =
             seconds(BudgetId::PyMyceliumA13MacosSwarmPublishDirectoryclientInitTimeoutL54)?;
-        let deadline = Instant::now() + Duration::from_secs(budget as u64);
+        let own = Instant::now() + Duration::from_secs(budget as u64);
+        let deadline = cap.map_or(own, |cap| cap.min(own));
+        remaining(deadline)?;
         // Timed-out DNS remains owned. A blocked system resolver cannot accumulate
         // one detached thread per retry; concurrent callers fail without waiting.
         let mut slot = self
