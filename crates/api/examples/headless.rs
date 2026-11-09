@@ -2882,29 +2882,46 @@ fn run() -> Result<(), String> {
                "serving_role": "not_yet_serving", "host": "rust-headless"})
     );
     std::io::stdout().flush().map_err(|e| e.to_string())?;
-    serve
-        .join()
-        .map_err(|_| "serve_thread_panicked".to_owned())?;
+    // From here on every step of the host's cleanup runs, whatever failed before it: a panicked
+    // helper thread or a failed step is recorded, and the FIRST failure is what the exit reports
+    // (B15; a later cleanup error never masks the close's code).
+    let mut failed: Option<String> = None;
+    let mut keep = |step: Result<(), String>| {
+        if let Err(code) = step
+            && failed.is_none()
+        {
+            failed = Some(code);
+        }
+    };
+    if serve.join().is_err() {
+        keep(Err("serve_thread_panicked".to_owned()));
+        // The listener ended without a quit: close the core so the helper threads end too.
+        if let Ok(mut c) = core.lock() {
+            c.closed = true;
+        }
+    }
     // `swarm_publish.close` once quit stopped the run: no further directory exchange starts, a
     // live listing becomes durable withdrawal debt, and one withdrawal attempt ends within the
     // close budget (`thread.join(5)`), including any wait for a tick inside an exchange. An
     // unreachable or slow directory is not a failure here: the next start retries the debt.
     // Only a storage failure fails the close (a listing state refused at startup fails every
-    // close). Its result is kept: the host's cleanup below always runs, and a close failure is
-    // returned only after it.
+    // close).
     let close_budget =
         span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453);
     let close_until = Instant::now() + close_budget;
-    let swarm_close = swarm_publisher.close(unix_seconds(), close_budget);
-    maintenance
-        .join()
-        .map_err(|_| "maintenance_thread_panicked".to_owned())?;
-    renewals
-        .join()
-        .map_err(|_| "renewal_thread_panicked".to_owned())?;
-    signals
-        .join()
-        .map_err(|_| "signal_thread_panicked".to_owned())?;
+    keep(
+        swarm_publisher
+            .close(unix_seconds(), close_budget)
+            .map(|_closed| ())
+            .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code)),
+    );
+    for (thread, panicked) in [
+        (maintenance, "maintenance_thread_panicked"),
+        (renewals, "renewal_thread_panicked"),
+        (signals, "signal_thread_panicked"),
+    ] {
+        keep(thread.join().map_err(|_| panicked.to_owned()));
+    }
     // The tick thread ends at its next loop check and is awaited until the close deadline
     // (`thread.join(5)` shares the close budget). It is joined only once its loop has ended, so
     // the join never waits on an exchange. One still inside a directory exchange at the
@@ -2913,28 +2930,36 @@ fn run() -> Result<(), String> {
     let ended =
         swarm_ticks_ended.recv_timeout(close_until.saturating_duration_since(Instant::now()));
     if matches!(ended, Err(mpsc::RecvTimeoutError::Disconnected)) {
-        swarm_ticks
-            .join()
-            .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
+        keep(
+            swarm_ticks
+                .join()
+                .map_err(|_| "swarm_publish_thread_panicked".to_owned()),
+        );
     }
     // Close: the acquisition is cancelled, joined and recorded `closed` (it stays closed across a restart);
     // transient control files go away.
-    let acquisition = core.lock().map_err(|_| "core_poisoned")?.acquisition.take();
-    if let Some(acquisition) = acquisition {
-        acquisition
-            .close()
-            .map_err(|e| format!("acquisition_stop_failed:{}", e.code()))?;
+    match core.lock() {
+        Ok(mut c) => {
+            if let Some(acquisition) = c.acquisition.take() {
+                drop(c);
+                keep(
+                    acquisition
+                        .close()
+                        .map_err(|e| format!("acquisition_stop_failed:{}", e.code())),
+                );
+            }
+        }
+        Err(_) => keep(Err("core_poisoned".to_owned())),
     }
     for name in [LAUNCH_FILE, CONTROL_FILE] {
         match fs::remove_file(root.join(name)) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(format!("cleanup:{e}"));
+                keep(Err(format!("cleanup:{e}")));
             }
             _ => {}
         }
     }
-    swarm_close.map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
-    Ok(())
+    failed.map_or(Ok(()), Err)
 }
 fn request_launch(port: u16, credential: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))?;
