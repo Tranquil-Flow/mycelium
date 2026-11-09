@@ -66,7 +66,7 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
         if let Some(local) = local {
             local.check().map_err(|error| ControlError(error.0))?;
         }
-        use crate::iroh_host::{allowance, outside_runtime};
+        use crate::iroh_host::{allowance, flush_close, outside_runtime};
         use budgets::BudgetId as B;
         use iroh::endpoint::ReadToEndError;
         use tokio::time::{Instant, timeout_at};
@@ -94,6 +94,8 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
             .host
             .endpoint()
             .map_err(|_| ControlError("carrier_unavailable"))?;
+        // The call-owned connection, once opened, for the close flush below.
+        let opened = std::cell::RefCell::new(None);
         self.host.runtime().block_on(async {
             let deadline=Instant::now()+wait;
             let exchange=async {
@@ -105,6 +107,7 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
                 let (target,pin)=self.host.dial_target(request.peer).map_err(|_| ControlError("invalid_control_destination"))?;
                 let connection=timeout_at(deadline,endpoint.connect(target,transport::Channel::NodeControl.alpn())).await.map_err(|_| ControlError("control_connect_timeout"))?.map_err(|_| ControlError("control_connect_failed"))?;
                 let connection=ControlConnection(connection);
+                *opened.borrow_mut()=Some((connection.0.weak_handle(),connection.0.remote_id()));
                 self.host.confine(&connection.0,pin).map_err(|_| ControlError("control_path_refused"))?;
                 if connection.0.remote_id().as_bytes()!=&request.fence.endpoint_id { return Err(ControlError("control_peer_mismatch")); }
                 current_authority(authority,request.fence)?;
@@ -137,11 +140,12 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
             // The exchange and its call-owned connection are dropped by now, so
             // close(7) is queued but not sent. This runtime may stop being driven
             // when the call returns (an owner waits between result polls), and
-            // the close timer can then drain the connection unsent: the peer sees
-            // a stateless reset instead of the explicit close. Yield once so the
-            // already-woken connection driver puts the close on the wire first.
-            tokio::task::yield_now().await;
-            outcome
+            // the close timer could then drain the connection unsent: the peer
+            // would see a stateless reset instead of the explicit close. Put it
+            // on the wire before returning; the outcome's error order is kept.
+            let opened=opened.borrow_mut().take();
+            let flushed=match opened { Some((closed,remote))=>flush_close(endpoint,&closed,remote).await, None=>Ok(()) };
+            outcome.and_then(|bytes| flushed.map(|()| bytes).map_err(|_| ControlError("control_cleanup_unproven")))
         })
     }
 }

@@ -299,6 +299,70 @@ pub(crate) fn outside_runtime() -> Result<(), Error> {
         Ok(())
     }
 }
+/// Whether the runtime this future runs on keeps running its tasks (the
+/// connection drivers, iroh's socket actors) while no caller is inside
+/// `block_on`. A current-thread runtime runs them only inside `block_on`.
+fn self_driven() -> bool {
+    !matches!(
+        tokio::runtime::Handle::current().runtime_flavor(),
+        tokio::runtime::RuntimeFlavor::CurrentThread
+    )
+}
+/// Await inside the `block_on` that closed `closed` (to `remote`, on
+/// `endpoint`), before that `block_on` returns.
+///
+/// `close()` only queues CONNECTION_CLOSE; quinn/iroh have no "close sent"
+/// future. On a self-driven runtime its worker sends the close whatever the
+/// caller does next. On a current-thread runtime nothing sends it once the
+/// call returns: an owner that waits outside the runtime (a result poll) lets
+/// the close timer drain the connection unsent, and the peer's next packet
+/// earns a stateless reset instead of the explicit close. There, keep this
+/// `block_on` driving until both hops are done:
+/// 1. the connection driver built the close and handed that datagram to iroh's
+///    socket layer (its `connection_close` frame count; the driver runs on
+///    this thread, so a counted frame was already passed to the sender), and
+/// 2. iroh's actor for `remote`, which sends datagrams queued for an
+///    endpoint-id path, has worked through its inbox: a `remote_info` query
+///    queued behind the close datagram has been answered.
+///
+/// Bounded by `RouterClose`. This does not wait for the 3·PTO drain.
+pub(crate) async fn flush_close(
+    endpoint: &Endpoint,
+    closed: &iroh::endpoint::WeakConnectionHandle,
+    remote: iroh::EndpointId,
+) -> Result<(), Error> {
+    if self_driven() {
+        return Ok(());
+    }
+    tokio::time::timeout(budget(BudgetId::RouterClose)?, async {
+        // A connection that is gone was drained by its driver: nothing queued.
+        while let Some(connection) = closed.upgrade() {
+            if connection.stats().frame_tx.connection_close > 0 {
+                drop(connection);
+                endpoint.remote_info(remote).await;
+                break;
+            }
+            drop(connection);
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .map_err(|_| Error::CleanupUnproven)
+}
+/// Await inside the `block_on` that finished `send`, before it returns: the
+/// same as [`flush_close`] for a response's tail and FIN. On a current-thread
+/// runtime keep driving until the peer acknowledged the whole stream, stopped
+/// it, or the connection ended (then nothing more can be delivered), bounded
+/// by `RouterClose`. The reply bytes and their timing are unchanged.
+pub(crate) async fn flush_finished(send: &iroh::endpoint::SendStream) -> Result<(), Error> {
+    if self_driven() {
+        return Ok(());
+    }
+    tokio::time::timeout(budget(BudgetId::RouterClose)?, send.stopped())
+        .await
+        .map(drop)
+        .map_err(|_| Error::CleanupUnproven)
+}
 pub(crate) fn allowance(clock: &impl Clock, deadline: MonoInstant) -> Result<Duration, Error> {
     let now = clock.monotonic();
     deadline.same_domain(now).map_err(|_| Error::ClockDomain)?;
@@ -625,11 +689,21 @@ impl<'a> LoopbackHost<'a> {
             }
         };
         if let Err(error) = allowance(clock, deadline) {
-            connection.close(0u32.into(), b"deadline");
+            self.close_late(connection)?;
             return Err(error);
         }
         self.confine(&connection, pin)?;
         Ok(connection)
+    }
+    /// A connection that completed after the caller's deadline: close it with
+    /// `deadline` and put that close on the wire before returning (see
+    /// [`flush_close`]); otherwise the peer may see a reset instead.
+    fn close_late(&self, connection: Connection) -> Result<(), Error> {
+        let (closed, remote) = (connection.weak_handle(), connection.remote_id());
+        connection.close(0u32.into(), b"deadline");
+        drop(connection);
+        self.runtime
+            .block_on(flush_close(self.endpoint()?, &closed, remote))
     }
     fn accept_lan(
         &self,
@@ -916,7 +990,7 @@ impl<'a> LoopbackHost<'a> {
                 .map_err(|_| Error::Unavailable)
         })?;
         if let Err(error) = allowance(clock, deadline) {
-            connection.close(0u32.into(), b"deadline");
+            self.close_late(connection)?;
             return Err(error);
         }
         self.confine(&connection, pin)?;

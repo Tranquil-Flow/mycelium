@@ -3,7 +3,7 @@
 //! authorization: dispatch must authenticate signed payloads and commit replay
 //! admission before performing effects. One borrowed delivery applies backpressure.
 use crate::iroh_control::{ControlError, control_maximum};
-use crate::iroh_host::{allowance, outside_runtime};
+use crate::iroh_host::{allowance, flush_finished, outside_runtime};
 use budgets::MonoInstant;
 use iroh::endpoint::{Connection, SendStream};
 use transport::{Channel, Clock, ConnectionFence};
@@ -107,7 +107,12 @@ impl<C: Clock, F: Fn() -> ConnectionFence> ControlDelivery<'_, '_, C, F> {
                 .map_err(|_| ControlError("control_write_failed"))?;
             self.send
                 .finish()
-                .map_err(|_| ControlError("control_write_failed"))
+                .map_err(|_| ControlError("control_write_failed"))?;
+            // finish() only queues the tail and FIN; a current-thread runtime
+            // must still send them before the receiver goes idle.
+            flush_finished(&self.send)
+                .await
+                .map_err(|_| ControlError("control_write_timeout"))
         })?;
         self.receiver.current_binding(self.deadline)?;
         Ok(())
