@@ -183,3 +183,46 @@ fn mounted_stage_policy_counts_unicode_characters_at_all_actual_intakes() {
         }
     }
 }
+
+/// Counts the probes the resource gate runs; the observation itself is admissible.
+struct CountingObserver(std::sync::atomic::AtomicUsize);
+impl Observer for CountingObserver {
+    fn observe(&self) -> Observation {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Observation {
+            power: "external".into(),
+            thermal: "nominal".into(),
+            network: "unmetered".into(),
+        }
+    }
+}
+
+/// Proves: the owner's own target does not run the (slow) resource probe on every managed-control
+/// exchange. v0.1.4's control pump checks only the member binding per poll (`control_pump.py:203`);
+/// resources are observed by the agent pass, the staging authorizer and the worker's guard. Here the
+/// exchanges of one policy interval (`app.py:1009`, 1 s) share one probe, and a fence still refuses
+/// at once.
+#[test]
+fn managed_control_exchanges_share_one_resource_probe_per_policy_interval() {
+    let root = Root::new("exchange-probe");
+    let core: Shared = Arc::new(Mutex::new(load_core(root.0.clone()).unwrap()));
+    resource_policy::write(
+        &core.lock().unwrap().root,
+        &json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,
+            "network":"unmetered_only","background":false,"diagnostics":false,
+            "thermal":"stop_on_serious"}),
+    )
+    .unwrap();
+    let probes = Arc::new(CountingObserver(std::sync::atomic::AtomicUsize::new(0)));
+    core.lock().unwrap().observer = probes.clone();
+    for _ in 0..8 {
+        assert_eq!(exchange_resource_check(&core), None);
+    }
+    assert_eq!(
+        probes.0.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "eight back-to-back exchanges probed resources more than once"
+    );
+    core.lock().unwrap().fenced = true;
+    assert_eq!(exchange_resource_check(&core), Some("owner_stop"));
+}

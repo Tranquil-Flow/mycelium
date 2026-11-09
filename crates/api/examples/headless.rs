@@ -2512,8 +2512,30 @@ fn resource_check(core: &Shared) -> Option<&'static str> {
     resources::policy_violation(&policy, &observation)
 }
 /// The resource gate the owner's own target checks on every managed-control exchange.
+///
+/// v0.1.4's control pump checks only the member binding per poll (`control_pump.py:203`); power,
+/// thermal and network are observed by the agent pass, the staging authorizer and the worker's
+/// guard. A probe per exchange (two per poll) made polls take seconds, so the exchanges of one
+/// policy interval (`DemoApp._policy_loop`, app.py:1009) share one probe's verdict. A member leave
+/// fence still refuses at once.
 fn exchange_resource_check(core: &Shared) -> Option<&'static str> {
-    resource_check(core)
+    let interval = span(BudgetId::PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009);
+    // A poisoned lock is not a verdict: probe afresh.
+    if let Ok(c) = core.lock() {
+        if c.fenced {
+            return Some("owner_stop");
+        }
+        if let Some((at, verdict)) = c.exchange_resource
+            && at.elapsed() < interval
+        {
+            return verdict;
+        }
+    }
+    let verdict = resource_check(core);
+    if let Ok(mut c) = core.lock() {
+        c.exchange_resource = Some((std::time::Instant::now(), verdict));
+    }
+    verdict
 }
 /// `DemoApp._policy_loop` (app.py:1007-1030), the acquisition half: a finished attempt clears the active flag;
 /// a lost membership or a policy violation cancels the real worker, not only the display.
