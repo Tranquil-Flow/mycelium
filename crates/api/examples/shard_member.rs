@@ -93,13 +93,32 @@ fn operator_consent(path: &str) -> Result<Value> {
     if !body["policy"].is_object() || !body["consent"].is_object() {
         return Err("consent_file_invalid".into());
     }
+    // v0.1.4 order (`app.py:1742-1757`): the policy and the standing grant's
+    // limits are checked before this member pairs or joins anything; a
+    // decision it cannot honour ends it here, not after a seed join.
+    usable_decision(&body)?;
     Ok(body)
 }
-/// Grant and bind standing consent from a member-side decision (local stdin
-/// operator or `--consent-file`) to the swarm this member joined.
-fn grant_consent(root: &std::path::Path, membership: &Membership, body: &Value) -> Result<Value> {
-    let held = membership.session.lock().map_err(|_| "session_poisoned")?;
-    let session = held.as_ref().ok_or("not_joined")?;
+/// The member-side decision is one this Mac can honour: an offered resource
+/// policy (`consent_valid`, else `consent_required`) and grant caps within
+/// that policy and the stated device memory. Nothing is written.
+fn usable_decision(body: &Value) -> Result<()> {
+    if !resource_policy::consent_valid(&body["policy"]) {
+        return Err("consent_required".into());
+    }
+    standing_consent::decision_caps(
+        &body["consent"],
+        &body["policy"],
+        body["device_memory_bytes"].as_u64(),
+    )
+    .map(|_| ())
+    .map_err(|e| e.0.to_owned())
+}
+/// Record a member-side decision (local stdin operator or `--consent-file`):
+/// its resource policy and the unbound standing grant. v0.1.4 grants before
+/// the pair request and binds after the accept.
+fn grant_decision(root: &std::path::Path, body: &Value) -> Result<()> {
+    usable_decision(body)?;
     resource_policy::write(root, &body["policy"]).map_err(|e| e.code.to_owned())?;
     standing_consent::grant(
         root,
@@ -108,7 +127,19 @@ fn grant_consent(root: &std::path::Path, membership: &Membership, body: &Value) 
         app_host::now(),
         body["device_memory_bytes"].as_u64(),
     )
-    .map_err(|e| e.0.to_owned())?;
+    .map(|_| ())
+    .map_err(|e| e.0.to_owned())
+}
+/// Grant and bind standing consent from a member-side decision to the swarm
+/// this member joined.
+fn grant_consent(root: &std::path::Path, membership: &Membership, body: &Value) -> Result<Value> {
+    grant_decision(root, body)?;
+    bind_consent(root, membership)
+}
+/// Bind the granted standing consent to the swarm this member joined.
+fn bind_consent(root: &std::path::Path, membership: &Membership) -> Result<Value> {
+    let held = membership.session.lock().map_err(|_| "session_poisoned")?;
+    let session = held.as_ref().ok_or("not_joined")?;
     let binding = session.binding().ok_or("not_joined")?;
     standing_consent::bind(root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).map_err(|e| e.0.to_owned())?;
     Ok(json!({"consent":"granted"}))
@@ -351,6 +382,11 @@ fn run() -> Result<()> {
                     random_hex: &random,
                     seed: &options,
                 };
+                // The operator's `--consent-file` decision is granted before
+                // the join (unbound) and bound to the swarm joined below.
+                if let Some(body) = &operator_decision {
+                    grant_decision(&root, body)?;
+                }
                 let mut accepted = peer::accept_handoff(&root, true, &request["handoff"], &env)
                     .map_err(|e| e.code.to_owned())?;
                 peer::renew(&root, true, accepted.session.as_mut(), &env)
@@ -363,8 +399,8 @@ fn run() -> Result<()> {
                 )?);
                 // The operator's `--consent-file` decision binds to the swarm
                 // this member just joined (member-side, before any offer).
-                if let Some(body) = &operator_decision {
-                    grant_consent(&root, session.as_ref().ok_or("session_missing")?, body)?;
+                if operator_decision.is_some() {
+                    bind_consent(&root, session.as_ref().ok_or("session_missing")?)?;
                 }
                 let held = session
                     .as_ref()
