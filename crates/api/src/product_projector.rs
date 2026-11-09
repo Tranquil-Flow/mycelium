@@ -27,6 +27,9 @@
 //!   `peer_class`, `generation`, `authority_generation`, then `str()` of `incarnation`,
 //!   `runtime_backend` and `transport`. A row without a non-empty string `node_id` is skipped before
 //!   any of them.
+mod build;
+pub use build::{ProjectionInput, unknown_internet_native};
+
 use crate::schema::Raised;
 use crate::wire::float_repr;
 use protocol::gossip::python_str_repr;
@@ -294,8 +297,17 @@ fn int_text(text: &str) -> Result<Value, ProjectionError> {
 
 /// Python `int(member.get(key, 1))` (`:739-742`).
 fn generation(member: &Map<String, Value>, key: &str) -> Result<Value, ProjectionError> {
+    int_field(member, key, 1)
+}
+
+/// `int(mapping.get(key, default))` of a JSON value.
+fn int_field(
+    member: &Map<String, Value>,
+    key: &str,
+    default: i64,
+) -> Result<Value, ProjectionError> {
     match member.get(key) {
-        None => Ok(Value::from(1)),
+        None => Ok(Value::from(default)),
         Some(Value::Bool(flag)) => Ok(Value::from(u8::from(*flag))),
         Some(Value::Number(number)) => {
             let text = number.to_string();
@@ -418,6 +430,7 @@ fn empty_binding() -> Value {
 /// `ProductProjector(pseudonym_salt=...)`.
 pub struct ProductProjector {
     salt: Vec<u8>,
+    publication: std::sync::Mutex<build::Publication>,
 }
 
 impl ProductProjector {
@@ -428,6 +441,7 @@ impl ProductProjector {
         }
         Ok(Self {
             salt: pseudonym_salt.to_vec(),
+            publication: std::sync::Mutex::default(),
         })
     }
 

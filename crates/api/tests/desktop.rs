@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! O:path:mycelium_a13_macos/app.py, O:escape:F5.
 use api::{
-    desktop::{Desktop, Service, Session},
+    desktop::{Desktop, ProductRoutes, Service, Session},
     http::{Reply, Request},
     schema::{PublicError, Snapshot},
     status::PublishedStatus,
@@ -181,4 +181,58 @@ fn publication_rejects_stale_completion_and_retains_failed_last_good() {
     let snapshot = p.read().unwrap();
     assert_eq!(snapshot["status_snapshot"]["refresh_failed"], true);
     assert!(snapshot["status_snapshot"]["age_seconds"].as_f64().unwrap() >= 0.0);
+}
+
+/// Records the product GETs it is handed (B13): the desktop only routes and authenticates them.
+struct Product(AtomicUsize);
+impl ProductRoutes for Product {
+    fn get(&self, request: &Request) -> Result<Reply, PublicError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Reply::json(200, &json!({"target": request.target}))
+    }
+}
+#[test]
+fn product_routes_are_absent_unless_served_and_then_need_the_session() {
+    // A desktop without product routes (the packaged host today): unchanged 404 before the session.
+    let plain = app();
+    let mut anonymous = request("GET", "/api/v1/product/snapshot", b"");
+    anonymous.headers.retain(|(k, _)| k != "cookie");
+    code(plain.handle(anonymous.clone()).unwrap(), 404, "not_found");
+    // With them: protected like /api/status, then handed over without any service call.
+    let product = Arc::new(Product(AtomicUsize::new(0)));
+    let served = app().with_product(product.clone());
+    for path in [
+        "/api/v1/product/snapshot",
+        "/api/v1/product/events",
+        "/api/v1/product/export",
+    ] {
+        let mut r = anonymous.clone();
+        r.target = path.into();
+        code(served.handle(r).unwrap(), 401, "open_from_native_launcher");
+    }
+    assert_eq!(product.0.load(Ordering::SeqCst), 0);
+    login(&served);
+    for path in [
+        "/api/v1/product/snapshot",
+        "/api/v1/product/events",
+        "/api/v1/product/export",
+    ] {
+        let reply = served.handle(request("GET", path, b"")).unwrap();
+        assert_eq!(reply.status, 200);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reply.body).unwrap(),
+            json!({"target": path})
+        );
+        assert!(reply.header("content-security-policy").is_some());
+    }
+    // Other paths are untouched: an unknown GET is still 404, an action still reaches the service.
+    code(
+        served
+            .handle(request("GET", "/api/v1/product/other", b""))
+            .unwrap(),
+        404,
+        "not_found",
+    );
+    assert_eq!(product.0.load(Ordering::SeqCst), 3);
+    assert_eq!(served.service().calls.load(Ordering::SeqCst), 0);
 }
