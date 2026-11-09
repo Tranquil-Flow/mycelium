@@ -281,6 +281,33 @@ pub fn check_record(
     integer(f("seq"), 1, 1 << 40, "seq_invalid")?;
     text(f("name"), 1, 48, "name_invalid")?;
     ident(model_ok(f("model")), "model_invalid")?;
+    listing_tail(d)?;
+    let entry = f("entry");
+    if !entry.is_null() {
+        let J::Obj(p) = entry else {
+            return Err(WireError::bad("entry_invalid"));
+        };
+        if p.len() != 2 || entry.get("key").is_none() || entry.get("origin").is_none() {
+            return Err(WireError::bad("entry_invalid"));
+        }
+        key(entry.get("key").unwrap_or(&J::Null), "entry_invalid")?;
+        origin(
+            entry.get("origin").unwrap_or(&J::Null),
+            allow_loopback,
+            allow_private,
+            "entry_origin_invalid",
+        )?;
+    }
+    verify_document(d, f("owner_key"), verifier)
+}
+/// The owner-chosen public fields of a record (`name`, `description`, `access_mode`,
+/// `open_quota`) with `check_record`'s rules and codes, before any record exists.
+pub fn check_listing(d: &J) -> Result<(), WireError> {
+    text(d.get("name").unwrap_or(&J::Null), 1, 48, "name_invalid")?;
+    listing_tail(d)
+}
+fn listing_tail(d: &J) -> Result<(), WireError> {
+    let f = |k: &str| d.get(k).unwrap_or(&J::Null);
     text(f("description"), 0, 280, "description_invalid")?;
     if !matches!(
         f("access_mode").as_str(),
@@ -310,23 +337,7 @@ pub fn check_record(
             "open_quota_invalid",
         )?;
     }
-    let entry = f("entry");
-    if !entry.is_null() {
-        let J::Obj(p) = entry else {
-            return Err(WireError::bad("entry_invalid"));
-        };
-        if p.len() != 2 || entry.get("key").is_none() || entry.get("origin").is_none() {
-            return Err(WireError::bad("entry_invalid"));
-        }
-        key(entry.get("key").unwrap_or(&J::Null), "entry_invalid")?;
-        origin(
-            entry.get("origin").unwrap_or(&J::Null),
-            allow_loopback,
-            allow_private,
-            "entry_origin_invalid",
-        )?;
-    }
-    verify_document(d, f("owner_key"), verifier)
+    Ok(())
 }
 /// docs.py:252-316 `check` for every non-record document type.
 pub fn check(

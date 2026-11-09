@@ -51,6 +51,10 @@ use api::{
     schema::{PublicError, Raised, STATUS_FIELDS, Snapshot},
     seed::SeedOptions,
     status::PublishedStatus,
+    swarm::publisher::{
+        app::{AppPublisher, OwnerFacts},
+        host::Stop,
+    },
     windows::PendingWindows,
     wire::Json,
 };
@@ -130,6 +134,9 @@ struct Core {
     pending: PendingWindows,
     /// `DemoApp.public_relay`.
     relay: OwnerRelay,
+    /// `DemoApp.swarm_publisher` (`swarm_publish.py`): explicit opt-in listing custody. Its own
+    /// locks; never held together with Core's (see `swarm_publish_tick`).
+    swarm_publisher: Arc<AppPublisher>,
     /// `DemoApp.owner_run` as the status and the fast-mode gate read it (never blocks on the run).
     demo: DemoView,
     /// `DemoApp.local_contributor`: the owner's own member (`local_contributor.py`), renewed by the loop.
@@ -1568,6 +1575,22 @@ impl Host for HeadlessHost {
             report: record,
         })
     }
+    fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
+        let (closed, owner, publisher) =
+            self.with(|c| (c.closed, !c.target, c.swarm_publisher.clone()));
+        if closed {
+            return Err(PublicError::new(400, "application_closed"));
+        }
+        publisher.publish(owner, body).map(Json::from)
+    }
+    fn swarm_unpublish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
+        let (closed, owner, publisher) =
+            self.with(|c| (c.closed, !c.target, c.swarm_publisher.clone()));
+        if closed {
+            return Err(PublicError::new(400, "application_closed"));
+        }
+        publisher.unpublish(owner, body).map(Json::from)
+    }
     fn quit(&mut self) -> Result<Json, PublicError> {
         let workflow = self.with(|c| {
             c.closed = true;
@@ -2213,7 +2236,7 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
             if core.target {
                 Json::Null
             } else {
-                jobj! {"enabled" => false, "mode" => Json::Null}
+                Json::from(core.swarm_publisher.status_json())
             },
         ),
         (
@@ -2229,6 +2252,35 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
     ];
     debug_assert_eq!(values.len(), STATUS_FIELDS.len());
     Json::Obj(values.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+}
+/// Whole seconds of wall time for signed directory documents.
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+/// `SwarmPublisher.tick` (swarm_publish.py:344-357): the owner facts are read under Core's lock,
+/// the run through its own view (run -> host order, as `publish`), and the bounded directory
+/// pass runs with no Core lock held. Nothing happens while the owner never opted in.
+fn swarm_publish_tick(core: &Shared) {
+    let Ok((publisher, owner, demo, model, relay)) = core.lock().map(|c| {
+        (
+            c.swarm_publisher.clone(),
+            !c.target,
+            c.demo.clone(),
+            c.acquisition.as_ref().map(|a| a.model().model_id),
+            c.relay.origin(),
+        )
+    }) else {
+        eprintln!("swarm_publish_tick_failed: core_poisoned");
+        return;
+    };
+    let run = demo.status().map(|json| json.to_value());
+    let facts = OwnerFacts::from_owner_run(owner, run.as_ref(), model, relay.as_deref());
+    if let Err(error) = publisher.tick(unix_seconds(), &facts) {
+        // Also shown as `swarm.error_code`; the next tick retries at the bounded cadence.
+        eprintln!("swarm_publish_tick_failed: {}", error.code);
+    }
 }
 fn fast_mode_env() -> &'static str {
     api::persistent::TOKEN_PATH_ENV
@@ -2484,6 +2536,7 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
     let root = authority.root.clone();
     let mut core = Core {
         relay: OwnerRelay::new(&root, relay_hooks),
+        swarm_publisher: Arc::new(AppPublisher::new(&root)),
         authority,
         fenced: false,
         left: false,
@@ -2645,6 +2698,16 @@ fn run() -> Result<(), String> {
     let host = format!("127.0.0.1:{port}");
     let credential = URL_SAFE_NO_PAD.encode(random(32).map_err(|e| e.to_string())?);
     resume_interrupted_leave(&core);
+    // `swarm_publish.resume`: retained opt-in and withdrawal debt reopen before serving starts;
+    // a failure is shown in the status (`swarm.error_code`) and never blocks the start.
+    let swarm_publisher = core
+        .lock()
+        .map_err(|_| "core_poisoned")?
+        .swarm_publisher
+        .clone();
+    if let Err(error) = swarm_publisher.resume() {
+        eprintln!("swarm_publish_resume_failed: {}", error.code);
+    }
     let runs = {
         let chain = owner_runs(&core);
         core.lock().map_err(|_| "core_poisoned")?.demo = chain.view();
@@ -2735,6 +2798,17 @@ fn run() -> Result<(), String> {
             }
         })
     };
+    // `SwarmPublisher.start` (swarm_publish.py:437-448): its own loop, so a slow directory never
+    // delays the status, renewals or the listener. Reconcile itself bounds the network cadence.
+    let swarm_ticks = {
+        let core = core.clone();
+        thread::spawn(move || {
+            while core.lock().is_ok_and(|c| !c.closed) {
+                swarm_publish_tick(&core);
+                thread::sleep(span(BudgetId::OwnerPoll));
+            }
+        })
+    };
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let budget = span(BudgetId::ModelSelection);
     let serve = {
@@ -2800,6 +2874,9 @@ fn run() -> Result<(), String> {
     signals
         .join()
         .map_err(|_| "signal_thread_panicked".to_owned())?;
+    swarm_ticks
+        .join()
+        .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
     // Close: the acquisition is cancelled, joined and recorded `closed` (it stays closed across a restart);
     // transient control files go away.
     let acquisition = core.lock().map_err(|_| "core_poisoned")?.acquisition.take();
@@ -2816,6 +2893,12 @@ fn run() -> Result<(), String> {
             _ => {}
         }
     }
+    // `swarm_publish.close` after the run stopped: one bounded withdrawal attempt of a live
+    // listing. An unreachable directory is not a failure here: the debt is already durable in the
+    // state file and the next start retries it. Only a storage failure fails the close.
+    swarm_publisher
+        .stop(unix_seconds(), Stop::Quit)
+        .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
     Ok(())
 }
 fn request_launch(port: u16, credential: &str) -> std::io::Result<()> {
