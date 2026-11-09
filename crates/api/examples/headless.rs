@@ -83,9 +83,9 @@ use std::{
     io::{Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// `DemoApp._probe_times` (app.py:1062-1066): at most 64 link probes per 10 s. Registry ids: SE-L10-JOIN-BOUNDS (L1b).
@@ -2799,14 +2799,19 @@ fn run() -> Result<(), String> {
     };
     // `SwarmPublisher.start` (swarm_publish.py:437-448): its own loop, so a slow directory never
     // delays the status, renewals or the listener. Reconcile itself bounds the network cadence.
-    let swarm_ticks = {
+    // Its end is announced by dropping `ended` (also on a panic), so quit can wait for it
+    // with a deadline instead of a join that would wait out an exchange.
+    let (swarm_ticks, swarm_ticks_ended) = {
         let core = core.clone();
-        thread::spawn(move || {
+        let (ended, swarm_ticks_ended) = mpsc::channel::<()>();
+        let swarm_ticks = thread::spawn(move || {
+            let _ended = ended;
             while core.lock().is_ok_and(|c| !c.closed) {
                 swarm_publish_tick(&core);
                 thread::sleep(span(BudgetId::OwnerPoll));
             }
-        })
+        });
+        (swarm_ticks, swarm_ticks_ended)
     };
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let budget = span(BudgetId::ModelSelection);
@@ -2868,13 +2873,13 @@ fn run() -> Result<(), String> {
     // live listing becomes durable withdrawal debt, and one withdrawal attempt ends within the
     // close budget (`thread.join(5)`), including any wait for a tick inside an exchange. An
     // unreachable or slow directory is not a failure here: the next start retries the debt.
-    // Only a storage failure fails the close.
-    swarm_publisher
-        .close(
-            unix_seconds(),
-            span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453),
-        )
-        .map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
+    // Only a storage failure fails the close (a listing state refused at startup fails every
+    // close). Its result is kept: the host's cleanup below always runs, and a close failure is
+    // returned only after it.
+    let close_budget =
+        span(BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453);
+    let close_until = Instant::now() + close_budget;
+    let swarm_close = swarm_publisher.close(unix_seconds(), close_budget);
     maintenance
         .join()
         .map_err(|_| "maintenance_thread_panicked".to_owned())?;
@@ -2884,14 +2889,17 @@ fn run() -> Result<(), String> {
     signals
         .join()
         .map_err(|_| "signal_thread_panicked".to_owned())?;
-    // The tick thread ends at its next loop check; one still inside a directory exchange (its
-    // state durable before the exchange) is ended by the process exit, as a crash would be.
-    if swarm_ticks.is_finished() {
+    // The tick thread ends at its next loop check and is awaited until the close deadline
+    // (`thread.join(5)` shares the close budget). It is joined only once its loop has ended, so
+    // the join never waits on an exchange. One still inside a directory exchange at the
+    // deadline (its state durable before the exchange) is ended by the process exit, as a crash
+    // would be; nothing is written for it, since a closing launcher writes nothing to stderr.
+    let ended =
+        swarm_ticks_ended.recv_timeout(close_until.saturating_duration_since(Instant::now()));
+    if matches!(ended, Err(mpsc::RecvTimeoutError::Disconnected)) {
         swarm_ticks
             .join()
             .map_err(|_| "swarm_publish_thread_panicked".to_owned())?;
-    } else {
-        eprintln!("swarm_publish_tick_ended_by_exit");
     }
     // Close: the acquisition is cancelled, joined and recorded `closed` (it stays closed across a restart);
     // transient control files go away.
@@ -2909,6 +2917,7 @@ fn run() -> Result<(), String> {
             _ => {}
         }
     }
+    swarm_close.map_err(|e| format!("swarm_publish_stop_failed:{}", e.code))?;
     Ok(())
 }
 fn request_launch(port: u16, credential: &str) -> std::io::Result<()> {

@@ -8,7 +8,7 @@
 mod support;
 use api::swarm::publisher::{
     DirectoryClient, DirectoryPort, Error,
-    app::{AppPublisher, OwnerFacts},
+    app::{AppPublisher, DB_FILE, OwnerFacts},
     heartbeat_seconds,
     host::Stop,
 };
@@ -21,7 +21,7 @@ use std::{
     net::{TcpListener, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -277,10 +277,52 @@ fn first_line(stdout: std::process::ChildStdout) -> String {
     reader.join().unwrap();
     line
 }
+/// Everything the process writes to stderr, each line also echoed to the test's own stderr.
+struct StderrText {
+    text: mpsc::Receiver<String>,
+    reader: Option<thread::JoinHandle<()>>,
+}
+impl StderrText {
+    fn collect(stderr: std::process::ChildStderr) -> Self {
+        let (send, text) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut text = String::new();
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                eprintln!("{line}");
+                text.push_str(&line);
+                text.push('\n');
+            }
+            send.send(text).unwrap_or(());
+        });
+        Self {
+            text,
+            reader: Some(reader),
+        }
+    }
+    /// The whole text, once the pipe closed (the process exited); the reader is joined.
+    fn wait(&mut self) -> String {
+        let text = self
+            .text
+            .recv_timeout(patience())
+            .expect("stderr closes with the process");
+        if let Some(reader) = self.reader.take() {
+            reader.join().unwrap();
+        }
+        text
+    }
+}
+/// How a quit ended: the exit status, the time from the request to the exit, and the stderr.
+struct Quit {
+    status: ExitStatus,
+    took: Duration,
+    stderr: String,
+}
 /// One headless process; dropped = killed and reaped by exact pid if it did not exit.
 struct Headless {
     child: Child,
     client: Client,
+    stderr: StderrText,
 }
 impl Headless {
     fn launch(root: &Path) -> Self {
@@ -290,9 +332,10 @@ impl Headless {
             .env("HOME", root)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("the headless example was built");
+        let stderr = StderrText::collect(child.stderr.take().unwrap());
         let stdout = child.stdout.take().unwrap();
         let line = first_line(stdout);
         assert!(line.contains("launcher_started"), "{line:?}");
@@ -310,7 +353,11 @@ impl Headless {
             .to_owned();
         let mut client = Client::new(&origin).unwrap();
         client.sign_in(&attribute("value")).unwrap();
-        Self { child, client }
+        Self {
+            child,
+            client,
+            stderr,
+        }
     }
     fn swarm(&self) -> Value {
         self.client.get("/api/status").unwrap().json().unwrap()["swarm"].clone()
@@ -323,14 +370,25 @@ impl Headless {
         self.quit_timed();
     }
     /// Quit, then the time from the request to the process exit.
-    fn quit_timed(mut self) -> Duration {
+    fn quit_timed(self) -> Duration {
+        let quit = self.quit_ended();
+        assert!(quit.status.success(), "{:?}", quit.status);
+        quit.took
+    }
+    /// Quit, then how the process ended, whatever its exit status.
+    fn quit_ended(mut self) -> Quit {
         let started = Instant::now();
         assert_eq!(self.post("/api/quit", json!({})).0, 200);
         let deadline = Instant::now() + patience();
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
-                assert!(status.success(), "{status:?}");
-                return started.elapsed();
+                let took = started.elapsed();
+                let stderr = self.stderr.wait();
+                return Quit {
+                    status,
+                    took,
+                    stderr,
+                };
             }
             assert!(
                 Instant::now() < deadline,
@@ -581,7 +639,16 @@ fn a_silent_directory_does_not_hold_quit_beyond_the_close_budget() {
     leave_unconfirmed_listing(&root, &silent.origin);
     let app = Headless::launch(&root);
     silent.wait_for_exchange();
-    let quit = app.quit_timed();
+    // The tick thread is inside that exchange (the directory never answers, the client's own
+    // deadline is past the close budget) when the quit ends: a closing launcher writes nothing
+    // to stderr (headless_signals), so the unfinished thread is left to the exit silently.
+    let ended = app.quit_ended();
+    assert!(ended.status.success(), "{:?}", ended.status);
+    assert_eq!(
+        ended.stderr, "",
+        "a quit during an exchange wrote to stderr"
+    );
+    let quit = ended.took;
     eprintln!("swarm-publish-quit-during-exchange {quit:?}");
     let bound = close_budget() + span(BudgetId::OwnerPoll) * 3;
     assert!(
@@ -592,6 +659,57 @@ fn a_silent_directory_does_not_hold_quit_beyond_the_close_budget() {
     let p = AppPublisher::new(&root);
     assert!(p.resume().unwrap());
     assert_eq!(p.status_json()["phase"], "withdraw_pending");
+}
+
+/// A listing state refused at startup (its file is no longer private, so its key is never
+/// trusted) fails every close: the quit still runs the host's whole cleanup — the other
+/// threads joined, the acquisition closed, the control files removed — and only then reports
+/// that failure. The refused state and the listing it owes stay as they were.
+#[test]
+fn a_refused_listing_state_still_cleans_up_on_quit() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let dir_root = fresh_root(&base, "directory");
+    support::set_clock(&dir_root, unix_now());
+    let directory = support::Server::start(&dir_root, false);
+    let root = fresh_root(&base, "refused");
+    leave_listing_behind(&root, &directory.origin);
+    let state = root.join(DB_FILE);
+    fs::set_permissions(&state, fs::Permissions::from_mode(0o640)).unwrap();
+    let saved = fs::read(&state).unwrap();
+    let app = Headless::launch(&root);
+    until("status shows the refused state", || {
+        app.swarm()["phase"] == "failed"
+    });
+    let ended = app.quit_ended();
+    for file in ["native-control.json", "open-demo.html"] {
+        assert!(
+            !root.join(file).exists(),
+            "{file} left behind by a quit whose close failed (exit {:?})",
+            ended.status
+        );
+    }
+    assert_eq!(
+        ended.status.code(),
+        Some(3),
+        "the close failure is reported"
+    );
+    assert!(
+        ended.stderr.contains("swarm_publish_stop_failed"),
+        "{}",
+        ended.stderr
+    );
+    assert_eq!(
+        fs::read(&state).unwrap(),
+        saved,
+        "the refused state is kept"
+    );
+    assert_eq!(
+        rows(&directory.origin).len(),
+        1,
+        "the listing is still owed"
+    );
 }
 
 #[test]
