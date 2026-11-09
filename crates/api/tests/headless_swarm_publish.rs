@@ -712,6 +712,49 @@ fn a_refused_listing_state_still_cleans_up_on_quit() {
     );
 }
 
+/// B15 (REVIEW-laneB12f re-review (b)): a cleanup step that fails at quit neither stops the
+/// rest of the cleanup nor replaces the code of the failure that came first. Here the close
+/// fails (a refused listing state), then the launch file cannot be removed (a directory now
+/// stands at its name): the control file is still removed, and the exit reports the close.
+#[test]
+fn a_failed_cleanup_step_neither_skips_the_rest_nor_masks_the_close_failure() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let dir_root = fresh_root(&base, "directory");
+    support::set_clock(&dir_root, unix_now());
+    let directory = support::Server::start(&dir_root, false);
+    let root = fresh_root(&base, "refused-cleanup");
+    leave_listing_behind(&root, &directory.origin);
+    fs::set_permissions(root.join(DB_FILE), fs::Permissions::from_mode(0o640)).unwrap();
+    let app = Headless::launch(&root);
+    until("status shows the refused state", || {
+        app.swarm()["phase"] == "failed"
+    });
+    // Signing in consumed the launch file; a non-empty directory at its name cannot be
+    // removed as a file.
+    let blocker = root.join("open-demo.html");
+    fs::create_dir(&blocker).unwrap();
+    fs::write(blocker.join("keep"), b"x").unwrap();
+    let ended = app.quit_ended();
+    assert!(
+        !root.join("native-control.json").exists(),
+        "a failed cleanup step skipped the control file's removal (exit {:?}, stderr {})",
+        ended.status,
+        ended.stderr
+    );
+    assert_eq!(ended.status.code(), Some(3), "{}", ended.stderr);
+    assert!(
+        ended.stderr.contains("swarm_publish_stop_failed"),
+        "the first failure's code was masked: {}",
+        ended.stderr
+    );
+    assert!(
+        blocker.join("keep").exists(),
+        "the blocker is not ours to remove"
+    );
+}
+
 #[test]
 fn headless_publishing_against_the_rust_directory_authority() {
     journey(false);

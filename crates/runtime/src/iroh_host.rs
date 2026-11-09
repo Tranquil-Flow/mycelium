@@ -858,7 +858,7 @@ impl<'a> LoopbackHost<'a> {
     /// rebind leaves the host closed. `Unavailable` in every other mode.
     pub fn recycle_lan(&mut self, clock: &impl Clock, deadline: MonoInstant) -> Result<(), Error> {
         let next = match (&self.lan, &self.reuse, &self.endpoint) {
-            (Some(lan), Some(_), Some(_)) => lan.successor()?,
+            (Some(lan), Some(_), Some(_)) => lan.successor(std::time::Instant::now())?,
             // Not direct LAN, or already closed: never rebind a released host.
             _ => return Err(Error::Unavailable),
         };
