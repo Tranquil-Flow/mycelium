@@ -35,7 +35,35 @@ fn profile_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     exe.parent().unwrap().parent().unwrap().to_path_buf()
 }
+/// The launcher, built once before any test uses it. Under nextest the `headless-release` setup
+/// script (`.config/nextest.toml`) builds the release launcher once before any test of this binary
+/// starts and names it in [`PREBUILT`]; each test only reads it. Without that variable (plain
+/// `cargo test`) the first test builds this profile's launcher, once per process.
+const PREBUILT: &str = "MYCELIUM_HEADLESS_RELEASE";
 fn build() {
+    launcher();
+}
+fn launcher() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| match std::env::var_os(PREBUILT) {
+            Some(path) => prebuilt(Path::new(&path)),
+            None => nested_build(),
+        })
+        .clone()
+}
+/// A prebuilt launcher must be this target directory's own release launcher, never another tree's.
+fn prebuilt(path: &Path) -> PathBuf {
+    let expected = profile_dir()
+        .with_file_name("release")
+        .join("examples/headless");
+    let (found, expected) = (fs::canonicalize(path), fs::canonicalize(&expected));
+    match (found, expected) {
+        (Ok(found), Ok(expected)) if found == expected => found,
+        other => panic!("{PREBUILT} is not this target's release launcher: {other:?}"),
+    }
+}
+fn nested_build() -> PathBuf {
     let profile = profile_dir();
     let target = profile.parent().unwrap();
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
@@ -53,6 +81,7 @@ fn build() {
         "nested build failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    profile.join("examples/headless")
 }
 fn span(id: BudgetId) -> Duration {
     Duration::from_millis(id.span(Entries::new(0)).unwrap().millis())
@@ -255,7 +284,7 @@ struct Headless {
 }
 impl Headless {
     fn launch(root: &Path) -> Self {
-        let mut child = Command::new(profile_dir().join("examples/headless"))
+        let mut child = Command::new(launcher())
             .args(["--headless", "--offline", "--state-root"])
             .arg(root)
             .env("HOME", root)
@@ -437,7 +466,7 @@ fn journey(python: bool) {
         started.elapsed()
     );
     // Explicit opt-in through the app route; not serving, so nothing is listed yet: the bound
-    // directory is never contacted, before or after the opt-out, nor across a restart.
+    // directory is never contacted, before or after the opt-out.
     let counting = Counting::start();
     let bound = counting.origin();
     let root = fresh_root(&base, "opt-in");
@@ -458,14 +487,6 @@ fn journey(python: bool) {
     let (status, out) = app.post("/api/swarm/unpublish", json!({}));
     assert_eq!(status, 200, "{out}");
     assert_eq!(out["enabled"], false);
-    app.quit();
-    let app = Headless::launch(&root);
-    until("the opted-out state reopens", || {
-        app.swarm()["enabled"] == false && app.swarm()["mode"] == "app"
-    });
-    // Several tick periods pass with the state reopened and nothing to do.
-    let settled = Instant::now() + span(BudgetId::OwnerPoll) * 4;
-    until("tick periods pass", || Instant::now() >= settled);
     app.quit();
     assert_eq!(
         counting.connections(),
@@ -519,29 +540,6 @@ fn journey(python: bool) {
     assert!(rows(&origin).is_empty());
     assert!(p.stop(retry, Stop::Quit).unwrap().is_some());
 
-    eprintln!(
-        "swarm-publish-profile {:?} before: A member keeps showing",
-        started.elapsed()
-    );
-    // A member keeps showing a withdrawal it still owes from its time as an owner.
-    let root = fresh_root(&base, "member-debt");
-    leave_listing_behind(&root, &origin);
-    become_member(&root);
-    directory.stop();
-    let app = Headless::launch(&root);
-    until("the member's status shows the owed withdrawal", || {
-        let s = app.swarm();
-        s["phase"] == "withdraw_pending" && s["error_code"] == "swarm_directory_unreachable"
-    });
-    app.quit();
-    directory.restart(&dir_root);
-    let retry = unix_now() + heartbeat_seconds().unwrap();
-    support::set_clock(&dir_root, retry);
-    let p = AppPublisher::new(&root);
-    assert!(p.resume().unwrap());
-    let member = OwnerFacts::from_owner_run(false, None, None, None);
-    p.tick(retry, &member).unwrap();
-    assert!(rows(&origin).is_empty());
     eprintln!("swarm-publish-profile done {:?}", started.elapsed());
 }
 
@@ -604,4 +602,67 @@ fn headless_publishing_against_the_rust_directory_authority() {
 #[ignore = "requires the deployed Python directory copy + cryptography interpreter; explicit loopback qualification"]
 fn headless_publishing_against_the_deployed_python_directory() {
     journey(true);
+}
+
+/// The opted-out state, reopened by a later start, contacts no directory either.
+#[test]
+fn an_opted_out_host_contacts_no_directory_across_a_restart() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let counting = Counting::start();
+    let root = fresh_root(&base, "opted-out-restart");
+    let app = Headless::launch(&root);
+    let (status, reply) = app.post(
+        "/api/swarm/publish",
+        Value::Object(listing(&counting.origin())),
+    );
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(app.post("/api/swarm/unpublish", json!({})).0, 200);
+    app.quit();
+    let app = Headless::launch(&root);
+    until("the opted-out state reopens", || {
+        let s = app.swarm();
+        s["enabled"] == false && s["mode"] == "app"
+    });
+    // Several tick periods pass with the state reopened and nothing to do.
+    let settled = Instant::now() + span(BudgetId::OwnerPoll) * 4;
+    until("tick periods pass", || Instant::now() >= settled);
+    app.quit();
+    assert_eq!(
+        counting.connections(),
+        0,
+        "an unlisted, opted-out host contacts no directory"
+    );
+}
+
+/// A member keeps showing a withdrawal it still owes from its time as an owner.
+#[test]
+fn a_member_shows_the_withdrawal_it_still_owes() {
+    build();
+    let scratch = support::Scratch::new();
+    let base = fs::canonicalize(&scratch.0).unwrap();
+    let dir_root = fresh_root(&base, "directory");
+    support::set_clock(&dir_root, unix_now());
+    let mut directory = support::Server::start(&dir_root, false);
+    let origin = directory.origin.clone();
+    let root = fresh_root(&base, "member-debt");
+    leave_listing_behind(&root, &origin);
+    become_member(&root);
+    directory.stop();
+    let app = Headless::launch(&root);
+    until("the member's status shows the owed withdrawal", || {
+        let s = app.swarm();
+        s["phase"] == "withdraw_pending" && s["error_code"] == "swarm_directory_unreachable"
+    });
+    app.quit();
+    support::set_clock(&dir_root, unix_now());
+    directory.restart();
+    let retry = unix_now() + heartbeat_seconds().unwrap();
+    support::set_clock(&dir_root, retry);
+    let p = AppPublisher::new(&root);
+    assert!(p.resume().unwrap());
+    let member = OwnerFacts::from_owner_run(false, None, None, None);
+    p.tick(retry, &member).unwrap();
+    assert!(rows(&origin).is_empty());
 }
