@@ -26,11 +26,10 @@ from playwright.sync_api import expect, sync_playwright
 from tests.swarm_directory.test_about_page import VISION, _ratio, directory, new_page  # noqa: F401 (fixture)
 
 ROOT = Path(__file__).resolve().parents[2]
-FIGURES = {'simple': ['model-split', 'swarm', 'stages'], 'technical': ['pipeline', 'stack']}
+FIGURES = {'simple': ['model-split', 'swarm'], 'technical': ['pipeline', 'stack']}  # owner: stages figure removed
 TITLES = {'model-split': 'One model, cut into pieces, run across everyday devices', 'swarm': 'A swarm',
-          'stages': 'Four stages, growing like a network',
           'pipeline': 'How a request flows through a three-stage pipeline', 'stack': 'The three layers of CCAI'}
-SECTIONS = {'model-split': 's-how', 'swarm': 's-charge', 'stages': 's-where', 'pipeline': 't-how', 'stack': 't-stack'}
+SECTIONS = {'model-split': 's-how', 'swarm': 's-charge', 'pipeline': 't-how', 'stack': 't-stack'}
 
 
 def html():
@@ -140,11 +139,11 @@ def test_illustrations_are_inline_accessible_and_self_contained():
     page = html()
     p = Svgs()
     p.feed(page)
-    assert p.figs == [('simple', 'model-split'), ('simple', 'swarm'), ('simple', 'stages'),
+    assert p.figs == [('simple', 'model-split'), ('simple', 'swarm'),
                       ('technical', 'pipeline'), ('technical', 'stack')]
     assert len(p.ids) == len(set(p.ids)), 'ids are unique on the page'
     assert not p.bad, p.bad
-    assert len(p.svgs) == 10
+    assert len(p.svgs) == 8
     for svg in p.svgs:
         assert svg['role'] == 'img' and svg['focusable'] == 'false', svg['fig']
         assert svg['data-variant'] in ('wide', 'narrow')
@@ -162,9 +161,7 @@ def test_illustrations_are_inline_accessible_and_self_contained():
     # Labels inside the art keep the copy rules too.
     labels = ' '.join(t for svg in p.svgs for t in svg['texts'])
     assert 'Mac' not in labels and 'Apple' not in labels and 'token' not in labels.lower()
-    stage_labels = [t for svg in p.svgs if svg['fig'] == 'stages' and svg['data-variant'] == 'wide' for t in svg['texts']]
-    assert stage_labels == ['1 Trusted swarms', 'Working now', '2 Connected communities', 'Designed',
-                            '3 A shared commons', 'Designed', '4 Proof instead of trust', 'Research']
+    assert not any(svg['fig'] == 'stages' for svg in p.svgs), 'owner removed the stages figure'
     stack_labels = [t for svg in p.svgs if svg['fig'] == 'stack' and svg['data-variant'] == 'wide' for t in svg['texts']]
     assert stack_labels[-3:] == ['Mycelium', 'compute', 'Built: early preview'] and 'Planned' in stack_labels
     # Each illustration stays bounded markup: about.html stays a reasonable page.
@@ -239,7 +236,8 @@ def test_illustration_labels_have_contrast_on_their_actual_pixels(directory, the
             page.wait_for_timeout(600)
             for fig in figs:
                 loc = page.locator('figure[data-fig="%s"]' % fig)
-                loc.scroll_into_view_if_needed()
+                # Centre the figure: 'if needed' can leave its last label row just below the fold.
+                loc.evaluate("e=>e.scrollIntoView({block:'center'})")
                 page.wait_for_timeout(150)
                 labels = page.evaluate("""(f)=>[...document.querySelectorAll(`figure[data-fig="${f}"] svg.fig-art`)]
                   .filter(s=>getComputedStyle(s).display!=='none')

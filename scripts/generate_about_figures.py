@@ -536,7 +536,6 @@ def fig_stack():
 FIGURES = {
     'model-split': (fig_model_split, 'Each device holds one piece of the model and passes its result on to the next.'),
     'swarm': (fig_swarm, 'A swarm: devices linked directly to one another, like threads of mycelium.'),
-    'stages': (fig_stages, 'Each stage grows out of the one before. Only the first is working today.'),
     'pipeline': (fig_pipeline, 'A three-stage pipeline. Only activations cross between the devices; the layer ranges '
                                'are an example, sized by the planner to each device\'s memory.'),
     'stack': (fig_stack, 'Three layers, from the devices up. Only the compute layer is built today.'),
