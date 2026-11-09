@@ -402,12 +402,14 @@ fn the_owner_product_snapshot_and_events_follow_the_swarm_through_a_restart() {
         cursors(&resumed),
         serde_json::to_string(&owner_after).unwrap()
     );
-    assert!(
-        owner_after
-            .iter()
-            .any(|d| d["attributes"]["membership_generation"] == 2),
-        "the restarted owner renewed its membership: {owner_after:?}"
-    );
+    // The owner's own device (same pseudonym across the restart) renewed its membership at each
+    // authority start: create 1, /api/start 2, relaunch 3.
+    let owner_now = owner_after
+        .iter()
+        .find(|d| d["entity_id"] == owner[0]["entity_id"])
+        .expect("the owner keeps its pseudonym across the restart");
+    assert_eq!(owner_now["attributes"]["membership_generation"], 3);
+    assert_eq!(owner_now["attributes"]["lifecycle"], "running");
 
     // The window is bounded: after more publications than it holds, an old cursor is stale and
     // the stored window holds exactly the replay limit.
