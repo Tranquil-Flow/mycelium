@@ -476,3 +476,74 @@ fn real_lan_an_owner_ip_change_is_relearned_within_its_dial_deadline() {
         assert_eq!(learned, &vec![at], "round {round}: one host for one key");
     }
 }
+
+/// A second local address of this host (e.g. a lo0 alias), standing in for a
+/// third LAN host.
+fn third_ip() -> IpAddr {
+    let value = std::env::var("MYCELIUM_LAN_THIRD_IP")
+        .expect("MYCELIUM_LAN_THIRD_IP = another local address of this host");
+    let address = ip(&value);
+    assert!(
+        address != loopback() && address != lan_ip(),
+        "{address} must differ from 127.0.0.1 and MYCELIUM_LAN_IP"
+    );
+    address
+}
+
+/// B15 (REVIEW-laneB14 F1) on this host's real interfaces: the owner moves
+/// from 127.0.0.1 to the LAN address while a THIRD host floods the shrunken
+/// waiting room, with bare Initials from four tables' worth of ports and
+/// completed handshakes under the wrong key. That host holds only its B11
+/// share of the room, so the owner is re-learned within its dial deadline and
+/// its new host then has its own lane.
+#[test]
+#[ignore = "needs MYCELIUM_LAN_IP and a second local address in MYCELIUM_LAN_THIRD_IP"]
+fn real_lan_an_ip_change_is_relearned_while_a_third_host_floods_the_waiting_room() {
+    let rt = runtime(1);
+    let peers = runtime(2);
+    let clock = Mono(Instant::now());
+    let (lan, third) = (lan_ip(), third_ip());
+    let mut member = LoopbackHost::bind_lan(
+        &rt,
+        &clock,
+        deadline(&clock, B::RouterClose),
+        SecretKey::generate(),
+        &[Channel::Router],
+        lan,
+        LanPolicy::with_explicit(vec![loopback(), third]).unwrap(),
+    )
+    .unwrap();
+    let addr = member.address().unwrap();
+    let target = *addr.ip_addrs().next().unwrap();
+    let owner_key = SecretKey::generate();
+    member.admit_peer_ids(&[owner_key.public()]).unwrap();
+    let (first, _, _, _) = owner_epoch(&rt, &clock, &member, loopback(), &owner_key);
+    let learned_old = learned_ips(&member);
+    let flood = bare_initials(third, 4 * count(B::RelayConnectionSlots), target);
+    let wrong = WrongKeys::start(&peers, third, &addr, share());
+    let (moved, waited, accepted, _) = owner_epoch(&rt, &clock, &member, lan, &owner_key);
+    let learned_new = learned_ips(&member);
+    let more = bare_initials(lan, 2 * share(), target);
+    let (next, after, _, _) = owner_epoch(&rt, &clock, &member, lan, &owner_key);
+    let dropped = member.lan_dropped_datagrams().unwrap();
+    wrong.stop(&peers);
+    drop((flood, more));
+    member
+        .close(&clock, deadline(&clock, B::RouterClose))
+        .unwrap();
+    eprintln!(
+        "learned {learned_old:?} -> moved in {waited:?} ({moved:?}) under a {third} flood -> \
+         {learned_new:?}; next epoch {after:?} ({next:?}); filter dropped {dropped}"
+    );
+    assert_eq!(first, Ok(addr.id));
+    assert_eq!(learned_old, vec![loopback()]);
+    assert!(dropped > 0, "the third host's flood never met a full room");
+    assert_eq!(
+        moved,
+        Ok(addr.id),
+        "re-learning within the owner's dial deadline while a third host floods"
+    );
+    assert_eq!(accepted, Ok(owner_key.public()));
+    assert_eq!(learned_new, vec![lan], "the new host is learned");
+    assert_eq!(next, Ok(addr.id), "the new host's own lane under a flood");
+}

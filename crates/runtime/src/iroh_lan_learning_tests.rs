@@ -246,3 +246,47 @@ fn a_learned_host_expires_one_membership_ttl_after_its_last_connection() {
         "a stale learned address keeps its own lane"
     );
 }
+
+/// B15 (REVIEW-laneB14 F1): the owner's IP changes while ANOTHER host floods
+/// the shrunken waiting room from fresh ports. The flooder holds only its B11
+/// share of that room (one slot), so the owner's first Initial from its new
+/// host finds the other; its verified handshake re-learns it at once, and its
+/// new host gets its own lane. (Documented limit, ruling 12: two flooding
+/// hosts can fill the two slots until the old host goes stale, B15 item 1.)
+#[test]
+fn an_ip_change_is_relearned_while_another_host_floods_the_waiting_room() {
+    let lan = admission();
+    let owner = key();
+    lan.set_keys(&[owner]).unwrap();
+    let mut first = lan.pin_provisional([on(1, 9)]).unwrap();
+    first.promote().unwrap();
+    lan.learn(on(1, 9), &owner);
+    drop(first);
+    let now = Instant::now();
+    let flooded = flood(&lan, 3, 10_000, 4 * slots(), now);
+    assert_eq!(flooded, 1, "one flooding host takes one waiting-room slot");
+    let moved = on(2, 9);
+    assert!(
+        lan.admit_inbound(moved, &initial_like(), now),
+        "the owner's first Initial from its new host found no waiting-room slot"
+    );
+    let mut pin = lan.pin_provisional([moved]).unwrap();
+    pin.promote().unwrap();
+    lan.learn(moved, &owner);
+    assert_eq!(
+        lan.learned_hosts(),
+        vec![moved],
+        "re-learned at its new host"
+    );
+    assert_eq!(
+        flood(&lan, 2, 20_000, slots(), now),
+        slots(),
+        "the new host's own lane"
+    );
+    assert_eq!(
+        flood(&lan, 3, 30_000, 4 * slots(), now),
+        0,
+        "the flooder still holds no more than its share"
+    );
+    drop(pin);
+}
