@@ -871,8 +871,12 @@ export function createField({ stage, state, reduce }) {
     if (intro && intro.start === null) intro.start = now ?? performance.now();
   };
 
-  // r11.2b: compact edge colonies pulse and cascade at 0.7 of the margin gain.
-  const mpGain = () => (field.layout.enabled ? MP.GAIN : MP.GAIN * 0.7);
+  // r11.2b: compact edge colonies pulse and cascade at 0.55 of the margin gain,
+  // only along the edge cords (never the hero join, which crosses the hero
+  // copy), and their leaks stay within ~50 px of the cord: on a phone the text
+  // column reaches to ~20 px from the edge (contrast at pulse peaks).
+  const mpGain = () => (field.layout.enabled ? MP.GAIN : MP.GAIN * 0.55),
+    COMPACT_LEAK = Object.freeze({ cutoff: 48, lambda: 24 });
   const marginWeight = (px) => {
     const l = field.layout;
     if (!l.enabled) {
@@ -1604,7 +1608,7 @@ export function createField({ stage, state, reduce }) {
     if (await stage("intro")) return;
     heroInterval = scene?.sched ? Math.max(16, ...scene.routes.map((r) => r.arrivalMax + scene.pulseTail + 2)) : 24;
     marginSchedules = field.marginRoutes.map((r, side) => {
-      const legs = r.paths.map((p) => {
+      const legs = r.paths.filter((p) => field.layout.enabled || p.points[0] !== r.source).map((p) => {
         let distance = 0;
         const segments = p.segments.map((s) => {
           const start = distance;
@@ -2459,12 +2463,13 @@ export function createField({ stage, state, reduce }) {
   /** Leaks are built in idle slices: independent legs first, then cascade hops. */
   function buildMarginLeaks() {
     const jobs = [];
-    for (const s of marginSchedules) for (const l of s.legs) jobs.push(() => leakLeg(l));
+    const compactLeak = field.layout.enabled ? null : COMPACT_LEAK;
+    for (const s of marginSchedules) for (const l of s.legs) jobs.push(() => leakLeg(l, compactLeak ? { ...LEAK_MP, ...compactLeak } : LEAK_MP));
     for (const c of cascades)
       for (const h of c.hops) {
         jobs.push(function* () {
           const key = h.p.id + ":" + h.dur.toFixed(3);
-          h.leak = c.cache.get(key) || (yield* leakLeg({ p: h.p }, { fast: h.speed, slow: CAS.SLOW, cutoff: CAS.CUTOFF, lambda: CAS.LAMBDA }));
+          h.leak = c.cache.get(key) || (yield* leakLeg({ p: h.p }, { fast: h.speed, slow: CAS.SLOW, cutoff: CAS.CUTOFF, lambda: CAS.LAMBDA, ...compactLeak }));
           c.cache.set(key, h.leak);
           return h.leak;
         });
@@ -2521,7 +2526,7 @@ export function createField({ stage, state, reduce }) {
         hops.push({ p, copy, node, nodeCopy, len, dur, speed: len / dur, leak: null, off: 0, gain: 0 });
       };
       outer: for (let c = 0; c < copies; c++) {
-        if (c === 0 && lead) push(lead, 0, lead.points.at(-1), 0);
+        if (c === 0 && lead && field.layout.enabled) push(lead, 0, lead.points.at(-1), 0);
         for (const p of tile) {
           if (pageY(c, p.points.at(-1)) > docH - 40) break outer;
           push(p, c, p.points.at(-1), c);
