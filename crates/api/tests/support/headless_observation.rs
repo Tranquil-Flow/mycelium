@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! CONTROLLED model-free peer: authentic joined identity and signed descriptor,
-//! real headless HTTP/Runner dispatch. No native hello or inference claim.
+//! Two real headless processes (owner + joined member), each with its own agent: the member signs
+//! its own exchange reports and descriptor and runs its own admitted model-free hello helper. No
+//! model load or inference claim; one Mac is one physical host for the observation.
 use super::*;
-use api::installation_descriptor::{self, Member, Paths, Source};
 
 struct Repository {
     stop: Arc<AtomicBool>,
@@ -64,95 +64,25 @@ fn mounted_observation(configured_bootstrap: bool) {
             exe_dir().join("examples/headless").display().to_string(),
         ),
     ];
-    let (owner, member, proxy, edge) = pair_up_with_owner_env(&base, false, &env);
+    // The member is a real headless member with its own agent: nothing is signed for it here.
+    let (owner, member, _proxy, edge) =
+        pair_up_with_envs(&base, false, &env, &env, &seed_member_cache);
     if configured_bootstrap {
         let config = std::env::var("MYCELIUM_BOOTSTRAP_TEST_CONFIG")
             .expect("explicit artifact qualification config");
         let document: Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
-        api::preferences::private_state::store(
-            &owner.root.join("bootstrap-program.json"),
-            &document,
-            api::preferences::private_state::private_json_limit().unwrap(),
-        )
-        .unwrap();
-    }
-    let grant = json!({"consent":{"download_acknowledged":true,"max_download_bytes":STORAGE,"storage_limit_bytes":4_000_000_000u64}});
-    // Retain the existing bounded power-policy retry; the prior failure did not establish its cause.
-    let mut retries = 0;
-    let (code, answer) = loop {
-        let response = owner.post("/api/model/download", &grant);
-        if response.0 == 200
-            || retries >= 5
-            || response.1["error"] != "resource_power_policy_violation"
-        {
-            break response;
-        }
-        retries += 1;
-        std::thread::sleep(budget(BudgetId::OwnerPoll) * 8);
-    };
-    assert_eq!(code, 200, "{answer}");
-    let prepared = owner.until(
-        "actual public acquisition prepared",
-        || owner.get("/api/status").1,
-        |s| {
-            matches!(
-                s["acquisition"]["state"].as_str(),
-                Some("prepared" | "failed")
+        for instance in [&owner, &member] {
+            api::preferences::private_state::store(
+                &instance.root.join("bootstrap-program.json"),
+                &document,
+                api::preferences::private_state::private_json_limit().unwrap(),
             )
-        },
-    );
-    assert_eq!(prepared["acquisition"]["state"], "prepared", "{prepared}");
+            .unwrap();
+        }
+    }
     let (code, started) = owner.post("/api/demo/start", &json!({}));
     assert_eq!(code, 200, "{started}");
     assert_eq!(started["state"], "running");
-    owner.until(
-        "actual descriptors stage",
-        || owner.get("/api/status").1,
-        |s| s["owner_run"]["step"] == "descriptors",
-    );
-    let report = |signer: &protocol::identity::Identity,
-                  current: &Value,
-                  swarm: &Value,
-                  announcement: &Value,
-                  at: f64| {
-        assert_eq!(announcement["phase"], "collect");
-        let run = announcement["run_id"].as_str().unwrap();
-        let deployment = announcement["deployment_id"].as_str().unwrap();
-        let binding = Member {
-            node_id: current["node_id"].as_str().unwrap().into(),
-            endpoint_id: signer.endpoint_id().into(),
-            verification_key_digest: signer.verification_key_digest(),
-            generation: current["generation"].as_u64().unwrap(),
-            incarnation: current["incarnation"].as_str().unwrap().into(),
-        };
-        let card = installation_descriptor::installation_descriptor(
-            signer,
-            &binding,
-            swarm["swarm_id"].as_str().unwrap(),
-            run,
-            deployment,
-            true,
-            &Source::Whole {
-                source_root: base.join("CONTROLLED-member-source").display().to_string(),
-                manifest_digest: announcement["manifest_digest"].as_str().unwrap().into(),
-            },
-            &Paths {
-                state_root: member.root.display().to_string(),
-                endpoint_secret_file: member
-                    .root
-                    .join("target-identity.json")
-                    .display()
-                    .to_string(),
-                python_executable: exe_dir().join("examples/headless").display().to_string(),
-                sidecar_binary: exe_dir().join("examples/headless").display().to_string(),
-            },
-            at,
-        )
-        .unwrap();
-        json!({"protocol":api::run_exchange::MEMBER_REPORT,"run_id":run,"deployment_id":deployment,"state":"reported","detail":null,
-            "model":{"model_id":announcement["model"]["model_id"],"resolved_commit":announcement["model"]["resolved_commit"]},"progress":null,"descriptor":card,"issued_at":at})
-    };
-    signed_headless_exchange_report(&owner, &member, proxy, Some(&report));
     if configured_bootstrap {
         let path = owner
             .root
@@ -199,14 +129,21 @@ fn mounted_observation(configured_bootstrap: bool) {
             rustix::process::test_kill_process_group(pid),
             Err(rustix::io::Errno::SRCH)
         );
-        assert_eq!(
-            finished["native_stop_receipt"],
-            Value::Null,
-            "forced cancellation is not a native Stop receipt"
-        );
+        // Both peers now run their own helper, so the observation may finish its hello and stop
+        // before this Stop: a receipt is then the helper's own STOPPED answer to that stop; a
+        // forced cancellation still records none (never a fabricated receipt).
+        let receipt = &finished["native_stop_receipt"];
+        if !receipt.is_null() {
+            assert_eq!(receipt["ok"], true, "{finished}");
+            assert_eq!(receipt["result"]["state"], "STOPPED", "{finished}");
+            assert_eq!(
+                receipt["node_id"], finished["binding"]["target_node_id"],
+                "{finished}"
+            );
+        }
         assert!(!Path::new(finished["stage_root"].as_str().unwrap()).exists());
         println!(
-            "CONTROLLED public configured bootstrap: actual group/poll/cancel verified; second peer has no runtime, no physical OBSERVE/model claim"
+            "public configured bootstrap: actual group/poll/stop verified on two headless processes; no model claim"
         );
         drop(member);
         drop(owner);
@@ -263,6 +200,13 @@ fn mounted_observation(configured_bootstrap: bool) {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert_eq!(rows.len(), run["participants"].as_array().unwrap().len());
+    let member_node = api::preferences::private_state::load(
+        &member.root.join("membership.state.json"),
+        api::preferences::private_state::private_json_limit().unwrap(),
+    )
+    .unwrap()
+    .unwrap()["node_id"]
+        .clone();
     for (metadata, requested, ack) in rows {
         let offer: Value = serde_json::from_str(&metadata).unwrap();
         assert_eq!(offer["run_id"], run["run_id"]);
@@ -271,15 +215,282 @@ fn mounted_observation(configured_bootstrap: bool) {
             requested,
             "real cleanup must be requested for every published offer"
         );
-        assert!(ack.is_none(), "no fabricated target cleanup acknowledgment");
+        if offer["target_node_id"] != member_node {
+            assert!(ack.is_none(), "no fabricated target cleanup acknowledgment");
+        }
     }
     drop(query);
     drop(db);
+    // The member itself answers the owner's cleanup request (it staged nothing: removed, signed).
+    let acked = owner.until(
+        "the member's own cleanup acknowledgment",
+        || {
+            let db = rusqlite::Connection::open_with_flags(
+                owner.root.join("seed-rs/managed/mailbox.sqlite"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .unwrap();
+            db.query_row(
+                "SELECT cleanup_ack FROM managed_stage_offers WHERE node_id=?1",
+                [member_node.as_str().unwrap()],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+            .map_or(Value::Null, |a| serde_json::from_str(&a).unwrap())
+        },
+        |a| !a.is_null(),
+    );
+    assert_eq!(
+        acked["protocol"],
+        "mycelium.controller_remote_cleanup_ack.v1"
+    );
+    assert_eq!(acked["node_id"], member_node);
+    assert_eq!(acked["removed"], true);
     for step in run["steps"].as_array().unwrap().iter().skip(4) {
         assert_eq!(step["state"], "pending", "{step}");
     }
     let (code, _) = owner.post("/api/demo/stop", &json!({}));
     assert_eq!(code, 200);
+    drop(member);
+    drop(owner);
+    drop(edge);
+    drop(repository);
+    fs::remove_dir_all(base).unwrap();
+}
+
+/// Whole-snapshot mode: a joined Mac needs the owner's pinned snapshot. Its download is S1's (not
+/// ported), so - as the stranger path seeds a member's cache - the owner's VERIFIED cache is cloned
+/// into the member's target acquisition root before it joins; the member's own acquisition opens it
+/// as unverified and re-hashes it itself.
+fn seed_member_cache(owner: &Instance, member_root: &Path) {
+    prepare_model(owner);
+    let serving = member_root.join("target/serving");
+    for entry in fs::read_dir(&owner.root).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("model-source") || !entry.file_type().unwrap().is_dir() {
+            continue;
+        }
+        let destination = if name == "model-source" {
+            serving.clone()
+        } else {
+            serving.join(&name)
+        };
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        let copied = std::process::Command::new("/bin/cp")
+            .arg("-cRp")
+            .arg(entry.path())
+            .arg(&destination)
+            .status()
+            .unwrap();
+        assert!(copied.success());
+    }
+    for dir in [member_root, &member_root.join("target"), &serving] {
+        fs::create_dir_all(dir).unwrap();
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+}
+
+/// `/api/model/download` from the test repository until this process's model is prepared.
+fn prepare_model(instance: &Instance) {
+    let grant = json!({"consent":{"download_acknowledged":true,"max_download_bytes":STORAGE,"storage_limit_bytes":STORAGE}});
+    let mut retries = 0;
+    let (code, answer) = loop {
+        let response = instance.post("/api/model/download", &grant);
+        if response.0 == 200
+            || retries >= 5
+            || response.1["error"] != "resource_power_policy_violation"
+        {
+            break response;
+        }
+        retries += 1;
+        std::thread::sleep(budget(BudgetId::OwnerPoll) * 8);
+    };
+    assert_eq!(code, 200, "{answer}");
+    let prepared = instance.until(
+        "actual public acquisition prepared",
+        || instance.get("/api/status").1,
+        |s| {
+            matches!(
+                s["acquisition"]["state"].as_str(),
+                Some("prepared" | "failed")
+            )
+        },
+    );
+    assert_eq!(prepared["acquisition"]["state"], "prepared", "{prepared}");
+}
+
+/// Row 3 (b): a headless MEMBER process runs its own agent - signed run-exchange client, its own
+/// descriptor, the owner's bootstrap offer fetched from the owner's mailbox and its own admitted
+/// hello worker - so two headless processes reach the owner's observation and both answer hello.
+/// Nothing is signed or staged for the member here. On one Mac the observation then refuses by
+/// name (`managed_observation_hosts_not_distinct`): the physical two-host check stays.
+#[test]
+#[ignore = "requires explicitly pinned admitted model-free Rust helper artifact"]
+fn two_headless_processes_answer_hello_with_their_own_agents() {
+    let _serial = one_at_a_time();
+    build();
+    let base = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("b19-pair-observe-{}", std::process::id()));
+    assert!(!base.exists(), "fresh fixture state");
+    fs::create_dir(&base).unwrap();
+    fs::set_permissions(&base, fs::Permissions::from_mode(0o700)).unwrap();
+    let oracle: Value =
+        serde_json::from_str(include_str!("../fixtures/oracle_resources.json")).unwrap();
+    let observation = &oracle["policy_cases"][0]["observation"];
+    let probe = base.join("probe.sh");
+    fs::write(&probe, format!("#!/bin/sh\nprintf '%s' '{observation}'\n")).unwrap();
+    fs::set_permissions(&probe, fs::Permissions::from_mode(0o700)).unwrap();
+    let (files, _) = tiny_repository::tiny_snapshot();
+    let (port, stop, thread) = tiny_repository::serve_repository(files);
+    let repository = Repository {
+        stop,
+        thread: Some(thread),
+    };
+    let env = [
+        (
+            "MYCELIUM_L10_TEST_RESOURCE_PROBE",
+            probe.display().to_string(),
+        ),
+        (
+            "MYCELIUM_L10_TEST_HUB_ORIGIN",
+            format!("http://127.0.0.1:{port}"),
+        ),
+        // Existing file-admission seam only; never executed as a native worker.
+        (
+            "MYCELIUM_L10_TEST_SIDECAR",
+            exe_dir().join("examples/headless").display().to_string(),
+        ),
+    ];
+    let (owner, member, _proxy, edge) =
+        pair_up_with_envs(&base, false, &env, &env, &seed_member_cache);
+    let config = std::env::var("MYCELIUM_BOOTSTRAP_TEST_CONFIG")
+        .expect("explicit artifact qualification config");
+    let document: Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
+    for instance in [&owner, &member] {
+        api::preferences::private_state::store(
+            &instance.root.join("bootstrap-program.json"),
+            &document,
+            api::preferences::private_state::private_json_limit().unwrap(),
+        )
+        .unwrap();
+    }
+    // A cache the member did not prepare itself is never trusted as prepared: it re-hashes it.
+    let seeded = member.get("/api/status").1;
+    assert_eq!(
+        seeded["acquisition"]["error_code"], "prepared_source_revalidation_required",
+        "{seeded}"
+    );
+    let (code, started) = owner.post("/api/demo/start", &json!({}));
+    assert_eq!(code, 200, "{started}");
+    let member_native = member.root.join("native-bootstrap/state.json");
+    let read_native = || {
+        fs::read(&member_native)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .unwrap_or(Value::Null)
+    };
+    // The member's own helper runs under its own pump (no test-side signing or staging).
+    let running = owner.until(
+        "the member's own hello worker",
+        || json!({"native": read_native(), "status": owner.get("/api/status").1}),
+        |s| s["native"]["phase"] == "running" || s["status"]["owner_run"]["state"] == "failed",
+    );
+    assert_eq!(
+        running["native"]["phase"],
+        "running",
+        "member stderr: {}\n{running}",
+        fs::read_to_string(member.root.with_extension("stderr")).unwrap_or_default()
+    );
+    let pid = rustix::process::Pid::from_raw(
+        running["native"]["process"]["pid"]
+            .as_u64()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .unwrap();
+    // The observe step's own registered budgets: initial cleanup, bootstrap, hello collection.
+    let observe = budget(BudgetId::InitialCleanup) * 2
+        + budget(BudgetId::Bootstrap)
+        + budget(BudgetId::Collect);
+    let observed = owner.until_with(
+        "observation outcome",
+        observe,
+        || json!({"run": owner.get("/api/status").1["owner_run"], "member_native": read_native(),
+            "member_stderr": fs::read_to_string(member.root.with_extension("stderr")).unwrap_or_default()}),
+        |s| s["run"]["state"] == "failed" || s["run"]["steps"][3]["state"] == "done",
+    );
+    let run = &observed["run"];
+    println!("B19 two-process observe: {run}");
+    assert_eq!(run["steps"][2]["name"], "descriptors", "{run}");
+    assert_eq!(run["steps"][2]["state"], "done", "{run}");
+    assert_eq!(run["steps"][2]["detail"], "2 of 2 Macs reported", "{run}");
+    let membership: Value = api::preferences::private_state::load(
+        &member.root.join("membership.state.json"),
+        api::preferences::private_state::private_json_limit().unwrap(),
+    )
+    .unwrap()
+    .map(Value::Object)
+    .unwrap();
+    let member_node = membership["node_id"].as_str().unwrap();
+    let participants = run["participants"].as_array().unwrap();
+    assert_eq!(participants.len(), 2, "{run}");
+    assert!(
+        participants.iter().any(|p| p["node_id"] == member_node),
+        "{member_node} {run}"
+    );
+    // Both hosts answered hello (the distinctness check compares the SECOND host's identity with
+    // the first): two processes on ONE Mac are one physical host, refused by name. Passing observe
+    // needs two Macs (or an admitted host-identity seam); nothing here relabels it.
+    assert_eq!(run["steps"][3]["name"], "observe", "{run}");
+    assert_eq!(run["failed_step"], "observe", "{observed}");
+    assert_eq!(
+        run["error_code"], "managed_observation_hosts_not_distinct",
+        "{observed}"
+    );
+    // The owner's teardown asked the member to clean up: the member's own agent saw the request,
+    // its pump stopped the helper, removed the stage and sent the signed cleanup ACK.
+    let closed = owner.until(
+        "the member's worker closed on the owner's cleanup request",
+        read_native,
+        |s| s["phase"] == "closed" || s["phase"] == "cleanup_unproven",
+    );
+    assert_eq!(closed["phase"], "closed", "{closed}");
+    assert_eq!(closed["cleanup_error"], Value::Null, "{closed}");
+    assert!(!member.root.join("native-bootstrap/stage").exists());
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    let db = rusqlite::Connection::open_with_flags(
+        owner.root.join("seed-rs/managed/mailbox.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let acks: Vec<(String, Option<String>, Option<String>)> = db
+        .prepare("SELECT node_id, ack, cleanup_ack FROM managed_stage_offers")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mine: Vec<_> = acks.iter().filter(|(n, _, _)| n == member_node).collect();
+    assert_eq!(mine.len(), 1, "{acks:?}");
+    let stage_ack: Value = serde_json::from_str(mine[0].1.as_deref().unwrap()).unwrap();
+    let cleanup_ack: Value = serde_json::from_str(mine[0].2.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        stage_ack["protocol"],
+        "mycelium.controller_remote_stage_ack.v1"
+    );
+    assert_eq!(
+        cleanup_ack["protocol"],
+        "mycelium.controller_remote_cleanup_ack.v1"
+    );
+    assert_eq!(cleanup_ack["removed"], true);
+    drop(db);
+    assert_eq!(owner.post("/api/demo/stop", &json!({})).0, 200);
     drop(member);
     drop(owner);
     drop(edge);

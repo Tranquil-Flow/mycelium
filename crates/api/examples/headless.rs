@@ -60,6 +60,8 @@ use api::{
 mod compiler;
 #[path = "headless/listener_wait.rs"]
 mod listener_wait;
+#[path = "headless/member_agent.rs"]
+mod member_agent;
 #[path = "headless/observation.rs"]
 mod observation;
 #[path = "headless/product.rs"]
@@ -2856,6 +2858,25 @@ fn run() -> Result<(), String> {
             }
         })
     };
+    // `DemoApp._standing_loop` (app.py:1201-1212): a joined Mac's click-free steps every 2 s, here
+    // its own demo agent (`demo_app.auto_step`). Its worker never outlives the loop.
+    let standing = {
+        let core = core.clone();
+        thread::spawn(move || {
+            let period =
+                span(BudgetId::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203);
+            let mut agent = member_agent::MemberAgent::default();
+            let mut last = std::time::Instant::now();
+            while core.lock().is_ok_and(|c| !c.closed) {
+                thread::sleep(span(BudgetId::OwnerPoll));
+                if last.elapsed() >= period {
+                    last = std::time::Instant::now();
+                    agent.tick(&core);
+                }
+            }
+            agent.close(&core);
+        })
+    };
     // `SwarmPublisher.start` (swarm_publish.py:437-448): its own loop, so a slow directory never
     // delays the status, renewals or the listener. Reconcile itself bounds the network cadence.
     // Its end is announced by dropping `ended` (also on a panic), so quit can wait for it
@@ -3040,6 +3061,7 @@ fn run() -> Result<(), String> {
     for (thread, panicked) in [
         (maintenance, "maintenance_thread_panicked"),
         (renewals, "renewal_thread_panicked"),
+        (standing, "standing_thread_panicked"),
         (signals, "signal_thread_panicked"),
     ] {
         keep(thread.join().map_err(|_| panicked.to_owned()));
