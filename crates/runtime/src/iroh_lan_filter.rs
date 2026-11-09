@@ -85,7 +85,7 @@ use iroh_base::CustomAddr;
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -174,6 +174,22 @@ fn host_share(capacity: usize) -> usize {
         0
     } else {
         (capacity / PROVISIONAL_SHARES).max(1)
+    }
+}
+/// The unit a waiting-room share is counted in (B17, REVIEW-laneB11 (1)): a
+/// host, not an address or a socket. An IPv4 address is one host (ports never
+/// add shares, B11). An IPv6 host can rotate through its whole /64 (SLAAC
+/// privacy addresses), so global and unique-local IPv6 count per /64 prefix.
+/// Link-local IPv6 keeps the whole address: every link-local host shares
+/// fe80::/64. Two IPv4 aliases of one machine stay two addresses (nothing on
+/// the wire tells them apart); the 16-slot table still bounds them.
+fn share_key(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) != 0xfe80 => {
+            let [a, b, c, d, ..] = v6.segments();
+            IpAddr::V6(Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
+        }
+        other => other,
     }
 }
 /// Once every admitted key's host is learned (B14), every other source shares
@@ -398,7 +414,7 @@ impl Admission {
             Ok(pins) => pins
                 .provisional
                 .keys()
-                .filter(|a| a.ip() == src.ip())
+                .filter(|a| share_key(a.ip()) == share_key(src.ip()))
                 .copied()
                 .collect(),
             // A poisoned pin table admits no send, so nothing is worth taking.
@@ -443,7 +459,11 @@ impl Admission {
             host.extend(
                 inbound
                     .iter()
-                    .filter(|(a, e)| e.lane.is_none() && a.ip() == src.ip() && now < e.until)
+                    .filter(|(a, e)| {
+                        e.lane.is_none()
+                            && share_key(a.ip()) == share_key(src.ip())
+                            && now < e.until
+                    })
                     .map(|(a, _)| *a),
             );
             // A refused entry of `src` itself still counts (it is overwritten,

@@ -8,8 +8,8 @@ use rustix::process::{Pid, Signal, kill_process};
 use serde_json::Value;
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
-    net::{Ipv4Addr, TcpStream},
+    io::{BufRead, BufReader, Read, Write},
+    net::{Ipv4Addr, SocketAddr, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -65,6 +65,9 @@ fn launch(root: &Path) -> Child {
 }
 /// The launcher, optionally under a descriptor limit (`ulimit -n`, then `exec`: the same pid).
 fn launch_with(root: &Path, descriptors: Option<u32>) -> Child {
+    launch_env(root, descriptors, &[])
+}
+fn launch_env(root: &Path, descriptors: Option<u32>, env: &[(&str, &str)]) -> Child {
     fs::create_dir_all(root).unwrap();
     fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
     let launcher = profile_dir().join("examples/headless");
@@ -83,6 +86,7 @@ fn launch_with(root: &Path, descriptors: Option<u32>) -> Child {
         .args(["--headless", "--offline", "--state-root"])
         .arg(root)
         .env("HOME", root)
+        .envs(env.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -317,30 +321,28 @@ fn sigint_closes_the_launcher_as_v014() {
     run("sigint", Signal::INT);
 }
 
-/// B15f (REVIEW-laneB15 F2): a listener that ends without a quit closes the launcher as a quit
-/// does: the helper loops end, the transient control files go away and the exit reports the
-/// listener's failure (exit 3). Here `accept` fails (EMFILE): the launcher runs under a small
-/// descriptor limit and the test holds connections until the listener is gone. Before, nothing
-/// closed the core when the listener ended without panicking, and the process waited for a
-/// signal.
-#[test]
-fn a_listener_that_ends_without_a_quit_closes_the_launcher() {
-    build();
-    let root = fs::canonicalize(std::env::temp_dir())
-        .unwrap()
-        .join(format!("b15f-listener-{}", std::process::id()));
-    fs::remove_dir_all(&root).unwrap_or(());
-    let mut child = launch_with(&root, Some(64));
-    let guard = ReapOnDrop(&mut child);
-    let child = &mut *guard.0;
+/// The launcher's stdout readiness line, then its port; stderr lines arrive on the receiver.
+struct Started {
+    port: u16,
+    stderr: mpsc::Receiver<String>,
+    readers: Vec<thread::JoinHandle<()>>,
+}
+fn started(child: &mut Child, root: &Path) -> Started {
     let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = BufReader::new(child.stderr.take().unwrap());
     let (ready_send, ready) = mpsc::channel();
-    let reader = thread::spawn(move || {
+    let (line_send, lines) = mpsc::channel();
+    let out = thread::spawn(move || {
         let mut first = String::new();
         stdout.read_line(&mut first).unwrap_or(0);
         ready_send.send(first).unwrap_or(());
         let mut rest = String::new();
         stdout.read_to_string(&mut rest).unwrap_or(0);
+    });
+    let err = thread::spawn(move || {
+        for line in stderr.lines().map_while(Result::ok) {
+            line_send.send(line).unwrap_or(());
+        }
     });
     let announced = ready.recv_timeout(patience()).unwrap_or_default();
     assert!(announced.contains("launcher_started"), "{announced:?}");
@@ -348,39 +350,177 @@ fn a_listener_that_ends_without_a_quit_closes_the_launcher() {
         serde_json::from_str(&fs::read_to_string(root.join("native-control.json")).unwrap())
             .unwrap();
     let port = u16::try_from(control["port"].as_u64().unwrap()).unwrap();
-    // Held, idle connections use up the launcher's descriptors until `accept` fails.
-    let mut held = Vec::new();
-    while let Ok(stream) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) {
-        held.push(stream);
-        assert!(
-            held.len() < 1024,
-            "the listener never ended under its descriptor limit"
-        );
+    Started {
+        port,
+        stderr: lines,
+        readers: vec![out, err],
     }
-    drop(held);
+}
+fn exited(child: &mut Child, what: &str) -> std::process::ExitStatus {
     let waited = Instant::now() + patience();
-    let status = loop {
+    loop {
         if let Some(status) = child.try_wait().unwrap() {
-            break status;
+            return status;
+        }
+        assert!(Instant::now() < waited, "{what}");
+        thread::sleep(poll());
+    }
+}
+
+/// B17 item 0, v0.1.4 parity (parent ruling on REVIEW-laneB15f FU1): v0.1.4 serves through
+/// `socketserver.serve_forever`, which swallows an accept `OSError` and keeps serving. A launcher
+/// that runs out of descriptors (`ulimit -n 64`, idle connections held) records the episode
+/// with its errno, stays up, and serves again once the descriptors free; a quit then closes it
+/// normally. B15f's version of this test pinned exit 3 on EMFILE.
+#[test]
+fn a_listener_out_of_descriptors_keeps_serving_once_they_free() {
+    build();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("b17-emfile-{}", std::process::id()));
+    fs::remove_dir_all(&root).unwrap_or(());
+    let mut child = launch_with(&root, Some(64));
+    let guard = ReapOnDrop(&mut child);
+    let child = &mut *guard.0;
+    let Started {
+        port,
+        stderr,
+        readers,
+    } = started(child, &root);
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    // Idle connections are held until one of the launcher's accepts fails (EMFILE). More than
+    // the 64 descriptors it has are never needed, and all of them fit the listen backlog.
+    let mut held = Vec::new();
+    let mut seen = Vec::new();
+    let waited = Instant::now() + patience();
+    let deferred = loop {
+        match stderr.recv_timeout(if held.len() < 80 {
+            Duration::ZERO
+        } else {
+            poll()
+        }) {
+            Ok(line) if line.contains("listener_accept_deferred") => break line,
+            Ok(line) => seen.push(line),
+            // Nothing yet: still inside the patience (checked below as well, for chatty runs).
+            Err(mpsc::RecvTimeoutError::Timeout) => assert!(
+                Instant::now() < waited,
+                "no accept failed under the descriptor limit: {seen:?}"
+            ),
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!(
+                "the launcher closed its stderr when its descriptors ran out: {:?} {seen:?}",
+                child.try_wait()
+            ),
+        }
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("the launcher ended when its descriptors ran out: {status:?} {seen:?}");
         }
         assert!(
             Instant::now() < waited,
-            "the launcher kept running after its listener ended (it waits for a signal)"
+            "no accept failed under the descriptor limit: {seen:?}"
         );
-        thread::sleep(poll());
+        if held.len() < 80 {
+            match TcpStream::connect_timeout(&address, patience()) {
+                Ok(stream) => held.push(stream),
+                Err(error) => panic!(
+                    "the launcher stopped serving when its descriptors ran out: {error} \
+                     (after {} connections; exited: {:?}) {seen:?}",
+                    held.len(),
+                    child.try_wait()
+                ),
+            }
+        }
     };
-    let mut stderr = String::new();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap_or(0);
-    reader.join().unwrap_or(());
-    assert_eq!(status.code(), Some(3), "{status:?} {stderr}");
     assert!(
-        stderr.contains("launcher_failed") && stderr.contains("listener_accept_failed"),
-        "the exit does not report the listener's failure: {stderr}"
+        deferred.contains(&format!("errno_{}", libc::EMFILE)),
+        "{deferred}"
+    );
+    drop(held);
+    // The same listener serves a new connection once the held ones are gone.
+    let mut probe = TcpStream::connect_timeout(&address, patience()).unwrap();
+    probe.set_read_timeout(Some(patience())).unwrap();
+    probe
+        .write_all(
+            format!(
+                "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut answer = String::new();
+    probe.read_to_string(&mut answer).unwrap_or(0);
+    assert!(
+        answer.starts_with("HTTP/1."),
+        "the launcher does not serve after its descriptors freed: {answer:?}"
+    );
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the launcher ended after serving again"
+    );
+    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
+    kill_process(pid, Signal::TERM).unwrap();
+    let status = exited(
+        child,
+        "the launcher ignored SIGTERM after an accept episode",
+    );
+    for reader in readers {
+        reader.join().unwrap_or(());
+    }
+    let rest: Vec<String> = stderr.try_iter().collect();
+    assert_eq!(status.code(), Some(0), "{status:?} {rest:?}");
+    assert!(
+        !rest.iter().any(|line| line.contains("launcher_failed")),
+        "{rest:?}"
+    );
+    let after = names(&root);
+    for file in ["native-control.json", "open-demo.html"] {
+        assert!(
+            !after.iter().any(|n| n == file),
+            "{file} left behind: {after:?}"
+        );
+    }
+    fs::remove_dir_all(&root).unwrap_or(());
+}
+
+/// B17 item 0: a FATAL listener end (here `EBADF`, injected on the first accepted connection
+/// through the `MYCELIUM_L10_TEST_ACCEPT_ERRNO` seam) still closes the launcher as a quit does
+/// (B15f): exit 3, the control files removed, and the reason names the errno (REVIEW-laneB15f
+/// FU2: `listener_accept_failed:Uncategorized` alone could not tell EMFILE from other causes).
+#[test]
+fn a_fatal_listener_end_closes_the_launcher_with_its_errno() {
+    build();
+    let root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("b17-fatal-{}", std::process::id()));
+    fs::remove_dir_all(&root).unwrap_or(());
+    let errno = libc::EBADF.to_string();
+    let mut child = launch_env(
+        &root,
+        None,
+        &[("MYCELIUM_L10_TEST_ACCEPT_ERRNO", errno.as_str())],
+    );
+    let guard = ReapOnDrop(&mut child);
+    let child = &mut *guard.0;
+    let Started {
+        port,
+        stderr,
+        readers,
+    } = started(child, &root);
+    let connection = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+    let status = exited(
+        child,
+        "the launcher kept running after its listener ended (it waits for a signal)",
+    );
+    drop(connection);
+    for reader in readers {
+        reader.join().unwrap_or(());
+    }
+    let lines: Vec<String> = stderr.try_iter().collect();
+    assert_eq!(status.code(), Some(3), "{status:?} {lines:?}");
+    assert!(
+        lines.iter().any(|line| line.contains("launcher_failed")
+            && line.contains("listener_accept_failed")
+            && line.contains(&format!("errno_{}", libc::EBADF))),
+        "the exit does not report the listener's failure and errno: {lines:?}"
     );
     let after = names(&root);
     for file in ["native-control.json", "open-demo.html"] {

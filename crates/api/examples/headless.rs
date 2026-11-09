@@ -2845,9 +2845,30 @@ fn run() -> Result<(), String> {
                     Err(code)
                 }
             };
+            // Test seam (like MYCELIUM_L10_TEST_RESOURCE_PROBE): the first accepted connection after
+            // the launch request is dropped and replaced by this errno, so a test reaches a
+            // listener's error end.
+            let mut injected = std::env::var("MYCELIUM_L10_TEST_ACCEPT_ERRNO")
+                .ok()
+                .and_then(|errno| errno.parse::<i32>().ok());
+            let mut served = 0_usize;
+            // v0.1.4 parity (`socketserver` swallows accept errors and keeps serving): a transient
+            // accept error is recorded once per episode and retried after one poll.
+            let mut deferred = false;
             loop {
-                match listener.accept() {
+                let mut accepted = listener.accept();
+                if accepted.is_ok() {
+                    // The first connection is the launcher's own launch request.
+                    served += 1;
+                    if served == 2
+                        && let Some(errno) = injected.take()
+                    {
+                        accepted = Err(std::io::Error::from_raw_os_error(errno));
+                    }
+                }
+                match accepted {
                     Ok((stream, _)) => {
+                        deferred = false;
                         // Accepted sockets must block (the listener is polled non-blocking).
                         if stream.set_nonblocking(false).is_err() {
                             continue;
@@ -2864,6 +2885,7 @@ fn run() -> Result<(), String> {
                         }));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        deferred = false;
                         if core.lock().map_or(true, |c| c.closed) {
                             for handle in connections {
                                 handle.join().unwrap_or(());
@@ -2873,12 +2895,29 @@ fn run() -> Result<(), String> {
                         if let Err(error) =
                             listener_wait::wait(&listener, span(BudgetId::OwnerPoll))
                         {
-                            return unless_quit(format!("listener_wait_failed:{:?}", error.kind()));
+                            return unless_quit(listener_wait::failure_code(
+                                "listener_wait_failed",
+                                &error,
+                            ));
                         }
                     }
-                    Err(error) => {
-                        return unless_quit(format!("listener_accept_failed:{:?}", error.kind()));
-                    }
+                    Err(error) => match listener_wait::accept_failure(&error) {
+                        listener_wait::AcceptFailure::Fatal(code) => return unless_quit(code),
+                        listener_wait::AcceptFailure::Transient(code) => {
+                            if !deferred {
+                                deferred = true;
+                                eprintln!("listener_accept_deferred: {code}");
+                            }
+                            // A quit still ends the listener while accepts keep failing.
+                            if core.lock().map_or(true, |c| c.closed) {
+                                for handle in connections {
+                                    handle.join().unwrap_or(());
+                                }
+                                return Ok(());
+                            }
+                            thread::sleep(span(BudgetId::OwnerPoll));
+                        }
+                    },
                 }
             }
         })

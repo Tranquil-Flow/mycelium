@@ -199,6 +199,58 @@ fn one_host_flooding_from_many_ports_takes_only_its_share() {
     }
 }
 
+/// B17 (REVIEW-laneB11 (1)): the waiting-room share is per host, not per
+/// address. An IPv6 host can rotate through its whole /64 (SLAAC privacy
+/// addresses), so a share is counted per /64: one host sending Initials from
+/// every address of its /64 takes one share, and a host in another /64 (or on
+/// IPv4) is still admitted. Link-local IPv6 keeps the whole address, because
+/// every link-local host shares fe80::/64.
+#[test]
+fn a_host_rotating_through_its_ipv6_64_takes_only_one_share() {
+    let lan = admission(LanPolicy::private_only());
+    let slots = count(B::RelayConnectionSlots);
+    let initial = initial_like();
+    let now = Instant::now();
+    let rotating = |i: usize| {
+        let low = u16::try_from(i + 1).unwrap();
+        SocketAddr::new(IpAddr::from([0xfd00, 0xb17, 0, 1, 0x1234, 0, 0, low]), 9)
+    };
+    let flooded = (0..4 * slots)
+        .filter(|i| lan.admit_inbound(rotating(*i), &initial, now))
+        .count();
+    assert_eq!(
+        flooded,
+        share(),
+        "one /64 took {flooded} of the {slots} provisional slots"
+    );
+    for other in [
+        SocketAddr::new(IpAddr::from([0xfd00, 0xb17, 0, 2, 0, 0, 0, 1]), 9),
+        SocketAddr::new(ip("192.168.17.2"), 9),
+        SocketAddr::new(ip("fe80::1"), 9),
+        SocketAddr::new(ip("fe80::2"), 9),
+    ] {
+        assert!(
+            lan.admit_inbound(other, &initial, now),
+            "{other}'s Initial was refused while one /64 floods"
+        );
+    }
+    // Two link-local hosts are two hosts: each keeps a share of its own.
+    let link_local = |host: u16, port: usize| {
+        SocketAddr::new(
+            IpAddr::from([0xfe80, 0, 0, 0, 0, 0, 0, host]),
+            u16::try_from(port).unwrap(),
+        )
+    };
+    let first = (0..slots)
+        .filter(|i| lan.admit_inbound(link_local(3, 10_000 + i), &initial, now))
+        .count();
+    assert_eq!(first, share(), "one link-local host's share");
+    assert!(
+        lan.admit_inbound(link_local(4, 9), &initial, now),
+        "a second link-local host shares the first one's share"
+    );
+}
+
 /// B11: a host's share also counts its provisional (accept-side) pins, so it
 /// cannot re-take fresh ports once its receive-filter entries expire while
 /// its handshakes are still held.

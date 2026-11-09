@@ -31,6 +31,59 @@ pub(super) fn wait(listener: &TcpListener, limit: Duration) -> std::io::Result<(
     Ok(())
 }
 
+/// What one failed `accept` means for the listener. v0.1.4 serves through
+/// `socketserver.serve_forever`, which swallows accept errors and keeps serving; v0.2 keeps that
+/// for the errors a healthy listener can meet and ends only when the listening socket itself is
+/// unusable.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum AcceptFailure {
+    /// Exhausted descriptors or buffers, a client that reset before the accept, a signal, a
+    /// network error on the pending connection: back off one poll and accept again.
+    Transient(String),
+    /// Anything else (`EBADF`, `EINVAL`, `ENOTSOCK`, ...): the listener has ended.
+    Fatal(String),
+}
+
+/// `<what>:<ErrorKind>:errno_<n|none>`: the kind alone (`Uncategorized` for EMFILE) cannot tell
+/// the causes apart in a field log (REVIEW-laneB15f FU2).
+pub(super) fn failure_code(what: &str, error: &std::io::Error) -> String {
+    format!(
+        "{what}:{:?}:errno_{}",
+        error.kind(),
+        error
+            .raw_os_error()
+            .map_or_else(|| "none".to_owned(), |n| n.to_string())
+    )
+}
+
+pub(super) fn accept_failure(error: &std::io::Error) -> AcceptFailure {
+    let errno = error.raw_os_error();
+    let code = failure_code("listener_accept_failed", error);
+    let transient = matches!(
+        errno,
+        Some(
+            libc::EMFILE
+                | libc::ENFILE
+                | libc::ENOBUFS
+                | libc::ENOMEM
+                | libc::ECONNABORTED
+                | libc::ECONNRESET
+                | libc::EINTR
+                | libc::EPROTO
+                | libc::ETIMEDOUT
+                | libc::ENETDOWN
+                | libc::ENETUNREACH
+                | libc::EHOSTDOWN
+                | libc::EHOSTUNREACH
+        )
+    );
+    if transient {
+        AcceptFailure::Transient(code)
+    } else {
+        AcceptFailure::Fatal(code)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +119,32 @@ mod tests {
             listener.accept().unwrap_err().kind(),
             std::io::ErrorKind::WouldBlock
         );
+    }
+    #[test]
+    fn exhausted_or_reset_accepts_are_retried_and_a_broken_listener_ends_with_its_errno() {
+        for errno in [
+            libc::EMFILE,
+            libc::ENFILE,
+            libc::ENOBUFS,
+            libc::ECONNABORTED,
+            libc::EINTR,
+        ] {
+            let error = std::io::Error::from_raw_os_error(errno);
+            assert!(
+                matches!(accept_failure(&error), AcceptFailure::Transient(_)),
+                "errno {errno} ends the listener"
+            );
+        }
+        for errno in [libc::EBADF, libc::EINVAL, libc::ENOTSOCK, libc::EOPNOTSUPP] {
+            let error = std::io::Error::from_raw_os_error(errno);
+            let AcceptFailure::Fatal(code) = accept_failure(&error) else {
+                panic!("errno {errno} is retried forever");
+            };
+            assert!(code.ends_with(&format!(":errno_{errno}")), "{code}");
+        }
+        let AcceptFailure::Fatal(code) = accept_failure(&std::io::Error::other("x")) else {
+            panic!("a non-OS accept error is retried");
+        };
+        assert!(code.ends_with(":errno_none"), "{code}");
     }
 }
