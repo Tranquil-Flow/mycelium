@@ -126,14 +126,22 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
             // waiter never share a mutable borrow. Changes win same-turn races.
             let mut changed=authority.clone();
             let cancelled=async {match local {Some(local)=>local.cancelled().await,None=>std::future::pending().await}};
-            tokio::select! {
+            let outcome=tokio::select! {
                 biased;
                 error=cancelled => Err(ControlError(error.0)),
                 _ = changed.changed() => {
                     if changed.borrow().is_none() { Err(ControlError("cancelled")) } else { Err(ControlError("peer_rotated")) }
                 },
-                result=exchange=>{ current_authority(authority,request.fence)?; if let Some(local)=local {local.check().map_err(|error| ControlError(error.0))?;} result }
-            }
+                result=exchange=>{ current_authority(authority,request.fence).and_then(|()| match local {Some(local)=>local.check().map_err(|error| ControlError(error.0)),None=>Ok(())}).and(result) }
+            };
+            // The exchange and its call-owned connection are dropped by now, so
+            // close(7) is queued but not sent. This runtime may stop being driven
+            // when the call returns (an owner waits between result polls), and
+            // the close timer can then drain the connection unsent: the peer sees
+            // a stateless reset instead of the explicit close. Yield once so the
+            // already-woken connection driver puts the close on the wire first.
+            tokio::task::yield_now().await;
+            outcome
         })
     }
 }
