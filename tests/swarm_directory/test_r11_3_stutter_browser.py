@@ -2,7 +2,12 @@
 scheduled slice of the hero build and of the post-ready passes (colony monotone
 pass, re-bake and its cross-fade start, dip-glow measurement) stays short.
 da4767e2 at 1920 DPR2: fuzz 76-94 ms, monotone 30-89 ms, re-bake swap 40-107 ms,
-dip passes 21-90 ms. Real local stack only."""
+dip passes 21-90 ms. Real local stack only. On macOS the browser runs with the
+real GPU (Metal), as the owner's does: with software raster every canvas flush,
+including the re-bake's forced batches, lands on the main thread.
+Timing test: at host load > 10 record failures as host load and re-run quiet."""
+import sys
+
 import pytest
 from playwright.sync_api import sync_playwright
 from test_site_v2_browser import local, CLS  # noqa: F401  (fixture)
@@ -13,7 +18,7 @@ READY = '#page-mycelium[data-ready="1"]'
 @pytest.mark.parametrize('width', [1440, 1920])
 def test_grow_in_and_post_ready_passes_have_no_long_slice(local, width):  # noqa: F811
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(args=['--enable-gpu', '--use-angle=metal'] if sys.platform == 'darwin' else [])
         context = browser.new_context(viewport={'width': width, 'height': 900}, device_scale_factor=2, color_scheme='dark')
         context.add_init_script(CLS)
         page = context.new_page()
