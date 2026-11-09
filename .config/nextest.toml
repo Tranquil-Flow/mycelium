@@ -53,6 +53,11 @@ setup = "headless-release"
 filter = 'binary_id(=api::headless_swarm_publish)'
 setup = "headless-release"
 
+# api::headless_product (B13) runs the same launcher.
+[[profile.default.scripts]]
+filter = 'binary_id(=api::headless_product)'
+setup = "headless-release"
+
 # quick skips, and never runs, these (each is still run by merge and nightly):
 #  * every #[ignore]d test (nextest skips them unless --run-ignored is given). The real two-host and
 #    two-device suites are all #[ignore]d ("explicit isolated native qualification", "requires local assets").

@@ -61,6 +61,8 @@ mod compiler;
 mod listener_wait;
 #[path = "headless/observation.rs"]
 mod observation;
+#[path = "headless/product.rs"]
+mod product;
 #[cfg(test)]
 use api::app_host::start_seed;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -2742,12 +2744,15 @@ fn run() -> Result<(), String> {
         Arc::new(MonotonicClock),
     )
     .map_err(|e| e.to_string())?;
-    let app = Arc::new(Desktop::new(
-        host.clone(),
-        Arc::new(Control::new(backend)),
-        published.clone(),
-        session,
-    ));
+    let app = Arc::new(
+        Desktop::new(
+            host.clone(),
+            Arc::new(Control::new(backend)),
+            published.clone(),
+            session,
+        )
+        .with_product(Arc::new(product::Routes::new(core.clone()))),
+    );
     publish(&core, &published).map_err(|e| e.to_string())?;
     private_write(
         &root,

@@ -110,12 +110,18 @@ fn same(a: &str, b: &str) -> bool {
             .fold(0u8, |diff, (x, y)| diff | (x ^ y))
             == 0
 }
+/// The product evidence GETs (`crate::product_app::PATHS`) of a host that serves them. A desktop
+/// without one keeps answering those paths `404 not_found` before any session check.
+pub trait ProductRoutes: Send + Sync {
+    fn get(&self, request: &Request) -> Result<Reply, PublicError>;
+}
 pub struct Desktop<S: Service> {
     host: String,
     origin: String,
     service: Arc<S>,
     status: Arc<PublishedStatus>,
     session: Mutex<Session>,
+    product: Option<Arc<dyn ProductRoutes>>,
 }
 impl<S: Service> Desktop<S> {
     pub fn new(
@@ -130,7 +136,18 @@ impl<S: Service> Desktop<S> {
             service,
             status,
             session: Mutex::new(session),
+            product: None,
         }
+    }
+    /// Serve the product evidence routes (session-protected like `/api/status`; additive: a desktop
+    /// built without this keeps its answers unchanged).
+    #[must_use]
+    pub fn with_product(mut self, routes: Arc<dyn ProductRoutes>) -> Self {
+        self.product = Some(routes);
+        self
+    }
+    fn product_path(&self, r: &Request) -> bool {
+        self.product.is_some() && crate::product_app::PATHS.contains(&r.target.as_str())
     }
     pub fn service(&self) -> &S {
         &self.service
@@ -175,6 +192,7 @@ impl<S: Service> Desktop<S> {
         if r.method == "GET"
             && r.target != "/api/status"
             && !r.target.starts_with("/api/pair/window/qr/")
+            && !self.product_path(r)
         {
             return Ok(());
         }
@@ -187,6 +205,7 @@ impl<S: Service> Desktop<S> {
             return Err(PublicError::new(401, "open_from_native_launcher"));
         }
         if r.method == "POST"
+            && !self.product_path(r)
             && (r.header("origin") != Some(&self.origin)
                 || r.header("x-mycelium-action") != Some("1"))
         {
@@ -217,6 +236,10 @@ impl<S: Service> Desktop<S> {
     }
     fn dispatch(&self, r: Request) -> Result<Reply, PublicError> {
         self.guard(&r)?;
+        if let Some(product) = self.product.as_ref().filter(|_| self.product_path(&r)) {
+            // No status/session lock is held across the product publication either.
+            return product.get(&r);
+        }
         if r.method == "GET" {
             if r.target == "/chat" || r.target.starts_with("/chat/") {
                 return self.service.chat(r);
