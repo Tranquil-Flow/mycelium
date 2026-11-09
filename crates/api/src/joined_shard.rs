@@ -126,6 +126,33 @@ fn current(coordinator: &seed::Coordinator, member: &Value) -> Result<f64> {
         })
         .map_err(|_| fail("joined_shard_member_changed"))
 }
+/// A member's signed carrier registration, opened against the seed's CURRENT
+/// row for the node it names: signed by that row's enrolled key and endpoint,
+/// and every member field (key digest, endpoint, incarnation, generation)
+/// equal to the row, RUNNING, leased. Returns the row and its lease expiry.
+fn registered(coordinator: &seed::Coordinator, registration: &Value) -> Result<(Value, f64)> {
+    let node = text(&registration["message"]["member"], "node_id")?;
+    let row = coordinator
+        .member(node)
+        .map_err(|_| fail("joined_shard_member_changed"))?;
+    let reg = open(
+        registration,
+        REGISTER,
+        text(&row, "verification_key_digest")?,
+    )?;
+    exact(reg, &["protocol", "member", "carrier_endpoint_id"])?;
+    if registration["signature"]["signer_endpoint_id"] != row["endpoint_id"] {
+        return Err(fail("joined_shard_identity_mismatch"));
+    }
+    let lease = current(coordinator, &reg["member"])?;
+    Ok((row, lease))
+}
+/// Verify a member's own registration claim (its enrolled key) against the
+/// seed row before anything trusts it (REVIEW-laneB16 F2); the same checks
+/// every offer repeats.
+pub fn verify_registration(coordinator: &seed::Coordinator, registration: &Value) -> Result<()> {
+    registered(coordinator, registration).map(|_| ())
+}
 /// Issue from the real seed's current durable member row. `recipe` and `transfer`
 /// must come from the compiler; this API does not claim to have produced them.
 pub fn issue(
@@ -183,20 +210,9 @@ pub fn issue_with_source_addrs(
 ) -> Result<Value> {
     let source_digest = identity::key_record_digest(source_key)
         .map_err(|_| fail("joined_shard_identity_mismatch"))?;
-    let node = text(&registration["message"]["member"], "node_id")?;
-    let row = coordinator
-        .member(node)
-        .map_err(|_| fail("joined_shard_member_changed"))?;
-    let reg = open(
-        registration,
-        REGISTER,
-        text(&row, "verification_key_digest")?,
-    )?;
-    exact(reg, &["protocol", "member", "carrier_endpoint_id"])?;
-    if registration["signature"]["signer_endpoint_id"] != row["endpoint_id"] {
-        return Err(fail("joined_shard_identity_mismatch"));
-    }
-    let lease = current(coordinator, &reg["member"])?;
+    let (row, lease) = registered(coordinator, registration)?;
+    let reg = &registration["message"];
+    let node = text(&reg["member"], "node_id")?;
     if recipe["node_id"] != node {
         return Err(fail("joined_shard_member_changed"));
     }

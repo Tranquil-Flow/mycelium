@@ -209,8 +209,9 @@ fn drive(
                     let reply = r["result"]["reply"].clone();
                     if name == "accept" && reply["ok"] == true {
                         // Paired: later replies must be signed by the enrolled
-                        // key named in the registration (the owner checks that
-                        // registration against the seed row before any offer).
+                        // key named in the registration; `link::admit` checks
+                        // that claim against the seed row before the owner uses
+                        // this link (a refused link is dropped).
                         remote.enrolled =
                             reply["result"]["message"]["member"]["verification_key_digest"]
                                 .as_str()
