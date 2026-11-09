@@ -148,3 +148,112 @@ fn real_quic_node_control_puts_its_explicit_close_on_the_wire_before_the_call_re
     assert_eq!(peer.line("L9_CALL_CLOSED "),"true","the peer must see the explicit close while the caller's runtime is idle");
     drop(client);host.close(&clock,clock.deadline()).unwrap();peer.finish();
 }
+/// More always-ready tasks than one current-thread scheduler tick runs (tokio
+/// polls at most 61 queued tasks before it polls the `block_on` future again):
+/// a connection driver woken inside a call's `block_on` is queued behind them,
+/// so it runs only if the call keeps driving the runtime. Stands for any other
+/// work a host runtime carries. Stops (each task finishes) when dropped.
+struct ReadyLoad(std::sync::Arc<std::sync::atomic::AtomicBool>, Vec<tokio::task::JoinHandle<()>>);
+impl ReadyLoad {
+    fn on(rt: &tokio::runtime::Runtime) -> Self {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let tasks = (0..256)
+            .map(|_| {
+                let stop = stop.clone();
+                rt.spawn(std::future::poll_fn(move |cx| {
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        return std::task::Poll::Ready(());
+                    }
+                    cx.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }))
+            })
+            .collect();
+        Self(stop, tasks)
+    }
+    fn stop(mut self, rt: &tokio::runtime::Runtime) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        for task in std::mem::take(&mut self.1) {
+            rt.block_on(task).unwrap();
+        }
+    }
+}
+impl Drop for ReadyLoad {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+#[test]
+fn real_quic_node_control_close_is_on_the_wire_when_a_loaded_current_thread_call_returns() {
+    // B20f. One `yield_now` after the call gives the woken connection driver a
+    // turn only when it is among the next 61 queued tasks; with more ready work
+    // on the host runtime the call returns with close(7) still queued. This
+    // thread then drives nothing until the peer reports the explicit close: an
+    // unsent close never arrives (the peer's wait elapses), a drained one would
+    // earn the peer a reset. Must hold whatever else the runtime carries.
+    let rt=runtime();let clock=Time::new();let mut host=bind_host(&rt,&clock,clock.deadline()).unwrap();
+    let mut peer=Peer::spawn(host.address().unwrap().id,"control-close-observed");
+    let fence=ConnectionFence{endpoint_id:*peer.address.id.as_bytes(),local_generation:2,remote_generation:3};
+    let (_tx,mut authority)=tokio::sync::watch::channel(Some(fence));
+    let client=NodeControlClient::new(&host,&clock,Entries::new(1)).unwrap();
+    let load=ReadyLoad::on(&rt);
+    let response=client.call(ControlRequest{peer:&peer.address,fence,command:&control_vector("install_token_path-0"),deadline:control_deadline(&clock)},&mut authority);
+    let observed=peer.lines.recv_timeout(allowance()+allowance());
+    load.stop(&rt);
+    assert_eq!(response.unwrap(),control_vector("completed"));
+    assert_eq!(observed.as_deref(),Ok("L9_CALL_CLOSED true"),"the peer must see close(7) while the caller's runtime is idle");
+    drop(client);host.close(&clock,clock.deadline()).unwrap();peer.finish();
+}
+#[test]
+fn real_quic_node_control_close_needs_no_flush_on_a_self_driven_runtime() {
+    // Control: a multi-thread host runtime's worker sends the queued close(7)
+    // while the caller's thread is idle, with or without any flush in the call.
+    let rt=tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+    let clock=Time::new();let mut host=bind_host(&rt,&clock,clock.deadline()).unwrap();
+    let mut peer=Peer::spawn(host.address().unwrap().id,"control-close-observed");
+    let fence=ConnectionFence{endpoint_id:*peer.address.id.as_bytes(),local_generation:2,remote_generation:3};
+    let (_tx,mut authority)=tokio::sync::watch::channel(Some(fence));
+    let client=NodeControlClient::new(&host,&clock,Entries::new(1)).unwrap();
+    let response=client.call(ControlRequest{peer:&peer.address,fence,command:&control_vector("install_token_path-0"),deadline:control_deadline(&clock)},&mut authority);
+    let observed=peer.lines.recv_timeout(allowance()+allowance());
+    assert_eq!(response.unwrap(),control_vector("completed"));
+    assert_eq!(observed.as_deref(),Ok("L9_CALL_CLOSED true"));
+    drop(client);host.close(&clock,clock.deadline()).unwrap();peer.finish();
+}
+#[test]
+fn real_quic_node_control_response_is_on_the_wire_when_a_current_thread_respond_returns() {
+    // B20f. `respond` used to return once write_all + finish had only queued
+    // the response and its FIN. A receiver whose current-thread runtime then
+    // goes idle (it waits for its next command outside the runtime) never sent
+    // them: the caller read nothing until its own deadline. The caller here has
+    // its own multi-thread runtime; this thread drives nothing after respond.
+    let rt=runtime();let clock=Time::new();
+    let mut host=bind_host_protocols(&rt,&clock,clock.deadline(),iroh::SecretKey::from_bytes(&[94;32]),&[Channel::NodeControl]).unwrap();
+    let address=host.address().unwrap();
+    let (caller_tx,caller_rx)=mpsc::channel();
+    let (result_tx,result_rx)=mpsc::channel();
+    let caller=std::thread::spawn(move || {
+        let crt=tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let cclock=Time::new();let mut chost=bind_host(&crt,&cclock,cclock.deadline()).unwrap();
+        caller_tx.send(chost.address().unwrap().id).unwrap();
+        let fence=ConnectionFence{endpoint_id:*address.id.as_bytes(),local_generation:2,remote_generation:3};
+        let (_tx,mut authority)=tokio::sync::watch::channel(Some(fence));
+        let client=NodeControlClient::new(&chost,&cclock,Entries::new(1)).unwrap();
+        let result=client.call(ControlRequest{peer:&address,fence,command:&control_vector("install_token_path-0"),deadline:cclock.deadline()},&mut authority);
+        result_tx.send(result).unwrap();
+        drop(client);chost.close(&cclock,cclock.deadline()).unwrap();
+    });
+    let caller_id=caller_rx.recv_timeout(allowance()).unwrap();
+    let conn=host.accept(&clock,clock.deadline()).unwrap();
+    let fence=ConnectionFence{endpoint_id:*caller_id.as_bytes(),local_generation:3,remote_generation:2};
+    let mut receiver=runtime::iroh_control_receive::NodeControlReceiver::new(conn.clone(),&rt,&clock,fence,||fence).unwrap();
+    let delivery=receiver.receive(clock.deadline()).unwrap();
+    assert_eq!(delivery.bytes(),control_vector("install_token_path-0"));
+    let load=ReadyLoad::on(&rt);
+    delivery.respond(&control_vector("completed")).unwrap();
+    let observed=result_rx.recv_timeout(allowance()+allowance());
+    load.stop(&rt);
+    assert_eq!(observed.expect("caller finished").expect("caller read the whole response"),control_vector("completed"));
+    caller.join().unwrap();
+    drop(receiver);drop(conn);host.close(&clock,clock.deadline()).unwrap();
+}
