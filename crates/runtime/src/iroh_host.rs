@@ -244,8 +244,28 @@ pub struct LoopbackHost<'a> {
     address_task: Option<tokio::task::JoinHandle<()>>,
     /// Direct LAN: one path watch per admitted connection (see `confine`).
     path_guards: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Direct LAN: what [`LoopbackHost::recycle_lan`] rebinds with.
+    reuse: Option<Box<LanReuse>>,
+}
+/// The bound socket (a CLOEXEC duplicate; the transport owns the original)
+/// and identity a direct-LAN endpoint is recycled with, so the address in the
+/// caller's signed carrier advert stays exactly valid (B11).
+struct LanReuse {
+    socket: std::net::UdpSocket,
+    secret: iroh::SecretKey,
+    alpns: Vec<Vec<u8>>,
 }
 type Handshake = Result<(Connection, Pin), Error>;
+/// The builder of a direct-LAN endpoint: no relay, no address lookup and NO
+/// IP transport; the pre-send LAN transport owns the one bound socket (see
+/// `iroh_lan_filter`).
+fn lan_builder(transport: Arc<LanTransport>) -> iroh::endpoint::Builder {
+    Endpoint::builder(presets::Minimal)
+        .relay_mode(RelayMode::Disabled)
+        .clear_address_lookup()
+        .clear_ip_transports()
+        .add_custom_transport(transport)
+}
 impl LoopbackHost<'_> {
     fn abort_path_guards(&self) {
         if let Ok(mut guards) = self.path_guards.lock() {
@@ -372,12 +392,22 @@ impl<'a> LoopbackHost<'a> {
             )),
             None => None,
         };
-        let lan_transport = match (&lan, &admission) {
-            (Some((interface, _)), Some(admission)) => Some(Arc::new(
-                LanTransport::bind(*interface, admission.clone())
-                    .map_err(|_| Error::Unavailable)?,
-            )),
-            _ => None,
+        let (lan_transport, reuse) = match (&lan, &admission, &secret) {
+            (Some((interface, _)), Some(admission), Some(secret)) => {
+                let socket = std::net::UdpSocket::bind(SocketAddr::new(*interface, 0))
+                    .map_err(|_| Error::Unavailable)?;
+                let kept = socket.try_clone().map_err(|_| Error::Unavailable)?;
+                let transport =
+                    LanTransport::on(socket, admission.clone()).map_err(|_| Error::Unavailable)?;
+                let reuse = Box::new(LanReuse {
+                    socket: kept,
+                    secret: secret.clone(),
+                    alpns: alpns.clone(),
+                });
+                (Some(Arc::new(transport)), Some(reuse))
+            }
+            (Some(_), _, _) => return Err(Error::Unavailable),
+            _ => (None, None),
         };
         let lan_socket = lan_transport.as_ref().map(|t| t.local());
         let endpoint = runtime.block_on(async {
@@ -389,14 +419,7 @@ impl<'a> LoopbackHost<'a> {
                     .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
                     .map_err(|_| Error::Unavailable)?,
                 NetworkMode::DirectLan => {
-                    // No IP transport at all: the pre-send LAN transport owns
-                    // the one bound socket (see `iroh_lan_filter`).
-                    let transport = lan_transport.clone().ok_or(Error::Unavailable)?;
-                    Endpoint::builder(presets::Minimal)
-                        .relay_mode(RelayMode::Disabled)
-                        .clear_address_lookup()
-                        .clear_ip_transports()
-                        .add_custom_transport(transport)
+                    lan_builder(lan_transport.clone().ok_or(Error::Unavailable)?)
                 }
                 NetworkMode::Production | NetworkMode::ForceRelay => {
                     // The production relay transport; `ForceRelay` removes every direct IP
@@ -433,6 +456,7 @@ impl<'a> LoopbackHost<'a> {
             handshakes: Mutex::new(tokio::task::JoinSet::new()),
             address_task: None,
             path_guards: Mutex::new(Vec::new()),
+            reuse,
         };
         allowance(clock, deadline)?;
         Ok(host)
@@ -801,6 +825,55 @@ impl<'a> LoopbackHost<'a> {
     /// Direct LAN: inbound datagrams the receive filter dropped before iroh.
     pub fn lan_dropped_datagrams(&self) -> Option<u64> {
         self.lan.as_ref().map(|lan| lan.dropped())
+    }
+    /// Direct LAN: remote addresses the current endpoint let reach iroh's
+    /// address map since it was bound (receive-filter admissions plus fresh
+    /// dial pins). iroh 1.0.2 never evicts that map (`mapped_addrs.rs:
+    /// 348-359`), so this bounds its growth from above; see `recycle_lan`.
+    pub fn lan_sources_admitted(&self) -> Option<u64> {
+        self.lan.as_ref().map(|lan| lan.admitted())
+    }
+    /// Direct LAN: close the endpoint (with the same proof as [`Self::close`])
+    /// and bind a fresh one on the SAME socket with the same key, channels,
+    /// policy and signed peer hosts/keys. iroh 1.0.2 keeps every remote
+    /// address an endpoint ever saw in a map it never evicts; a long-lived
+    /// host that recycles at each route epoch boundary drops that map with
+    /// the old endpoint, while its address (endpoint id + socket, i.e. the
+    /// caller's signed carrier advert) stays exactly valid. Pins, path
+    /// watches, handshakes in flight and the address watch end with the old
+    /// endpoint (re-request `address_watch`). A failed close keeps the old
+    /// endpoint for an explicit retry of this call or of `close`; a failed
+    /// rebind leaves the host closed. `Unavailable` in every other mode.
+    pub fn recycle_lan(&mut self, clock: &impl Clock, deadline: MonoInstant) -> Result<(), Error> {
+        let next = match (&self.lan, &self.reuse, &self.endpoint) {
+            (Some(lan), Some(_), Some(_)) => lan.successor()?,
+            // Not direct LAN, or already closed: never rebind a released host.
+            _ => return Err(Error::Unavailable),
+        };
+        self.close(clock, deadline)?;
+        let reuse = self.reuse.as_ref().ok_or(Error::Unavailable)?;
+        let socket = reuse.socket.try_clone().map_err(|_| Error::Unavailable)?;
+        let transport =
+            Arc::new(LanTransport::on(socket, next.clone()).map_err(|_| Error::Unavailable)?);
+        let (secret, alpns) = (reuse.secret.clone(), reuse.alpns.clone());
+        let wait = allowance(clock, deadline)?;
+        let endpoint = self.runtime.block_on(async {
+            tokio::time::timeout(
+                wait,
+                lan_builder(transport)
+                    .alpns(alpns)
+                    .secret_key(secret)
+                    .bind(),
+            )
+            .await
+            .map_err(|_| Error::Expired)?
+            .map_err(|_| Error::Unavailable)
+        })?;
+        self.handshakes = Mutex::new(tokio::task::JoinSet::new());
+        self.lan = Some(next);
+        self.endpoint = Some(endpoint);
+        self.admitting = true;
+        allowance(clock, deadline).map(|_| ())
     }
     pub fn connect(
         &self,

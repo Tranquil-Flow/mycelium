@@ -194,6 +194,10 @@ pub(crate) struct Admission {
     refused: AtomicU64,
     /// Inbound datagrams the receive filter dropped (never reached iroh).
     dropped: AtomicU64,
+    /// Remote addresses this admission let reach iroh's never-evicting
+    /// address map (receive-filter entries + fresh authenticated pins): an
+    /// upper bound on that map's growth for the endpoint it serves (B11).
+    admitted: AtomicU64,
     /// Fault injection: the path monitor treats every path as not admitted
     /// (the sender is unaffected, so close frames still go out). Proves that a
     /// connection is watched at all and that the monitor alone closes it.
@@ -223,12 +227,24 @@ impl Admission {
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
+            admitted: AtomicU64::new(0),
             #[cfg(test)]
             distrust_for_test: AtomicBool::new(false),
         })
     }
     pub(crate) fn policy(&self) -> &LanPolicy {
         &self.policy
+    }
+    /// A fresh admission for a recycled endpoint (B11): the same policy,
+    /// bounds and signed peer hosts/keys; no pins, history, receive-filter
+    /// entries or counters (they described the closed endpoint).
+    pub(crate) fn successor(&self) -> Result<Arc<Self>, Error> {
+        let next = Self::new(self.policy.clone(), self.capacity, self.remembered);
+        let hosts = self.hosts.read().map_err(|_| Error::Unavailable)?.clone();
+        let keys = self.keys.read().map_err(|_| Error::Unavailable)?.clone();
+        *next.hosts.write().map_err(|_| Error::Unavailable)? = hosts;
+        *next.keys.write().map_err(|_| Error::Unavailable)? = keys;
+        Ok(next)
     }
     /// The pre-send check, evaluated for every datagram.
     pub(crate) fn may_send(&self, dst: SocketAddr) -> bool {
@@ -313,6 +329,7 @@ impl Admission {
                 refused: false,
             },
         );
+        self.admitted.fetch_add(1, Ordering::SeqCst);
         true
     }
     /// A provisional handshake from `addrs` was refused: their entries stop
@@ -436,6 +453,11 @@ impl Admission {
         if table.len() + fresh > limit {
             return Err(Error::Unavailable);
         }
+        if class == PinClass::Authenticated {
+            // A dialed destination is mapped by iroh too (`lan_target`).
+            self.admitted
+                .fetch_add(u64::try_from(fresh).unwrap_or(u64::MAX), Ordering::SeqCst);
+        }
         for addr in &addrs {
             *table.entry(*addr).or_insert(0) += 1;
         }
@@ -473,6 +495,10 @@ impl Admission {
     /// Inbound datagrams the receive filter dropped (never reached iroh).
     pub(crate) fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::SeqCst)
+    }
+    /// See the `admitted` field.
+    pub(crate) fn admitted(&self) -> u64 {
+        self.admitted.load(Ordering::SeqCst)
     }
 }
 /// Holds exact destination pins; releases them on drop (not while closing).
@@ -562,8 +588,16 @@ pub(crate) struct LanTransport {
 impl LanTransport {
     /// Bind exactly `interface` (port 0) now, so the address is known before
     /// iroh builds the endpoint.
+    #[cfg(test)]
     pub(crate) fn bind(interface: IpAddr, admission: Arc<Admission>) -> io::Result<Self> {
-        let socket = std::net::UdpSocket::bind(SocketAddr::new(interface, 0))?;
+        Self::on(
+            std::net::UdpSocket::bind(SocketAddr::new(interface, 0))?,
+            admission,
+        )
+    }
+    /// The transport over an already bound socket (a recycled endpoint keeps
+    /// its socket, so its signed address stays valid; B11).
+    pub(crate) fn on(socket: std::net::UdpSocket, admission: Arc<Admission>) -> io::Result<Self> {
         socket.set_nonblocking(true)?;
         let local = socket.local_addr()?;
         Ok(Self {

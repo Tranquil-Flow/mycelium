@@ -207,7 +207,7 @@ fn run() -> Result<()> {
             }
             "serve" => {
                 let member = session.as_ref().ok_or("not_joined")?;
-                serve::serve(
+                let served = serve::serve(
                     &host,
                     &rt,
                     &clock,
@@ -217,7 +217,25 @@ fn run() -> Result<()> {
                     &request["route"],
                     proof_digest.as_deref().ok_or("native_proof_required")?,
                     &operation,
-                )
+                );
+                // B11 (gap row 19): the epoch is over. A direct-LAN carrier is
+                // recycled on the same socket and key before the reply, so its
+                // signed address stays valid while iroh's never-evicting
+                // address map of this epoch goes with the old endpoint.
+                if lan.is_none() {
+                    return served;
+                }
+                let recycled = deadline()
+                    .and_then(|d| host.recycle_lan(&clock, d).map_err(|e| format!("{e:?}")));
+                match (served, recycled) {
+                    (Ok(mut report), Ok(())) => {
+                        report["carrier_recycled"] = json!(true);
+                        Ok(report)
+                    }
+                    (Ok(_), Err(e)) => Err(format!("carrier_recycle_failed:{e}")),
+                    (Err(code), Ok(())) => Err(code),
+                    (Err(code), Err(e)) => Err(format!("{code};carrier_recycle_failed:{e}")),
+                }
             }
             "leave" => {
                 let mode = request["mode"]
