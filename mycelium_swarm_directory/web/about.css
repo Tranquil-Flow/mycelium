@@ -299,3 +299,252 @@ table.vision-table td:last-child {
     padding: 24px 18px;
   }
 }
+
+/* v4: numbered 'How Mycelium works' steps. */
+.vision-steps {
+  margin: 8px 0 0;
+  padding-left: 1.5em;
+  display: grid;
+  gap: 14px;
+}
+.vision-steps li {
+  line-height: 1.75;
+  max-width: 68ch;
+  padding-left: 4px;
+}
+.vision-steps li::marker {
+  color: var(--accent);
+  font-weight: 650;
+}
+.vision-page .sect .vision-steps + .vision-fig {
+  margin-top: 34px;
+}
+
+/* v4 illustrations: inline SVG (scripts/generate_about_figures.py), coloured
+   only through the theme variables so they follow Green/Blue and dark/light.
+   A wide version, and a simplified tall one on phones; both keep their
+   aspect ratio from the first byte (viewBox + width/height), so CLS stays 0.
+   Static: no motion. */
+.vision-fig {
+  margin: 30px 0 34px;
+  max-width: 1000px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 18px 14px;
+  text-shadow: none;
+}
+.vision-page main .vision-fig {
+  text-shadow: none;
+}
+.fig-frame {
+  display: block;
+}
+.fig-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+}
+.fig-art.fig-narrow {
+  display: none;
+  max-width: 420px;
+  margin: 0 auto;
+}
+.vision-fig figcaption {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+  max-width: 68ch;
+}
+@media (max-width: 820px) {
+  .fig-art.fig-wide {
+    display: none;
+  }
+  .fig-art.fig-narrow {
+    display: block;
+  }
+}
+@media (max-width: 640px) {
+  .vision-fig {
+    padding: 12px 10px 12px;
+    margin: 24px 0 26px;
+  }
+}
+.fig-art text {
+  font-family: var(--sans);
+  font-weight: 560;
+  paint-order: stroke;
+  stroke: var(--card);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.fig-art .fx-t {
+  fill: var(--ink);
+  font-weight: 620;
+}
+.fig-art .fx-s {
+  fill: var(--muted);
+}
+.fig-art .fx-a {
+  fill: var(--accent);
+  font-weight: 640;
+}
+.fig-art path,
+.fig-art ellipse,
+.fig-art circle,
+.fig-art rect {
+  vector-effect: non-scaling-stroke;
+}
+.fx-halo {
+  fill: none;
+  stroke: var(--glow);
+  stroke-width: 6px;
+  opacity: 0.22;
+}
+.fx-mat {
+  fill: var(--glow);
+  opacity: 0.32;
+}
+.fx-core,
+.fx-strand,
+.fx-hair,
+.fx-plan,
+.fx-plan-hair {
+  fill: none;
+  stroke-linecap: round;
+}
+.fx-core {
+  stroke: var(--core);
+  opacity: 0.95;
+}
+.fx-strand {
+  stroke: var(--glow);
+  opacity: 0.85;
+}
+.fx-hair {
+  stroke: var(--glow);
+  opacity: 0.6;
+}
+.fx-plan {
+  stroke: var(--glow);
+  opacity: 0.75;
+  stroke-dasharray: 5 6;
+}
+.fx-plan-hair {
+  stroke: var(--glow);
+  opacity: 0.35;
+  stroke-dasharray: 2 4;
+}
+.fx-dev .fx-dev-body {
+  fill: var(--card-2);
+  stroke: var(--ink);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+}
+.fx-dev .fx-dev-line {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+}
+.fx-led {
+  fill: var(--accent);
+}
+.fx-p1,
+.fx-p2,
+.fx-p3 {
+  fill: var(--glow);
+  stroke: var(--core);
+  stroke-width: 0.8px;
+}
+.fx-p1 {
+  fill-opacity: 0.35;
+}
+.fx-p2 {
+  fill-opacity: 0.62;
+}
+.fx-p3 {
+  fill-opacity: 0.95;
+}
+.fx-cut {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2px;
+  stroke-dasharray: 4 4;
+}
+.fx-flow,
+.fx-step {
+  fill: none;
+  stroke: var(--core);
+  stroke-width: 1.8px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fx-step {
+  stroke: var(--muted);
+}
+.fx-pool {
+  fill: var(--glow);
+  fill-opacity: 0.18;
+  stroke: var(--glow);
+  stroke-width: 1.4px;
+  stroke-dasharray: 4 4;
+}
+.fx-check circle {
+  fill: var(--card);
+  stroke: var(--accent);
+  stroke-width: 1.4px;
+}
+.fx-check path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fx-plan-shape {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4px;
+  stroke-dasharray: 3 4;
+  stroke-linejoin: round;
+}
+.fx-rule {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1px;
+}
+/* On light paper the glow becomes ink: thinner, quieter halos and mats. */
+@media (prefers-color-scheme: light) {
+  .fx-halo {
+    opacity: 0.16;
+  }
+  .fx-mat {
+    opacity: 0.14;
+  }
+  .fx-strand {
+    opacity: 0.7;
+  }
+  .fx-hair {
+    opacity: 0.45;
+  }
+  .fx-core {
+    opacity: 0.85;
+  }
+  .fx-p1,
+  .fx-p2,
+  .fx-p3 {
+    stroke: var(--glow);
+  }
+  .fx-p1 {
+    fill-opacity: 0.2;
+  }
+  .fx-p2 {
+    fill-opacity: 0.45;
+  }
+  .fx-p3 {
+    fill-opacity: 0.75;
+  }
+}
