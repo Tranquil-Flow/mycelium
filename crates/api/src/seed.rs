@@ -241,6 +241,13 @@ impl SeedClient {
         })
     }
 
+    /// `ManagedControlClient._request(path, envelope)`: POST one signed envelope to an application
+    /// route the seed mounts (demo-run exchange, managed control). The answer is unverified here:
+    /// the caller verifies the owner's signature and binding.
+    pub fn post(&self, path: &str, envelope: &Value) -> Result<Value, SeedError> {
+        self.request("POST", path, Some(envelope))
+    }
+
     /// One request; the canonical-JSON object it answers (`_request`).
     fn request(&self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, SeedError> {
         let unreachable = || SeedError::new("seed_http_unreachable");

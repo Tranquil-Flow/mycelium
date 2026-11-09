@@ -299,10 +299,20 @@ impl Instance {
     fn until(
         &self,
         what: &str,
+        fetch: impl FnMut() -> Value,
+        done: impl Fn(&Value) -> bool,
+    ) -> Value {
+        self.until_with(what, patience(), fetch, done)
+    }
+    /// [`Instance::until`] for a step whose own registered budget exceeds the default patience.
+    fn until_with(
+        &self,
+        what: &str,
+        patience: Duration,
         mut fetch: impl FnMut() -> Value,
         done: impl Fn(&Value) -> bool,
     ) -> Value {
-        let deadline = Instant::now() + patience();
+        let deadline = Instant::now() + patience;
         loop {
             let value = fetch();
             if done(&value) {
@@ -499,6 +509,17 @@ fn pair_up_with_owner_env(
     via_edge: bool,
     env: &[(&str, String)],
 ) -> (Instance, Instance, u16, Option<Edge>) {
+    pair_up_with_envs(base, via_edge, env, &[], &|_, _| {})
+}
+/// As [`pair_up_with_owner_env`], with extra environment for the member process too and a
+/// fixture step that runs once the owner exists, before the member launches.
+fn pair_up_with_envs(
+    base: &Path,
+    via_edge: bool,
+    env: &[(&str, String)],
+    member_env: &[(&str, String)],
+    before_member: &dyn Fn(&Instance, &Path),
+) -> (Instance, Instance, u16, Option<Edge>) {
     // ---- owner: relay (external, no tunnel), create, window       (relay-window steps 1-3, 6)
     let owner = Instance::launch(&base.join("owner"), env);
     let proxy = free_port();
@@ -554,19 +575,19 @@ fn pair_up_with_owner_env(
             e.address.to_string()
         });
     // ---- member: the seams of the oracle's test launcher
-    let member = Instance::launch(
-        &base.join("member"),
-        &[
-            (
-                "MYCELIUM_L10_TEST_JOIN_BASE",
-                format!("http://127.0.0.1:{proxy}"),
-            ),
-            (
-                "MYCELIUM_L10_TEST_SEED_DIRECT",
-                format!("{seed_address}|{}", ca.display()),
-            ),
-        ],
-    );
+    let mut seams = vec![
+        (
+            "MYCELIUM_L10_TEST_JOIN_BASE",
+            format!("http://127.0.0.1:{proxy}"),
+        ),
+        (
+            "MYCELIUM_L10_TEST_SEED_DIRECT",
+            format!("{seed_address}|{}", ca.display()),
+        ),
+    ];
+    seams.extend(member_env.iter().cloned());
+    before_member(&owner, &base.join("member"));
+    let member = Instance::launch(&base.join("member"), &seams);
     let (_, member_status) = member.get("/api/status");
     let digest = member_status["join_flow"]["standing_disclosure"]["digest"].clone();
     assert!(digest.is_string(), "{member_status}");

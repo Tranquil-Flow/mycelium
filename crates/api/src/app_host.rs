@@ -255,6 +255,9 @@ pub struct SeedRuntime<M: ManagedSlot = Unmanaged> {
     pub managed_init: Mutex<()>,
     pub managed_closed: Mutex<bool>,
     pub managed: Mutex<Option<Arc<M>>>,
+    /// The target-side managed-control routes this seed serves to joined members; the owner's
+    /// managed owner binds its mailbox here (`crate::managed_routes`).
+    pub mailbox_routes: Arc<crate::managed_routes::DispatchSlot>,
 }
 impl<M: ManagedSlot> SeedRuntime<M> {
     /// How this process reaches its own seed: the local CA, the loopback port, the loopback name.
@@ -269,6 +272,7 @@ impl<M: ManagedSlot> SeedRuntime<M> {
         if let Ok(mut closed) = self.managed_closed.lock() {
             *closed = true;
         }
+        self.mailbox_routes.unbind();
         let managed = self.managed.lock().ok().and_then(|m| m.clone());
         if let Some(managed) = managed
             && let Err(error) = managed.close()
@@ -353,6 +357,11 @@ pub fn start_seed<M: ManagedSlot>(
             .span(Entries::ZERO)
             .map_err(|_| failure())?,
     ));
+    let mailbox_routes = Arc::new(crate::managed_routes::DispatchSlot::default());
+    let routes = Arc::new(crate::managed_routes::Routes(vec![
+        routes,
+        Arc::new(crate::managed_routes::MailboxRoutes(mailbox_routes.clone())),
+    ]));
     let server = ::seed::server::Server::bind_tls_on_with_routes(
         coordinator.clone(),
         &material,
@@ -382,6 +391,7 @@ pub fn start_seed<M: ManagedSlot>(
         managed_init: Mutex::new(()),
         managed_closed: Mutex::new(false),
         managed: Mutex::new(None),
+        mailbox_routes,
     })
 }
 /// `/api/create` on a fresh swarm: `pair_request` -> `approve_pairing(ttl_seconds=120)` ->

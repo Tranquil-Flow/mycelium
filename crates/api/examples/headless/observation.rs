@@ -247,6 +247,8 @@ fn binding(member: &Value, run: &Value, deployment: &Value) -> OResult<Value> {
     Ok(b)
 }
 type Factory = Box<dyn Fn() -> OResult<PinnedHost> + Send + Sync>;
+/// The owner mailbox's authenticated dispatcher: exact signed bytes in, signed answer out.
+type MailboxDispatch = dyn Fn(&[u8]) -> OResult<Vec<u8>> + Send + Sync;
 /// Seed-owned capabilities. No Runner, Core, or temporary ports are retained.
 pub(super) struct Managed {
     owner: Arc<SharedManagedOwner<Factory>>,
@@ -393,7 +395,9 @@ impl Backend {
         let wake = Arc::new(target::Wake::default());
         let dispatch_wake = wake.clone();
         let dispatch_host = host.clone();
-        let carrier = LocalMailboxCarrier::start(move |raw| {
+        // One dispatcher for both carriers: this process's own target over the local carrier, a
+        // joined member's target over the seed's managed-control routes (same authentication).
+        let dispatch: Arc<MailboxDispatch> = Arc::new(move |raw| {
             let value = protocol::strict::object(raw, protocol::managed::MAX_FRAME_BYTES)
                 .map_err(|_| OwnerError("invalid_control_call"))?;
             let statement = &value["statement"];
@@ -423,7 +427,11 @@ impl Backend {
                 dispatch_wake.notify()?;
             }
             result
-        })?;
+        });
+        let local = dispatch.clone();
+        let carrier = LocalMailboxCarrier::start(move |raw| local(raw))?;
+        seed.mailbox_routes
+            .bind(Arc::new(move |raw: &[u8]| dispatch(raw).map_err(|e| e.0)));
         host.pin()?;
         let managed = Arc::new(Managed {
             owner,

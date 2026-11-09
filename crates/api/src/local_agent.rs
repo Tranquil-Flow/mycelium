@@ -31,6 +31,17 @@ use std::{
 
 pub const MEMBER_REPORT: &str = "mycelium.a13_demo_member_report.v1";
 
+/// `_ensure_whole_model(a)` of a joined Mac: the announced whole snapshot is here, or what it waits for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WholeModel {
+    Ready,
+    Waiting {
+        state: String,
+        detail: Option<String>,
+        progress: Option<Value>,
+    },
+}
+
 /// A failed exchange call. The oracle exposes only the call site's closed code, not exception text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExchangeUnavailable;
@@ -43,6 +54,11 @@ pub trait AgentHost {
     fn member(&mut self) -> Option<String>;
     /// `OwnerRunConsent._active()`.
     fn run_active(&mut self) -> bool;
+    /// A joined Mac's `StandingConsentGate`: the closed reason its standing grant does not allow
+    /// work now (`standing_consent_missing` / `_withdrawn` / `_unbound` / `_owner_mismatch`).
+    fn standing_refusal(&mut self) -> Option<String> {
+        Some("standing_consent_missing".into())
+    }
     /// `app._resource_check()`: a closed reason when a power / thermal / network gate refuses.
     fn resource_check(&mut self) -> Option<String>;
     /// The pinned snapshot on this Mac (`acquisition.prepared_source()`): model id, commit.
@@ -101,6 +117,11 @@ pub trait AgentHost {
     fn slice_transport(&mut self, _announcement: &Value) -> Option<Box<dyn SliceTransport>> {
         None
     }
+    /// A joined Mac in whole-snapshot mode: `_ensure_whole_model(a)` (never called for the owner's own
+    /// contributor, whose snapshot is the owner's).
+    fn whole_model(&mut self, _announcement: &Value) -> Result<WholeModel, Failure> {
+        Ok(WholeModel::Ready)
+    }
     /// `sink(report)` = `exchange.submit_local(local, report)`.
     fn sink(&mut self, report: &Value) -> Result<(), ExchangeUnavailable>;
     /// `self._clock()`.
@@ -154,6 +175,8 @@ pub struct LocalAgent {
     slice_job: Option<SliceJob>,
     slice_result: SliceResult,
     slice_stop: Arc<AtomicBool>,
+    /// `local=False`: a joined Mac (`DemoTargetAgent(app, consent=StandingConsentGate(), ...)`).
+    remote: bool,
 }
 
 /// `_code(error, default)` over a native worker's error code.
@@ -202,6 +225,15 @@ impl LocalAgent {
         agent
     }
 
+    /// The agent of a JOINED Mac (`local=False`): it reports over the signed exchange, needs the
+    /// owner's announced bootstrap offer itself before it starts its worker, and leaves work offers
+    /// to its standing acceptor.
+    pub fn remote() -> Self {
+        let mut agent = Self::new();
+        agent.remote = true;
+        agent
+    }
+
     /// `_set(state, detail, progress=None)`.
     fn set(&mut self, state: &str, detail: Option<&str>) {
         self.set_progress(state, detail, None);
@@ -221,14 +253,17 @@ impl LocalAgent {
             "phase": a.get("phase").cloned().unwrap_or(Value::Null),
             "run_id": a.get("run_id").cloned().unwrap_or(Value::Null),
             "model_id": a.get("model").and_then(|m| m.get("model_id")).cloned().unwrap_or(Value::Null),
-            "local": true,
+            "local": !self.remote,
             "sources": Value::Null,
         })
     }
 
     /// `_consent(action)` under `OwnerRunConsent`.
     fn consent(&mut self, host: &mut dyn AgentHost) -> bool {
-        let reason = if host.run_active() {
+        let reason = if self.remote {
+            // `StandingConsentGate.allows`: the join lane's grant, bound to this membership.
+            host.standing_refusal().or_else(|| host.resource_check())
+        } else if host.run_active() {
             host.resource_check()
         } else {
             Some("owner_run_not_active".to_owned())
@@ -561,6 +596,22 @@ impl LocalAgent {
             return Err(Failure::new("KeyError", "demo_step_failed"));
         };
         let wanted = (run_id.clone(), deployment_id.clone());
+        // 0. Whole-snapshot mode (a joined Mac): it needs the owner's whole pinned snapshot before
+        //    it can describe its installation.
+        if self.remote
+            && !a
+                .get("slice_mode")
+                .is_some_and(owner_run::steps::exchange::truthy)
+            && self.descriptor_for.as_ref() != Some(&wanted)
+            && let WholeModel::Waiting {
+                state,
+                detail,
+                progress,
+            } = host.whole_model(&a)?
+        {
+            self.set_progress(&state, detail.as_deref(), progress);
+            return Ok(());
+        }
         // 1. Descriptor (once per run).
         if self.descriptor_for.as_ref() != Some(&wanted) {
             self.slice_stop.store(true, Ordering::SeqCst);
@@ -609,8 +660,14 @@ impl LocalAgent {
         // 3. Bootstrap (hello-only, model load denied).
         let early = matches!(phase.as_str(), "collect" | "observe" | "compile");
         let bootstrap = text(&a, "bootstrap_offer_id");
+        // A joined Mac starts its worker only for the announced offer it holds itself (v0.1.4).
+        let held = !self.remote
+            || offer.as_ref().is_some_and(|o| {
+                bootstrap.is_some() && o["offer_id"].as_str() == bootstrap.as_deref()
+            });
         if let Some(id) = &bootstrap
-            && (early || !self.bootstrap_done.contains(id))
+            && held
+            && ((early && !self.remote) || !self.bootstrap_done.contains(id))
         {
             if !self.consent(host) {
                 return Ok(());
@@ -660,7 +717,7 @@ impl LocalAgent {
         let limits = a
             .get("work_limits")
             .filter(|v| owner_run::steps::exchange::truthy(v));
-        if let (Some(offer), Some(limits)) = (&offer, limits) {
+        if let (false, Some(offer), Some(limits)) = (self.remote, &offer, limits) {
             let id = offer["offer_id"]
                 .as_str()
                 .ok_or_else(|| Failure::new("KeyError", "demo_step_failed"))?

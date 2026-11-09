@@ -12,20 +12,20 @@ use std::thread::JoinHandle;
 const DELIVERY_WAKE: BudgetId = BudgetId::PyManagedRuntimeDeliveryWakeCeilingL461C16;
 
 #[derive(Default)]
-pub(super) struct Wake {
+pub(crate) struct Wake {
     generation: Mutex<u64>,
     changed: std::sync::Condvar,
 }
 impl Wake {
-    pub(super) fn notify(&self) -> OResult<()> {
+    pub(crate) fn notify(&self) -> OResult<()> {
         let updated = locked(&self.generation).map(|mut g| *g = g.wrapping_add(1));
         self.changed.notify_all();
         updated
     }
-    fn generation(&self) -> OResult<u64> {
+    pub(crate) fn generation(&self) -> OResult<u64> {
         Ok(*locked(&self.generation)?)
     }
-    fn wait(&self, generation: u64, fence: &TargetFence) -> OResult<()> {
+    pub(crate) fn wait(&self, generation: u64, fence: &TargetFence) -> OResult<()> {
         let g = locked(&self.generation)?;
         let ceiling = DELIVERY_WAKE
             .span(Entries::ZERO)
@@ -111,7 +111,14 @@ pub(crate) struct Worker {
     failure: Option<CleanupFailure>,
 }
 impl Worker {
-    fn close(&mut self) -> OResult<()> {
+    /// The pump thread is still driving its worker.
+    pub(crate) fn running(&self) -> bool {
+        self.join.as_ref().is_some_and(|j| !j.is_finished())
+    }
+    pub(crate) fn scope(&self) -> &Value {
+        &self.scope
+    }
+    pub(crate) fn close(&mut self) -> OResult<()> {
         let cancelled = self.fence.cancel();
         let notified = self.wake.notify();
         let stopped = self.process.cancel().map_err(OwnerError);
@@ -459,6 +466,89 @@ fn startup_test_seam() -> OResult<Option<std::net::TcpStream>> {
     }
     Ok(Some(stream))
 }
+/// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
+pub(crate) fn program(root: &Path) -> OResult<TrustedBootstrap> {
+    let config = private_state::load(
+        &root.join("bootstrap-program.json"),
+        private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
+    )
+    .map_err(|e| OwnerError(e.0))?
+    .ok_or(OwnerError("native_bootstrap_unavailable"))?;
+    let config = Value::Object(config);
+    if config.as_object().is_none_or(|o| o.len() != 4)
+        || config["protocol"] != "mycelium.bootstrap_program.v1"
+    {
+        return Err(OwnerError("native_bootstrap_configuration_invalid"));
+    }
+    let text = |k: &str| {
+        config[k]
+            .as_str()
+            .ok_or(OwnerError("native_bootstrap_configuration_invalid"))
+    };
+    TrustedBootstrap::open(
+        Path::new(text("path")?),
+        text("sha256")?,
+        text("source_sha")?,
+    )
+    .map_err(OwnerError)
+}
+/// Drive a started pump on its own thread until Stop (or its stop command) and close it there.
+pub(crate) fn spawn<H: TargetHost + 'static>(
+    mut pump: TargetPump<H>,
+    fence: TargetFence,
+    wake: Arc<Wake>,
+    scope: Value,
+) -> Worker {
+    let process = pump.process_control();
+    let worker_fence = fence.clone();
+    let owner_wake = wake.clone();
+    let join = thread::spawn(move || {
+        let result: OResult<()> = (|| {
+            let mut cadence = Cadence::new()?;
+            loop {
+                let generation = wake.generation()?;
+                let outcome = pump.step_outcome().map_err(OwnerError)?;
+                if matches!(outcome, StepOutcome::Completed { stopped: true }) {
+                    while worker_fence.check().is_ok() {
+                        let g = wake.generation()?;
+                        wake.wait(g, &worker_fence)?;
+                    }
+                    break;
+                }
+                cadence.wait(outcome, &wake, generation, &worker_fence)?;
+            }
+            Ok(())
+        })();
+        let recorded = if let Err(e) = &result {
+            pump.record_failure(e.0)
+        } else {
+            Ok(())
+        };
+        if let Err(cleanup) = pump.close() {
+            let control = pump.process_control();
+            return Err(CleanupFailure::owned(
+                cleanup,
+                cleanup,
+                control,
+                move || pump.close(),
+            ));
+        }
+        recorded.map_err(CleanupFailure::from)?;
+        if worker_fence.check().is_err() {
+            Ok(())
+        } else {
+            result.map_err(|e| CleanupFailure::from(e.0))
+        }
+    });
+    Worker {
+        scope,
+        fence,
+        process,
+        wake: owner_wake,
+        join: Some(join),
+        failure: None,
+    }
+}
 pub(super) fn start(
     core: &Shared,
     pinned: PinnedHost,
@@ -492,29 +582,7 @@ pub(super) fn start(
             Err(OwnerError("control_restart_requires_reconciliation"))
         };
     }
-    let config = private_state::load(
-        &root.join("bootstrap-program.json"),
-        private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
-    )
-    .map_err(|e| OwnerError(e.0))?
-    .ok_or(OwnerError("native_bootstrap_unavailable"))?;
-    let config = Value::Object(config);
-    if config.as_object().is_none_or(|o| o.len() != 4)
-        || config["protocol"] != "mycelium.bootstrap_program.v1"
-    {
-        return Err(OwnerError("native_bootstrap_configuration_invalid"));
-    }
-    let text = |k: &str| {
-        config[k]
-            .as_str()
-            .ok_or(OwnerError("native_bootstrap_configuration_invalid"))
-    };
-    let program = TrustedBootstrap::open(
-        Path::new(text("path")?),
-        text("sha256")?,
-        text("source_sha")?,
-    )
-    .map_err(OwnerError)?;
+    let program = program(&root)?;
     let seed = pinned.pin()?;
     let startup_current = || -> OResult<()> {
         let c = locked(core)?;
@@ -561,7 +629,7 @@ pub(super) fn start(
         .map_err(OwnerError)?;
     startup_current()?; // before spawn; Stop cannot cross the lifecycle guard
     let fence = TargetFence::default();
-    let mut pump = match TargetPump::start(
+    let pump = match TargetPump::start(
         &root,
         host,
         scope.clone(),
@@ -577,60 +645,12 @@ pub(super) fn start(
             return Err(OwnerError(code));
         }
     };
-    let process = pump.process_control();
     let wake = locked(&seed.managed)?
         .as_ref()
         .ok_or(OwnerError("managed_owner_unavailable"))?
         .wake
         .clone();
-    let worker_fence = fence.clone();
-    let owner_wake = wake.clone();
-    let join = thread::spawn(move || {
-        let result: OResult<()> = (|| {
-            let mut cadence = Cadence::new()?;
-            loop {
-                let generation = wake.generation()?;
-                let outcome = pump.step_outcome().map_err(OwnerError)?;
-                if matches!(outcome, StepOutcome::Completed { stopped: true }) {
-                    while worker_fence.check().is_ok() {
-                        let g = wake.generation()?;
-                        wake.wait(g, &worker_fence)?;
-                    }
-                    break;
-                }
-                cadence.wait(outcome, &wake, generation, &worker_fence)?;
-            }
-            Ok(())
-        })();
-        let recorded = if let Err(e) = &result {
-            pump.record_failure(e.0)
-        } else {
-            Ok(())
-        };
-        if let Err(cleanup) = pump.close() {
-            let control = pump.process_control();
-            return Err(CleanupFailure::owned(
-                cleanup,
-                cleanup,
-                control,
-                move || pump.close(),
-            ));
-        }
-        recorded.map_err(CleanupFailure::from)?;
-        if worker_fence.check().is_err() {
-            Ok(())
-        } else {
-            result.map_err(|e| CleanupFailure::from(e.0))
-        }
-    });
-    let mut worker = Worker {
-        scope,
-        fence,
-        process,
-        wake: owner_wake,
-        join: Some(join),
-        failure: None,
-    };
+    let mut worker = spawn(pump, fence, wake, scope);
     let mut c = locked(core)?;
     if c.bootstrap.is_some()
         || c.closed
