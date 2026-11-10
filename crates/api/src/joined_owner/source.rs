@@ -82,7 +82,10 @@ impl ShardSource {
         let thread = std::thread::Builder::new()
             .name("joined-owner-source".into())
             .spawn(move || -> Result<(), Refusal> {
-                let rt = tokio::runtime::Builder::new_current_thread()
+                // One worker that keeps driving iroh while this thread waits, so a refusal or
+                // close queued before a return is always flushed (REVIEW-laneB20f; as remote.rs).
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(1)
                     .enable_all()
                     .build()
                     .map_err(|_| refusal("runtime_failed"))?;

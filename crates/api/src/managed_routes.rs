@@ -9,7 +9,15 @@
 //! membership and the mailbox verifies its signature, exactly as for the local carrier.
 use seed::{Coordinator, SeedError, http::RouteExtension};
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+
+/// `BoundedSemaphore(16)` (`tls.py:435 @ f4e366e9`): the managed-control requests the seed serves
+/// at once. The next one is refused at once (`acquire(blocking=False)`), before it reaches the
+/// mailbox, so a LAN or relay flood cannot queue up behind the mailbox's member guard.
+pub const MAX_CONCURRENT_REQUESTS: usize = 16;
 
 /// `(path, statement protocol)` of every target-side request the seed accepts.
 pub const TARGET_ROUTES: [(&str, &str); 6] = [
@@ -53,25 +61,44 @@ pub type Dispatch = Arc<dyn Fn(&[u8]) -> Result<Vec<u8>, &'static str> + Send + 
 /// Where the owner binds its mailbox dispatcher once its managed owner exists (and unbinds it on
 /// close). Unbound, every managed route answers `managed_owner_unavailable`.
 #[derive(Default)]
-pub struct DispatchSlot(Mutex<Option<Dispatch>>);
+pub struct DispatchSlot {
+    dispatch: Mutex<Option<Dispatch>>,
+    in_flight: AtomicUsize,
+}
+/// One admitted managed-control request; dropping it frees the slot.
+struct Admitted<'a>(&'a AtomicUsize);
+impl Drop for Admitted<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 impl DispatchSlot {
     pub fn bind(&self, dispatch: Dispatch) {
         *self
-            .0
+            .dispatch
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(dispatch);
     }
     pub fn unbind(&self) {
-        self.0
+        self.dispatch
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
     }
     fn current(&self) -> Option<Dispatch> {
-        self.0
+        self.dispatch
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+    /// `slots.acquire(blocking=False)`: a slot, or `None` when all are taken.
+    fn admit(&self) -> Option<Admitted<'_>> {
+        self.in_flight
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_CONCURRENT_REQUESTS).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Admitted(&self.in_flight))
     }
 }
 
@@ -85,6 +112,10 @@ impl RouteExtension for MailboxRoutes {
         body: &Value,
     ) -> Option<Result<Value, SeedError>> {
         let (_, protocol) = TARGET_ROUTES.iter().find(|(p, _)| *p == path)?;
+        // The seed's error envelope carries the code; its status map answers 400 (v0.1.4: 503).
+        let Some(_admitted) = self.0.admit() else {
+            return Some(Err(SeedError::new("managed_control_capacity_exhausted")));
+        };
         Some((|| {
             // The path names the statement it carries; nothing else crosses this route.
             if body["statement"]["protocol"] != *protocol {

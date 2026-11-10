@@ -465,6 +465,9 @@ impl LocalAgent {
         node_plan: &Value,
         run_id: &str,
     ) -> Result<(), Failure> {
+        // A fetch can end after the step's own collect: read its result before deciding to start
+        // one (`_drive_slice` reads `_slice_result` the thread already wrote).
+        self.collect_slice();
         let root = host.slice_root(run_id)?;
         if self
             .slice_job
@@ -660,14 +663,14 @@ impl LocalAgent {
         // 3. Bootstrap (hello-only, model load denied).
         let early = matches!(phase.as_str(), "collect" | "observe" | "compile");
         let bootstrap = text(&a, "bootstrap_offer_id");
-        // A joined Mac starts its worker only for the announced offer it holds itself (v0.1.4).
-        let held = !self.remote
-            || offer.as_ref().is_some_and(|o| {
-                bootstrap.is_some() && o["offer_id"].as_str() == bootstrap.as_deref()
-            });
+        // Past the owner's early phases (and always on a joined Mac) the worker starts only for the
+        // announced offer this Mac holds itself, once (`demo_target.py:495-497`): a work offer held
+        // after a descriptor reset never re-runs the bootstrap.
+        let held = offer
+            .as_ref()
+            .is_some_and(|o| bootstrap.is_some() && o["offer_id"].as_str() == bootstrap.as_deref());
         if let Some(id) = &bootstrap
-            && held
-            && ((early && !self.remote) || !self.bootstrap_done.contains(id))
+            && ((early && !self.remote) || (held && !self.bootstrap_done.contains(id)))
         {
             if !self.consent(host) {
                 return Ok(());

@@ -520,6 +520,13 @@ impl AgentHost for WorkHost {
     fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
         Ok(self.offer.clone())
     }
+    /// The oracle's `/api/staging/accept` + `/api/control/start` for the bootstrap offer, as one
+    /// recorded route (no recorded scenario announces a bootstrap offer).
+    fn bootstrap(&mut self, _run: &str, _deployment: &str, offer: &str) -> Result<(), Failure> {
+        self.action("bootstrap", json!({"offer_id": offer}));
+        self.native = json!({"state": "running"});
+        Ok(())
+    }
     fn accept_work(&mut self, limits: &Value) -> Result<(), Failure> {
         self.action(
             "/api/work/preview",
@@ -674,6 +681,59 @@ fn work_announcement(fx: &Value) -> Value {
         .find(|op| op["op"] == "announce" && op["value"]["phase"] == "work")
         .expect("work announcement")["value"]
         .clone()
+}
+
+/// Proves: in the work phase the agent starts its bootstrap worker only when the offer it holds IS the
+/// announced bootstrap offer (`demo_target.py:495-497`): an agent whose descriptor is fresh in the work phase
+/// (nothing bootstrapped yet) holding the WORK offer accepts its work and never re-runs the bootstrap.
+#[test]
+fn the_work_phase_bootstraps_only_for_the_bootstrap_offer_it_holds() {
+    let fx = work_fixture();
+    let whole = fx["scenarios"]
+        .as_array()
+        .expect("scenarios")
+        .iter()
+        .find(|s| s["name"] == "whole_snapshot_work_waits_by_name")
+        .expect("whole-snapshot scenario");
+    let mut work = whole["ops"]
+        .as_array()
+        .expect("ops")
+        .iter()
+        .find(|op| op["op"] == "announce" && op["value"]["phase"] == "work")
+        .expect("work announcement")["value"]
+        .clone();
+    work["bootstrap_offer_id"] = json!("bootstrap-offer-1");
+    let offer = |id: &str| {
+        json!({"archive_digest": format!("sha256:{}", "3".repeat(64)),
+        "offer_id": id, "run_id": work["run_id"]})
+    };
+    for (held, bootstraps) in [("work-offer-1", false), ("bootstrap-offer-1", true)] {
+        let root = scratch(&format!("bootstrap-{held}"));
+        let mut host = WorkHost::new(root.clone());
+        let mut agent = LocalAgent::new();
+        host.native = json!({"state": "stopped"});
+        host.offer = Some(offer(held));
+        host.announcement = Some(work.clone());
+        let status = agent.tick(&mut host);
+        let routes: Vec<&Value> = host.actions.iter().map(|a| &a[0]).collect();
+        if bootstraps {
+            assert_eq!(status["state"], "bootstrap_running", "{held}: {status}");
+            assert_eq!(routes, [&json!("bootstrap")], "{held}");
+            // Once per descriptor: the next tick does not start it again.
+            host.native = json!({"state": "stopped"});
+            agent.tick(&mut host);
+            assert_eq!(host.actions.len(), 1, "{held}: {:?}", host.actions);
+        } else {
+            assert_eq!(status["state"], "work_running", "{held}: {status}");
+            assert_eq!(
+                routes,
+                [&json!("/api/work/preview"), &json!("/api/work/accept")],
+                "{held}: the work offer is accepted, the bootstrap is not re-run"
+            );
+        }
+        drop(agent);
+        fs::remove_dir_all(&root).unwrap_or_default();
+    }
 }
 
 /// Proves: the HTTP repository fallback (S1 model download) is never used for a slice: without an owner-served
@@ -840,6 +900,149 @@ fn stop_cancels_a_running_slice_fetch_between_segments() {
     fs::remove_dir_all(&root).unwrap_or_default();
 }
 
+fn secs(n: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(n)
+}
+/// Signals once its fetch thread has fully exited (thread-local destructors run after the thread's
+/// result is stored, so the agent's `JoinHandle::is_finished` is already true).
+struct OnExit(std::sync::mpsc::Sender<()>);
+impl Drop for OnExit {
+    fn drop(&mut self) {
+        // The receiver is gone only when the test already failed.
+        self.0.send(()).unwrap_or_default();
+    }
+}
+thread_local! {
+    static ON_EXIT: std::cell::RefCell<Option<OnExit>> = const { std::cell::RefCell::new(None) };
+}
+/// A source that fails its first read once the test releases it.
+struct Gone {
+    release: std::sync::mpsc::Receiver<()>,
+    exited: std::sync::mpsc::Sender<()>,
+}
+impl SliceTransport for Gone {
+    fn read_range(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: u64,
+        _: u64,
+    ) -> Result<Vec<u8>, SliceError> {
+        ON_EXIT.with(|e| *e.borrow_mut() = Some(OnExit(self.exited.clone())));
+        // A failing test drops the sender: the read then fails at once.
+        self.release.recv_timeout(secs(30)).unwrap_or_default();
+        Err(SliceError("slice_test_source_gone".into()))
+    }
+}
+
+/// Proves: a fetch that ends while the agent is mid-step is collected, never started again: its
+/// refusal is reported on that same tick and the source is asked for exactly once
+/// (`_drive_slice` reads the thread's result before deciding to start one).
+#[test]
+fn a_fetch_that_ends_mid_step_is_reported_not_started_again() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let root = scratch("ends-mid-step");
+    let mut host = WorkHost::new(root.clone());
+    let (release, gone_release) = std::sync::mpsc::channel();
+    let (exited_tx, exited) = std::sync::mpsc::channel();
+    struct MidStep<'a> {
+        host: &'a mut WorkHost,
+        gone: Option<Gone>,
+        transports: usize,
+        armed: bool,
+        release: std::sync::mpsc::Sender<()>,
+        exited: std::sync::mpsc::Receiver<()>,
+    }
+    impl AgentHost for MidStep<'_> {
+        fn announcement(&mut self) -> Result<Option<Value>, api::local_agent::ExchangeUnavailable> {
+            self.host.announcement()
+        }
+        fn member(&mut self) -> Option<String> {
+            self.host.member()
+        }
+        fn run_active(&mut self) -> bool {
+            self.host.run_active()
+        }
+        fn resource_check(&mut self) -> Option<String> {
+            self.host.resource_check()
+        }
+        fn prepared_model(&mut self) -> Result<(String, String), Failure> {
+            self.host.prepared_model()
+        }
+        fn describe(&mut self, r: &str, d: &str, s: Option<&str>) -> Result<Value, Failure> {
+            self.host.describe(r, d, s)
+        }
+        fn native_control(&mut self) -> Result<Value, Failure> {
+            self.host.native_control()
+        }
+        fn pending_offer(&mut self) -> Result<Option<Value>, Failure> {
+            self.host.pending_offer()
+        }
+        /// Called after the step collected nothing and before the slice is driven: the running fetch
+        /// ends exactly here.
+        fn member_caps(&mut self) -> Result<Value, Failure> {
+            if std::mem::take(&mut self.armed) {
+                self.release.send(()).expect("release the read");
+                self.exited
+                    .recv_timeout(secs(30))
+                    .expect("the fetch thread exited");
+            }
+            self.host.member_caps()
+        }
+        fn storage_cap(&mut self) -> Result<u64, Failure> {
+            self.host.storage_cap()
+        }
+        fn slice_root(&mut self, r: &str) -> Result<PathBuf, Failure> {
+            self.host.slice_root(r)
+        }
+        fn slice_transport(&mut self, _: &Value) -> Option<Box<dyn SliceTransport>> {
+            self.transports += 1;
+            self.gone
+                .take()
+                .map(|g| Box::new(g) as Box<dyn SliceTransport>)
+        }
+        fn sink(&mut self, r: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
+            self.host.sink(r)
+        }
+        fn clock(&mut self) -> f64 {
+            self.host.clock()
+        }
+    }
+    let mut collect = work.clone();
+    collect["phase"] = json!("collect");
+    host.announcement = Some(collect);
+    let mut agent = LocalAgent::new();
+    let mut mid = MidStep {
+        host: &mut host,
+        gone: Some(Gone {
+            release: gone_release,
+            exited: exited_tx,
+        }),
+        transports: 0,
+        armed: false,
+        release,
+        exited,
+    };
+    assert_eq!(agent.tick(&mut mid)["state"], "reported");
+    mid.host.announcement = Some(work);
+    let status = agent.tick(&mut mid);
+    assert_eq!(status["state"], "downloading_slice", "{status}");
+    mid.armed = true;
+    let status = agent.tick(&mut mid);
+    let transports = mid.transports;
+    agent.join_slice();
+    assert_eq!(
+        (status["state"].clone(), status["detail"].clone()),
+        (json!("error"), json!("slice_test_source_gone")),
+        "{status}"
+    );
+    assert_eq!(transports, 1, "the ended fetch was started again");
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
 /// A transport that serves a wrong byte for the first read of each segment and counts rejects.
 struct Flaky {
     inner: SnapshotRangeTransport,
@@ -989,6 +1192,101 @@ fn the_slice_fetcher_publishes_only_verified_bytes() {
     assert_eq!(
         (done["reused_bytes"].clone(), done["range_requests"].clone()),
         (json!(1000), json!(2))
+    );
+    fs::remove_dir_all(&root).unwrap_or_default();
+}
+
+/// Proves: a verified local clone is published only into a private directory of the slice root
+/// (`_clone_verified` -> `_private_dir(final.parent)`): a parent folder that is a symlink is refused
+/// by name and nothing lands where it points; an ordinary clone publishes the verified bytes with no
+/// range read.
+#[test]
+fn a_clone_is_never_published_through_a_symlinked_parent_folder() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let plan = &work["node_slice_plan"];
+    let digest = plan["node_plan_digest"].as_str().expect("digest");
+    let root = scratch("clone-parent");
+    WorkHost::new(root.clone());
+    let snapshot = |clone_root: Option<PathBuf>| {
+        SnapshotRangeTransport::new(
+            root.join("snapshot"),
+            plan["model_id"].as_str().expect("id"),
+            plan["resolved_commit"].as_str().expect("commit"),
+            clone_root,
+        )
+    };
+    let never = || false;
+    // The verified slice an earlier run left on this Mac: the clone candidates.
+    let earlier = root.join("earlier");
+    fs::create_dir_all(&earlier).expect("earlier");
+    slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &earlier,
+        &mut snapshot(None),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("earlier slice");
+    // An ordinary clone: every file is cloned and verified, no range is read.
+    let cloned = root.join("cloned");
+    fs::create_dir_all(&cloned).expect("cloned");
+    let report = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &cloned,
+        &mut snapshot(Some(earlier.clone())),
+        1 << 20,
+        1 << 20,
+        &never,
+    )
+    .expect("cloned slice");
+    assert_eq!(
+        (
+            report["cloned_bytes"].clone(),
+            report["range_requests"].clone()
+        ),
+        (json!(2223), json!(0)),
+        "{report}"
+    );
+    for file in plan["files"].as_array().expect("files") {
+        let path = cloned.join(file["path"].as_str().expect("path"));
+        assert_eq!(json!(sha_hex(&path)), file["content_digest"]);
+        assert_eq!(
+            fs::metadata(&path).expect("meta").permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    // The slice's `stage-0/` folder is a symlink to a folder outside the slice root.
+    let outside = root.join("outside");
+    fs::create_dir_all(&outside).expect("outside");
+    let dest = root.join("dest");
+    fs::create_dir_all(&dest).expect("dest");
+    std::os::unix::fs::symlink(&outside, dest.join("stage-0")).expect("symlink");
+    let refused = slice_fetch::fetch_node_slice(
+        plan,
+        digest,
+        &dest,
+        &mut snapshot(Some(earlier)),
+        1 << 20,
+        1 << 20,
+        &never,
+    );
+    let listed: Vec<_> = fs::read_dir(&outside)
+        .expect("outside")
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(
+        refused.as_ref().map_err(|e| e.0.as_str()).err(),
+        Some("slice_destination_invalid"),
+        "{refused:?}; outside the slice root: {listed:?}"
+    );
+    assert!(
+        listed.is_empty(),
+        "published through the symlink: {listed:?}"
     );
     fs::remove_dir_all(&root).unwrap_or_default();
 }
