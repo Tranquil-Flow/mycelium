@@ -8,6 +8,21 @@ pub enum Kind {
     Dylib,
     Metal,
     Resource,
+    /// A helper executable the packaged app runs beside itself (`native/resource_probe`).
+    Helper,
+}
+/// Where `api::resources::ProbeObserver::beside_executable` looks for the resource probe.
+pub const RESOURCE_PROBE_PATH: &str = "Contents/MacOS/native/resource_probe";
+/// Compile-time pins of the helpers this source tree builds (the release `resource_probe`); the
+/// native payload pins stay in `package-pins.json`, taken from the genuine native-input manifest.
+pub const HELPER_PINS: &str = include_str!("../helper-pins.json");
+/// The helper pins, parsed (a malformed table is a layout error, never an empty list).
+pub fn helper_pins() -> Result<Vec<Entry>, PackageError> {
+    let pins: Vec<Entry> = serde_json::from_str(HELPER_PINS).map_err(|_| PackageError::Layout)?;
+    if pins.is_empty() || pins.iter().any(|p| p.kind != Kind::Helper) {
+        return Err(PackageError::Layout);
+    }
+    Ok(pins)
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,7 +141,9 @@ fn layout(manifest: &Manifest) -> Result<(), PackageError> {
                 entry.path == "Contents/Info.plist"
                     || entry.path == "Contents/Resources/icon-windowed.icns"
                     || entry.path.starts_with("Contents/Resources/licenses/")
+                    || entry.path == CODE_RESOURCES_PATH
             }
+            Kind::Helper => false,
         };
         if !kind_ok {
             return Err(PackageError::Layout);
@@ -265,12 +282,14 @@ pub fn with_measured_executable(
         entries: pins,
     })
 }
+/// The resource seal `codesign` writes into the bundle when it signs it.
+pub const CODE_RESOURCES_PATH: &str = "Contents/_CodeSignature/CodeResources";
 pub fn signing_plan(manifest: &Manifest) -> Result<Vec<String>, PackageError> {
     layout(manifest)?;
     let mut code: Vec<_> = manifest
         .entries
         .iter()
-        .filter(|e| e.kind == Kind::Dylib)
+        .filter(|e| matches!(e.kind, Kind::Dylib | Kind::Helper))
         .map(|e| e.path.clone())
         .collect();
     code.sort();

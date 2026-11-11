@@ -20,8 +20,11 @@ use std::{path::Path, process::ExitCode};
 const PINS: &str = include_str!("../../../desktop/package-pins.json");
 
 fn manifest() -> Result<package::Manifest, String> {
-    let pins: Vec<Entry> =
+    let mut pins: Vec<Entry> =
         serde_json::from_str(PINS).map_err(|_| "embedded_pins_invalid".to_string())?;
+    // The pinned helpers this tree builds (`native/resource_probe`): admitted by their pinned bytes
+    // like the native payload, so a bundle without the probe, or with other bytes, never starts.
+    pins.extend(package::helper_pins().map_err(|e| format!("embedded_helper_pins:{e:?}"))?);
     let executable = std::env::current_exe().map_err(|e| format!("executable:{:?}", e.kind()))?;
     package::with_measured_executable(pins, &executable)
         .map_err(|e| format!("executable_measure:{e:?}"))

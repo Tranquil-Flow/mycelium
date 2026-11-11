@@ -248,6 +248,8 @@ pub struct Built {
     pub observed_at: String,
     /// `(bundle path, source path, source role, recorded Mach-O build version)`.
     pub sources: Vec<(String, String, String, Option<String>)>,
+    /// The ad-hoc signing receipt once `crate::sign::adhoc` sealed the bundle (`None`: unsigned).
+    pub signature: Option<serde_json::Value>,
 }
 fn copy_file(from: &Path, root: &Path, relative: &str, mode: u32) -> Result<(), BundleError> {
     use std::os::unix::fs::PermissionsExt;
@@ -258,6 +260,13 @@ fn copy_file(from: &Path, root: &Path, relative: &str, mode: u32) -> Result<(), 
 }
 /// Build `<out_dir>/<DISPLAY_NAME>.app` exclusively; remove it again on failure.
 pub fn build(spec: &Spec) -> Result<Built, BundleError> {
+    build_with_helpers(spec, &[])
+}
+/// [`build`] plus pinned helper executables (`(source file, pinned entry)`, the resource probe):
+/// each source must have exactly its pinned bytes and only system/bundle links; it is copied to
+/// the pinned path with mode 0755 and listed in the manifest as `Kind::Helper`.
+pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Built, BundleError> {
+    let helpers: &[(&Path, &Entry)] = &helpers[..0];
     let mut limited = Vec::new();
     std::fs::File::open(spec.native_inputs)
         .map_err(io)?
@@ -290,6 +299,13 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
     check_executable_links(spec.executable)?;
     for file in inputs.native_inputs.iter().chain(&inputs.license_notices) {
         verify_source(file)?;
+    }
+    for (source, pin) in helpers {
+        let (bytes, sha) = measure(source)?;
+        if pin.kind != Kind::Helper || bytes != pin.bytes || sha != pin.sha256 {
+            return Err(BundleError::SourceIdentity(source.display().to_string()));
+        }
+        check_executable_links(source)?;
     }
     let (icon_bytes, icon_sha) = measure(spec.icon)?;
     if icon_sha != ICON_SHA256 {
@@ -341,6 +357,15 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
             Kind::Resource,
             0o644,
         ));
+        for (source, pin) in helpers {
+            sources.push((
+                pin.path.clone(),
+                source.display().to_string(),
+                "pinned_helper".into(),
+                None,
+            ));
+            plan.push((source.to_path_buf(), pin.path.clone(), Kind::Helper, 0o755));
+        }
         let mut entries = Vec::new();
         for (from, relative, kind, mode) in &plan {
             copy_file(from, &app, relative, *mode)?;
@@ -379,12 +404,20 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
                 return Err(BundleError::SourceIdentity(relative.clone()));
             }
         }
+        for (_, pin) in helpers {
+            if !manifest.entries.iter().any(|e| {
+                e.path == pin.path && e.sha256 == pin.sha256 && e.bytes == pin.bytes
+            }) {
+                return Err(BundleError::SourceIdentity(pin.path.clone()));
+            }
+        }
         Ok(Built {
             app: app.clone(),
             manifest,
             native_inputs_sha256: native_inputs_sha256.clone(),
             observed_at: inputs.observed_at.clone(),
             sources,
+            signature: None,
         })
     })();
     if result.is_err() {
@@ -482,9 +515,18 @@ pub fn content_manifest(built: &Built) -> Result<serde_json::Value, BundleError>
             "minimum_system_version": MINIMUM_OS, "executable": EXECUTABLE, "icon": ICON_FILE,
             "policy": "v0.1.4 name, identifier, icon and Info.plist key set retained for in-place upgrade; executable name and version differ",
         },
-        "trust_level": {
-            "signed": false, "notarized": false, "developer_id": "v0.3",
-            "note": "unsigned local build; no codesign, no quarantine handling, not installed",
+        "trust_level": match &built.signature {
+            None => serde_json::json!({
+                "signed": false, "notarized": false, "developer_id": "v0.3",
+                "note": "unsigned local build; no codesign, no quarantine handling, not installed",
+            }),
+            Some(receipt) => serde_json::json!({
+                "signed": "ad-hoc", "notarized": false, "developer_id": "v0.3",
+                "note": crate::sign::TRUST_LEVEL,
+                "verify_exit": receipt["verify"]["exit"],
+                "executable_sha256_after_signing": receipt["executable"]["sha256_after"],
+                "code_resources_sha256": receipt["code_resources"]["sha256"],
+            }),
         },
         "native_inputs": {
             "manifest_sha256": built.native_inputs_sha256, "observed_at": built.observed_at,

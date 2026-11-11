@@ -1856,7 +1856,7 @@ pub fn publish(inputs: &Inputs, attempt: &str, token: Option<&Path>) -> Result<(
 
 // ------------------------------------------------------------------ command line
 
-pub(crate) const USAGE: &str = "USAGE: xtask release candidate <sha> --manifest FILE (--attempt ID | --resume ID) [--profile FILE] [--registry DIR] [--attempts DIR] [--stop-after STATE]\n       xtask release emit <kind> <name> (--pass --producer TEXT --artifact FILE... | --not-yet --reason TEXT [--blocker ID]...) [--manifest FILE] [--profile FILE] [--registry DIR]\n       xtask release produce <cell> --lane LANE --manifest FILE [--profile FILE] [--registry DIR] [--guard PATH] [-- <command...>]\n       xtask release publish <sha> --manifest FILE --attempt ID [--owner-token FILE] [--profile FILE] [--registry DIR] [--attempts DIR]";
+pub(crate) const USAGE: &str = "USAGE: xtask release freeze <sha> --exe FILE --bundle DIR --out MANIFEST [--repo DIR]\n       xtask release candidate <sha> --manifest FILE (--attempt ID | --resume ID) [--profile FILE] [--registry DIR] [--attempts DIR] [--stop-after STATE]\n       xtask release emit <kind> <name> (--pass --producer TEXT --artifact FILE... | --not-yet --reason TEXT [--blocker ID]...) [--manifest FILE] [--profile FILE] [--registry DIR]\n       xtask release produce <cell> --lane LANE --manifest FILE [--profile FILE] [--registry DIR] [--guard PATH] [-- <command...>]\n       xtask release publish <sha> --manifest FILE --attempt ID [--owner-token FILE] [--profile FILE] [--registry DIR] [--attempts DIR]";
 
 struct Parsed {
     sha: String,
@@ -2022,6 +2022,7 @@ pub fn cli(args: &[String]) -> Result<u8, String> {
             );
             Ok(u8::from(!blocks.is_empty()))
         }
+        "freeze" => crate::release_freeze::cli(rest),
         "emit" => crate::release_emit::emit(rest),
         "produce" => crate::release_emit::produce(rest),
         "publish" => {

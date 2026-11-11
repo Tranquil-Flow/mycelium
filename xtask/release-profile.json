@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "name": "v0.2.0-release-profile-draft-1",
+  "name": "v0.2.0-release-profile-draft-2",
   "require_critical_lanes": [
     "L12",
     "L13"
@@ -19,7 +19,14 @@
     "CL-L13-09",
     "CL-L13-10",
     "CL-L13-11",
-    "CL-L13-12"
+    "CL-L13-12",
+    "CL-L12-01",
+    "CL-L11-06",
+    "CL-L11-08",
+    "CL-L11-04",
+    "CL-L11-03",
+    "CL-L11-07",
+    "CL-L12-05"
   ],
   "cells": [
     {
@@ -192,6 +199,81 @@
       ]
     },
     {
+      "id": "release-build",
+      "state": "package",
+      "claim": "CL-L12-01",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "release-build"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "release-build",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "adhoc-signature",
+      "state": "package",
+      "claim": "CL-L11-06",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "adhoc-signature"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "adhoc-signature",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "two-path-reproducibility",
+      "state": "package",
+      "claim": "CL-L11-08",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "two-path-reproducibility"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "two-path-reproducibility",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
       "id": "workspace-tests",
       "state": "cert",
       "claim": "CL-L13-03",
@@ -307,6 +389,31 @@
         "emit",
         "rehearsal",
         "rehearsal-2",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "model-free-launch",
+      "state": "cert",
+      "claim": "CL-L11-04",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "release_receipt",
+        "name": "model-free-launch-smoke"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "release_receipt",
+        "model-free-launch-smoke",
         "--manifest",
         "<manifest>",
         "--pass",
@@ -492,6 +599,56 @@
       ]
     },
     {
+      "id": "finder-launch",
+      "state": "device",
+      "claim": "CL-L11-03",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "finder-launch-reopen"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "finder-launch-reopen",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
+      "id": "minimum-os-gpu",
+      "state": "device",
+      "claim": "CL-L11-07",
+      "bind": "bytes",
+      "verify": {
+        "runs": "receipt",
+        "kind": "device",
+        "name": "minimum-os-gpu"
+      },
+      "hint": [
+        "xtask",
+        "release",
+        "emit",
+        "device",
+        "minimum-os-gpu",
+        "--manifest",
+        "<manifest>",
+        "--pass",
+        "--producer",
+        "<tool>",
+        "--artifact",
+        "<receipt-file>"
+      ]
+    },
+    {
       "id": "contract-inventory",
       "state": "inventory",
       "claim": "CL-L13-03",
@@ -549,6 +706,32 @@
         "check",
         "--ledger",
         "<registry>/evidence.jsonl"
+      ]
+    },
+    {
+      "id": "no-python",
+      "state": "inventory",
+      "claim": "CL-L12-05",
+      "bind": "bytes",
+      "verify": {
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "no-python",
+          "--bundle"
+        ]
+      },
+      "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
+        "xtask",
+        "--",
+        "no-python",
+        "--bundle",
+        "<bundle>"
       ]
     },
     {

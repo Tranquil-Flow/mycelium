@@ -20,11 +20,14 @@ canon_acquire "$ROOT"; trap canon_release EXIT
 cd "$ROOT"
 m="$MYCELIUM_CANON/Cargo.toml"
 nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p node-service --features "$feat" --bin mycelium
-nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p desktop --bin desktop-package
+nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p desktop --bin desktop-package --bin resource_probe
 exe=$(mktemp "${TMPDIR:-/tmp}/mycelium-exe.XXXXXX")
 cp "$CARGO_TARGET_DIR/release/mycelium" "$exe"
 mkdir -p "$out"
+# The pinned resource probe goes beside the executable; the bundle is then sealed ad-hoc
+# (v0.1.4 trust level, SIGN-RECEIPT.json) and its manifests describe the signed bytes.
 nice -n 19 "$CARGO_TARGET_DIR/release/desktop-package" bundle "$exe" \
-  evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns "$out"
+  evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns "$out" \
+  --resource-probe "$CARGO_TARGET_DIR/release/resource_probe" --sign-adhoc
 rm -f "$exe"
 echo BUNDLE_DONE "$out"
