@@ -475,3 +475,130 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     };
     assert_eq!(verdict, Ok(Poll::Verified));
 }
+
+// ---- laneB16f §5 / laneB18 FU1: admitted requests are capped, Stop and status stay servable ----
+
+/// The packaged window's callbacks (`packaged::assemble`: the `desktop::services` core over the
+/// packaged services) with every admitted slot held: one send waiting for its start and three
+/// chat event polls waiting behind it. v0.1.4 counts only admitted requests against its cap and
+/// always serves Stop and status (laneB18 call for any packaged loopback gateway); the packaged
+/// window has no socket listener (its requests arrive through the `mycelium://` scheme handler),
+/// so this is the whole of that rule here: Stop, status and the chat state answer, and the next
+/// admitted request is refused with the existing capacity code.
+#[test]
+fn stop_and_status_answer_while_every_admitted_slot_is_held() {
+    use desktop::{channel::Request, lifecycle::Cleanup};
+    let node = NodeService::new(
+        Arc::new(FailsAtOnce),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let held = HeldRecord {
+        record: Arc::new(node_service::router_port::DevelopmentRecord::of(&node).unwrap()),
+        probe: Arc::default(),
+    };
+    let private = private();
+    let services = DesktopServices::with_qualification(
+        node,
+        node_service::packaged::CALLBACK_CAPACITY,
+        &private,
+        Arc::new(held.clone()),
+    );
+    let source = node_service::app_host::ModelSource::new(
+        private.clone(),
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+    );
+    let (core, mut cleanup) = node_service::packaged::assemble(services, source);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let submit = |method: &str, path: &str, body: Value| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        core.submit(
+            Request {
+                window: "main".into(),
+                method: method.into(),
+                uri: format!("{}{path}", desktop::channel::ORIGIN),
+                headers: vec![
+                    (
+                        if path.starts_with("/chat/") {
+                            "x-mycelium-chat"
+                        } else {
+                            "x-mycelium-action"
+                        }
+                        .into(),
+                        "1".into(),
+                    ),
+                    ("content-type".into(), "application/json".into()),
+                ],
+                body: serde_json::to_vec(&body).unwrap(),
+            },
+            Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+        );
+        rx
+    };
+    let answer = |rx: std::sync::mpsc::Receiver<desktop::core::Reply>, what: &str| {
+        let reply = rx
+            .recv_timeout(millis(B::ModelSelection))
+            .unwrap_or_else(|_| panic!("{what} got no answer"));
+        let body: Value = serde_json::from_slice(&reply.body).unwrap_or(Value::Null);
+        (reply.status, body)
+    };
+    let idle = answer(submit("GET", "/api/status", json!({})), "idle status");
+    let release = Release(held.clone());
+    held.hold();
+    let sent = submit(
+        "POST",
+        "/chat/api/send",
+        json!({"prompt":"hello","max_new_tokens":1}),
+    );
+    held.wait_inside();
+    let polls: Vec<_> = (0..3)
+        .map(|_| {
+            submit(
+                "POST",
+                "/chat/api/events",
+                json!({"request_id":"pending","after":0}),
+            )
+        })
+        .collect();
+    let stop = answer(submit("POST", "/api/serving/stop", json!({})), "Stop");
+    assert!(
+        !(stop.0 == 503
+            && matches!(
+                stop.1["error"].as_str(),
+                Some("desktop_callback_capacity" | "native_service_capacity")
+            )),
+        "Stop refused for capacity: {stop:?}"
+    );
+    assert_eq!(answer(submit("GET", "/api/status", json!({})), "status"), idle);
+    let state = answer(submit("POST", "/chat/api/state", json!({})), "chat state");
+    assert_eq!((state.0, &state.1["busy"]), (200, &json!(true)));
+    // Past the admitted slots: refused at once with the existing capacity code.
+    let fifth = answer(
+        submit(
+            "POST",
+            "/chat/api/events",
+            json!({"request_id":"pending","after":0}),
+        ),
+        "the fifth admitted request",
+    );
+    assert_eq!(
+        (fifth.0, fifth.1["error"].clone()),
+        (503, json!("desktop_callback_capacity"))
+    );
+    drop(release);
+    answer(sent, "the held send");
+    for poll in polls {
+        answer(poll, "a chat events poll");
+    }
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    let verdict = loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert_eq!(verdict, Ok(Poll::Verified));
+}
