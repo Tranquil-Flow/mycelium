@@ -14,12 +14,17 @@
 //! member's real receive (`JoinedShard` + `ChunkSession`). The test member has no native worker:
 //! it refuses `prepare_native` by name and never fabricates a resident proof. Clocks are injected.
 use api::{
-    app_host, handoff,
+    app_host,
+    compiler_inputs::Error,
+    handoff,
     joined_owner::{
-        link::{MemberLink, Refusal},
-        work::{self, Clocks, OwnerWork, Plan, WorkMember},
+        link::{MemberLink, Refusal, Stage},
+        work::{self, Admission, Clocks, OwnerWork, Plan, RouteOrder, WorkMember},
     },
-    joined_shard::{self, JoinedShard},
+    joined_shard::{
+        self, JoinedShard, route,
+        serve::{self, StageCompute},
+    },
     m16_route::Codec,
     member::Session,
     peer,
@@ -42,7 +47,7 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -70,6 +75,12 @@ struct Seen {
     cancels: usize,
     /// When the member was asked to discard its stage.
     discard_at: Option<Instant>,
+    /// A serving member's controlled stage compute, in order: (`step`, session position),
+    /// (`reset_attempt`, 0), (`reset`, 0), (`close`, 0), (`abort`, 0), then its
+    /// (`discard`, 0) answer.
+    compute: Vec<(&'static str, u64)>,
+    /// The member's own serve outcome (its stage server's report or refusal).
+    served: Option<Result<Value, String>>,
 }
 /// A scripted answer of a test member to one command (by name).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -124,6 +135,32 @@ impl Control {
             ops = self.changed.wait(ops).unwrap_or_else(|p| p.into_inner());
         }
     }
+    /// Record a compute event under the dispatcher lock (no lost wake-up for [`Control::wait`]).
+    fn record(&self, seen: &Mutex<Seen>, event: (&'static str, u64)) {
+        let ops = self.lock();
+        seen.lock().unwrap_or_else(|p| p.into_inner()).compute.push(event);
+        drop(ops);
+        self.changed.notify_all();
+    }
+    /// Wait (bounded) until `done` holds for what the member saw.
+    fn wait(&self, seen: &Mutex<Seen>, done: impl Fn(&Seen) -> bool, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        let mut ops = self.lock();
+        loop {
+            if done(&seen.lock().unwrap_or_else(|p| p.into_inner())) {
+                return true;
+            }
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            ops = self
+                .changed
+                .wait_timeout(ops, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+    }
     /// Wait (bounded) until the member holds `name`.
     fn holding(&self, name: &str, within: Duration) -> bool {
         let end = Instant::now() + within;
@@ -162,6 +199,12 @@ struct TestMember {
     shard: Option<JoinedShard>,
     script: BTreeMap<&'static str, Act>,
     control: Arc<Control>,
+    /// A SERVING test member (controlled admission): its stage script; `None` refuses
+    /// `prepare_native` by name, as before.
+    serving: Option<Serving>,
+    /// The offer it received and the controlled document it answered `prepare_native` with.
+    offer: Option<Value>,
+    proof: Option<Value>,
 }
 const NO_NATIVE: &str = "test_member_native_unavailable";
 const CANCELLED: &str = "member_operation_cancelled";
@@ -190,10 +233,18 @@ impl TestMember {
             Some("prepare_native") => {
                 self.pause("prepare_native", cancelled)
                     .map_err(|e| refused(&e))?;
-                Err(refused(NO_NATIVE))
+                if self.serving.is_none() || self.offer.is_none() {
+                    return Err(refused(NO_NATIVE));
+                }
+                // CONTROLLED, not a resident proof: only the test's controlled admission
+                // reads it; the product's proof verifier never sees it.
+                let proof = json!({"controlled_proof":self.session.node_id(),"worker_pid":CONTROLLED_PID});
+                self.proof = Some(proof.clone());
+                Ok(proof)
             }
             Some("discard") => {
-                self.seen.lock().unwrap().discard_at = Some(Instant::now());
+                self.seen.lock().unwrap_or_else(|p| p.into_inner()).discard_at = Some(Instant::now());
+                self.control.record(&self.seen, ("discard", 0));
                 Ok(match self.shard.take() {
                     Some(mut shard) => {
                         shard.discard().map_err(|e| refused(e.0))?;
@@ -214,6 +265,7 @@ impl TestMember {
             return Err("shard_already_owned".into());
         }
         let offer = &command["offer"];
+        self.offer = Some(offer.clone());
         let carrier = self.carrier();
         let mut shard = JoinedShard::begin(
             &self.root,
@@ -302,21 +354,61 @@ impl TestMember {
         shard
             .verify(&self.session, &self.signer, carrier, &app_host::now)
             .map_err(|e| e.0.to_owned())?;
-        self.seen.lock().unwrap().received = Some(fs::read(shard.path()).unwrap());
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).received = Some(fs::read(shard.path()).unwrap());
         host.close(&clock, deadline())
             .map_err(|e| format!("{e:?}"))?;
         drop(host);
         Ok(json!({"received_bytes":size,"route_ready":false}))
     }
-    /// The member process: one admitted operation at a time, answered in order.
+    /// The member process: one admitted operation at a time, answered in order. A serving
+    /// member binds its route carrier (with its registered carrier key) at `carrier_address`
+    /// and runs the member's REAL stage server (`joined_shard::serve`) over a controlled compute.
     fn serve(
         mut self,
         inbox: mpsc::Receiver<(Value, Arc<AtomicBool>)>,
         replies: mpsc::Sender<Result<Value, Refusal>>,
     ) {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let clock = api::managed_carrier::HostClock::default();
+        let until = |id: B| {
+            clock
+                .monotonic()
+                .checked_add(id.span(Entries::ZERO).unwrap())
+                .unwrap()
+        };
+        let mut host: Option<LoopbackHost<'_>> = None;
         while let Ok((command, cancelled)) = inbox.recv() {
             let name = command["command"].as_str().unwrap_or_default().to_owned();
-            let reply = self.answer(&command, &cancelled);
+            let reply = match name.as_str() {
+                "carrier_address" => {
+                    if host.is_none() {
+                        host = Some(
+                            LoopbackHost::bind_with_secret(
+                                &rt,
+                                &clock,
+                                until(B::WorkerStartup),
+                                self.secret.clone(),
+                            )
+                            .unwrap(),
+                        );
+                    }
+                    let addr = host.as_ref().unwrap().address().unwrap();
+                    Ok(json!({"endpoint_id":addr.id.to_string(),
+                        "socket":addr.ip_addrs().next().unwrap()}))
+                }
+                "serve" => {
+                    let served = self.serve_route(host.as_ref(), &rt, &clock, &command, cancelled);
+                    if let Some(mut h) = host.take() {
+                        h.close(&clock, until(B::RouterClose)).unwrap();
+                    }
+                    served
+                }
+                _ => self.answer(&command, &cancelled),
+            };
             if self.script.get(name.as_str()) == Some(&Act::Silent) {
                 continue;
             }
@@ -325,6 +417,153 @@ impl TestMember {
                 break;
             }
         }
+    }
+    /// `serve`: the member's real stage server over its controlled compute until the epoch ends.
+    fn serve_route(
+        &mut self,
+        host: Option<&LoopbackHost<'_>>,
+        rt: &tokio::runtime::Runtime,
+        clock: &api::managed_carrier::HostClock,
+        command: &Value,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Value, Refusal> {
+        let (Some(host), Some(offer), Some(proof), Some(script)) = (
+            host,
+            self.offer.clone(),
+            self.proof.clone(),
+            self.serving.as_mut(),
+        ) else {
+            return Err(Refusal("test_member_not_prepared".into()));
+        };
+        let mut compute = Controlled {
+            offer,
+            owned: true,
+            position: 0,
+            steps: 0,
+            script,
+            seen: self.seen.clone(),
+            control: self.control.clone(),
+        };
+        let (session, signer) = (&self.session, &self.signer);
+        let live = || {
+            session
+                .shard_identity(signer, app_host::now())
+                .map_err(|_| Error("test_member_invalid"))
+        };
+        let report = serve::serve(
+            &serve::Serve {
+                host,
+                runtime: rt,
+                clock,
+                current: &live,
+                cancelled,
+                deadline: Instant::now() + span(B::MemberChosenWall),
+            },
+            &mut compute,
+            &command["route"],
+            &protocol::canonical::digest(&proof).unwrap(),
+        );
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).served = Some(report.clone());
+        report.map_err(Refusal)
+    }
+}
+/// The (fake) worker pid a serving test member's controlled document names.
+const CONTROLLED_PID: u32 = 4242;
+/// One serving test member's stage script.
+#[derive(Default)]
+struct Serving {
+    /// The final stage: emits these token ids by session position (else activations).
+    tokens: Vec<u32>,
+    /// Every session reset fails (the compute cannot release its state).
+    reset_fails: bool,
+    /// The step with this global index signals `.1`, then waits for `.2` (a chat in flight).
+    hold: Option<(u64, mpsc::Sender<()>, mpsc::Receiver<()>)>,
+}
+const VOCAB: usize = 64;
+/// Controlled final-stage logits: argmax at `token` (MYAC header of the native link).
+fn logits(token: u32) -> Vec<u8> {
+    let mut out = b"MYAC\x01\x03\x03\x01".to_vec();
+    out.extend(((VOCAB * 4) as u64).to_be_bytes());
+    for d in [1u32, 1, VOCAB as u32] {
+        out.extend(d.to_be_bytes());
+    }
+    for i in 0..VOCAB {
+        out.extend((if i as u32 == token { 1.0f32 } else { 0.0f32 }).to_le_bytes());
+    }
+    out
+}
+/// CONTROLLED stage compute of a serving test member (test double): scripted activation and
+/// logit bytes, never model output; every call is recorded in order.
+struct Controlled<'a> {
+    offer: Value,
+    owned: bool,
+    /// Steps since the last reset (0 = PREFILL), and since the serve began.
+    position: u64,
+    steps: u64,
+    script: &'a mut Serving,
+    seen: Arc<Mutex<Seen>>,
+    control: Arc<Control>,
+}
+impl Controlled<'_> {
+    fn log(&self, event: (&'static str, u64)) {
+        self.control.record(&self.seen, event);
+    }
+}
+impl StageCompute for Controlled<'_> {
+    fn offer(&self) -> &Value {
+        &self.offer
+    }
+    fn worker_pid(&self) -> Option<u32> {
+        self.owned.then_some(CONTROLLED_PID)
+    }
+    fn step(
+        &mut self,
+        _: Option<&[u32]>,
+        _: &[u8],
+        current: serve::Current<'_>,
+        cancel: Arc<AtomicBool>,
+        _: Instant,
+    ) -> Result<Vec<u8>, Error> {
+        current()?;
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Error("compiler_stopped"));
+        }
+        let (t, position) = (self.steps, self.position);
+        self.steps += 1;
+        self.position += 1;
+        self.log(("step", position));
+        if let Some((_, entered, open)) = self.script.hold.take_if(|h| h.0 == t) {
+            entered.send(()).unwrap();
+            if let Err(e) = open.recv_timeout(span(B::WorkerStartup)) {
+                eprintln!("held step gate: {e}");
+            }
+        }
+        if self.script.tokens.is_empty() {
+            return Ok(vec![t as u8; 16]);
+        }
+        Ok(logits(
+            self.script.tokens[position as usize % self.script.tokens.len()],
+        ))
+    }
+    fn close(&mut self) -> Result<Value, Error> {
+        self.owned = false;
+        self.log(("close", 0));
+        Ok(json!({"context_closed":true}))
+    }
+    fn abort(&mut self) -> Result<Value, Error> {
+        self.owned = false;
+        self.log(("abort", 0));
+        Ok(json!({"context_closed":false,"worker_reaped":true}))
+    }
+    fn reset(&mut self, current: serve::Current<'_>) -> Result<Value, Error> {
+        current()?;
+        self.log(("reset_attempt", 0));
+        if self.script.reset_fails {
+            return Err(Error("native_session_reset_invalid"));
+        }
+        self.position = 0;
+        self.log(("reset", 0));
+        Ok(json!({"controlled_reset":true}))
     }
 }
 /// The owner's link to a test member (as `RemoteMember`: a busy member refuses at once, a reply
@@ -363,7 +602,7 @@ impl MemberLink for TestLink {
     fn begin(&mut self, command: Value) -> Result<(), Refusal> {
         self.seen
             .lock()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .commands
             .push(command["command"].as_str().unwrap_or_default().to_owned());
         let mut ops = self.control.lock();
@@ -502,6 +741,9 @@ fn swarm(n: usize) -> Swarm {
             shard: None,
             script: BTreeMap::new(),
             control: Arc::new(Control::default()),
+            serving: None,
+            offer: None,
+            proof: None,
         };
         let registration =
             joined_shard::register(&session, &member.signer, &member.carrier(), app_host::now())
@@ -1230,5 +1472,438 @@ fn teardown_hands_every_member_back_in_stage_order_started_or_not() {
                 .call(json!({"command":"consent_status"}), span(B::WorkerStartup));
             assert!(status.is_ok(), "started: {started}: {status:?}");
         }
+    }
+}
+
+// ---- Lane EP2: one route epoch per run (model-free, real carrier and member stage servers) ----
+//
+// v0.1.4 call chain: DemoApp (app.py:505) -> `_action` start (app.py:1362) -> demo_app.py:109-133 ->
+// OwnerRun steps (owner_run.py:30-40) -> demo_chain.py:890-985 -> `workflow.run` (workflow.py:277-345)
+// -> `launch.run` -> `run_registry_server` (mycelium_live/supervisor.py:4196): the registry stack
+// serves the run's ONE route until the stop event (supervisor.py:4427-4428); every chat is a request
+// on it (chat.py:300-398 -> `route.infer`, route.py:4592-4620); Stop / rollover / ceiling tear the
+// route down (demo_chain.py:1322-1335).
+
+#[path = "support/sse_client.rs"]
+mod sse_client;
+
+/// TEST ADMISSION (test double): each serving test member answers `prepare_native` with a
+/// CONTROLLED document (no native worker, no resident proof) and the route over them is signed
+/// with the test swarm's seed key, as tests/joined_route_carrier.rs signs its controlled routes.
+/// The owner's epoch, carrier, gateway and every member's stage server are the product's.
+struct ControlledAdmission {
+    seed: Identity,
+    swarm: String,
+    /// Per stage: (offer, controlled document, range, prepare tokens).
+    prepared: Vec<(Value, Value, [u64; 2], usize)>,
+}
+impl Admission for ControlledAdmission {
+    fn prepare(
+        &mut self,
+        stages: &mut [Stage<'_>],
+        tokens: usize,
+        forbidden_source: &Path,
+        within: Duration,
+    ) -> Result<(), Refusal> {
+        for st in stages.iter_mut() {
+            st.member.begin(json!({"command":"prepare_native","range":st.range,"tokens":tokens,
+                "nonce":"controlled","forbidden_source":forbidden_source}))?;
+        }
+        self.prepared.clear();
+        for st in stages.iter_mut() {
+            let document = st.member.finish(within)?;
+            self.prepared
+                .push((st.offer.clone(), document, st.range, tokens));
+        }
+        Ok(())
+    }
+    fn issue(&mut self, o: &RouteOrder<'_>) -> Result<Value, Refusal> {
+        let digest = |v: &Value| protocol::canonical::digest(v).unwrap();
+        let stages: Vec<Value> = self.prepared.iter().enumerate().map(|(i, (offer, document, range, tokens))| {
+            let m = &offer["message"];
+            json!({"stage_index":i,"placement_id":format!("{}:{}-{}",m["member"]["node_id"].as_str().unwrap(),range[0],range[1]),
+                "member":m["member"],"carrier_endpoint_id":m["registration"]["message"]["carrier_endpoint_id"],
+                "run":m["run"],"offer_digest":digest(offer),"proof_digest":digest(document),"range":range,
+                "worker_pid":document["worker_pid"],"tokens":tokens,"memory":4_000_000_000u64})
+        }).collect();
+        let message = json!({"protocol":o.protocol,"swarm_id":self.swarm,"deployment_id":o.deployment_id,
+            "deployment_epoch":o.epoch,"topology_version":o.epoch,"model_id":o.model["model_id"],
+            "resolved_commit":o.model["resolved_commit"],"manifest_digest":o.model["manifest_digest"],
+            "owner_endpoint_id":o.owner_endpoint_id,"stages":stages,"issued_at":o.now,
+            "expires_at":o.expires_at,"route_ready":false,"scope":route::SCOPE});
+        Ok(
+            json!({"protocol":"mycelium.joined_shard.signed.v1","signature":self.seed.sign(&message).unwrap(),
+            "verification_key":self.seed.public_key_record(),"message":message}),
+        )
+    }
+}
+/// Model-free prompt codec of the serving tests (token ids are carrier test values).
+struct Prompt;
+impl Codec for Prompt {
+    fn encode(&self, _: &str) -> Result<Vec<u32>, PublicError> {
+        Ok((0..4).collect())
+    }
+    fn decode(&self, token: u32) -> Result<String, PublicError> {
+        Ok(format!("<{token}>"))
+    }
+}
+/// Tokens of one chat and the final stage's scripted token ids.
+const CHAT_TOKENS: u64 = 4;
+const SCRIPTED: [u32; 4] = [11, 12, 13, 14];
+impl Swarm {
+    /// Hand the members to a work port that admits them through the controlled admission;
+    /// `scripts` per stage (the last stage's emits [`SCRIPTED`]).
+    fn serving(&mut self, plan: Plan, scripts: Vec<Serving>) -> (OwnerWork, Vec<Watched>) {
+        let (seed, _, _) = app_host::identity_in(&self.owner, app_host::SEED_IDENTITY_FILE).unwrap();
+        let mut taken = Vec::new();
+        let mut members = Vec::new();
+        for (mut j, script) in self.members.drain(..).zip(scripts) {
+            j.member.serving = Some(script);
+            taken.push((j.seen.clone(), j.expected.clone(), j.member.control.clone()));
+            let link = TestLink::start(j.member);
+            members.push(WorkMember {
+                node_id: j.node_id,
+                cancel: Some(link.canceller()),
+                link: Box::new(link),
+                registration: j.registration,
+            });
+        }
+        let work = OwnerWork::new(
+            self.seed.coordinator.clone(),
+            members,
+            plan,
+            None,
+            Arc::new(Prompt),
+            host_clocks(),
+        )
+        .unwrap()
+        .with_admission(Box::new(ControlledAdmission {
+            seed,
+            swarm: self.seed.coordinator.swarm_id().to_owned(),
+            prepared: Vec::new(),
+        }));
+        (work, taken)
+    }
+    /// A 60 s run plan whose model names a well-formed manifest digest.
+    fn serving_plan(&self) -> Plan {
+        let mut plan = self.plan(60);
+        plan.model["manifest_digest"] = json!(protocol::canonical::digest(&json!("manifest")).unwrap());
+        plan
+    }
+}
+/// Two stage scripts: the final stage emits [`SCRIPTED`].
+fn stage_scripts() -> Vec<Serving> {
+    vec![
+        Serving::default(),
+        Serving {
+            tokens: SCRIPTED.to_vec(),
+            ..Serving::default()
+        },
+    ]
+}
+/// start_serving -> every stage prepared -> activation -> the run's route serving.
+fn activate(work: &mut OwnerWork) -> Value {
+    let proposal = json!({"max_wall_seconds":60});
+    let started = work.start_serving(&proposal);
+    assert!(started.is_ok(), "{started:?}");
+    let staged = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(staged["state"], "awaiting_activation", "{staged}");
+    let activated = ActivationPort::activate(work, &proposal);
+    assert!(activated.is_ok(), "{activated:?}");
+    let serving = work.wait_state(
+        |s| matches!(s["state"].as_str(), Some("api_running" | "failed" | "stopped")),
+        span(B::WorkerStartup),
+    );
+    assert_eq!(serving["state"], "api_running", "{serving}");
+    serving
+}
+fn bearer(gateway: &Value) -> String {
+    format!(
+        "Authorization: Bearer {}\r\n",
+        gateway["bearer"].as_str().unwrap()
+    )
+}
+fn gateway_addr(gateway: &Value) -> std::net::SocketAddr {
+    gateway["addr"].as_str().unwrap().parse().unwrap()
+}
+/// Submit one chat on the run's gateway (`POST /v1/inference`).
+fn post(gateway: &Value) -> (u16, Value) {
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":CHAT_TOKENS,
+        "workload_profile_id":"interactive","qos_class":"interactive","qualification":gateway["qualification"]});
+    sse_client::http(
+        gateway_addr(gateway),
+        "POST",
+        "/v1/inference",
+        &bearer(gateway),
+        &doc.to_string(),
+    )
+}
+/// The accepted chat's event stream (reader thread owned by the caller).
+fn events(
+    gateway: &Value,
+    accepted: &Value,
+) -> (mpsc::Receiver<(Value, Instant)>, std::thread::JoinHandle<()>) {
+    let (tx, rx) = mpsc::channel();
+    let (addr, path) = (
+        gateway_addr(gateway),
+        accepted["stream_path"].as_str().unwrap().to_owned(),
+    );
+    let auth = format!(
+        "{}X-Mycelium-Session: {}\r\n",
+        bearer(gateway),
+        accepted["session_token"].as_str().unwrap()
+    );
+    let reader =
+        std::thread::spawn(move || sse_client::stream(addr, path, auth, tx, span(B::WorkerStartup)));
+    (rx, reader)
+}
+/// Events until the chat's terminal (bounded per event).
+fn until_terminal(rx: &mpsc::Receiver<(Value, Instant)>) -> Vec<Value> {
+    let mut all = Vec::new();
+    loop {
+        let Ok((event, _)) = rx.recv_timeout(span(B::WorkerStartup)) else {
+            return all;
+        };
+        let done = matches!(
+            event["type"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        );
+        all.push(event);
+        if done {
+            return all;
+        }
+    }
+}
+/// One whole chat: accepted, streamed to its terminal.
+fn chat(gateway: &Value) -> Vec<Value> {
+    let (status, accepted) = post(gateway);
+    assert_eq!(status, 202, "chat refused: {accepted}");
+    let (rx, reader) = events(gateway, &accepted);
+    let all = until_terminal(&rx);
+    reader.join().unwrap();
+    all
+}
+fn token_ids(all: &[Value]) -> Vec<u64> {
+    all.iter()
+        .filter(|e| e["type"] == "token")
+        .map(|e| e["token_id"].as_u64().unwrap())
+        .collect()
+}
+fn count(seen: &Seen, event: &str) -> usize {
+    seen.compute.iter().filter(|(e, _)| *e == event).count()
+}
+/// Index of the first compute event named `event`.
+fn first(seen: &Seen, event: &str) -> Option<usize> {
+    seen.compute.iter().position(|(e, _)| *e == event)
+}
+
+/// EP2 item 1: a run opens ONE route epoch at activation and serves every chat on it. Each
+/// member is prepared once and serves once; every chat's tokens are the final stage's; each
+/// chat's end resets both stages' sessions (chat k starts after k-1 resets) and the epoch number
+/// and gateway never change. The run's Stop closes the epoch FIRST (each member's serve ends
+/// `owner_closed`, its compute closed once, no operator cancel of the serve), then each member
+/// discards its stage (S4aF R1); the workflow ends `stopped` with its cleanup proven.
+#[test]
+fn a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let (mut work, members) = s.serving(plan, stage_scripts());
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let serving = activate(&mut work);
+    assert_eq!(serving["epoch"], 1, "{serving}");
+    let gateway = work.gateway().unwrap();
+    const CHATS: usize = 3;
+    for k in 1..=CHATS {
+        let all = chat(&gateway);
+        assert_eq!(
+            all.last().map(|e| e["type"].clone()),
+            Some(json!("completed")),
+            "chat {k}: {all:?}"
+        );
+        assert_eq!(
+            token_ids(&all),
+            SCRIPTED.iter().map(|t| u64::from(*t)).collect::<Vec<_>>(),
+            "chat {k}: a fresh session (position 0) on the final stage"
+        );
+        for (seen, _, control) in &members {
+            assert!(
+                control.wait(seen, |s| count(s, "reset") >= k, span(B::WorkerStartup)),
+                "chat {k}'s end resets the stage session: {:?}",
+                seen.lock().unwrap().compute
+            );
+        }
+        let state = work.state();
+        assert_eq!(state["epoch"], 1, "chat {k}: one epoch per run: {state}");
+        assert_eq!(state["state"], "api_running", "chat {k}: {state}");
+        assert_eq!(work.gateway().unwrap()["addr"], gateway["addr"], "chat {k}");
+    }
+    for (seen, _, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.commands,
+            ["consent_status", "receive", "prepare_native", "carrier_address", "serve"],
+            "one prepare and one serve per member for {CHATS} chats"
+        );
+        assert_eq!(count(&seen, "reset"), CHATS, "{:?}", seen.compute);
+        assert_eq!(count(&seen, "close") + count(&seen, "abort"), 0, "compute kept");
+    }
+    work.teardown().unwrap();
+    let state = work.state();
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    for (seen, _, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.commands,
+            ["consent_status", "receive", "prepare_native", "carrier_address", "serve", "discard"]
+        );
+        assert_eq!(seen.cancels, 0, "the epoch's close ended the serve, not a cancel");
+        let served = seen.served.clone().unwrap().unwrap();
+        assert_eq!(served["teardown"], "owner_closed", "{served}");
+        assert_eq!(served["requests_served"], CHATS, "{served}");
+        assert_eq!(count(&seen, "close"), 1, "{:?}", seen.compute);
+        assert!(first(&seen, "close") < first(&seen, "discard"), "{:?}", seen.compute);
+    }
+}
+
+/// EP2 item 1: Stop while chat 2 is in flight (its final stage held mid-step) closes the epoch
+/// BEFORE the members' cleanup: no member serve is cancelled by the owner, each member's compute
+/// is released by the epoch's close before its `discard`, the workflow ends `stopped` with its
+/// cleanup proven within the stop allowance, and the next run over the same members receives its
+/// shards again (rollover / the next Start).
+#[test]
+fn a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_receives() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let next = s.serving_plan();
+    let (entered, held) = mpsc::channel();
+    let (open, gate) = mpsc::channel();
+    let mut scripts = stage_scripts();
+    // Chat 1 takes CHAT_TOKENS steps; hold chat 2's second step on the final stage.
+    scripts[1].hold = Some((CHAT_TOKENS + 1, entered, gate));
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    let first_chat = chat(&gateway);
+    assert_eq!(
+        first_chat.last().map(|e| e["type"].clone()),
+        Some(json!("completed")),
+        "{first_chat:?}"
+    );
+    let (status, accepted) = post(&gateway);
+    assert_eq!(status, 202, "chat 2 refused: {accepted}");
+    let (_rx, _reader) = events(&gateway, &accepted);
+    assert!(
+        held.recv_timeout(span(B::WorkerStartup)).is_ok(),
+        "chat 2 runs on the run's epoch"
+    );
+    let bound = stop_allowance(60, 2);
+    let (ended, _stopper) = stop(work);
+    open.send(()).unwrap();
+    let stopped = ended.recv_timeout(bound + span(B::WorkerStartup));
+    assert!(stopped.is_ok(), "Stop mid chat 2 did not end");
+    let (result, state) = stopped.unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    for (seen, _, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.cancels, 0, "Stop closed the epoch; it never cancelled a serve");
+        assert_eq!(
+            seen.commands,
+            ["consent_status", "receive", "prepare_native", "carrier_address", "serve", "discard"]
+        );
+        let released = first(&seen, "close").or(first(&seen, "abort"));
+        assert!(released.is_some(), "{:?}", seen.compute);
+        assert!(released < first(&seen, "discard"), "{:?}", seen.compute);
+        assert!(seen.served.as_ref().is_some_and(Result::is_ok), "{:?}", seen.served);
+    }
+    // The next run over the same members: each receives its shard again.
+    let mut work = _stopper.join().unwrap();
+    let back = work.take_members();
+    assert_eq!(back.len(), 2);
+    let mut again = OwnerWork::new(
+        s.seed.coordinator.clone(),
+        back,
+        next,
+        None,
+        Arc::new(NoCodec),
+        host_clocks(),
+    )
+    .unwrap();
+    assert_eq!(SlicesPort::node_slice_plans(&mut again), Ok(None));
+    for (seen, expected, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.commands[6..],
+            ["consent_status", "receive"],
+            "{:?}",
+            seen.commands
+        );
+        assert_eq!(seen.received.as_deref(), Some(expected.as_slice()));
+    }
+    again.teardown().unwrap();
+}
+
+/// EP2 item 1, the rule for a retired epoch (shipped app, ruling 23): an epoch that can no longer
+/// serve (here: the final stage cannot reset its session after chat 1, EP1's failed reset) is
+/// NEVER re-opened or re-prepared during the run. The run keeps `api_running` on epoch 1 and the
+/// work port does not fail it (the monitor answers nothing); the next chat is refused by the
+/// retired route (v0.1.4: `route_not_open` route.py:4614-4620 -> chat 503
+/// `chat_route_not_qualified` chat.py:113-120; supervisor.py:4427-4428 serves on until Stop).
+/// Stop then releases every member as on any exit.
+#[test]
+fn a_retired_epoch_is_never_reopened_and_later_chats_are_refused_until_stop() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    scripts[1].reset_fails = true;
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    let all = chat(&gateway);
+    assert_eq!(
+        all.last().map(|e| e["type"].clone()),
+        Some(json!("completed")),
+        "{all:?}"
+    );
+    let (seen, _, control) = &members[1];
+    assert!(
+        control.wait(
+            seen,
+            |s| count(s, "reset_attempt") == 1 && s.served.is_some(),
+            span(B::WorkerStartup)
+        ),
+        "the final stage's reset failed and its epoch ended: {:?}",
+        seen.lock().unwrap().compute
+    );
+    let (status, refused) = post(&gateway);
+    assert_eq!(status, 409, "{refused}");
+    assert!(refused.to_string().contains("route_dropped"), "{refused}");
+    let state = work.state();
+    assert_eq!(state["state"], "api_running", "{state}");
+    assert_eq!(state["epoch"], 1, "{state}");
+    assert_eq!(
+        work.monitor(&walled(&[("node-a", 60)], None)),
+        MonitorProbe::Code(None)
+    );
+    for (seen, _, _) in &members {
+        assert_eq!(
+            seen.lock().unwrap().commands,
+            ["consent_status", "receive", "prepare_native", "carrier_address", "serve"],
+            "never re-prepared, never re-served"
+        );
+    }
+    work.teardown().unwrap();
+    let state = work.state();
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    for (seen, _, _) in &members {
+        assert_eq!(
+            seen.lock().unwrap().commands.last().map(String::as_str),
+            Some("discard")
+        );
     }
 }
