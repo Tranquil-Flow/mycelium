@@ -29,10 +29,10 @@ use api::{
 use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
     Clock, Identity as RunIdentity, OwnerRun, Reason, StepOutcome,
-    chain::StepError,
+    chain::{PortError, StepError},
     machine::{CeilingProbe, MonitorProbe},
     state::RunState,
-    steps::{publish::WorkPort, slices::SlicesPort},
+    steps::{activate::ActivationPort, publish::WorkPort, slices::SlicesPort},
 };
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
 use runtime::{
@@ -920,6 +920,10 @@ fn a_stop_while_the_slices_step_pushes_ends_the_step_within_the_stop_allowance()
         "the slices step pushes the shard"
     );
     stopper();
+    assert!(
+        members[0].0.lock().unwrap().cancels >= 1,
+        "the stopper itself interrupts the receive"
+    );
     let bound = stop_allowance(60, 2);
     assert_eq!(ended.recv_timeout(bound), Ok(Err(StepError::Stopped)));
     let (ended, _stopper) = stop(step.join().unwrap());
@@ -1072,4 +1076,159 @@ fn a_member_whose_seed_lease_ran_out_fails_the_serving_run_joined_route_member_s
     );
     assert_eq!(status.failed_step, Some("serving"));
     work.teardown().unwrap();
+}
+
+/// F7 (REVIEW-lanePH3B-S4A): the work port's copy of SL's member-stale rule
+/// (`m16_route::observe_member_leases`; v0.1.4 control_session.py:315-326 via demo_chain.py:532-546)
+/// says stale only once the seed clock is past the lease PLUS the members' clock skew (the
+/// member's own fence point), and only for the seed row of the generation the run admitted (a
+/// re-joined member's new row is the membership paths' business). Kills M6 (no skew tolerance)
+/// and M7 (generation ignored). The same rule lives in m16_route.rs (lane EP2: share it).
+#[test]
+fn the_member_stale_rule_keeps_the_skew_tolerance_and_reads_only_the_admitted_generation() {
+    let mut s = swarm(2);
+    let node = s.members[1].node_id.clone();
+    let lease = s.seed.coordinator.member(&node).unwrap()["lease_expires_at"]
+        .as_f64()
+        .unwrap();
+    let coordinator = s.seed.coordinator.clone();
+    let seed_now = Arc::new(Mutex::new(lease));
+    let rejoined = Arc::new(AtomicBool::new(false));
+    let (at, again, watched) = (seed_now.clone(), rejoined.clone(), node.clone());
+    let view: api::m16_route::SeedMembers = Arc::new(move |n: &str| {
+        if n != watched {
+            return None;
+        }
+        let mut row = coordinator.member(n).ok()?;
+        if again.load(Ordering::SeqCst) {
+            row["generation"] = json!(row["generation"].as_u64()? + 1);
+        }
+        Some((row, *at.lock().unwrap()))
+    });
+    let (work, _) = s.work(host_clocks());
+    let mut work = work.with_seed_view(view);
+    let state = walled(&[("node-a", 600)], None);
+    let skew = seconds(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31);
+    assert_eq!(
+        work.monitor(&state),
+        MonitorProbe::Code(None),
+        "at the lease"
+    );
+    *seed_now.lock().unwrap() = lease + skew / 2.0;
+    assert_eq!(
+        work.monitor(&state),
+        MonitorProbe::Code(None),
+        "inside the members' clock skew"
+    );
+    *seed_now.lock().unwrap() = lease + skew;
+    assert_eq!(
+        work.monitor(&state),
+        MonitorProbe::Code(Some("joined_route_member_stale".into()))
+    );
+    rejoined.store(true, Ordering::SeqCst);
+    assert_eq!(
+        work.monitor(&state),
+        MonitorProbe::Code(None),
+        "another generation's row is not the admitted member"
+    );
+    work.teardown().unwrap();
+}
+
+fn activation(result: Result<(), PortError>) -> Result<(), String> {
+    result.map_err(|e| e.code_or("activation_unexpected"))
+}
+
+/// F9 M3: activation is accepted only for the started proposal and only once every stage is
+/// prepared (`awaiting_activation`; v0.1.4 `activate_serving`, workflow.py:277-345, reached from
+/// `_step_activate` demo_chain.py:980): before publish, while a stage is still transferring and
+/// for another proposal it is refused `activation_failed`.
+#[test]
+fn activation_before_every_stage_is_prepared_is_refused() {
+    let mut s = swarm(2);
+    s.members[0].member.script.insert("receive", Act::Hold);
+    let (mut work, members) = s.work(host_clocks());
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let proposal = json!({"max_wall_seconds":600});
+    let refused = Err("activation_failed".to_owned());
+    assert_eq!(
+        activation(ActivationPort::activate(&mut work, &proposal)),
+        refused,
+        "before publish"
+    );
+    let started = work.start_serving(&proposal);
+    assert!(started.is_ok(), "{started:?}");
+    assert!(members[0].2.holding("receive", span(B::WorkerStartup)));
+    assert_eq!(
+        activation(ActivationPort::activate(&mut work, &proposal)),
+        refused,
+        "a stage is still transferring"
+    );
+    assert_eq!(
+        activation(ActivationPort::activate(
+            &mut work,
+            &json!({"max_wall_seconds":60})
+        )),
+        refused,
+        "another proposal"
+    );
+    work.teardown().unwrap();
+}
+
+/// F9 M9/M10: every route of the run expires at publish + the SMALLEST member wall (v0.1.4
+/// `_smallest_worker_wall`, demo_chain.py:1125-1130: no route outlives a member's consented wall),
+/// neither the rehearsal default (MemberChosenWall) nor the largest wall. Two distinct walls,
+/// both unlike the default, on an injected publish wall clock.
+#[test]
+fn every_route_expires_at_publish_plus_the_smallest_of_two_distinct_member_walls() {
+    let mut s = swarm(2);
+    let (small, large) = (120u64, 300u64);
+    let mut plan = s.plan(large);
+    let ids: Vec<String> = s.members.iter().map(|m| m.node_id.clone()).collect();
+    plan.worker_walls = BTreeMap::from([(ids[0].clone(), large), (ids[1].clone(), small)]);
+    assert!(seconds(B::MemberChosenWall) != small as f64);
+    let publish = app_host::now();
+    let clocks = Clocks {
+        mono: Arc::new(|| 0.0),
+        wall: Arc::new(move || publish),
+    };
+    let (mut work, _) = s.work_with(clocks, plan);
+    let started = work.start_serving(&json!({"max_wall_seconds":large}));
+    assert!(started.is_ok(), "{started:?}");
+    assert_eq!(
+        work.state()["route_expires_at"],
+        json!(publish + small as f64)
+    );
+    let state = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(state["route_expires_at"], json!(publish + small as f64));
+    work.teardown().unwrap();
+}
+
+/// F9 M11: `teardown` hands every member link back in stage order, whether the work started or
+/// not (members stay joined; the run never closes their links), each link still answering.
+#[test]
+fn teardown_hands_every_member_back_in_stage_order_started_or_not() {
+    for started in [false, true] {
+        let mut s = swarm(2);
+        let ids: Vec<String> = s.members.iter().map(|m| m.node_id.clone()).collect();
+        let (mut work, _) = s.work(host_clocks());
+        if started {
+            let begun = work.start_serving(&json!({"max_wall_seconds":600}));
+            assert!(begun.is_ok(), "{begun:?}");
+            work.wait_state(settled, span(B::WorkerStartup));
+        }
+        work.teardown().unwrap();
+        let mut back = work.take_members();
+        assert_eq!(
+            back.iter().map(|m| m.node_id.clone()).collect::<Vec<_>>(),
+            ids,
+            "started: {started}"
+        );
+        for m in &mut back {
+            assert!(m.cancel.is_some());
+            let status = m
+                .link
+                .call(json!({"command":"consent_status"}), span(B::WorkerStartup));
+            assert!(status.is_ok(), "started: {started}: {status:?}");
+        }
+    }
 }
