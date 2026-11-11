@@ -39,9 +39,10 @@ use std::{
 /// the dedicated desktop callback capacity is still an open L1 request.
 pub const CALLBACK_CAPACITY: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 /// The window core's own bound on callbacks in flight: the admitted ones ([`CALLBACK_CAPACITY`])
-/// plus as many always-servable Stop/status callbacks, which `DesktopServices` bounds apart.
+/// plus as many chat-state callbacks and as many status/Stop/Quit callbacks, which
+/// `DesktopServices` bounds apart.
 pub const SERVICE_CAPACITY: NonZeroUsize =
-    CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(2).unwrap());
+    CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(3).unwrap());
 pub const MODEL_NOT_INSTALLED: &str = "model_not_installed";
 /// The prepared model is located but its native driver could not be composed (the cause is on
 /// stderr); the next chat request tries again.
