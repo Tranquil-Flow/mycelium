@@ -51,16 +51,21 @@ pub struct JoinSeams {
     /// How a joining (or renewing) member reaches the owner's seed.
     pub member_seed: SeedOptions,
 }
-/// What the packaged composition gives the network: the relay's hooks and the join seams.
+/// What the packaged composition gives the network: the relay's hooks, the join seams and the
+/// period of a joined member's own lease renewal.
 #[derive(Clone)]
 pub struct NetworkConfig {
     pub hooks: RelayHooks,
     pub seams: JoinSeams,
+    /// `_renew_loop`'s period for a joined target (`self.closed.wait(20)`, app.py:917): the app's
+    /// `RenewLoopSelfClosedWait`; a test runs the same loop on a shorter budget.
+    pub renewal: budgets::BudgetId,
 }
 impl Default for NetworkConfig {
-    /// The app's own: the bundled `native/cloudflared` next to the executable, no seams.
+    /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
     fn default() -> Self {
         Self {
+            renewal: budgets::BudgetId::PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917,
             hooks: Arc::new(|| {
                 Hooks::production(
                     std::env::current_exe()
