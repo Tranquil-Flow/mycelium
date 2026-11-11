@@ -286,16 +286,20 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
 **Reproducible build (round 9).** `crates/desktop/repro/build-bundle.sh OUT_DIR [probe]` is the canonical
 recipe (env in `repro/env.sh`; Python-free). tauri bakes the absolute `CARGO_MANIFEST_DIR` into the
 exe and `--remap-path-prefix` cannot reach a string literal, so the build runs through one fixed
-symlink (`repro/canonical.sh`, default `~/.hermes/cache/scratch/mycelium-canonical-src`, override
-`MYCELIUM_CANONICAL_SRC`; mkdir lock). **Not yet reproducible across target dirs or builders
-(finding REL-R1, review F4):** two builds of one commit from different worktrees give identical bytes
-for every bundle file EXCEPT the executable, whose `LC_UUID` (16 bytes, and the ad-hoc signature
-over it) depends on the `CARGO_TARGET_DIR` path; `verify-two-paths.sh` used equal-length target dir
-names and could not see it. The executable also carries the canonical source path as a literal, by
-default under the builder's `$HOME` (username included), so another account or Mac gets other bytes.
-Byte-identical output is proven only for the same target path and the same canonical path
-(`repro/verify-two-paths.sh SCRATCH`, ignored test `two_path_builds_of_the_same_commit_are_byte_identical`;
-tiny-crate proof + control in `tests/repro_canonical.rs`).
+symlink (`repro/canonical.sh`, default `/Users/Shared/mycelium-v02-canonical-src`, override
+`MYCELIUM_CANONICAL_SRC`; mkdir lock). Before lane RELF the executable was NOT reproducible across
+target dirs or builders (finding REL-R1, review F4): its `LC_UUID` (16 bytes, and the ad-hoc
+signature over it) depended on the `CARGO_TARGET_DIR` path, and it carried the canonical source path,
+then under the builder's `$HOME` (username included). Lane RELF item 5 changed the recipe: the
+canonical path is no longer under `$HOME`, `CARGO_TARGET_DIR` and `CARGO_HOME` are reached through
+fixed links beside it (`$MYCELIUM_CANON.target`, `.cargo-home`), `RUSTFLAGS` is the same text for
+every builder, and the linker writes no debug map (`-Wl,-S`; `LC_UUID` is kept, no `-no_uuid`).
+Whether two builders now get byte-identical bundles is decided only by running
+`repro/verify-two-paths.sh SCRATCH` (two builders: different tree, target dir and `HOME`, all of
+different lengths) on the commit in question; this README makes no claim beyond that script's
+output, which the release ledger's `two-path-reproducibility` cell records. The ignored test
+`two_path_builds_of_the_same_commit_are_byte_identical` runs it; the tiny-crate proof + control and
+the same-environment-for-two-builders check are in `tests/repro_canonical.rs`.
 
 ```text
 source $SCRATCH/env.sh   # (pre-round-9 manual recipe) CARGO_TARGET_DIR, MACOSX_DEPLOYMENT_TARGET=15.6, RUSTFLAGS remap, strip,
