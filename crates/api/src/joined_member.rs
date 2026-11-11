@@ -16,7 +16,9 @@
 //! * `authority.start()` of a joined target (`RemoteMacMember.start`, app.py:613-626) and the
 //!   durable half of a member leave's "no owned compute" proof.
 use crate::{
-    app_host::{self, Authority, Cell, HANDOFF_FILE, IDENTITY_FILE, ManagedSlot, PENDING_FILE},
+    app_host::{
+        self, Authority, CONSENT_FILE, Cell, HANDOFF_FILE, IDENTITY_FILE, ManagedSlot, PENDING_FILE,
+    },
     app_host::{SeedRuntime, cap, hex, identity, now, random},
     capability, handoff, jobj,
     join_client::JoinWindowClient,
@@ -520,8 +522,9 @@ pub fn join_accept(
     })
 }
 /// `TargetApplication.status` = `peer.status()` plus the owner-shaped extras (peer.py:395-455,
-/// target_app.py:330-343), in that dict order. The membership is the joined Mac's own
-/// ([`app_host::membership_state`]).
+/// target_app.py:330-343), in that dict order. The membership is the joined Mac's OWN
+/// (`api::peer::status_membership`: retained / current / expired / a recorded disposition), and the
+/// acknowledgements are the retained consent's (`_load_consent`).
 pub fn target_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
     let root = &c.root;
     let pairing_state = if root.join("accepted.json").exists() {
@@ -533,23 +536,27 @@ pub fn target_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
     } else {
         "not_requested"
     };
-    let consented = root.join(PENDING_FILE).exists() || root.join(HANDOFF_FILE).exists();
-    let (generation, lease) = c.session.as_ref().map_or_else(
-        || c.session_view.unwrap_or((None, None)),
-        |s| (s.generation(), s.lease_expires_at()),
-    );
-    let joined = lease.is_some_and(|lease| now() < lease);
+    let consent = private_state::load(&root.join(CONSENT_FILE), cap())
+        .ok()
+        .flatten()
+        .and_then(|record| record.get("consent").cloned())
+        .unwrap_or(Value::Null);
+    let acknowledged = |key: &str| consent[key] == true;
+    let live = c.session.as_ref().map_or(c.session_view, |s| {
+        Some((s.generation(), s.lease_expires_at()))
+    });
+    let (state, generation, lease_state) = crate::peer::status_membership(root, live, now());
     jobj! {
         "protocol" => "mycelium.demo_authority_status.v1",
         "started" => c.running,
         "identity_state" => if root.join(IDENTITY_FILE).exists() { "present" } else { "absent" },
         "pairing_state" => pairing_state,
-        "membership_state" => if joined { "current" } else { "absent" },
+        "membership_state" => state.as_str(),
         "membership_generation" => generation.map_or(Json::Null, Json::from),
-        "lease_state" => if joined { "fresh" } else { "none" },
-        "cooperative_peer_visibility_acknowledged" => consented,
-        "resource_use_acknowledged" => consented,
-        "contribution_enabled" => false,
+        "lease_state" => lease_state,
+        "cooperative_peer_visibility_acknowledged" => acknowledged("cooperative_peer_visibility_acknowledged"),
+        "resource_use_acknowledged" => acknowledged("resource_use_acknowledged"),
+        "contribution_enabled" => acknowledged("contribution_enabled"),
         "capability_state" => "not_reported",
         "serving_state" => "not_yet_serving",
         "route_ready" => false,

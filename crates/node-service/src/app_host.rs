@@ -644,8 +644,10 @@ impl PackagedHost {
         let renewal = config.renewal;
         self.network = crate::packaged_network::Network::new(&self.root, config);
         if let Ok(authority) = &self.authority {
-            // `if self.installation_role == 'target': self._resume_leave()` (app.py:644): a completed
+            // `authority.start()` of a joined target (app.py:613-626): its retained membership
+            // resumes over the member's seed path; then `_resume_leave` (app.py:644): a completed
             // leave stays fenced and left (no renewal), an interrupted one is finished.
+            crate::packaged_network::resume_membership(&self.network, authority);
             crate::packaged_network::resume_leave(&self.network, authority, self.model.clone());
             let (network, authority) = (self.network.clone(), authority.clone());
             match HostLoop::start(
@@ -856,6 +858,10 @@ impl Host for PackagedHost {
         quota: &Value,
     ) -> Result<Json, PublicError> {
         app_host::pair_approve(self.authority()?, request, ttl_seconds, quota)
+    }
+    /// `RemoteMacMember.membership_binding()` of this Mac's live membership session.
+    fn membership_binding(&self) -> Option<api::member::Binding> {
+        self.loaded().and_then(app_host::membership_binding)
     }
     /// `accept_pairing` over the member's seed path (`crate::packaged_network`'s join seams).
     fn pair_accept(&mut self, handoff: &Value) -> Result<Json, PublicError> {

@@ -1020,6 +1020,43 @@ fn resume(
     Ok(session)
 }
 
+/// `RemoteMacMember.status()`'s membership projection (peer.py:395-455 @ f4e366e9): a retained
+/// credential is `retained` (lease `unknown`), a live session `current` (`fresh`) or `expired`, and a
+/// recorded terminal disposition wins (`expired` also expires the lease). `live` is the session's
+/// `(generation, lease_expires_at)`; a credential or disposition that cannot be read counts as absent
+/// here (the status never fails on it). Returns `(membership_state, generation, lease_state)`.
+pub fn status_membership(
+    root: &Path,
+    live: Option<(Option<u64>, Option<f64>)>,
+    now: f64,
+) -> (String, Option<u64>, &'static str) {
+    let mut state = "absent".to_owned();
+    let mut generation = None;
+    let mut lease_state = "none";
+    if let Ok(Some(membership)) = load_membership_state(root) {
+        generation = membership["membership_generation"].as_u64();
+        state = "retained".into();
+        lease_state = "unknown";
+    }
+    if let Some((live_generation, lease)) = live {
+        generation = live_generation;
+        if lease.is_some_and(|lease| now >= lease) {
+            state = "expired".into();
+            lease_state = "expired";
+        } else {
+            state = "current".into();
+            lease_state = "fresh";
+        }
+    }
+    if let Ok(Some(disposition)) = load_disposition(root) {
+        if disposition == "expired" {
+            lease_state = "expired";
+        }
+        state = disposition;
+    }
+    (state, generation, lease_state)
+}
+
 /// The owner's own member re-pinned to the seed address its authority answers on now
 /// (`DemoAuthority._resume` pins its client to `self._coordinator.seed_url` and saves the
 /// membership with it, authority.py:578-604 @ f4e366e9): after `attach_public_endpoint` /

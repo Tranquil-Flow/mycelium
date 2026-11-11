@@ -2064,44 +2064,8 @@ fn resume_interrupted_leave(core: &Shared) {
 /// local recovery surface: the app starts without a member (`running = False`); any other failure
 /// stops the launch with its code.
 fn resume_membership(core: &Shared) -> Result<(), String> {
-    let (target, root) = match core.lock() {
-        Ok(c) => (c.target, c.root.clone()),
-        Err(_) => return Ok(()),
-    };
-    if !target || !root.join("membership.state.json").exists() {
-        return Ok(());
-    }
-    let (signer, _, _) = identity(&root).map_err(|e| e.code.to_owned())?;
-    let options = SeedOptions::default();
-    let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-    let env = api::peer::JoinEnv {
-        signer: &signer,
-        clock: &now,
-        random_hex: &random_hex,
-        seed: &options,
-    };
-    match api::peer::start(&root, &signer, true, &env) {
-        Ok(started) => {
-            if let Ok(mut c) = core.lock() {
-                c.session = started.session;
-                c.running = true;
-            }
-            Ok(())
-        }
-        Err(failed) => match failed.error.code {
-            "peer_transport_unreachable"
-            | "seed_http_remote_error"
-            | "peer_member_expired"
-            | "peer_generation_stale"
-            | "peer_member_unknown" => {
-                if let Ok(mut c) = core.lock() {
-                    c.running = false;
-                }
-                Ok(())
-            }
-            code => Err(code.to_owned()),
-        },
-    }
+    // `api::joined_member`, shared with the packaged host; this launcher resumes over the public path.
+    joined_member::resume_membership(&CoreCell(core.clone()), &SeedOptions::default())
 }
 
 /// The same lazy owner factory is used by the process and its lifetime check.

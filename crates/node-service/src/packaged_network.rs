@@ -403,6 +403,18 @@ impl api::leave::LeaveWorker for PackagedLeave {
     }
 }
 
+/// `DemoApp.start` -> `authority.start()` for a joined target (app.py:613-626 @ f4e366e9): the
+/// retained membership resumes over the member's seed path (generation + 1). A dead relay or a lapsed
+/// membership leaves the Mac started but not running (`recovery_error`); any other refusal keeps its
+/// code on stderr and the Mac not running (v0.1.4 refuses to start the app then).
+pub fn resume_membership(network: &Arc<Network>, authority: &Mutex<Authority>) {
+    let cell = network.cell(authority);
+    let options = network.seams.member_seed.clone();
+    if let Err(code) = joined_member::resume_membership(&cell, &options) {
+        eprintln!("member_resume_failed: {code}");
+    }
+}
+
 /// `member_leave.resume_leave` at start for a joined Mac (member_leave.py:295-306 @ f4e366e9): a
 /// completed leave keeps the Mac fenced and left, an interrupted one is resumed over the same steps.
 /// A failure keeps its code on stderr (the leave's own record keeps the debt).
