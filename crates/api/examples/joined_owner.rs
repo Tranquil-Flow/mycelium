@@ -599,7 +599,7 @@ impl Owner {
                 node_id: m.node_id,
                 link: m.link,
                 registration: m.registration,
-                cancel: Some(m.cancel),
+                cancel: m.cancel,
             });
         }
         self.parked = parked;
@@ -676,7 +676,7 @@ impl Owner {
                 .ok_or("owner_work_member_lost")?;
             let m = back.remove(i);
             self.members.push(Member {
-                cancel: m.cancel.ok_or("owner_work_member_lost")?,
+                cancel: m.cancel,
                 link: m.link,
                 registration: m.registration,
                 node_id,

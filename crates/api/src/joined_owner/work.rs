@@ -346,12 +346,13 @@ pub struct Clocks {
 /// `cancel_operation`); callable from any thread while the link is in use.
 pub type Cancel = Arc<dyn Fn() + Send + Sync>;
 /// One admitted participant: its member link, seed-verified registration and
-/// the link's canceller.
+/// the link's canceller (required: without it a Stop could not interrupt the
+/// member's operation, REVIEW-lanePH3B-S4AF F7).
 pub struct WorkMember {
     pub node_id: String,
     pub link: Box<dyn MemberLink + Send>,
     pub registration: Value,
-    pub cancel: Option<Cancel>,
+    pub cancel: Cancel,
 }
 /// What the compile step produced for this run (copied from its `RunState`
 /// and its `source-shards.private.json`); the port never re-plans.
@@ -510,7 +511,7 @@ impl OwnerWork {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let skew = super::span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31)?;
-        let cancels = members.iter().filter_map(|m| m.cancel.clone()).collect();
+        let cancels = members.iter().map(|m| m.cancel.clone()).collect();
         let admission: Box<dyn Admission> = Box::new(Proven::new(coordinator.clone()));
         Ok(Self {
             seed: epoch::seed_members(&coordinator),
@@ -763,7 +764,7 @@ impl OwnerWork {
         Ok(())
     }
     /// Wait until every shard is pushed, the work ended, a Stop was signalled
-    /// or `within` ran out; re-sends the cancels while stopping.
+    /// or `within` ran out (the stopper sends the cancels; this wait sends none).
     fn wait_transferred(&self, within: Duration) -> Result<(), StepError> {
         let poll = super::span(B::OwnerPoll).map_err(|e| step_refusal(e.code))?;
         let end = Instant::now() + within;
@@ -958,7 +959,7 @@ struct Member {
     node_id: String,
     link: Counted,
     registration: Value,
-    cancel: Option<Cancel>,
+    cancel: Cancel,
 }
 impl Member {
     fn new(m: WorkMember, stop: Arc<AtomicBool>, poll: Duration) -> Self {
@@ -1056,8 +1057,8 @@ impl Worker {
         let refusals = open.map(Epoch::close);
         for m in &self.members {
             let serving = closed && m.link.begun.front().is_some_and(|c| c == "serve");
-            if let (true, false, Some(cancel)) = (m.link.outstanding > 0, serving, &m.cancel) {
-                cancel();
+            if m.link.outstanding > 0 && !serving {
+                (m.cancel)();
             }
         }
         let n = self.members.len();

@@ -828,7 +828,7 @@ impl Swarm {
             let link = TestLink::start(j.member);
             members.push(WorkMember {
                 node_id: j.node_id,
-                cancel: Some(link.canceller()),
+                cancel: link.canceller(),
                 link: Box::new(link),
                 registration: j.registration,
             });
@@ -1469,7 +1469,8 @@ fn teardown_hands_every_member_back_in_stage_order_started_or_not() {
             "started: {started}"
         );
         for m in &mut back {
-            assert!(m.cancel.is_some());
+            // F7: the canceller is required by type; it is callable (nothing admitted here).
+            (m.cancel)();
             let status = m
                 .link
                 .call(json!({"command":"consent_status"}), span(B::WorkerStartup));
@@ -1566,7 +1567,7 @@ impl Swarm {
             let link = TestLink::start(j.member);
             members.push(WorkMember {
                 node_id: j.node_id,
-                cancel: Some(link.canceller()),
+                cancel: link.canceller(),
                 link: Box::new(link),
                 registration: j.registration,
             });
