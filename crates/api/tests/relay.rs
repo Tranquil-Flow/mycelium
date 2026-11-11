@@ -17,7 +17,7 @@ use std::{
     net::{Shutdown, TcpListener, TcpStream},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -731,4 +731,51 @@ fn proxy_serves_sixteen_connections_and_drops_the_seventeenth() {
         "slots are released with the connections"
     );
     proxy.close();
+}
+
+/// Q9 (REVIEW-laneGR), second gap: a proxied request still in flight must not keep the proxy's
+/// port bound once the proxy is closed, so a relay started right after can bind the same port.
+/// v0.1.4 closes the listening socket explicitly (`server_close()`, `public_relay.py:240`); the
+/// listener must not live until the last connection thread lets go of it. Channel-driven.
+#[test]
+fn a_closed_proxy_frees_its_port_while_a_request_is_still_in_flight() {
+    let proxy = Proxy::start(0, true).expect("proxy");
+    let port = proxy.port();
+    let (entered_tx, entered) = mpsc::channel::<()>();
+    let (release, held) = mpsc::channel::<()>();
+    let held = Mutex::new(held);
+    proxy.bind_chat(Some(Arc::new(move |_, _, _, _| {
+        entered_tx.send(()).expect("entered");
+        held.lock().expect("held").recv().expect("release");
+        Ok(RichAnswer {
+            status: 200,
+            kind: "text/html; charset=utf-8".into(),
+            raw: b"ok".to_vec(),
+        })
+    })));
+    let mut client = TcpStream::connect(("127.0.0.1", port)).expect("client");
+    client
+        .write_all(b"GET /chat HTTP/1.1\r\nHost: x\r\n\r\n")
+        .expect("request");
+    entered
+        .recv_timeout(secs(30))
+        .expect("the request is in its handler");
+    proxy.close();
+    let rebound = TcpListener::bind(("127.0.0.1", port))
+        .map(drop)
+        .map_err(|e| e.kind());
+    release.send(()).expect("release");
+    assert_eq!(
+        rebound,
+        Ok(()),
+        "a closed proxy must free its port while a request is still in flight"
+    );
+    // The in-flight request still gets its answer.
+    let mut answer = Vec::new();
+    client.read_to_end(&mut answer).expect("answer");
+    assert!(
+        answer.starts_with(b"HTTP/1.1 200"),
+        "{}",
+        String::from_utf8_lossy(&answer)
+    );
 }
