@@ -63,4 +63,5 @@ pub mod sidecar_process;
 pub mod sidecar_session;
 pub mod sidecar_telemetry;
 pub mod simulated;
+pub mod subject_cancel;
 pub mod worker;

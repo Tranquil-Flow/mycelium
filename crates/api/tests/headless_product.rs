@@ -520,11 +520,18 @@ fn a_new_swarm_in_the_same_state_root_starts_its_own_window() {
     let window_a = fs::read(owner.root.join(STATE)).unwrap();
 
     // The swarm's own state goes away: its record, its seed store (which refuses another swarm id,
-    // `seed_state_identity_mismatch`) and the owner's membership of it (`pairing_handoff_changed`
+    // `seed_state_identity_mismatch`), the seed's key (v0.1.4 keeps it in the authority's seed
+    // directory; one left without a swarm record is partial state, `authority_partial_state`,
+    // authority.py:390-391 @ f4e366e9) and the owner's membership of it (`pairing_handoff_changed`
     // otherwise). The same root then creates another swarm; the rest of the root (node identity,
     // network settings, serving/) stays, as a reset of the swarm leaves it.
     fs::create_dir(owner.base.join("swarm-a")).unwrap();
-    for name in ["owner-swarm.json", "seed-rs", "authority/member"] {
+    for name in [
+        "owner-swarm.json",
+        "seed-rs",
+        "seed-identity.json",
+        "authority/member",
+    ] {
         let aside = owner.base.join("swarm-a").join(name.replace('/', "-"));
         fs::rename(owner.root.join(name), aside).unwrap();
     }
