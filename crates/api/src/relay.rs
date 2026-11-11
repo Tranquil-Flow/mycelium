@@ -882,6 +882,10 @@ struct Inner {
     state: Mutex<State>,
     ready: Condvar,
     wake: Condvar,
+    /// Unit tests only: run on the lifetime thread once it decided the window expired, before it
+    /// closes the relay (no other seam can order a closer into that gap).
+    #[cfg(test)]
+    expired_hold: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 /// `TemporaryHttpsRelay`.
 pub struct Relay {
@@ -989,6 +993,8 @@ impl Relay {
                 state: Mutex::new(state),
                 ready: Condvar::new(),
                 wake: Condvar::new(),
+                #[cfg(test)]
+                expired_hold: Mutex::new(None),
             }),
         })
     }
@@ -1387,6 +1393,10 @@ fn lifetime_step(inner: &Arc<Inner>) {
         }
     };
     if expired {
+        #[cfg(test)]
+        if let Some(hold) = lock(&inner.expired_hold).clone() {
+            hold();
+        }
         close(inner);
     }
 }
@@ -1792,5 +1802,95 @@ impl Relay {
             }
         };
         !running
+    }
+}
+
+#[cfg(test)]
+mod lifetime_guard_tests {
+    //! GRF2 (review F6): the relay's own lifetime thread never waits for a release. When it has
+    //! decided the window expired and another closer (Stop, Quit, a Start) wins the close, that
+    //! closer joins the lifetime thread; were the lifetime thread to wait for the closer's release
+    //! it would stall both for the whole release wait (`release_wait`, 20 s). The order cannot be
+    //! forced through the public seams (the clock is read under the state lock, and the release
+    //! observer fires only inside `close()`), hence the unit-test-only `expired_hold`.
+    use super::*;
+    use std::sync::atomic::AtomicU64;
+
+    #[derive(Debug, PartialEq)]
+    enum Seen {
+        /// The lifetime thread decided the window expired and is held before its `close()`.
+        Expired,
+        Release(ReleaseEvent),
+        /// The other closer's `close()` returned.
+        Closed,
+    }
+
+    #[test]
+    fn a_lifetime_thread_whose_close_is_won_by_another_closer_returns_without_waiting() {
+        let root =
+            std::env::temp_dir().join(format!("relay-lifetime-guard-{}", std::process::id()));
+        let port = TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .expect("an ephemeral loopback port");
+        let now_ms = Arc::new(AtomicU64::new(1_000_000));
+        let (seen, events) = mpsc::channel::<Seen>();
+        let clock = now_ms.clone();
+        let observed = Mutex::new(seen.clone());
+        let hooks = Hooks {
+            clock: Arc::new(move || clock.load(Ordering::SeqCst) as f64 / 1000.0),
+            lifetime_poll: Some(span(BudgetId::RelayPoll)),
+            ready_wait: span(BudgetId::RelayPoll),
+            binary: Arc::new(|| None),
+            env: Vec::new(),
+            release_observer: Some(Arc::new(move |event| {
+                lock(&observed).send(Seen::Release(event)).unwrap_or(());
+            })),
+        };
+        let spec: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "public_origin": "https://relay.mycelium-test.org",
+            "proxy_port": port,
+            "auto_renew": false,
+        }))
+        .expect("spec");
+        let relay = Relay::new(&root, &Value::from("external"), &spec, hooks).expect("relay");
+        let (release, released) = mpsc::channel::<()>();
+        let held = Mutex::new((seen.clone(), released));
+        *lock(&relay.inner.expired_hold) = Some(Arc::new(move || {
+            let held = lock(&held);
+            held.0.send(Seen::Expired).unwrap_or(());
+            held.1.recv().unwrap_or(());
+        }));
+        relay
+            .start(&Value::Bool(true), &Value::from(30))
+            .expect("external relay started");
+        let wait = span(BudgetId::RouterClose);
+        // The 30 s window runs out; wake the lifetime thread (it would also wake on its next poll).
+        now_ms.fetch_add(30_001, Ordering::SeqCst);
+        relay.inner.wake.notify_all();
+        assert_eq!(events.recv_timeout(wait), Ok(Seen::Expired));
+        // Another closer wins: it publishes "stopped", then joins the held lifetime thread.
+        let closer = thread::spawn(move || {
+            relay.close();
+            seen.send(Seen::Closed).unwrap_or(());
+            relay
+        });
+        assert_eq!(
+            events.recv_timeout(wait),
+            Ok(Seen::Release(ReleaseEvent::Stopping))
+        );
+        // The lifetime thread goes on to its own close(): it must return at once, so the
+        // closer's join (and its release) completes.
+        release.send(()).expect("the lifetime thread is held");
+        assert_eq!(
+            events.recv_timeout(wait),
+            Ok(Seen::Closed),
+            "the lifetime thread must not wait for a release its closer joins it for"
+        );
+        let relay = closer.join().expect("closer");
+        assert_eq!(relay.status().to_value()["state"], "stopped");
+        assert!(events.try_recv().is_err(), "no closer waited for a release");
+        drop(relay);
+        std::fs::remove_dir_all(&root).expect("scratch root");
     }
 }
