@@ -763,6 +763,98 @@ fn a_member_that_never_answers_its_discard_leaves_cleanup_unproven_within_the_st
     work.teardown().unwrap();
 }
 
+/// Stop `work` on its own thread; the result arrives on the receiver (the thread hands the port
+/// back so a late teardown still joins).
+fn stop(
+    mut work: OwnerWork,
+) -> (
+    mpsc::Receiver<(Result<(), String>, Value)>,
+    std::thread::JoinHandle<OwnerWork>,
+) {
+    let (done, ended) = mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        let result = work.teardown();
+        if done.send((result, work.state())).is_err() {
+            eprintln!("stop waiter gone");
+        }
+        work
+    });
+    (ended, stopper)
+}
+
+/// F4 (REVIEW-lanePH3B-S4A): Stop is prompt in the shipped app (`OwnerRun.stop` sets the stop
+/// event every wait polls, owner_run.py:275-283; teardown bounded by `_stop_deadline`,
+/// demo_chain.py:1240-1254). A Stop while a member is receiving its shard (custody taken, the
+/// owner's source waiting for the member's connection) interrupts that receive
+/// (`cancel_operation`), wakes the source and ends within the stop allowance; the member then
+/// discards what it holds (R1) and the workflow is `stopped`.
+#[test]
+fn a_stop_during_a_held_receive_interrupts_it_and_ends_within_the_stop_allowance() {
+    let mut s = swarm(2);
+    s.members[0].member.script.insert("receive", Act::Hold);
+    let plan = s.plan(60);
+    let (mut work, members) = s.work_with(host_clocks(), plan);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let started = work.start_serving(&json!({"max_wall_seconds":60}));
+    assert!(started.is_ok(), "{started:?}");
+    assert!(members[0].2.holding("receive", span(B::WorkerStartup)));
+    let bound = stop_allowance(60, 2);
+    let (ended, _stopper) = stop(work);
+    let stopped = ended.recv_timeout(bound);
+    assert!(
+        stopped.is_ok(),
+        "Stop waited past the stop allowance ({bound:?}) on the held receive"
+    );
+    let (result, state) = stopped.unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    let first = members[0].0.lock().unwrap();
+    assert!(first.cancels >= 1, "the held receive is cancelled");
+    assert_eq!(first.commands, ["consent_status", "receive", "discard"]);
+    assert!(
+        members[1].0.lock().unwrap().commands.is_empty(),
+        "the next member is never reached"
+    );
+}
+
+/// F4: a Stop while both stages prepare their native workers cancels both prepares, ends within
+/// the stop allowance, and both members discard their stage (R1).
+#[test]
+fn a_stop_during_held_native_prepares_cancels_both_and_every_member_discards() {
+    let mut s = swarm(2);
+    for m in &mut s.members {
+        m.member.script.insert("prepare_native", Act::Hold);
+    }
+    let plan = s.plan(60);
+    let (mut work, members) = s.work_with(host_clocks(), plan);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let started = work.start_serving(&json!({"max_wall_seconds":60}));
+    assert!(started.is_ok(), "{started:?}");
+    for (_, _, control) in &members {
+        assert!(control.holding("prepare_native", span(B::WorkerStartup)));
+    }
+    let bound = stop_allowance(60, 2);
+    let (ended, _stopper) = stop(work);
+    let stopped = ended.recv_timeout(bound);
+    assert!(
+        stopped.is_ok(),
+        "Stop waited past the stop allowance ({bound:?}) on the held prepares"
+    );
+    let (result, state) = stopped.unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    for (seen, _, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert!(seen.cancels >= 1, "every running prepare is cancelled");
+        assert_eq!(
+            seen.commands,
+            ["consent_status", "receive", "prepare_native", "discard"]
+        );
+    }
+}
+
 fn walled(walls: &[(&str, u64)], started: Option<f64>) -> RunState {
     let mut state = RunState::new("s4a-run", "s4a-deployment", Reason::Start);
     let min = walls.iter().map(|(_, w)| *w).min().unwrap();
