@@ -1058,10 +1058,15 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
         Ok(Offer { offer_id: id, raw })
     }
     fn retire_offer(&mut self, offer: &Offer) -> Result<Value, ObservationError> {
-        self.offer_effect(offer, |m, now| {
-            m.retire_stage(&offer.raw, || now).map_err(owner_error)
-        })
-        .map_err(observe)
+        let receipt = self
+            .offer_effect(offer, |m, now| {
+                m.retire_stage(&offer.raw, || now).map_err(owner_error)
+            })
+            .map_err(observe)?;
+        // A retired offer is final (its receipt kept: `retire_offer`, managed_offers.py:158-170 @
+        // f4e366e9): the run's teardown never asks for its cleanup again.
+        self.published.remove(&offer.offer_id);
+        Ok(receipt)
     }
     fn request_stage_cleanup(&mut self, offer: &Offer) -> Result<(), ObservationError> {
         self.offer_effect(offer, |m, now| {

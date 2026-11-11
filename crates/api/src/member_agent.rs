@@ -365,15 +365,28 @@ impl<H: MemberHost> MemberAgent<H> {
             return;
         };
         // `run_auto_step`: a joined target with a granted, bound standing consent only.
-        let granted = standing_consent::load(&root)
-            .ok()
-            .flatten()
+        let grant = standing_consent::load(&root).ok().flatten();
+        let granted = grant
+            .as_ref()
             .is_some_and(|g| g.get("state") == Some(&json!("granted")));
         if !target || !running || left || closed || !granted {
             if left || closed {
                 self.close(host);
             }
             return;
+        }
+        let context = host.accept_context();
+        // `auto_poll_step` (standing_consent.py:357-361 @ f4e366e9): nothing is reported, accepted
+        // or ticked unless this Mac is a current member (`not_member`) whose standing consent is
+        // bound to THIS membership (`standing_consent_owner_mismatch`). A host that gives no
+        // acceptor context (the headless launcher's) keeps its own gates.
+        if let Some(context) = &context {
+            let Some(binding) = &context.binding else {
+                return;
+            };
+            if grant.as_ref().and_then(|g| g.get("binding")) != Some(binding) {
+                return;
+            }
         }
         let client = match self.client(host, &root) {
             Ok(client) => client,
@@ -382,12 +395,10 @@ impl<H: MemberHost> MemberAgent<H> {
                 return;
             }
         };
-        let context = host.accept_context();
         // `if report_due: outcome['report'] = app.auto_report('periodic')` (standing_consent.py:
-        // 362-363), past the gates above and a current membership binding (:357-359), before the
-        // acceptor and the agent; `_auto_report` never raises (app.py:1138-1163).
+        // 362-363), past the gates above, before the acceptor and the agent; `_auto_report` never
+        // raises (app.py:1138-1163).
         if let Some(context) = &context
-            && context.binding.is_some()
             && host.periodic_report_due()
         {
             let record = crate::joined_member::auto_report(
