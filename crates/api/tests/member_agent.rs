@@ -15,7 +15,7 @@ use api::{
 use serde_json::{Value, json};
 use std::{
     os::unix::fs::DirBuilderExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -39,7 +39,7 @@ fn policy() -> Value {
 }
 /// A granted standing consent bound to a membership (`grant_standing_consent` at join, then
 /// `bind_standing_consent` after `accept_pairing`, app.py:1758, :1803-1808); its binding.
-fn granted(root: &PathBuf, wall: u64, memory: u64) -> Value {
+fn granted(root: &Path, wall: u64, memory: u64) -> Value {
     let body = json!({"acknowledged": true, "disclosure_digest": standing_consent::DISCLOSURE_DIGEST,
         "caps": {"storage_bytes": STORAGE, "max_memory_bytes": memory,
                  "max_wall_seconds": wall, "max_commands": 5000}});

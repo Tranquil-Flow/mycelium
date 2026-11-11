@@ -769,6 +769,26 @@ impl api::member_agent::MemberHost for PackagedMember {
     ) -> api::member_agent::OResult<api::bootstrap_process::TrustedBootstrap> {
         api::member_agent::bootstrap_program(root)
     }
+    /// `auto_step_context()` (app.py:1168-1172): the binding only while this Mac is a target
+    /// whose membership is `current`; the saved resource policy; the member's join seam.
+    fn accept_context(&self) -> Option<api::member_agent::AcceptContext> {
+        let root = lock(&self.authority).root.clone();
+        let current = membership_state(&self.authority).as_deref() == Some("current");
+        let binding = current
+            .then(|| app_host::membership_binding(&self.network.cell(&self.authority)))
+            .flatten()
+            .map(|b| {
+                json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
+                "seed_key_digest": b.seed_key_digest})
+            });
+        Some(api::member_agent::AcceptContext {
+            policy: api::preferences::resource_policy::read(&root)
+                .ok()
+                .flatten(),
+            binding,
+            join_base: self.network.seams.join_base.clone(),
+        })
+    }
     fn spawn(
         &self,
         pump: api::target_pump::TargetPump<api::member_agent::RemoteTarget<Self>>,

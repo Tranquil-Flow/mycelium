@@ -30,6 +30,7 @@ use crate::{
     preferences::{private_state, standing_consent},
     run_exchange_client::{ClientError, ExchangeClient, Membership},
     seed::{SeedClient, SeedOptions},
+    standing_acceptor::{AcceptFailure, StandingAcceptor, WorkAcceptance},
     target_pump::{StepOutcome, TargetHost, TargetPump},
 };
 use base64::Engine as _;
@@ -164,6 +165,31 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
     fn slot<R>(&self, f: impl FnOnce(Slot<'_, Self::Worker>) -> R) -> OResult<R>;
     /// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
     fn program(&self, root: &Path) -> OResult<TrustedBootstrap>;
+    /// `auto_step_context()` + `read_resource_policy(root)` (app.py:1168-1172, :1176-1178): the
+    /// policy and the current membership binding the standing acceptor works under, and how the
+    /// member's pre-run report reaches the owner. `None`: this host runs no acceptor.
+    fn accept_context(&self) -> Option<AcceptContext> {
+        None
+    }
+    /// `preview_work(actor, offer, stage_acknowledged=True, limits=, resource_policy=)`: no member
+    /// work service is composed by default (it is the member work service's, S4b/S4c).
+    fn work_preview(
+        &self,
+        _offer: &Value,
+        _limits: &Value,
+        _policy: &Value,
+    ) -> Result<Value, AcceptFailure> {
+        Err(AcceptFailure::code("member_work_unavailable"))
+    }
+    /// `accept_work(actor, preview, work_acknowledged=True, limits=, resource_policy=)`.
+    fn work_accept(
+        &self,
+        _preview: &Value,
+        _limits: &Value,
+        _policy: &Value,
+    ) -> Result<(), AcceptFailure> {
+        Err(AcceptFailure::code("member_work_unavailable"))
+    }
     /// Drive a started pump on its own thread until Stop (or its stop command).
     fn spawn(
         &self,
@@ -171,6 +197,17 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
         fence: TargetFence,
         scope: Value,
     ) -> Self::Worker;
+}
+
+/// What the standing acceptor of a joined Mac works under (`DemoApp.auto_accept`).
+#[derive(Clone, Debug, Default)]
+pub struct AcceptContext {
+    /// `read_resource_policy(self.root)`.
+    pub policy: Option<Value>,
+    /// `auto_step_context()['binding']`: the membership binding while it is `current`.
+    pub binding: Option<Value>,
+    /// The join seam the member's reports go through (`_join_client`'s base).
+    pub join_base: Option<String>,
 }
 
 /// This member's retained membership (`membership.state.json`), the source of its binding.
@@ -195,6 +232,8 @@ pub struct MemberAgent<H: MemberHost> {
     agent: Option<LocalAgent>,
     client: Option<(Value, Client)>,
     announcement: Arc<Mutex<Value>>,
+    /// `DemoApp.standing` (created on the first acceptor pass).
+    acceptor: Option<MemberAcceptor>,
     _host: std::marker::PhantomData<fn(H)>,
 }
 impl<H: MemberHost> Default for MemberAgent<H> {
@@ -203,6 +242,7 @@ impl<H: MemberHost> Default for MemberAgent<H> {
             agent: None,
             client: None,
             announcement: Arc::default(),
+            acceptor: None,
             _host: std::marker::PhantomData,
         }
     }
@@ -333,6 +373,34 @@ impl<H: MemberHost> MemberAgent<H> {
                 return;
             }
         };
+        // `auto_accept` before `auto_steps` (standing_consent.py:363-365); its exception ends the
+        // pass (`_standing_loop` records it as `standing_error`, app.py:1210-1212).
+        if let Some(context) = host.accept_context() {
+            let holds = self.agent.as_mut().is_some_and(LocalAgent::holds_offer);
+            let acceptor = self.acceptor.get_or_insert_with(|| {
+                MemberAcceptor::new(root.clone(), self.announcement.clone())
+            });
+            let mut work = MemberWork {
+                host: &**host,
+                client: client.clone(),
+                root: root.clone(),
+                join_base: context.join_base.clone(),
+            };
+            let outcome = acceptor.tick(
+                &mut work,
+                context.policy.as_ref(),
+                context.binding.as_ref(),
+                holds,
+                &mut || host.resource_check(),
+            );
+            if let Err(failure) = outcome {
+                eprintln!(
+                    "member standing acceptor: {}",
+                    failure.code.as_deref().unwrap_or("standing_accept_failed")
+                );
+                return;
+            }
+        }
         let agent = self.agent.get_or_insert_with(LocalAgent::remote);
         let mut view = MemberView {
             host,
@@ -722,6 +790,9 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
     fn member_caps(&mut self) -> Result<Value, Failure> {
         standing_member_caps(&self.root)
     }
+    fn storage_cap(&mut self) -> Result<u64, Failure> {
+        standing_storage_cap(&self.root)
+    }
     fn sink(&mut self, report: &Value) -> Result<(), ExchangeUnavailable> {
         let sent = locked(&self.client)
             .map_err(|_| ExchangeUnavailable)?
@@ -736,33 +807,128 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
     }
 }
 
-/// The caps a joined Mac's announced share must fit. Not wired yet: like the moved agent, it
-/// knows none (`{}`).
-pub fn standing_member_caps(_root: &Path) -> Result<Value, Failure> {
-    Ok(json!({}))
+/// `StandingConsentGate.member_caps(app)` (demo_target.py:74-78 @ f4e366e9): the standing caps a
+/// joined Mac's announced share must fit (storage, memory, wall).
+pub fn standing_member_caps(root: &Path) -> Result<Value, Failure> {
+    let grant = standing_consent::load(root)
+        .ok()
+        .flatten()
+        .ok_or_else(|| Failure::new("TypeError", "demo_step_failed"))?;
+    let mut caps = Map::new();
+    for key in ["storage_bytes", "max_memory_bytes", "max_wall_seconds"] {
+        let value = grant["caps"][key]
+            .as_u64()
+            .ok_or_else(|| Failure::new("KeyError", "demo_step_failed"))?;
+        caps.insert(key.into(), json!(value));
+    }
+    Ok(Value::Object(caps))
 }
-/// A joined Mac's automatic work acceptance (`DemoApp.auto_accept`). Not wired yet: it never
-/// handles an offer.
+/// `StandingConsentGate.storage_cap(app)` (demo_target.py:69-72).
+fn standing_storage_cap(root: &Path) -> Result<u64, Failure> {
+    standing_member_caps(root)?["storage_bytes"]
+        .as_u64()
+        .ok_or_else(|| Failure::new("KeyError", "demo_step_failed"))
+}
+
+/// A joined Mac's automatic work acceptance: `DemoApp.auto_accept` (app.py:1175-1189 @ f4e366e9)
+/// over `StandingAcceptor` (standing_consent.py:375-470), whose `limits_for` is the agent's
+/// `member_limits(offer)` (demo_target.py:342-349): the owner's announced `work_limits` for the
+/// offer's run, read from the announcement the agent last read.
 pub struct MemberAcceptor {
-    _root: PathBuf,
-    _announcement: Arc<Mutex<Value>>,
+    acceptor: StandingAcceptor,
 }
 impl MemberAcceptor {
     pub fn new(root: PathBuf, announcement: Arc<Mutex<Value>>) -> Self {
+        let limits_for = move |offer: &Value| {
+            let a = announcement
+                .lock()
+                .map(|a| a.clone())
+                .unwrap_or(Value::Null);
+            (offer.is_object()
+                && offer.get("run_id") == a.get("run_id")
+                && a["work_limits"].is_object())
+            .then(|| a["work_limits"].clone())
+        };
         Self {
-            _root: root,
-            _announcement: announcement,
+            acceptor: StandingAcceptor::new(root, Some(Box::new(limits_for))),
         }
     }
+    /// One `auto_accept`: nothing without a policy or a current binding, nothing for an offer
+    /// the agent holds (`holds_offer`: a bootstrap offer, a slice not verified yet), else the
+    /// standing acceptor's outcome for the pending offer.
     pub fn tick(
         &mut self,
-        _work: &mut dyn crate::standing_acceptor::WorkAcceptance,
-        _policy: Option<&Value>,
-        _binding: Option<&Value>,
-        _holds_offer: bool,
-        _resource_check: &mut dyn FnMut() -> Option<String>,
-    ) -> Result<Option<Value>, crate::standing_acceptor::AcceptFailure> {
-        Ok(None)
+        work: &mut dyn WorkAcceptance,
+        policy: Option<&Value>,
+        binding: Option<&Value>,
+        holds_offer: bool,
+        resource_check: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<Option<Value>, AcceptFailure> {
+        let (Some(policy), Some(binding)) = (policy, binding) else {
+            return Ok(None);
+        };
+        if holds_offer {
+            return Ok(None);
+        }
+        self.acceptor
+            .tick(work, policy, Some(binding), resource_check)
+    }
+}
+/// The member's own collaborators of the standing acceptor (`StandingAcceptor.tick(self.authority,
+/// ...)`): its pending offer from the owner's mailbox, its pre-run report (`_auto_report`), and
+/// the host's work preview/accept.
+struct MemberWork<'a, H: MemberHost> {
+    host: &'a H,
+    client: Client,
+    root: PathBuf,
+    join_base: Option<String>,
+}
+impl<H: MemberHost> WorkAcceptance for MemberWork<'_, H> {
+    /// `actor.pending_stage()`: an owner whose mailbox does not exist yet has published nothing.
+    fn pending_offer(&mut self) -> Result<Option<Value>, AcceptFailure> {
+        let body = match stage_call(
+            &self.client,
+            STAGE_READ,
+            json!({"offer_id": null, "offset": 0}),
+        ) {
+            Err(OwnerError("managed_owner_unavailable")) => return Ok(None),
+            Err(error) => {
+                return Err(AcceptFailure {
+                    retryable: true,
+                    ..AcceptFailure::code(error.0)
+                });
+            }
+            Ok(body) => body,
+        };
+        Ok((!body["offer"].is_null()).then(|| body["offer"].clone()))
+    }
+    /// `report=lambda purpose, _offer: self._auto_report(purpose)`: best effort, never raises.
+    fn report(&mut self, purpose: &str, _offer: &Value) -> Result<(), AcceptFailure> {
+        let record =
+            crate::joined_member::auto_report(&self.root, self.join_base.as_deref(), purpose);
+        if record["state"] != "delivered" {
+            eprintln!("member {purpose} report: {}", record["error"]);
+        }
+        Ok(())
+    }
+    fn preview(
+        &mut self,
+        offer: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<Value, AcceptFailure> {
+        self.host.work_preview(offer, limits, policy)
+    }
+    fn accept(
+        &mut self,
+        preview: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<(), AcceptFailure> {
+        self.host.work_accept(preview, limits, policy)
+    }
+    fn clock(&mut self) -> f64 {
+        now()
     }
 }
 
