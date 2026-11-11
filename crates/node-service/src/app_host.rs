@@ -911,18 +911,11 @@ impl Host for PackagedHost {
     fn environment(&self, name: &str) -> Option<String> {
         std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
     }
-    /// `host_memory_bytes()`: this Mac's physical memory, `None` when unknown. Read with the
-    /// same `hw.memsize` probe the native driver uses (native.rs `host`).
+    /// `_device_memory_bytes()` (app.py:1123-1126): this Mac's physical memory, `None` when
+    /// unknown; the network's (the composition's seam, else `hw.memsize`), which the status's
+    /// memory choices read too.
     fn device_memory_bytes(&self) -> Option<u64> {
-        let output = crate::spawn::confined_output("/usr/sbin/sysctl", &["-n", "hw.memsize"])
-            .ok()
-            .filter(|output| output.status.success())?;
-        String::from_utf8(output.stdout)
-            .ok()?
-            .trim()
-            .parse()
-            .ok()
-            .filter(|bytes| *bytes > 0)
+        self.network.device_memory_bytes()
     }
     /// `fast_mode.run_active(app)`. This process has no chain compile/serving thread or
     /// workflow, so it is the owner run alone. A poisoned node counts as active (refuse a change).
@@ -1137,6 +1130,15 @@ impl Host for PackagedHost {
     }
     fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
         api::joined_member::join_poll(state, self.network.seams().join_base.as_deref())
+    }
+    /// `self.standing_error = public_failure_code(error)` after a failed `bind_standing_consent`
+    /// (app.py:1802-1806); `error_http` is `None` for a consent error (control_failures.py:24-27).
+    fn standing_bind_failed(&mut self, code: &'static str) {
+        if let Some(authority) = self.loaded() {
+            let mut a = authority.lock().unwrap_or_else(PoisonError::into_inner);
+            a.recorded.standing_error = Some(code.to_owned());
+            a.recorded.standing_error_http = None;
+        }
     }
     fn join_accept(
         &mut self,

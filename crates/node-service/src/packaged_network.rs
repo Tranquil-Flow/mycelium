@@ -23,7 +23,7 @@ use crate::{
 use api::{
     actions::{Action, Backend},
     app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
-    joined_member,
+    app_status, joined_member,
     persistent::RelayState,
     preferences::private_state,
     relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend},
@@ -36,7 +36,7 @@ use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -68,6 +68,9 @@ pub struct NetworkConfig {
     /// native_runtime.py:8-22 @ f4e366e9): `None` is the app's own, beside the executable
     /// (`native/mycelium-iroh-sidecar`); a test names an owned executable file it never starts.
     pub sidecar: Option<PathBuf>,
+    /// v0.1.4's `_device_memory_bytes()` test seam (app.py:1123-1126 @ f4e366e9): the RAM that
+    /// bounds this Mac's per-run memory consent. `None` (the app's own): this Mac's `hw.memsize`.
+    pub device_memory_bytes: Option<u64>,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -83,6 +86,7 @@ impl Default for NetworkConfig {
             }),
             seams: JoinSeams::default(),
             sidecar: None,
+            device_memory_bytes: None,
         }
     }
 }
@@ -101,6 +105,8 @@ pub struct Network {
     demo_target: Mutex<Option<Value>>,
     /// [`NetworkConfig::sidecar`].
     sidecar: Option<PathBuf>,
+    /// `_device_memory_bytes()`: the composition's seam, else this Mac's RAM, read once.
+    device_memory: OnceLock<Option<u64>>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -125,7 +131,16 @@ impl Network {
             left: AtomicBool::new(false),
             demo_target: Mutex::default(),
             sidecar: config.sidecar,
+            device_memory: config
+                .device_memory_bytes
+                .map_or_else(OnceLock::new, |bytes| OnceLock::from(Some(bytes))),
         })
+    }
+    /// `_device_memory_bytes()` (app.py:1123-1126 @ f4e366e9): the RAM that bounds this Mac's
+    /// per-run memory consent, for the join's caps check and the status's memory choices alike: the
+    /// composition's seam, else `host_memory_bytes()` (this Mac's `hw.memsize`, read once).
+    pub fn device_memory_bytes(&self) -> Option<u64> {
+        *self.device_memory.get_or_init(host_memory_bytes)
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
         let hooks = hooks.clone();
@@ -482,30 +497,50 @@ pub fn resume_leave(
     }
 }
 
-/// The parts of v0.1.4's `status()` (app.py:1263-1283) the packaged status takes from this host:
-/// `network`, `installation_role`, `resource_policy`, `authority`, `join_flow` (the join-consent
-/// document, `standing_disclosure`, for both roles) and `leave`.
+/// `host_memory_bytes()` (app.py:267-273): this Mac's physical memory, `None` when unknown. Read
+/// with the same `hw.memsize` probe the native driver uses (native.rs `host`).
+fn host_memory_bytes() -> Option<u64> {
+    let output = crate::spawn::confined_output("/usr/sbin/sysctl", &["-n", "hw.memsize"])
+        .ok()
+        .filter(|output| output.status.success())?;
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+        .filter(|bytes| *bytes > 0)
+}
+
+/// The parts of v0.1.4's `status()` (app.py:1244-1283) the packaged status takes from this host:
+/// `network`, and from the authority, through the builder the headless launcher shares
+/// (`api::app_status::shared`): `model_contract`, `run_model` (with this Mac's memory choices),
+/// `fast_mode`, `installation_role`, `resource_policy`, `authority`, `renewal_error`, `leave` and
+/// `join_flow`. A document that is not a JSON object is left as it is, never indexed into a panic
+/// (REVIEW-lanePH2 F8).
 pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {
+    let Some(fields) = status.as_object_mut() else {
+        return;
+    };
     let pending = lock(&network.pending).clone();
-    status["network"] = network.status().to_value();
+    fields.insert("network".into(), network.status().to_value());
     let Some(authority) = authority else {
         return;
     };
-    let a = lock(authority);
-    status["installation_role"] = json!(if a.target { "target" } else { "owner" });
-    status["resource_policy"] = api::preferences::resource_policy::read(&a.root)
-        .ok()
-        .flatten()
-        .unwrap_or(Value::Null);
-    status["authority"] = joined_member::authority_status(&a).to_value();
-    status["join_flow"] =
-        joined_member::join_flow_status(&a.root, a.target, &a.windows, &pending).to_value();
-    status["leave"] = if a.target {
-        let leave = api::leave::MemberLeave::new(&a.root, api::leave::Limits::default());
-        api::leave::status_view(&leave).map_or(Value::Null, |view| Json::from(view).to_value())
-    } else {
-        Value::Null
+    // `os.environ.get(name)`, as the host's own `environment` reads it.
+    let env = |name: &str| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned());
+    let (run_model_env, fast_mode_env) = (
+        env(api::preferences::run_model::ENV),
+        env(api::persistent::TOKEN_PATH_ENV),
+    );
+    let facts = app_status::Facts {
+        run_model_env: run_model_env.as_deref(),
+        fast_mode_env: fast_mode_env.as_deref(),
+        device_memory_bytes: network.device_memory_bytes(),
     };
+    let a = lock(authority);
+    for (key, value) in app_status::shared(&a, &pending, &facts) {
+        fields.insert(key.into(), value.to_value());
+    }
 }
 
 /// The packaged action root's delegate: the node service's serving actions, with

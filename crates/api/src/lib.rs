@@ -5,6 +5,7 @@ pub mod acquisition;
 pub mod actions;
 pub mod adaptive;
 pub mod app_host;
+pub mod app_status;
 pub mod assets;
 pub mod authority_view;
 pub mod bootstrap_process;

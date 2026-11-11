@@ -516,6 +516,9 @@ pub struct Authority<M: ManagedSlot = Unmanaged> {
     /// `(generation, lease_expires_at)` of `session` while the renewal loop has it out on the wire, so the
     /// status never flickers to "absent" during a heartbeat.
     pub session_view: Option<(Option<u64>, Option<f64>)>,
+    /// What the app's loops and join recorded for its status (`renewal_error`, the standing
+    /// consent's error, last offer and last report).
+    pub recorded: crate::app_status::Recorded,
 }
 impl<M: ManagedSlot> Authority<M> {
     /// The authority part of `DemoApp.__init__` over `root`: the installation role, the owner's
@@ -569,6 +572,7 @@ impl<M: ManagedSlot> Authority<M> {
             windows: Arc::new(PairingWindows::system()),
             seed: None,
             owner_session: None,
+            recorded: crate::app_status::Recorded::default(),
         })
     }
     /// The owner authority this process answers for: a persisted v0.1.x one, else the one-member swarm
@@ -842,7 +846,9 @@ pub fn start_authority(cell: &impl Cell) -> Result<(), PublicError> {
 }
 /// One pass of `DemoApp._renew_loop`: `authority.renew()` for a running owner (the session is taken out of
 /// the core while the heartbeat is on the wire, so no core lock is held across the seed round trip).
-/// `renewal_unavailable` is only a status field in the oracle; here the next pass simply tries again.
+/// The pass is recorded for the status as the loop does (app.py:921-927): a failure while running
+/// shows `renewal_unavailable`, a renewal clears it, a skipped pass changes nothing; the session goes
+/// back whatever the pass did, so the next pass tries again.
 pub fn renew_owner(cell: &impl Cell) {
     let Some(Some((root, runtime, session))) = cell.try_with(|c| {
         if c.closed || !c.running || c.left || c.target {
@@ -857,62 +863,93 @@ pub fn renew_owner(cell: &impl Cell) {
     };
     let mut session = session;
     let dir = root.join("authority").join("member");
-    let Ok((signer, _, _)) = identity(&root) else {
-        return;
+    let renewed = match identity(&root) {
+        Ok((signer, _, _)) => {
+            let options = runtime.options();
+            let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+            let env = crate::peer::JoinEnv {
+                signer: &signer,
+                clock: &now,
+                random_hex: &random_hex,
+                seed: &options,
+            };
+            crate::peer::renew(&dir, true, Some(&mut session), &env)
+        }
+        Err(error) => Err(error),
     };
-    let options = runtime.options();
-    let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-    let env = crate::peer::JoinEnv {
-        signer: &signer,
-        clock: &now,
-        random_hex: &random_hex,
-        seed: &options,
-    };
-    if let Err(error) = crate::peer::renew(&dir, true, Some(&mut session), &env) {
+    if let Err(error) = &renewed {
         eprintln!("owner renew: {}", error.code);
     }
     cell.try_with(|c| {
         if c.owner_session.is_none() && c.seed.is_some() {
             c.owner_session = Some(session);
         }
+        let running_open = c.running && !c.closed;
+        c.recorded
+            .renewal(renewal_pass(renewed.is_ok()), running_open);
     });
+}
+fn renewal_pass(renewed: bool) -> crate::app_status::RenewalPass {
+    if renewed {
+        crate::app_status::RenewalPass::Renewed
+    } else {
+        crate::app_status::RenewalPass::Failed
+    }
 }
 /// One pass of `DemoApp._renew_loop` for a joined TARGET (`authority.renew()` is
 /// `RemoteMacMember.renew()`, app.py:911-927 @ f4e366e9): the live membership session is taken out
 /// of the host while the heartbeat is on the wire (its generation and lease stay visible through
 /// `session_view`), over the member's own seed path ([`Cell::member_seed_options`]). A closed, left,
-/// stopped or owner host renews nothing. A failure is logged and tried again at the next pass (the
-/// oracle sets `renewal_error = 'renewal_unavailable'`).
+/// stopped or owner host renews nothing. A failure is logged and tried again at the next pass; the
+/// pass is recorded for the status as the loop does (app.py:921-927: `renewal_unavailable` while
+/// running, cleared by a renewal). A target with no live session renews nothing and raises nothing
+/// (`TargetApplication.renew` returns its status, target_app.py:295-298).
 pub fn renew_member(cell: &impl Cell) {
-    let Some(Some((root, session))) = cell.try_with(|c| {
+    let Some(Some(taken)) = cell.try_with(|c| {
         if c.closed || !c.running || c.left || !c.target {
             return None;
         }
-        let session = c.session.take()?;
+        let Some(session) = c.session.take() else {
+            return Some(None);
+        };
         c.session_view = Some((session.generation(), session.lease_expires_at()));
-        Some((c.root.clone(), session))
+        Some(Some((c.root.clone(), session)))
     }) else {
         return;
     };
+    let Some((root, session)) = taken else {
+        cell.try_with(|c| {
+            c.recorded
+                .renewal(crate::app_status::RenewalPass::Renewed, true);
+        });
+        return;
+    };
     let mut session = session;
-    if let Ok((signer, _, _)) = identity(&root) {
-        let options = cell.member_seed_options();
-        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-        let env = crate::peer::JoinEnv {
-            signer: &signer,
-            clock: &now,
-            random_hex: &random_hex,
-            seed: &options,
-        };
-        if let Err(error) = crate::peer::renew(&root, true, Some(&mut session), &env) {
-            eprintln!("member renew: {}", error.code);
+    let renewed = match identity(&root) {
+        Ok((signer, _, _)) => {
+            let options = cell.member_seed_options();
+            let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+            let env = crate::peer::JoinEnv {
+                signer: &signer,
+                clock: &now,
+                random_hex: &random_hex,
+                seed: &options,
+            };
+            crate::peer::renew(&root, true, Some(&mut session), &env)
         }
+        Err(error) => Err(error),
+    };
+    if let Err(error) = &renewed {
+        eprintln!("member renew: {}", error.code);
     }
     cell.try_with(|c| {
         c.session_view = None;
         if c.session.is_none() {
             c.session = Some(session);
         }
+        let running_open = c.running && !c.closed;
+        c.recorded
+            .renewal(renewal_pass(renewed.is_ok()), running_open);
     });
 }
 /// Target side of `authority.pair_request()`: one signed, recipient-keyed request, reused

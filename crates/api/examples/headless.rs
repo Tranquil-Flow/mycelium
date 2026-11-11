@@ -22,9 +22,7 @@ use api::{
     installation_descriptor::Failure,
     jobj,
     joined_member::{self, NoSeedServer, SeedHop},
-    leave::{
-        Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave, status_view,
-    },
+    leave::{Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave},
     native_session::{MonotonicClock, NativeLauncher},
     owner_chain::{
         ChainPorts, ModelAdapter, SharedHostChain, acquisition_exception, prepared_source_from,
@@ -34,9 +32,7 @@ use api::{
     owner_ports::{self, OwnerPorts, RunFields, RunHost, RunView, contributor_dir, step_exception},
     pairing::SignedBackend,
     persistent::{Host, PersistentBackend, RelayState},
-    preferences::{
-        fast_mode, private_state, private_write, resource_policy, run_model, standing_consent,
-    },
+    preferences::{private_state, private_write, resource_policy, run_model},
     relay::{EndpointHost, Hooks, LocalHandler, OwnerRelay, Probe, Proxy, SeedBackend},
     resources::{self, Observation, Observer, ProbeObserver},
     run_exchange::RunExchange,
@@ -183,10 +179,6 @@ impl app_host::Cell for CoreCell {
 }
 type Shared = Arc<Mutex<Core>>;
 
-/// `self.authority.status()` (`api::joined_member`, shared with the packaged host).
-fn authority_status(core: &Core) -> Json {
-    joined_member::authority_status(&core.authority)
-}
 /// The same pass for a joined TARGET (`api::app_host::renew_member`, shared with the packaged host).
 fn renew_target(core: &Shared) {
     app_host::renew_member(&CoreCell(core.clone()));
@@ -1007,59 +999,28 @@ impl Backend for Rest {
     }
 }
 
+/// `DemoApp.status()` (app.py:1244-1283 @ f4e366e9): the fields both hosts build from the
+/// authority come from the shared builder (`api::app_status::shared`, also the packaged host's
+/// status overlay); the rest are this launcher's own.
 fn status_json(core: &Core, demo: Option<Json>) -> Json {
-    let root = &core.root;
     let env = |name: &str| std::env::var(name).ok();
-    let run =
-        run_model::document_json(root, env(run_model::ENV).as_deref(), None).unwrap_or(Json::Null);
-    let fast =
-        fast_mode::document_json(root, env(fast_mode_env()).as_deref()).unwrap_or(Json::Null);
-    let policy = resource_policy::read(root).ok().flatten();
-    let role = if core.target { "target" } else { "owner" };
-    let contract = jobj! {
-        "model_id" => run.get("model_id").cloned().unwrap_or(Json::Null),
-        "resolved_commit" => run.get("resolved_commit").cloned().unwrap_or(Json::Null),
+    let (run_model_env, fast_mode_env) = (env(run_model::ENV), env(fast_mode_env()));
+    let facts = api::app_status::Facts {
+        run_model_env: run_model_env.as_deref(),
+        fast_mode_env: fast_mode_env.as_deref(),
+        device_memory_bytes: host_memory_bytes(),
     };
-    let disclosure = jobj! {
-        "text" => standing_consent::DISCLOSURE_TEXT, "digest" => standing_consent::DISCLOSURE_DIGEST,
-    };
-    let join_flow = if core.target {
-        let grant = standing_consent::load(root).ok().flatten();
-        let join = private_state::load(&root.join("join-window.json"), cap())
-            .ok()
-            .flatten();
-        jobj! {
-            "standing_disclosure" => disclosure,
-            "standing_consent" => match grant {
-                None => Json::Null,
-                Some(g) => jobj! {
-                    "state" => &g["state"], "caps" => &g["caps"], "granted_at" => &g["granted_at"],
-                    "withdrawn_at" => &g["withdrawn_at"], "last" => Json::Null,
-                },
-            },
-            "standing_error" => Json::Null, "standing_error_http" => Json::Null,
-            "join_window" => match join {
-                None => Json::Null,
-                Some(j) => jobj! {
-                    "state" => "waiting_for_owner", "fingerprint" => &j["fingerprint"],
-                    "pinned" => !j["seed_key_digest"].is_null(),
-                },
-            },
-            "last_report" => Json::Null,
-        }
-    } else {
-        jobj! {
-            "standing_disclosure" => disclosure,
-            "pairing_windows" => core.windows.list().unwrap_or(Json::Arr(Vec::new())),
-            "pending_windows" => core.pending.json(), "member_reports" => Json::Obj(Vec::new()),
-        }
-    };
+    let mut shared: std::collections::BTreeMap<&str, Json> =
+        api::app_status::shared(&core.authority, &core.pending, &facts)
+            .into_iter()
+            .collect();
+    let mut take = |key: &str| shared.remove(key).unwrap_or(Json::Null);
     let values: Vec<(&str, Json)> = vec![
         ("label", LABEL.into()),
         ("role", "not_yet_serving".into()),
-        ("model_contract", contract),
-        ("run_model", run),
-        ("fast_mode", fast),
+        ("model_contract", take("model_contract")),
+        ("run_model", take("run_model")),
+        ("fast_mode", take("fast_mode")),
         ("network", core.relay.network_status()),
         (
             "acquisition",
@@ -1075,26 +1036,18 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
             "acquisition_policy_error",
             core.acquisition_policy_error.map_or(Json::Null, Json::from),
         ),
-        ("installation_role", role.into()),
-        ("resource_policy", policy.map_or(Json::Null, Json::from)),
+        ("installation_role", take("installation_role")),
+        ("resource_policy", take("resource_policy")),
         ("running", core.running.into()),
-        ("authority", authority_status(core)),
-        ("renewal_error", Json::Null),
+        ("authority", take("authority")),
+        ("renewal_error", take("renewal_error")),
         ("recovery_error", Json::Null),
         (
             "distribution",
             "unsigned development software; not notarized".into(),
         ),
-        (
-            "leave",
-            if core.target {
-                let leave = MemberLeave::new(&core.root, Limits::default());
-                status_view(&leave).map_or(Json::Null, Json::from)
-            } else {
-                Json::Null
-            },
-        ),
-        ("join_flow", join_flow),
+        ("leave", take("leave")),
+        ("join_flow", take("join_flow")),
         ("adaptive_host", Json::Null),
         ("adaptive_host_publication", Json::Null),
         (
@@ -1142,6 +1095,18 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
     ];
     debug_assert_eq!(values.len(), STATUS_FIELDS.len());
     Json::Obj(values.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+}
+/// `host_memory_bytes()` (app.py:267-273): this Mac's RAM for the status's memory choices, read
+/// once with the `hw.memsize` probe the join's caps check uses (`Host::device_memory_bytes`).
+fn host_memory_bytes() -> Option<u64> {
+    static MEMORY: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *MEMORY.get_or_init(|| {
+        let out = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+    })
 }
 /// Whole seconds of wall time for signed directory documents.
 fn unix_seconds() -> i64 {

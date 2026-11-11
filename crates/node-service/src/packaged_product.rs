@@ -15,13 +15,14 @@
 //! Sources (`ProductEvidenceApplication`, `app.py:206-281`), as v0.1.4 publishes them for what this
 //! process really has:
 //! - members: the owner's seed (shared with the headless launcher).
-//! - route status, assignments: read through the live route (`_follow`, supervisor.py:2153-2164).
-//!   This process never opens a qualified live route (its serving status is `route_ready: false`,
-//!   `development_unqualified`; the native slice has no `mycelium.live_route_status.v1` producer), so
-//!   the read is v0.1.4's `RouteUnavailableError('route_not_open')`, which `_follow` does not type:
-//!   `route_source_failed` / `assignment_source_failed` (no assignment offers or placements exist in
-//!   this process either: route.py:6910-6948 reads them from the route's plan). Only a cold-restart
-//!   code (`ColdRouteRestartError`) would publish its own reason; this process has no cold restart.
+//! - route status, assignments: the SHIPPED Mac app reads them from its deployment registry (it
+//!   composes the product application through `build_registry_stack`, a13 serving.py:734 ->
+//!   supervisor.py:2039-2064, :4370; there `route = registry`). With no running deployment
+//!   `registry.product_assignment_records()` returns `()` (registry.py:943-946) and the projector
+//!   publishes `assignment_source_missing` (projector.py:476-487). The registry's route status is a
+//!   degraded `live_route_status.v1` built from a deployment record (registry.py:823-856) that this
+//!   process does not have, so the route source is absent until a serving registry is composed here:
+//!   `route_source_missing` (a v0.2-only code, ruled 11 Nov on REVIEW-lanePH2 F1; nothing invented).
 //! - qualification: the serving root's qualification source (`Serving::qualification_record`), as
 //!   `route_qualification_to_dict(qualification_source.current())` (supervisor.py:2166-2168): the
 //!   development record has no `mycelium.route_qualification.v1` document (`missing`); a source
@@ -68,13 +69,15 @@ impl Owner for PackagedOwner {
             root: authority.root.clone(),
         })
     }
-    /// `route_source = _follow('public_status')`: no qualified live route in this process.
+    /// The route source: no serving registry is composed in this process, so there is no route
+    /// status to read (`route_source_missing`).
     fn route_status(&self) -> Result<Option<Value>, SourceError> {
-        Err(route_not_open())
+        Ok(None)
     }
-    /// `assignment_source = _follow('product_assignment_records')`: no live route here.
+    /// `registry.product_assignment_records()` with no running deployment: `()`
+    /// (`assignment_source_missing`).
     fn assignments(&self) -> Option<Result<Vec<Map<String, Value>>, SourceError>> {
-        Some(Err(route_not_open()))
+        Some(Ok(Vec::new()))
     }
     /// `route_qualification_to_dict(qualification_source.current())` over the serving root's source.
     fn qualification(&self) -> Result<Option<Value>, SourceError> {
@@ -83,12 +86,6 @@ impl Owner for PackagedOwner {
             .qualification_record()
             .map_err(|_| SourceError::Failed)
     }
-}
-
-/// v0.1.4's read of a route that is not open (`RouteUnavailableError('route_not_open')`, supervisor.py:
-/// 590-600): `_follow` re-raises it untyped, so the source publishes its generic `<source>_failed`.
-fn route_not_open() -> SourceError {
-    SourceError::Failed
 }
 
 /// The product routes of the packaged host over its authority, node service and serving root.
