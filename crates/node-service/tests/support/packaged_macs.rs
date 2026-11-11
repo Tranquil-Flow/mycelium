@@ -70,7 +70,15 @@ impl Observer for Permissive {
 /// (`relay_client_installation_required`) instead of running a `cloudflared` this Mac has on
 /// `PATH` (review PH3a Q4).
 pub fn test_network() -> NetworkConfig {
-    NetworkConfig::default()
+    let production = NetworkConfig::default().hooks;
+    NetworkConfig {
+        hooks: Arc::new(move || {
+            let mut hooks = production();
+            hooks.binary = Arc::new(|| None);
+            hooks
+        }),
+        ..NetworkConfig::default()
+    }
 }
 /// One packaged Mac: its window core and its Quit.
 pub struct Mac {
