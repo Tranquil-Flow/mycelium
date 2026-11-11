@@ -12,10 +12,23 @@
 //!   `*.pyc`, `*.pyo` or `__main__.py`, or a PyInstaller archive cookie;
 //! * NP004 (bundles only) Python runtime bytes inside a file: `libpython`, `Python.framework`,
 //!   `Py_Initialize`, `PyConfig_`, `PYTHONHOME`, the PyInstaller cookie.
+//! * NP005 Python source in a file without an extension (and without a shebang): a line that is a
+//!   Python `import`/`from ... import`, `def f(...):`, `class C(...):` statement or the
+//!   `__name__ == "__main__"` guard (lane RELF, review F3);
+//! * NP006 a shell script (a `#!` file or `.sh .bash .zsh .ksh .command`) that runs an interpreter
+//!   (`python`, `python3`, `python3.N` as a command word outside comments: `python3 - <<EOF`,
+//!   `exec /usr/bin/env python3`).
+//!
+//! NP001 also names notebooks (`.ipynb`) and Python project files (`pyproject.toml`, `setup.cfg`,
+//! `requirements*.txt`, `Pipfile`, `poetry.lock`, `tox.ini`, `.python-version`). NP003 also lists
+//! the members of gzip/bzip2/xz-compressed or plain tar archives (`/usr/bin/tar -tf`); a compressed
+//! stream that is not a tar is decompressed and scanned like a file. A tree or bundle with no file
+//! at all is an error, never a pass.
 //!
 //! Repository mode skips exactly `.git` and `target` at the root (VCS data and build output); it
-//! reads names, the first line of every file and the ZIP directory of ZIP-shaped files, so prose
-//! that merely mentions Python (this file included) is not a finding. Bundle mode reads every byte.
+//! reads names, the first 64 KiB of every file, the tail of every file (a ZIP's end record, so a
+//! prefixed ZIP is found) and all of an archive-shaped file, so prose that merely mentions Python
+//! (this file included) is not a finding. Bundle mode reads every byte.
 use std::{
     fs::{self, File},
     io::Read,
@@ -40,7 +53,7 @@ pub struct Report {
     pub findings: Vec<Finding>,
 }
 
-const SUFFIXES: [&str; 11] = [
+const SUFFIXES: [&str; 12] = [
     ".py",
     ".pyc",
     ".pyo",
@@ -52,7 +65,25 @@ const SUFFIXES: [&str; 11] = [
     ".dist-info",
     ".egg-info",
     ".pyx",
+    ".ipynb",
 ];
+/// Python project and environment files (lower-case names).
+const PROJECT_FILES: [&str; 8] = [
+    "pyproject.toml",
+    "setup.cfg",
+    "pipfile",
+    "pipfile.lock",
+    "poetry.lock",
+    "tox.ini",
+    ".python-version",
+    "conda-env.yml",
+];
+/// How much of every file repository mode reads from the front (text analysis, tar magic).
+const HEAD_BYTES: usize = 64 * 1024;
+/// A ZIP's end-of-central-directory record sits within the last 65 557 bytes of the file.
+const ZIP_TAIL_BYTES: u64 = 65_557;
+/// The largest decompressed stream scanned (a bigger one is an error, not a pass).
+const DECOMPRESSED_MAX_BYTES: usize = 256 * 1024 * 1024;
 /// The PyInstaller CArchive cookie magic (`MEI\014\013\012\013\016`).
 const PYINSTALLER_COOKIE: &[u8] = b"MEI\x0c\x0b\x0a\x0b\x0e";
 const RUNTIME_NEEDLES: [&[u8]; 6] = [
@@ -80,6 +111,133 @@ pub fn python_name(component: &str) -> bool {
         )
         || lower.starts_with("libpython")
         || lower.contains(".cpython-")
+        || PROJECT_FILES.contains(&lower.as_str())
+        || (lower.starts_with("requirements") && lower.ends_with(".txt"))
+}
+
+fn dotted_name(text: &str) -> bool {
+    !text.is_empty()
+        && text.split('.').all(|part| {
+            !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
+}
+fn identifier(text: &str) -> bool {
+    !text.is_empty()
+        && !text.as_bytes()[0].is_ascii_digit()
+        && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+/// `name` or `name as alias` (an import list item).
+fn import_item(item: &str, dotted: bool) -> bool {
+    let words: Vec<&str> = item.split_whitespace().collect();
+    let name_ok = |w: &str| {
+        if dotted {
+            dotted_name(w)
+        } else {
+            identifier(w)
+        }
+    };
+    match words.as_slice() {
+        [name] => name_ok(name),
+        [name, "as", alias] => name_ok(name) && identifier(alias),
+        _ => false,
+    }
+}
+/// One line that only Python reads this way: `import a.b[, c as d]`, `from a import b[, c]`,
+/// `def f(...):`, `class C[(...)]:`, or the `__name__ == "__main__"` guard.
+pub fn python_statement(line: &str) -> bool {
+    let line = line.trim();
+    if line.contains("__name__ == \"__main__\"") || line.contains("__name__ == '__main__'") {
+        return true;
+    }
+    if let Some(rest) = line.strip_prefix("import ") {
+        return rest.split(',').all(|item| import_item(item, true));
+    }
+    if let Some(rest) = line.strip_prefix("from ")
+        && let Some((module, names)) = rest.split_once(" import ")
+    {
+        let module = module.trim_start_matches('.');
+        let names = names.trim().trim_start_matches('(').trim_end_matches(')');
+        return (module.is_empty() || dotted_name(module))
+            && (names == "*" || names.split(',').all(|i| import_item(i, false)));
+    }
+    if let Some(rest) = line.strip_prefix("def ") {
+        return rest.ends_with(':')
+            && rest
+                .split_once('(')
+                .is_some_and(|(name, _)| identifier(name.trim()));
+    }
+    if let Some(rest) = line.strip_prefix("class ") {
+        let head = rest.strip_suffix(':').unwrap_or_default();
+        let name = head.split_once('(').map_or(head, |(n, _)| n);
+        return rest.ends_with(':')
+            && identifier(name.trim())
+            && (head.contains('(') == head.ends_with(')'));
+    }
+    false
+}
+/// A shell line that runs a Python interpreter as a command word (comments ignored).
+pub fn python_invocation(line: &str) -> bool {
+    let line = line.trim_start();
+    if line.starts_with('#') {
+        return false;
+    }
+    // Each simple command (split at `; | & ( ) $ \``); its command word is the first word after
+    // assignments and the prefixes that run their argument (`exec`, `env`, `command`, ...).
+    line.split(|c: char| ";|&()`$".contains(c)).any(|segment| {
+        let mut words = segment.split_whitespace().peekable();
+        while let Some(word) = words.peek() {
+            let base = word.rsplit('/').next().unwrap_or(word);
+            let prefix = matches!(
+                base,
+                "exec"
+                    | "env"
+                    | "command"
+                    | "nohup"
+                    | "time"
+                    | "then"
+                    | "do"
+                    | "else"
+                    | "if"
+                    | "while"
+                    | "until"
+                    | "!"
+                    | "sudo"
+                    | "arch"
+            );
+            let assignment = word.split_once('=').is_some_and(|(k, _)| identifier(k));
+            let option = word.starts_with('-');
+            if prefix || assignment || option {
+                words.next();
+            } else {
+                break;
+            }
+        }
+        words.next().is_some_and(|word| {
+            let base = word.rsplit('/').next().unwrap_or(word);
+            base == "python"
+                || base == "python3"
+                || base
+                    .strip_prefix("python3.")
+                    .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
+        })
+    })
+}
+fn extensionless(name: &str) -> bool {
+    !name.trim_start_matches('.').contains('.')
+}
+fn shell_script(name: &str, head: &[u8]) -> bool {
+    let lower = name.to_ascii_lowercase();
+    head.starts_with(b"#!")
+        || [".sh", ".bash", ".zsh", ".ksh", ".command"]
+            .iter()
+            .any(|s| lower.ends_with(s))
+}
+/// Gzip, bzip2, xz or a POSIX tar header.
+fn archive_magic(head: &[u8]) -> bool {
+    head.starts_with(&[0x1f, 0x8b])
+        || head.starts_with(b"BZh")
+        || head.starts_with(&[0xfd, b'7', b'z', b'X', b'Z', 0])
+        || head.get(257..262) == Some(b"ustar")
 }
 
 /// A `#!` first line that names python (`#!/usr/bin/env python3`, `#!/usr/bin/python`, ...).
@@ -178,33 +336,130 @@ pub fn audit(root: &Path, mode: Mode) -> Result<Report, String> {
             }
         }
     }
+    if report.files == 0 {
+        return Err(format!(
+            "NO-PYTHON: {} holds no files: an empty tree is not evidence",
+            root.display()
+        ));
+    }
     report.findings.sort();
     report.findings.dedup();
     Ok(report)
 }
 
-fn scan_file(path: &Path, rel: &str, mode: Mode, report: &mut Report) -> Result<(), String> {
-    let mut file = File::open(path).map_err(|e| io(path, &e))?;
-    let mut head = [0_u8; 512];
-    let n = file.read(&mut head).map_err(|e| io(path, &e))?;
-    report.bytes_read += n as u64;
-    let head = &head[..n];
-    if let Some(line) = python_shebang(head) {
+/// The text-level indicators of one file's bytes (NP002 shebang, NP005 source, NP006 invocation).
+fn scan_text(name: &str, rel: &str, bytes: &[u8], report: &mut Report) {
+    if let Some(line) = python_shebang(bytes) {
         report.findings.push(Finding {
             path: rel.into(),
             code: "NP002",
             detail: format!("python shebang {line}"),
         });
     }
-    // Read the whole file only when it can hold an archive (ZIP magic or a script prefix) or in
-    // bundle mode, where every byte of the shipped app is inspected.
-    let whole = mode == Mode::Bundle || head.starts_with(b"PK\x03\x04") || head.starts_with(b"#!");
-    if !whole {
-        return Ok(());
+    if bytes.contains(&0) {
+        return; // binary: no text indicators
     }
-    let mut bytes = head.to_vec();
-    file.read_to_end(&mut bytes).map_err(|e| io(path, &e))?;
-    report.bytes_read += (bytes.len() - n) as u64;
+    let text = String::from_utf8_lossy(bytes);
+    if extensionless(name) && !bytes.starts_with(b"#!") {
+        if let Some(line) = text.lines().find(|l| python_statement(l)) {
+            report.findings.push(Finding {
+                path: rel.into(),
+                code: "NP005",
+                detail: format!("python source statement {:?}", line.trim()),
+            });
+        }
+    }
+    if shell_script(name, bytes) && python_shebang(bytes).is_none() {
+        if let Some(line) = text.lines().find(|l| python_invocation(l)) {
+            report.findings.push(Finding {
+                path: rel.into(),
+                code: "NP006",
+                detail: format!("script runs python: {:?}", line.trim()),
+            });
+        }
+    }
+}
+
+/// Members of a (compressed) tar listed by the system `tar`; `None` when it is not a tar.
+fn tar_members(path: &Path) -> Result<Option<Vec<String>>, String> {
+    let out = std::process::Command::new("/usr/bin/tar")
+        .arg("-tf")
+        .arg(path)
+        .output()
+        .map_err(|e| io(path, &e))?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+/// The decompressed bytes of a gzip/bzip2/xz stream (`/usr/bin/gzip|bzip2|xz -dc`), bounded.
+fn decompressed(path: &Path, head: &[u8]) -> Result<Vec<u8>, String> {
+    let tool = if head.starts_with(&[0x1f, 0x8b]) {
+        "/usr/bin/gzip"
+    } else if head.starts_with(b"BZh") {
+        "/usr/bin/bzip2"
+    } else {
+        "/usr/bin/xz"
+    };
+    let out = std::process::Command::new(tool)
+        .arg("-dc")
+        .arg(path)
+        .output()
+        .map_err(|e| io(path, &e))?;
+    if !out.status.success() || out.stdout.len() > DECOMPRESSED_MAX_BYTES {
+        return Err(format!(
+            "NO-PYTHON: {}: cannot decompress for inspection ({tool} exit {:?}, {} bytes)",
+            path.display(),
+            out.status.code(),
+            out.stdout.len()
+        ));
+    }
+    Ok(out.stdout)
+}
+
+fn scan_file(path: &Path, rel: &str, mode: Mode, report: &mut Report) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom};
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let mut file = File::open(path).map_err(|e| io(path, &e))?;
+    let length = file.metadata().map_err(|e| io(path, &e))?.len();
+    let mut head = Vec::with_capacity(HEAD_BYTES);
+    (&mut file)
+        .take(HEAD_BYTES as u64)
+        .read_to_end(&mut head)
+        .map_err(|e| io(path, &e))?;
+    report.bytes_read += head.len() as u64;
+    // Read the whole file when it can hold an archive (ZIP or tar magic, a script prefix, a ZIP
+    // end record in its tail) or in bundle mode, where every byte of the shipped app is inspected.
+    let mut whole = mode == Mode::Bundle
+        || head.starts_with(b"PK\x03\x04")
+        || head.starts_with(b"#!")
+        || archive_magic(&head)
+        || shell_script(&name, &head)
+        || head.len() as u64 == length;
+    if !whole {
+        let from = length.saturating_sub(ZIP_TAIL_BYTES).max(head.len() as u64);
+        file.seek(SeekFrom::Start(from)).map_err(|e| io(path, &e))?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail).map_err(|e| io(path, &e))?;
+        report.bytes_read += tail.len() as u64;
+        whole = find(&tail, b"PK\x05\x06").is_some();
+    }
+    let mut bytes = head;
+    if whole && bytes.len() as u64 != length {
+        file.seek(SeekFrom::Start(bytes.len() as u64))
+            .map_err(|e| io(path, &e))?;
+        let before = bytes.len();
+        file.read_to_end(&mut bytes).map_err(|e| io(path, &e))?;
+        report.bytes_read += (bytes.len() - before) as u64;
+    }
+    scan_text(&name, rel, &bytes, report);
     for member in zip_members(&bytes) {
         if python_member(&member) {
             report.findings.push(Finding {
@@ -212,6 +467,40 @@ fn scan_file(path: &Path, rel: &str, mode: Mode, report: &mut Report) -> Result<
                 code: "NP003",
                 detail: format!("archive member {member}"),
             });
+        }
+    }
+    if archive_magic(&bytes) {
+        match tar_members(path)? {
+            Some(members) => {
+                for member in members
+                    .iter()
+                    .filter(|m| python_member(m) || m.split('/').any(python_name))
+                {
+                    report.findings.push(Finding {
+                        path: rel.into(),
+                        code: "NP003",
+                        detail: format!("archive member {member}"),
+                    });
+                }
+            }
+            None if bytes.get(257..262) != Some(b"ustar") => {
+                let inner = decompressed(path, &bytes)?;
+                let before = report.findings.len();
+                scan_text("", rel, &inner, report);
+                for member in zip_members(&inner) {
+                    if python_member(&member) {
+                        report.findings.push(Finding {
+                            path: rel.into(),
+                            code: "NP003",
+                            detail: format!("compressed archive member {member}"),
+                        });
+                    }
+                }
+                for finding in &mut report.findings[before..] {
+                    finding.detail = format!("inside the compressed stream: {}", finding.detail);
+                }
+            }
+            None => {}
         }
     }
     if find(&bytes, PYINSTALLER_COOKIE).is_some() {
