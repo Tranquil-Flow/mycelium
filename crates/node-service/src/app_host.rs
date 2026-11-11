@@ -953,6 +953,15 @@ impl Host for PackagedHost {
     fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
         api::joined_member::join_poll(state, self.network.seams().join_base.as_deref())
     }
+    /// `self.standing_error = public_failure_code(error)` after a failed `bind_standing_consent`
+    /// (app.py:1802-1806); `error_http` is `None` for a consent error (control_failures.py:24-27).
+    fn standing_bind_failed(&mut self, code: &'static str) {
+        if let Some(authority) = self.loaded() {
+            let mut a = authority.lock().unwrap_or_else(PoisonError::into_inner);
+            a.recorded.standing_error = Some(code.to_owned());
+            a.recorded.standing_error_http = None;
+        }
+    }
     fn join_accept(
         &mut self,
         handoff: &Value,

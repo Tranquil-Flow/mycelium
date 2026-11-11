@@ -512,6 +512,8 @@ pub fn join_accept(
     cell.with(|c| c.running = true);
     let generation = cell.with(|c| c.session.as_ref().and_then(|s| s.generation()));
     let report = auto_report(&root, test_base, "join");
+    // `self.last_report = record` (`_auto_report`, app.py:1161), shown in `join_flow.last_report`.
+    cell.with(|c| c.recorded.last_report = Some(report.clone()));
     Ok(JoinAccepted {
         membership_state: joined
             .get("membership_state")
