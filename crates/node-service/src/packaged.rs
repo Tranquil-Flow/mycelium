@@ -286,9 +286,15 @@ fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, App
     let services =
         DesktopServices::with_model_source(node, CALLBACK_CAPACITY, &private, source.clone())
             .gated(native);
+    Ok(assemble(services, source))
+}
+/// The window's core and its Quit cleanup over composed `services` and the run model's `source`
+/// (the same source the services' packaged host was given): the composition's last step, also
+/// what a test runs over services it composed with its own driver.
+pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core>, AppCleanup) {
     let (core, cleanup) = desktop::services::adapt(Arc::new(services), CALLBACK_CAPACITY);
-    Ok((
+    (
         core,
         AppCleanup::Service(Box::new(cleanup), ModelClose::new(source)),
-    ))
+    )
 }

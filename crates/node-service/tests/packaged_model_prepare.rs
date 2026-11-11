@@ -1049,12 +1049,11 @@ fn packaged_model_prepare_routes_equal_the_executed_oracle() {
     for step in oracle["steps"].as_array().unwrap() {
         let label = step["label"].as_str().unwrap();
         if let Some(view) = step.get("status_view") {
-            let status = if label.starts_with("after_download") {
+            // `settled`: the oracle's view once its attempt had ended, read when the persisted
+            // status is terminal (a condition, not a fixed wait).
+            let status = if label.starts_with("after_download") || label == "settled" {
                 settled(&state)
             } else {
-                if label == "settled" {
-                    std::thread::sleep(poll() * 12);
-                }
                 acquisition_status(&state)
             };
             // Before the first attempt nothing was persisted: the in-memory status is idle.
@@ -1159,4 +1158,154 @@ fn packaged_model_prepare_present_snapshot_reverified() {
         drop(host);
         std::fs::remove_dir_all(&state).unwrap_or_default();
     }
+}
+
+// ---- Quit's close of the download, whatever else the cleanup met ----
+
+/// A driver that returns without the request's terminal: the node service cannot prove its
+/// cleanup, so the window's own Quit cleanup fails (`cleanup_unproven`, service.rs `poll_shutdown`).
+struct EndsWithoutTerminal;
+impl Driver for EndsWithoutTerminal {
+    fn run(&self, _: &mut Job) -> Result<(), PublicError> {
+        Ok(())
+    }
+}
+/// The packaged core (`packaged::assemble`) over the action root composed with `driver`.
+fn assembled(
+    state: &Path,
+    source: &ModelSource,
+    driver: Arc<dyn Driver>,
+) -> (Arc<dyn Core>, AppCleanup) {
+    let dirs = packaged::prepare_dirs(state).unwrap();
+    let node = NodeService::new(
+        driver,
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let services = DesktopServices::with_model_source(
+        node,
+        packaged::CALLBACK_CAPACITY,
+        &dirs.private,
+        source.clone(),
+    );
+    let (core, mut cleanup) = packaged::assemble(services, source.clone());
+    cleanup.bind_clock(Instant::now()).unwrap();
+    (core, cleanup)
+}
+/// Quit to its result: the cleanup's first non-pending answer within the quit allowance.
+fn quit_result(cleanup: &mut AppCleanup) -> Result<Poll, desktop::lifecycle::CleanupError> {
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let deadline = Instant::now() + Duration::from_millis(allowance.millis());
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(Instant::now() < deadline, "the packaged core did not clean up");
+                std::thread::sleep(poll());
+            }
+            other => return other,
+        }
+    }
+}
+
+/// REVIEW-laneR1-G2 finding 5: v0.1.4's `DemoApp.close` (app.py:1835-1847 @ f4e366e9) closes the
+/// acquisition after an earlier close step failed (each step records `cleanup_error` and the next
+/// one runs), so the next launch answers `closed`. Here the window's services cannot prove their
+/// cleanup (a run that ended without its terminal): Quit still fails (exit 3, as v0.1.4's
+/// `cleanup_incomplete`), and the idle acquisition is closed all the same (`close_when_idle`).
+#[test]
+fn packaged_quit_closes_the_download_when_the_window_cleanup_fails() {
+    let state = state_root();
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let (core, mut cleanup) = assembled(&state, &source, Arc::new(EndsWithoutTerminal));
+    assert_created(&core);
+    let sent = core.call(
+        "/chat/api/send",
+        json!({"prompt": "hello", "max_new_tokens": 1}),
+    );
+    assert_eq!(sent.0, 200, "send: {}", sent.1);
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    assert_eq!(
+        quit_result(&mut cleanup),
+        Err(desktop::lifecycle::CleanupError::Poll),
+        "the window's cleanup is unproven: Quit reports it"
+    );
+    assert_eq!(
+        acquisition_status(&state),
+        status_doc("closed", 0, 0, None),
+        "Quit closed the acquisition although the window's cleanup failed"
+    );
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// Quit is verified only once the acquisition's `closed` is written (REVIEW-laneR1-G2 finding 11,
+/// mutant Me): while the running attempt still waits inside its held response the close cannot
+/// have finished, so Quit stays pending; once released, `Verified` means `closed` is on disk.
+#[test]
+fn packaged_quit_waits_for_the_close_to_be_written() {
+    let state = state_root();
+    let files = tiny_snapshot(None);
+    let repository = Repository::start(files.clone());
+    let observed = Observed::new(permissive());
+    let (core, mut cleanup) = packaged_core(&state, &repository, &observed);
+    assert_created(&core);
+    repository.hold("model.safetensors");
+    assert_started(&download(&core));
+    repository.wait_held();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    // The window's services verify within the first polls (nothing runs); the close then waits
+    // for the attempt the held response keeps.
+    for _ in 0..6 {
+        assert_eq!(
+            cleanup.poll(),
+            Ok(Poll::Pending),
+            "Quit reported done while the close waits for the held attempt"
+        );
+        assert_ne!(acquisition_status(&state)["state"], "closed");
+        std::thread::sleep(poll());
+    }
+    repository.release();
+    assert_eq!(quit_result(&mut cleanup), Ok(Poll::Verified));
+    assert_eq!(
+        acquisition_status(&state),
+        status_doc("closed", size_of(&files, "config.json"), total(&files), None),
+        "Verified before the close was written"
+    );
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// A close that fails is never reported as a clean Quit (REVIEW-laneR1-G2 finding 11, mutant Mg):
+/// v0.1.4 records `cleanup_error = 'acquisition_stop_failed'` (app.py:1846-1847) and its launcher
+/// exits `cleanup_incomplete`. The acquisition cannot persist `closed` (its directory is read-only).
+#[test]
+fn packaged_quit_reports_a_failed_close() {
+    use std::os::unix::fs::PermissionsExt;
+    let state = state_root();
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let (core, mut cleanup) = packaged_core(&state, &repository, &observed);
+    assert_created(&core);
+    let sources = state.join(SOURCE);
+    assert_eq!(entries(&sources), ["acquisition.lock"]);
+    std::fs::set_permissions(&sources, std::fs::Permissions::from_mode(0o500)).unwrap();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let result = quit_result(&mut cleanup);
+    std::fs::set_permissions(&sources, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        result,
+        Err(desktop::lifecycle::CleanupError::Poll),
+        "a failed close was reported as a clean Quit"
+    );
+    assert_eq!(acquisition_status(&state), Value::Null);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
 }
