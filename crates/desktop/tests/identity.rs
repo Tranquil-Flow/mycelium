@@ -67,3 +67,30 @@ fn v02_has_its_own_applications_entry_payload_directory_and_data_folder() {
         }
     }
 }
+
+/// Lane RELF item 8 (review F7, ruling 25): the signed install manifest declared v0.1.4's launchd
+/// label `org.mycelium.managed-host` (`finalize_a13_macos.py:45` @ f4e366e9). v0.2 declares its
+/// own, under its own bundle identifier, so no launchd user agent of v0.2 can ever share v0.1.4's.
+#[test]
+fn the_signed_install_manifest_declares_v02s_own_launchd_label() {
+    use desktop::docs::{self, FinalizeSpec, Signer};
+    let (manifest, _source) = docs::build_documents(
+        &Signer::from_seed([0x77; 32], docs::SIGNER_ENDPOINT_ID),
+        &FinalizeSpec {
+            version: "0.2.0",
+            rollback_floor: "0.1.0",
+            source_revision: "0123456789abcdef0123456789abcdef01234567",
+            issued_at: 1_790_000_000.0,
+            minimum_os: "15.6.1",
+        },
+        &format!("sha256:{}", "a".repeat(64)),
+    )
+    .unwrap();
+    let label = manifest["service_descriptor"]["launchd_label"]
+        .as_str()
+        .unwrap();
+    assert_ne!(label, "org.mycelium.managed-host", "v0.1.4's launchd label");
+    assert_eq!(label, "org.mycelium.app.managed-host");
+    assert!(label.starts_with(bundle::BUNDLE_ID));
+    assert!(!manifest.to_string().contains("org.mycelium.managed-host"));
+}
