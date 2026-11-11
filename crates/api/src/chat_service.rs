@@ -141,8 +141,10 @@ pub trait RunRoute: Send + Sync {
     /// `app.run_model_contract().model_id` (chat.py:507-511).
     fn model_id(&self) -> Option<String>;
 }
-/// Why the owner run's teardown cancels every chat (demo_chain.py:1322-1335 @ f4e366e9).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Why the owner run's teardown cancels every chat (demo_chain.py:1322-1335 @ f4e366e9):
+/// `cancel_all('chat_switching_runs' if rollover_requested else (monitor_error_code or
+/// 'owner_run_failed') if failed else 'chat_cancelled')`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Teardown {
     /// `/api/demo/stop` (owner_run.py:275-282).
     Stopped,
@@ -150,20 +152,28 @@ pub enum Teardown {
     SwitchingRuns,
     /// The execution ceiling (demo_chain.py:1143-1164).
     CeilingReached,
+    /// Any other failed run: the monitor's code, else `owner_run_failed`.
+    Failed(String),
 }
 impl Teardown {
     /// The code the page shows (chat.js:37-41; owner_run.EXECUTION_CEILING_CODE).
-    pub fn code(self) -> &'static str {
+    pub fn code(&self) -> &str {
         match self {
             Self::Stopped => "chat_cancelled",
             Self::SwitchingRuns => "chat_switching_runs",
             Self::CeilingReached => "execution_ceiling_reached",
+            Self::Failed(code) => code,
         }
+    }
+    /// The reason of a teardown from the run's own status (`owner_driver::status_json`) and the
+    /// teardown's `failed` flag, as demo_chain.py:1329-1331 decides it.
+    pub fn of_run(_failed: bool, _status: &Value) -> Self {
+        Self::Stopped
     }
 }
 /// The hook the owner run's teardown calls: `chat.cancel_all(code)`. Returns the chats cancelled.
 pub trait ChatTeardown: Send + Sync {
-    fn cancel_all(&self, reason: Teardown) -> usize;
+    fn cancel_all(&self, reason: &Teardown) -> usize;
 }
 /// The service's monotonic clock (`ChatService._clock`, chat.py:213).
 pub trait Clock: Send + Sync {
@@ -352,7 +362,7 @@ struct Record {
     error: Option<String>,
     terminal: Option<&'static str>,
     cancel: RequestCancel,
-    cancel_reason: Option<&'static str>,
+    cancel_reason: Option<String>,
     max_new_tokens: u64,
     clamped: bool,
     served_by: Value,
@@ -667,27 +677,31 @@ impl ChatService {
                             record.error = Some(
                                 record
                                     .cancel_reason
-                                    .or(ended)
-                                    .map(str::to_owned)
+                                    .clone()
+                                    .or(ended.map(str::to_owned))
                                     .or(streamed.code)
                                     .unwrap_or_else(|| "chat_generation_failed".into()),
                             );
                         }
                         Some("cancelled") => {
-                            record.error =
-                                Some(record.cancel_reason.unwrap_or("chat_cancelled").to_owned());
+                            record.error = Some(
+                                record
+                                    .cancel_reason
+                                    .clone()
+                                    .unwrap_or_else(|| Teardown::Stopped.code().to_owned()),
+                            );
                         }
                         _ => {}
                     }
                 }
                 Err(error) => {
-                    let reason = record.cancel_reason.or(ended);
+                    let reason = record.cancel_reason.clone().or(ended.map(str::to_owned));
                     record.terminal = Some(if reason.is_some() {
                         "cancelled"
                     } else {
                         "failed"
                     });
-                    record.error = Some(reason.map(str::to_owned).unwrap_or(error.code));
+                    record.error = Some(reason.unwrap_or(error.code));
                 }
             }
             record.done = true;
@@ -743,14 +757,13 @@ impl ChatService {
                 && status["run_id"].as_str() != run_id
                 && status["reason"] == "rollover")
         {
-            return Some(Teardown::SwitchingRuns.code());
+            return Some("chat_switching_runs");
         }
-        (status["error_code"] == Teardown::CeilingReached.code())
-            .then_some(Teardown::CeilingReached.code())
+        (status["error_code"] == "execution_ceiling_reached").then_some("execution_ceiling_reached")
     }
     /// `cancel` (chat.py:418-440). `Ok(false)`: already done or cancelled, or the gateway could
     /// not be told (the generation then runs on).
-    pub fn cancel(&self, request_id: &str, code: &'static str) -> Result<bool, ChatError> {
+    pub fn cancel(&self, request_id: &str, code: &str) -> Result<bool, ChatError> {
         if !valid_id(request_id) {
             return Err(ChatError::new(400, "chat_request_invalid"));
         }
@@ -763,7 +776,7 @@ impl ChatService {
             if record.done || record.cancel_reason.is_some() {
                 return Ok(false);
             }
-            record.cancel_reason = Some(code);
+            record.cancel_reason = Some(code.to_owned());
             record.cancel.clone()
         };
         if cancel.cancel() {
@@ -775,7 +788,7 @@ impl ChatService {
         Ok(false)
     }
     /// `cancel_all` (chat.py:442-451): every chat not done; returns how many were cancelled.
-    pub fn cancel_all(&self, code: &'static str) -> usize {
+    pub fn cancel_all(&self, code: &str) -> usize {
         let running: Vec<String> = self
             .state_lock()
             .requests
@@ -844,7 +857,7 @@ impl ChatService {
     }
 }
 impl ChatTeardown for ChatService {
-    fn cancel_all(&self, reason: Teardown) -> usize {
+    fn cancel_all(&self, reason: &Teardown) -> usize {
         ChatService::cancel_all(self, reason.code())
     }
 }
