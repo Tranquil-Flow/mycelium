@@ -22,8 +22,31 @@ impl Driver for MustNotRun {
         panic!("refused desktop request started native work")
     }
 }
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
 /// A fresh private state root for the packaged action host (these chat paths never write it).
-fn private() -> std::path::PathBuf {
+fn private() -> TestRoot {
     use std::os::unix::fs::DirBuilderExt;
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "desktop-host-private-{}",
@@ -33,18 +56,20 @@ fn private() -> std::path::PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
-fn host() -> DesktopServices {
-    DesktopServices::new(
+fn host() -> (TestRoot, DesktopServices) {
+    let private = private();
+    let host = DesktopServices::new(
         NodeService::new(
             Arc::new(MustNotRun),
             "private-local-token".into(),
             node_service::native::development_qualification().unwrap(),
         ),
         NonZeroUsize::new(2).unwrap(),
-        &private(),
-    )
+        &private,
+    );
+    (private, host)
 }
 fn call(host: &DesktopServices, path: &str, body: Value) -> desktop::core::Reply {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -67,7 +92,7 @@ fn call(host: &DesktopServices, path: &str, body: Value) -> desktop::core::Reply
 }
 #[test]
 fn native_service_callback_validates_chat_without_fixture_inference() {
-    let host = host();
+    let (_private, host) = host();
     let state = call(&host, "/chat/api/state", json!({}));
     assert_eq!(state.status, 200);
     assert_eq!(
@@ -103,7 +128,7 @@ fn native_service_callback_validates_chat_without_fixture_inference() {
 }
 #[test]
 fn native_shutdown_fences_chat_before_callback_or_backend_effects() {
-    let host = host();
+    let (_private, host) = host();
     host.begin_shutdown(
         Instant::now()
             + Duration::from_millis(B::StageCleanup.span(Entries::ZERO).unwrap().millis()),
@@ -160,6 +185,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
     let fixture: Value = serde_json::from_str(TEMPLATE_FIXTURE).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let private = private();
         let host = DesktopServices::new(
             NodeService::new(
                 Arc::new(Capture(seen.clone())),
@@ -167,7 +193,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
                 node_service::native::development_qualification().unwrap(),
             ),
             NonZeroUsize::new(2).unwrap(),
-            &private(),
+            &private,
         );
         let user = case["user"].as_str().unwrap();
         let reply = call(
@@ -251,6 +277,7 @@ fn quit_after_a_failed_run_without_a_cleanup_proof_is_verified_like_v014_exit_ze
         fx["observations"]["q2_failed_run_cleanup_unproven"]["exit_code"],
         0
     );
+    let private = private();
     let host = DesktopServices::new(
         NodeService::new(
             Arc::new(DiesWithoutProof),
@@ -258,7 +285,7 @@ fn quit_after_a_failed_run_without_a_cleanup_proof_is_verified_like_v014_exit_ze
             node_service::native::development_qualification().unwrap(),
         ),
         NonZeroUsize::new(2).unwrap(),
-        &private(),
+        &private,
     );
     let sent = call(
         &host,
@@ -403,10 +430,11 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
         record: Arc::new(node_service::router_port::DevelopmentRecord::of(&node).unwrap()),
         probe: Arc::default(),
     };
+    let private = private();
     let host = DesktopServices::with_qualification(
         node,
         NonZeroUsize::new(4).unwrap(),
-        &private(),
+        &private,
         Arc::new(held.clone()),
     );
     let release = Release(held.clone());
@@ -717,7 +745,7 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
         Arc::new(held.clone()),
     );
     let source = node_service::app_host::ModelSource::new(
-        private.clone(),
+        private.to_path_buf(),
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
     );
     let (core, mut cleanup) = node_service::packaged::assemble(services, source);
@@ -881,7 +909,7 @@ fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
     let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
         .gated(Arc::new(gate.clone()));
     let source = node_service::app_host::ModelSource::new(
-        private.clone(),
+        private.to_path_buf(),
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
     );
     let (core, mut cleanup) = node_service::packaged::assemble(services, source);

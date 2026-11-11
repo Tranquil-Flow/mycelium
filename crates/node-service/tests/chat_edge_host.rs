@@ -48,8 +48,31 @@ impl Driver for Hold {
         Ok(())
     }
 }
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
 /// A fresh private state root for the packaged action host (these chat paths never write it).
-fn private() -> std::path::PathBuf {
+fn private() -> TestRoot {
     use std::os::unix::fs::DirBuilderExt;
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "chat-edge-host-private-{}",
@@ -59,18 +82,20 @@ fn private() -> std::path::PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
-fn host_with(driver: Arc<dyn Driver>) -> DesktopServices {
-    DesktopServices::new(
+fn host_with(driver: Arc<dyn Driver>) -> (TestRoot, DesktopServices) {
+    let private = private();
+    let host = DesktopServices::new(
         NodeService::new(
             driver,
             "private-local-token".into(),
             node_service::native::development_qualification().unwrap(),
         ),
         NonZeroUsize::new(4).unwrap(),
-        &private(),
-    )
+        &private,
+    );
+    (private, host)
 }
 fn call_raw(host: &DesktopServices, path: &str, body: Vec<u8>) -> (u16, Value) {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -139,7 +164,7 @@ fn every_executed_send_case_gets_the_oracles_status_body_and_driver_request() {
     for case in fixture["send_cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let seen: Seen = Arc::default();
-        let host = host_with(Arc::new(Capture(seen.clone())));
+        let (_private, host) = host_with(Arc::new(Capture(seen.clone())));
         let (status, mut body) = call_raw(
             &host,
             "/chat/api/send",
@@ -190,7 +215,7 @@ fn every_executed_send_case_gets_the_oracles_status_body_and_driver_request() {
 
 #[test]
 fn the_state_document_carries_the_oracles_limits() {
-    let host = host_with(Arc::new(Capture(Arc::default())));
+    let (_private, host) = host_with(Arc::new(Capture(Arc::default())));
     let (status, state) = call_raw(&host, "/chat/api/state", b"{}".to_vec());
     assert_eq!(status, 200);
     assert_eq!(state["limits"], fixture()["state_limits"]);
@@ -203,7 +228,7 @@ fn a_second_send_while_one_runs_is_429_chat_busy_as_in_the_oracle() {
     assert_eq!(fixture["busy"]["second"]["status"], 429);
     assert_eq!(fixture["busy"]["second"]["body"]["error"], "chat_busy");
     let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let host = host_with(Arc::new(Hold(gate.clone())));
+    let (_private, host) = host_with(Arc::new(Hold(gate.clone())));
     let (first, _) = send(&host, &json!({"prompt": "one", "max_new_tokens": 2}));
     assert_eq!(first, 200);
     let (second, body) = send(&host, &json!({"prompt": "two", "max_new_tokens": 2}));
@@ -216,7 +241,7 @@ fn a_second_send_while_one_runs_is_429_chat_busy_as_in_the_oracle() {
 #[test]
 fn the_fifth_accepted_send_within_a_minute_is_429_and_refusals_are_not_charged() {
     let fixture = fixture();
-    let host = host_with(Arc::new(Capture(Arc::default())));
+    let (_private, host) = host_with(Arc::new(Capture(Arc::default())));
     // The oracle: six invalid sends are not charged; the fifth valid one is limited. The valid
     // sends are credential-theft prompts: accepted like any request, finished at once, so no run
     // (and no cleanup proof) is needed between them.
@@ -250,7 +275,7 @@ fn the_fifth_accepted_send_within_a_minute_is_429_and_refusals_are_not_charged()
 fn a_credential_theft_prompt_gets_the_gateways_refusal_text_without_a_model_run() {
     let fixture = fixture();
     let seen: Seen = Arc::default();
-    let host = host_with(Arc::new(Capture(seen.clone())));
+    let (_private, host) = host_with(Arc::new(Capture(seen.clone())));
     let refusal = fixture["policy_stream"]["emit_token"][1].as_str().unwrap();
     let prompt = fixture["policy"][0]["prompt"].as_str().unwrap();
     assert_eq!(fixture["policy"][0]["response"], refusal);

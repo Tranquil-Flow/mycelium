@@ -37,7 +37,30 @@ const SOURCE: &str = "model-source-7ae557604adf";
 fn millis(id: B) -> Duration {
     Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
 }
-fn state_root() -> PathBuf {
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
+fn state_root() -> TestRoot {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "packaged-publisher-{}",
         node_service::service::random_id().unwrap()
@@ -46,7 +69,7 @@ fn state_root() -> PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
 fn private(state: &Path) -> PathBuf {
     state.join("v02-node/private")

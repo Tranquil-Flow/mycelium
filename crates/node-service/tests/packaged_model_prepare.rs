@@ -81,7 +81,30 @@ impl Driver for MustNotRun {
         panic!("a model action started native work")
     }
 }
-fn state_root() -> PathBuf {
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
+fn state_root() -> TestRoot {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "packaged-model-prepare-{}",
         node_service::service::random_id().unwrap()
@@ -90,7 +113,7 @@ fn state_root() -> PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
 fn identity() -> Value {
     api::acquisition::model_identity(&api::model_catalog::registered()[1])
@@ -757,7 +780,7 @@ fn packaged_model_prepare_download_reaches_prepared() {
     let exe = std::env::current_exe().unwrap();
     assert!(!exe.parent().unwrap().join("native/resource_probe").exists());
     let bare = state_root();
-    let bundled = ModelSource::new(bare.clone(), repository.transport());
+    let bundled = ModelSource::new(bare.to_path_buf(), repository.transport());
     let bare_host = action_root(&bare, &bundled);
     assert_created(&bare_host);
     assert_eq!(
