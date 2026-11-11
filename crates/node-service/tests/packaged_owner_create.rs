@@ -567,6 +567,118 @@ fn packaged_owner_create_failed_preparation_commits_no_swarm() {
     assert_eq!(private_json(&root.join("resource-policy.json")), consent());
 }
 
+/// Set in the sandboxed child of [`packaged_owner_create_seed_key_failure_commits_no_swarm`]: the
+/// private root its two creates run in.
+const SEED_KEY_CHILD_ROOT: &str = "PACKAGED_OWNER_CREATE_SEED_KEY_CHILD_ROOT";
+/// What a create left committed: a swarm record, a seed database, a membership.
+fn committed(root: &Path) -> [bool; 3] {
+    [
+        root.join(SWARM_FILE).exists(),
+        root.join("seed-rs/seed.sqlite").exists(),
+        root.join(MEMBER_DIR).join("membership.state.json").exists(),
+    ]
+}
+/// `path` as a literal in a sandbox profile regex: every character but `/` and alphanumerics is
+/// a one-character class.
+fn sandbox_literal(path: &Path) -> String {
+    path.to_str()
+        .unwrap()
+        .chars()
+        .map(|c| {
+            if c == '/' || c.is_ascii_alphanumeric() {
+                c.to_string()
+            } else {
+                format!("[{c}]")
+            }
+        })
+        .collect()
+}
+
+/// A failure while `create_swarm` installs the seed key, after the seed's directory exists (review
+/// A2-F1). v0.1.4 makes the seed and target directories, then `load_or_create_node_signer(seed.key)`,
+/// whose refused `O_CREAT` is `node_identity_path_invalid` (authority.py:412-417,
+/// identity.py:309-322 @ f4e366e9); the directories stay and count as partial state
+/// (authority.py:390-391,410-411: every authority entry but `network.json`). The fault is the
+/// real operation's: this test runs its two creates in a child of this test binary under a macOS
+/// sandbox profile that denies only creating the seed identity's temporary file in the root
+/// (`private_state::store`'s `.seed-identity.json.<unique>.tmp`), then relaunches over the same
+/// root itself. Executed oracle (a2 review `oracle-early.json`, case `early_identity`, one
+/// intercepted `seed.key` create): 409 `node_identity_path_invalid` with no metadata, no seed
+/// state, no membership, the consent kept and the failure recorded; the retry 409
+/// `authority_swarm_exists`, still nothing committed; the relaunch refuses
+/// `authority_partial_state` (raised by `DemoApp.start`; the packaged host binds and answers that
+/// code, the accepted host boundary of `packaged_owner_create_failed_preparation_commits_no_swarm`).
+#[test]
+fn packaged_owner_create_seed_key_failure_commits_no_swarm() {
+    if let Some(root) = std::env::var_os(SEED_KEY_CHILD_ROOT) {
+        let root = PathBuf::from(root);
+        let host = compose(&root);
+        let failed = answer(&create(&host));
+        let failed_state = (committed(&root), last_failure(&root));
+        let retried = answer(&create(&host));
+        let retried_state = (committed(&root), last_failure(&root));
+        println!(
+            "SEED_KEY_CHILD {}",
+            json!({
+                "steps": [[failed, failed_state], [retried, retried_state]],
+                "seed_dir": root.join("seed-rs").is_dir(),
+                "seed_identity": root.join("seed-identity.json").exists(),
+            })
+        );
+        return;
+    }
+    let root = private_root();
+    let profile = format!(
+        "(version 1)(allow default)(deny file-write-create (regex #\"^{}/[.]seed-identity[.]json[.][^/]+[.]tmp$\"))",
+        sandbox_literal(&root)
+    );
+    let child = std::process::Command::new("/usr/bin/sandbox-exec")
+        .args(["-p", &profile])
+        .arg(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "packaged_owner_create_seed_key_failure_commits_no_swarm",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(SEED_KEY_CHILD_ROOT, &root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    assert!(
+        child.status.success(),
+        "sandboxed child: {}\n{stdout}\n{}",
+        child.status,
+        String::from_utf8_lossy(&child.stderr)
+    );
+    let trace: Value = stdout
+        .lines()
+        .find_map(|line| line.split_once("SEED_KEY_CHILD ").map(|(_, trace)| trace))
+        .map(|line| serde_json::from_str(line).unwrap())
+        .unwrap_or_else(|| panic!("the child printed no trace: {stdout}"));
+    let relaunched = compose(&root);
+    let relaunch = answer(&create(&relaunched));
+    let nothing = [false; 3];
+    assert_eq!(
+        (trace, json!([relaunch, committed(&root)])),
+        (
+            json!({
+                "steps": [
+                    [[409, "node_identity_path_invalid"],
+                        [nothing, ["/api/create", "node_identity_path_invalid"]]],
+                    [[409, "authority_swarm_exists"],
+                        [nothing, ["/api/create", "authority_swarm_exists"]]],
+                ],
+                "seed_dir": true,
+                "seed_identity": false,
+            }),
+            json!([[409, "authority_partial_state"], nothing])
+        )
+    );
+    assert_eq!(private_json(&root.join("resource-policy.json")), consent());
+}
+
 /// A stopped owner whose retained membership cannot be read. `/api/create` asks
 /// `authority.status()` (app.py:1604), whose branch without a coordinator lets
 /// `load_membership_state`'s `DurableMembershipError` out (authority.py:669-674), answered 409 with
