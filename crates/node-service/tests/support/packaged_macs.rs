@@ -65,6 +65,21 @@ impl Observer for Permissive {
         }
     }
 }
+/// The network every test Mac here gets: the app's own composition, but its relay client lookup
+/// finds nothing, so a Start that forgets `provider: external` fails closed
+/// (`relay_client_installation_required`) instead of running a `cloudflared` this Mac has on
+/// `PATH` (review PH3a Q4).
+pub fn test_network() -> NetworkConfig {
+    let production = NetworkConfig::default().hooks;
+    NetworkConfig {
+        hooks: Arc::new(move || {
+            let mut hooks = production();
+            hooks.binary = Arc::new(|| None);
+            hooks
+        }),
+        ..NetworkConfig::default()
+    }
+}
 /// One packaged Mac: its window core and its Quit.
 pub struct Mac {
     pub core: Arc<dyn Core>,
@@ -185,7 +200,7 @@ pub fn owner(base: &Path) -> Owner {
         .create(&state)
         .unwrap();
     let before = listening();
-    let mac = Mac::launch(&state, NetworkConfig::default());
+    let mac = Mac::launch(&state, test_network());
     let proxy = free_port();
     let started = mac.post(
         "/api/network/start",
@@ -229,7 +244,7 @@ pub fn member(base: &Path, owner: &Owner) -> Mac {
         &state,
         NetworkConfig {
             seams: owner.seams.clone(),
-            ..NetworkConfig::default()
+            ..test_network()
         },
     )
 }
@@ -246,7 +261,7 @@ pub fn member_renewing(base: &Path, owner: &Owner, period: B) -> Mac {
         NetworkConfig {
             seams: owner.seams.clone(),
             renewal: period,
-            ..NetworkConfig::default()
+            ..test_network()
         },
     )
 }

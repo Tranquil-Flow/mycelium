@@ -90,6 +90,12 @@ pub trait Host: Send {
     fn closed(&self) -> bool;
     /// `installation_role == 'owner'`.
     fn owner(&self) -> bool;
+    /// The code the installation state was refused with when the host started (`None`: it was
+    /// accepted). The shipped app does not start over such a state (`DemoApp.start` raises,
+    /// app.py:595-611), so no action may write into it.
+    fn installation_refused(&self) -> Option<&'static str> {
+        None
+    }
     /// `os.environ.get(name)`; `Some("")` is a set-but-empty variable.
     fn environment(&self, name: &str) -> Option<String>;
     /// `host_memory_bytes()`.
@@ -945,6 +951,13 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
             | Quit => {
                 if self.host.closed() {
                     return Err(PublicError::new(400, "application_closed"));
+                }
+                // v0.1.4 never serves a refused installation state (app.py:595-611): every
+                // action but Quit answers the refusal before it can persist anything.
+                if action != Quit
+                    && let Some(code) = self.host.installation_refused()
+                {
+                    return Err(PublicError::new(409, code));
                 }
                 // app.py:1346-1348: a target is refused these before any shape check.
                 // fast_mode.choose checks the role before the body shape too. Run-model, the
