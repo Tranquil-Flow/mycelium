@@ -51,6 +51,7 @@ fn start(
             ready_wait: span(BudgetId::RouterClose),
             binary: Arc::new(|| None),
             env: Vec::new(),
+            release_observer: None,
         }
     });
     core.lock().unwrap().relay = relay;

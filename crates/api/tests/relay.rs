@@ -164,6 +164,7 @@ fn run_scenario(fx: &Value, sc: &Value) -> Vec<String> {
                         },
                         binary: Arc::new(move || binary.clone()),
                         env: env.clone(),
+                        release_observer: None,
                     };
                     match Relay::new(&root, &op["provider"], &kwargs, hooks) {
                         Ok(r) => {

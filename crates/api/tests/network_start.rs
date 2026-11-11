@@ -11,7 +11,8 @@ use api::{
     jobj,
     persistent::{Host, PersistentBackend, RelayState},
     relay::{
-        BackendError, BackendReply, EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend,
+        BackendError, BackendReply, EndpointHost, Hooks, OwnerRelay, Probe, Proxy, ReleaseEvent,
+        ReleaseObserver, SeedBackend,
     },
     schema::PublicError,
     wire::Json,
@@ -21,7 +22,7 @@ use std::{
     collections::HashMap,
     net::TcpListener,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 
@@ -219,6 +220,10 @@ struct App {
 }
 impl App {
     fn new(tag: &str) -> Self {
+        Self::observed(tag, None)
+    }
+    /// Every relay this app creates reports where its `close()` stands to `observer`.
+    fn observed(tag: &str, observer: Option<ReleaseObserver>) -> Self {
         let root = scratch(tag);
         let clock = Arc::new(Mutex::new(1000.0));
         let hook_clock = clock.clone();
@@ -230,6 +235,7 @@ impl App {
                 ready_wait: secs(1),
                 binary: Arc::new(|| None),
                 env: Vec::new(),
+                release_observer: observer.clone(),
             }
         })));
         let ep: SharedEp = Arc::new(Mutex::new(Ep::default()));
@@ -469,6 +475,86 @@ fn a_window_that_runs_out_is_reopened_by_the_same_start() {
         app.tokenise(&without_expiry(again).to_string()),
         without_expiry(case(&fx, "w_restart_same_start")["body"].clone()).to_string()
     );
+    app.relay.lock().expect("relay").close();
+}
+
+/// What the restart-race test sees, in order.
+#[derive(Debug)]
+enum Seen {
+    Release(ReleaseEvent),
+    Started(u16, Value),
+}
+
+/// Q9 (REVIEW-laneGR): the window runs out and the lifetime thread publishes "stopped", but is held
+/// before it releases the proxy listener. A Start in that gap must wait for the release and reopen
+/// the relay on the same proxy port; it must never answer 409 after "stopped" (v0.1.4 holds the
+/// relay lock through the whole release, `public_relay.py:439-454`, and Start closes the old relay
+/// synchronously, `app.py:693-697`). Driven by channels from the relay's own release observer: no
+/// sleeps decide the order.
+#[test]
+fn a_start_in_the_gap_after_stopped_waits_for_the_release_and_reopens() {
+    let fx = fixture();
+    let (seen_tx, seen) = mpsc::channel::<Seen>();
+    let (go, held) = mpsc::channel::<()>();
+    // Only the first closer of the first relay is held; later closes just report.
+    let hold = Mutex::new(Some(held));
+    let report = Mutex::new(seen_tx.clone());
+    let observer: ReleaseObserver = Arc::new(move |event| {
+        report
+            .lock()
+            .expect("report")
+            .send(Seen::Release(event))
+            .expect("seen");
+        let held = hold.lock().expect("hold").take();
+        if let (ReleaseEvent::Stopping, Some(held)) = (event, held) {
+            held.recv().expect("go");
+        }
+    });
+    let mut app = App::observed("gap", Some(observer));
+    let body = app.real(&case(&fx, "w_start_30")["request"]["body"]);
+    let (status, got, _) = app.post("/api/network/start", &body);
+    assert_eq!(status, 200, "{got}");
+    let wait = secs(30);
+    // The clock passes the window: the lifetime thread closes the relay and is held in the gap.
+    *app.clock.lock().expect("clock") += 31.5;
+    match seen.recv_timeout(wait).expect("the window closes") {
+        Seen::Release(ReleaseEvent::Stopping) => {}
+        other => panic!("expected the lifetime thread's close, got {other:?}"),
+    }
+    assert_eq!(app.network().0["state"], "stopped");
+    std::thread::scope(|scope| {
+        let starter = seen_tx.clone();
+        let app = &mut app;
+        let body = &body;
+        scope.spawn(move || {
+            let (status, answer, _) = app.post("/api/network/start", body);
+            starter
+                .send(Seen::Started(status, answer))
+                .expect("started");
+        });
+        // The held closer is released once the Start waits for it, or once the Start has answered
+        // without waiting; nothing is left blocked either way.
+        let mut go = Some(go);
+        let answer = loop {
+            match seen.recv_timeout(wait).expect("the Start answers or waits") {
+                Seen::Release(ReleaseEvent::AwaitingRelease) => {
+                    go.take().expect("one wait").send(()).expect("release");
+                }
+                // Another relay's own close (a refused new relay closes itself).
+                Seen::Release(ReleaseEvent::Stopping) => {}
+                Seen::Started(status, answer) => break (status, answer),
+            }
+        };
+        if let Some(go) = go {
+            go.send(()).expect("release");
+        }
+        assert_eq!(
+            answer.0, 200,
+            "a Start after \"stopped\" reopens: {}",
+            answer.1
+        );
+        assert_eq!(answer.1["state"], "relay_process_running");
+    });
     app.relay.lock().expect("relay").close();
 }
 

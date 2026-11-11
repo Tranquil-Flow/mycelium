@@ -84,6 +84,17 @@ pub type Probe = Arc<dyn Fn() -> Result<bool, ()> + Send + Sync>;
 /// `installed_relay_binary()` (`:250-255`).
 pub type Binary = Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>;
 
+/// What a relay's `close()` reports to a [`ReleaseObserver`] (a test seam; production has none).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseEvent {
+    /// The closing thread has published `closed` (status reads "stopped") and has not yet released
+    /// the child and the proxy listener.
+    Stopping,
+    /// A second closer found the relay closing and waits for that release.
+    AwaitingRelease,
+}
+pub type ReleaseObserver = Arc<dyn Fn(ReleaseEvent) + Send + Sync>;
+
 /// The seams of the source: `_clock`, `_lifetime_poll`, the binary lookup and the environment the
 /// child inherits. [`Hooks::production`] is what the app uses.
 pub struct Hooks {
@@ -95,6 +106,8 @@ pub struct Hooks {
     pub binary: Binary,
     /// The parent environment the child inherits (scrubbed of `TUNNEL_*`/`CLOUDFLARE_*`/`CF_*`/`NO_TLS_VERIFY`).
     pub env: Vec<(String, String)>,
+    /// Told where `close()` stands (tests hold a closer between "stopped" and the release).
+    pub release_observer: Option<ReleaseObserver>,
 }
 impl Hooks {
     /// `time.monotonic`, a 1 s lifetime poll, the 45 s ready wait, `installed_relay_binary()` for
@@ -109,6 +122,7 @@ impl Hooks {
             ),
             binary: Arc::new(move || installed_relay_binary(bundled_dir.as_deref())),
             env: std::env::vars().collect(),
+            release_observer: None,
         }
     }
 }
@@ -1356,6 +1370,9 @@ fn close(inner: &Arc<Inner>) {
             st.lifetime.take(),
         )
     };
+    if let Some(observer) = &inner.hooks.release_observer {
+        observer(ReleaseEvent::Stopping);
+    }
     if let Some(mut child) = process {
         if matches!(child.try_wait(), Ok(None)) {
             if let Some(pid) =
