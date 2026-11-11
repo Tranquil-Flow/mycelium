@@ -487,6 +487,207 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     assert_eq!(verdict, Ok(Poll::Verified));
 }
 
+// ---- REVIEW-lanePH1 finding 3: a Stop answered while a send is still being admitted ----
+
+/// A run that ends only when it is cancelled (`request_cancelled`, as the native driver's token
+/// and receipt steps answer), when the test releases it (`driver_released`), or after the
+/// stage-cleanup budget (`driver_never_cancelled`). It counts its runs and whether it was cancelled.
+#[derive(Clone, Default)]
+struct UntilCancelled {
+    runs: Arc<std::sync::atomic::AtomicUsize>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    released: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Driver for UntilCancelled {
+    fn run(&self, job: &mut Job) -> Result<(), PublicError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.runs.fetch_add(1, SeqCst);
+        let deadline = Instant::now() + millis(B::StageCleanup);
+        while !job.cancelled() && !self.released.load(SeqCst) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        if job.cancelled() {
+            self.cancelled.store(true, SeqCst);
+            return Err(PublicError::new(503, "request_cancelled"));
+        }
+        Err(PublicError::new(
+            503,
+            if self.released.load(SeqCst) {
+                "driver_released"
+            } else {
+                "driver_never_cancelled"
+            },
+        ))
+    }
+}
+/// When the page sends Stop relative to its chat send.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum StopAt {
+    /// While the send waits inside its admission (its qualification read held).
+    Admission,
+    /// Once the send answered with its request id (the request is registered).
+    Registered,
+    /// Before the send, with nothing in flight.
+    Idle,
+    /// Never.
+    Never,
+}
+/// What the page saw of one chat send with `route` (a Stop) sent at `at`: the Stop's answer, the
+/// request's `(terminal, error)` from `/chat/api/events`, how many runs the driver started and
+/// whether it was cancelled. A run that is not cancelled is released once the send answered.
+fn chat_with_stop(route: &str, at: StopAt) -> (Option<(u16, Value)>, (Value, Value), usize, bool) {
+    use std::sync::atomic::Ordering::SeqCst;
+    let driver = UntilCancelled::default();
+    let node = NodeService::new(
+        Arc::new(driver.clone()),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let held = HeldRecord {
+        record: Arc::new(node_service::router_port::DevelopmentRecord::of(&node).unwrap()),
+        probe: Arc::default(),
+    };
+    let private = private();
+    let host = DesktopServices::with_qualification(
+        node,
+        NonZeroUsize::new(4).unwrap(),
+        &private,
+        Arc::new(held.clone()),
+    );
+    let release = Release(held.clone());
+    let stop = || {
+        let reply = answered_within(&host, "POST", route, json!({}))
+            .unwrap_or_else(|| panic!("{route} got no answer"));
+        (
+            reply.status,
+            serde_json::from_slice::<Value>(&reply.body).unwrap_or(Value::Null),
+        )
+    };
+    let mut stopped = None;
+    if at == StopAt::Idle {
+        stopped = Some(stop());
+    }
+    if at == StopAt::Admission {
+        held.hold();
+    }
+    let (sent_tx, sent) = std::sync::mpsc::channel();
+    host.submit(
+        ServiceRequest {
+            method: "POST".into(),
+            target: "/chat/api/send".into(),
+            headers: vec![
+                ("x-mycelium-chat".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(&json!({"prompt":"hello","max_new_tokens":1})).unwrap(),
+        },
+        Box::new(move |reply| sent_tx.send(reply).unwrap_or_default()),
+    );
+    if at == StopAt::Admission {
+        held.wait_inside();
+        stopped = Some(stop());
+        drop(release);
+    }
+    let sent = sent
+        .recv_timeout(millis(B::WorkerStartup))
+        .expect("the send never answered");
+    assert_eq!(sent.status, 200, "{}", String::from_utf8_lossy(&sent.body));
+    let id = serde_json::from_slice::<Value>(&sent.body).unwrap()["request_id"].clone();
+    match at {
+        StopAt::Registered => stopped = Some(stop()),
+        StopAt::Idle | StopAt::Never => driver.released.store(true, SeqCst),
+        StopAt::Admission => {}
+    }
+    let deadline = Instant::now() + millis(B::StageCleanup) + millis(B::WorkerStartup);
+    let mut after = 0;
+    let outcome = loop {
+        let events = call(
+            &host,
+            "/chat/api/events",
+            json!({"request_id": id, "after": after}),
+        );
+        assert_eq!(
+            events.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&events.body)
+        );
+        let events: Value = serde_json::from_slice(&events.body).unwrap();
+        if events["done"] == true {
+            break (events["terminal"].clone(), events["error"].clone());
+        }
+        after = events["next"].as_u64().unwrap();
+        assert!(Instant::now() < deadline, "the request never ended");
+    };
+    host.begin_shutdown(Instant::now() + millis(B::StageCleanup))
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    let verdict = loop {
+        match host.poll_shutdown() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert_eq!(verdict, Ok(Poll::Verified));
+    (
+        stopped,
+        outcome,
+        driver.runs.load(SeqCst),
+        driver.cancelled.load(SeqCst),
+    )
+}
+/// v0.1.4 registers the chat record before `send` returns and its Stop's `cancel_all` cancels
+/// every record not done, stickily: a record whose backend client does not exist yet is
+/// cancelled the moment it does (chat.py:319-333, 349-354, 418-452; demo_chain.py:1324-1336 @
+/// f4e366e9). So a Stop the page sends while its send is still being admitted
+/// (`Serving::submit`, before the request is live) cancels that request, exactly as the same
+/// Stop does once the send answered, for `/api/serving/stop` and `/api/demo/stop` alike.
+fn a_stop_during_the_send_admission_cancels_that_request(route: &str) {
+    let (stop, registered, runs, cancelled) = chat_with_stop(route, StopAt::Registered);
+    assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+    assert_eq!(
+        (runs, cancelled),
+        (1, true),
+        "{route}: Stop after registration"
+    );
+    let (stop, admission, runs, cancelled) = chat_with_stop(route, StopAt::Admission);
+    assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+    assert!(
+        runs == 0 || cancelled,
+        "{route}: a Stop answered while the send was admitted was lost: its run went on \
+         uncancelled ({admission:?})"
+    );
+    assert_eq!(
+        admission, registered,
+        "{route}: the request did not end as a Stop after registration ends it"
+    );
+}
+#[test]
+fn a_serving_stop_during_the_send_admission_cancels_that_request() {
+    a_stop_during_the_send_admission_cancels_that_request("/api/serving/stop");
+}
+#[test]
+fn a_demo_stop_during_the_send_admission_cancels_that_request() {
+    a_stop_during_the_send_admission_cancels_that_request("/api/demo/stop");
+}
+/// The admission's Stop check never reaches a later request: a Stop with nothing in flight
+/// leaves the next send to run, as v0.1.4's `cancel_all` cancels only the records it finds.
+#[test]
+fn a_stop_with_no_send_in_flight_does_not_cancel_the_next_send() {
+    for route in ["/api/serving/stop", "/api/demo/stop"] {
+        let (_, unstopped, runs, cancelled) = chat_with_stop(route, StopAt::Never);
+        assert_eq!((runs, cancelled), (1, false), "{route}");
+        let (stop, after_stop, runs, cancelled) = chat_with_stop(route, StopAt::Idle);
+        assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+        assert_eq!(
+            (runs, cancelled),
+            (1, false),
+            "{route}: an earlier Stop cancelled a later send"
+        );
+        assert_eq!(after_stop, unstopped, "{route}");
+    }
+}
+
 // ---- laneB16f §5 / laneB18 FU1: admitted requests are capped, Stop and status stay servable ----
 
 /// The packaged window's callbacks (`packaged::assemble`: the `desktop::services` core over the
