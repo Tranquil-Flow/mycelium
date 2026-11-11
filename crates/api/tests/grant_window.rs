@@ -26,15 +26,20 @@ use runtime::{
     iroh_host::LoopbackHost,
     sidecar_artifact::{grant_limits, serve_limits},
 };
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use serde_json::{Value, json};
 use std::{
     fs,
+    io::{Read, Write},
+    net::{Ipv4Addr, TcpListener, TcpStream},
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
+    thread::JoinHandle,
     time::Duration,
 };
 use transport::{Channel, Clock};
@@ -69,6 +74,9 @@ impl Time {
     }
     fn advance(&self, seconds: u64) {
         self.0.fetch_add(seconds * 1000, Ordering::SeqCst);
+    }
+    fn set_ms(&self, ms: u64) {
+        self.0.store(ms, Ordering::SeqCst);
     }
 }
 fn seconds(id: B) -> u64 {
@@ -879,4 +887,246 @@ fn a_member_revoked_while_a_chunk_is_read_gets_none_of_its_bytes_from_the_owner_
         "no byte past chunk 1 leaves the owner source"
     );
     assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
+}
+
+/// What a front on the seed's address answers instead of the seed.
+#[derive(Clone, Copy, Debug)]
+enum Answer {
+    /// A relay front's own `502 Bad Gateway` page (not the seed's JSON).
+    BadGateway,
+    /// The seed's own `500 seed_http_internal_error`.
+    SeedInternal,
+    /// A reply cut short: a chunked body that ends early (`http.client.IncompleteRead`).
+    Truncated,
+    /// A seed refusal with this code (the seed's JSON error body).
+    Refused(&'static str),
+}
+/// A TLS front on the seed's own port and certificate that answers every request with one
+/// [`Answer`] (a relay in front of the seed, or a failing seed) until it is dropped.
+struct Front {
+    port: u16,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+impl Front {
+    fn up(rig: &Rig, answer: Answer) -> Self {
+        let pem = fs::read(&rig.material.server_certificate).unwrap();
+        let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem)
+            .map(Result::unwrap)
+            .collect();
+        let key =
+            PrivateKeyDer::from_pem_slice(&fs::read(&rig.material.server_private_key).unwrap())
+                .unwrap();
+        let config = Arc::new(
+            ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        );
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, rig.port)).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let halt = stop.clone();
+        let thread = std::thread::spawn(move || {
+            for tcp in listener.incoming() {
+                if halt.load(Ordering::SeqCst) {
+                    return;
+                }
+                let mut stream =
+                    StreamOwned::new(ServerConnection::new(config.clone()).unwrap(), tcp.unwrap());
+                answer_one(&mut stream, answer);
+            }
+        });
+        Self {
+            port: rig.port,
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+impl Drop for Front {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // Wake the accept: the front sees `stop` and ends, releasing the port.
+        drop(TcpStream::connect((Ipv4Addr::LOCALHOST, self.port)).unwrap());
+        self.thread.take().unwrap().join().unwrap();
+    }
+}
+fn answer_one(stream: &mut StreamOwned<ServerConnection, TcpStream>, answer: Answer) {
+    let mut raw = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut chunk).unwrap();
+        assert!(n > 0, "the member hung up before its request was complete");
+        raw.extend_from_slice(&chunk[..n]);
+        if let Some(p) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&raw[..p]).to_ascii_lowercase();
+            let length: usize = head
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .map_or(0, |v| v.trim().parse().unwrap());
+            if raw.len() >= p + 4 + length {
+                break;
+            }
+        }
+    }
+    let seed_error = |status: u16, code: &str| {
+        let body = format!(
+            "{{\"error\":{{\"code\":\"{code}\"}},\"protocol\":\"mycelium.seed.http_error.v1\"}}"
+        );
+        format!(
+            "HTTP/1.1 {status} Status\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    let wire = match answer {
+        Answer::BadGateway => {
+            let body = "<html><body>502 Bad Gateway</body></html>";
+            format!(
+                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+        }
+        Answer::SeedInternal => seed_error(500, "seed_http_internal_error"),
+        Answer::Refused(code) => seed_error(409, code),
+        Answer::Truncated => "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n7\r\n{\"a\":1}\r\n".to_owned(),
+    };
+    stream.write_all(wire.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    stream.conn.send_close_notify();
+    stream.flush().unwrap();
+}
+/// The B7 member, renewing on the test's clock and schedule.
+fn driven(rig: &Rig) -> membership::Membership {
+    let time = rig.time.clone();
+    membership::Membership::driven(
+        rig.session.clone(),
+        rig.member_root.clone(),
+        &rig.signer,
+        rig.options.clone(),
+        Arc::new(move || time.now()),
+    )
+    .unwrap()
+}
+fn member_lease(member: &membership::Membership) -> f64 {
+    member
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .lease_expires_at()
+        .unwrap()
+}
+/// The member's renewal schedule (`shard_member`'s keepalive pass).
+fn pass_seconds() -> u64 {
+    seconds(B::PyFinalMyceliumSeedCoordinatorKeepaliveIntervalSecondsL182C44)
+}
+
+/// RED (GRF 3): the shipped v0.1.4 app retries a failed renewal of ANY kind on its next pass
+/// (`_renew_loop`, app.py:911-927, catches every exception and only records
+/// `renewal_unavailable`; peer.py:1037-1060): a relay front's 502, the seed's own 500 and a reply
+/// cut short each leave the member current while its own lease lasts, and the next pass renews.
+#[test]
+fn a_failed_renewal_of_any_kind_keeps_the_member_current_and_the_next_pass_renews() {
+    let mut rig = Rig::new();
+    let member = driven(&rig);
+    let before = member_lease(&member);
+    rig.seed_down();
+    for (answer, code) in [
+        (Answer::BadGateway, "seed_http_remote_error"),
+        (Answer::SeedInternal, "seed_http_internal_error"),
+        (Answer::Truncated, "action_not_completed"),
+    ] {
+        let front = Front::up(&rig, answer);
+        rig.time.advance(pass_seconds());
+        assert_eq!(member.renew_once(), Err(code.to_owned()), "{answer:?}");
+        assert!(
+            member.current(&rig.signer).is_ok(),
+            "a failed renewal ({answer:?}) must not end a member whose lease is fresh: {:?}",
+            member.current(&rig.signer)
+        );
+        drop(front);
+    }
+    rig.seed_up();
+    rig.time.advance(pass_seconds());
+    member.renew_once().expect("the next pass renews");
+    let after = member_lease(&member);
+    assert!(after > before, "renewed lease {after} > {before}");
+    assert!(member.current(&rig.signer).is_ok());
+}
+
+/// RED (GRF 3): renewals that keep failing never end the member early and never keep it current
+/// past its own lease: it is current up to the last millisecond before the lease and fenced from
+/// the lease on (v0.1.4 `_control_snapshot`: `clock() >= lease_expires_at` refuses, peer.py:631).
+#[test]
+fn renewals_failing_until_the_lease_runs_out_fence_the_member_exactly_at_its_expiry() {
+    let mut rig = Rig::new();
+    let member = driven(&rig);
+    let lease = member_lease(&member);
+    rig.seed_down();
+    let front = Front::up(&rig, Answer::BadGateway);
+    let mut passes = 0;
+    while rig.time.now() + (pass_seconds() as f64) < lease {
+        rig.time.advance(pass_seconds());
+        assert_eq!(
+            member.renew_once(),
+            Err("seed_http_remote_error".to_owned())
+        );
+        passes += 1;
+        assert!(
+            member.current(&rig.signer).is_ok(),
+            "failed pass {passes}: still current before the lease: {:?}",
+            member.current(&rig.signer)
+        );
+    }
+    assert!(
+        passes >= 2,
+        "several failed passes before the lease ran out"
+    );
+    let lease_ms = (lease * 1000.0).ceil() as u64;
+    rig.time.set_ms(lease_ms - 1);
+    assert!(
+        member.current(&rig.signer).is_ok(),
+        "current until the last millisecond of its lease"
+    );
+    rig.time.set_ms(lease_ms);
+    assert_eq!(
+        member.current(&rig.signer).unwrap_err().0,
+        "joined_shard_lease_expired",
+        "fenced exactly when its own lease runs out"
+    );
+    rig.time.advance(pass_seconds());
+    assert!(member.renew_once().is_err());
+    assert!(
+        member.current(&rig.signer).is_err(),
+        "never current past its lease"
+    );
+    drop(front);
+}
+
+/// Guard (GRF 3): a refusal v0.1.4 treats as final (it records a terminal disposition and the
+/// member's snapshot refuses at once, peer.py:300-325 + 625-640) still fences the member at once.
+#[test]
+fn a_final_renewal_refusal_fences_the_member_at_once() {
+    let mut rig = Rig::new();
+    rig.seed_down();
+    for (seed_code, member_code) in [
+        ("seed_member_lifecycle_ineligible", "peer_member_revoked"),
+        ("seed_member_generation_stale", "peer_generation_stale"),
+        ("seed_member_unknown", "peer_member_unknown"),
+        ("seed_member_lease_expired", "peer_member_expired"),
+    ] {
+        let member = driven(&rig);
+        let front = Front::up(&rig, Answer::Refused(seed_code));
+        rig.time.advance(1);
+        assert_eq!(member.renew_once(), Err(member_code.to_owned()));
+        assert_eq!(
+            member.current(&rig.signer).unwrap_err().0,
+            "member_renewal_failed",
+            "{member_code} fences at once"
+        );
+        drop(front);
+    }
 }
