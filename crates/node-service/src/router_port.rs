@@ -150,6 +150,12 @@ pub trait Admission: Send + Sync {
     fn complete(&self, request_id: &str, outcome: Result<Outcome, Refusal>);
     /// `coordinator.cancel(request_id)` (router_port.py:794-829).
     fn cancel(&self, request_id: &str);
+    /// `recovery_public_projection` (router_port.py:2347-2420): the coordinator's request facts as
+    /// `mycelium.full_context_recovery_runtime.v1`. Default: no M16 coordinator, v0.1.4's
+    /// `recovery_projection_unavailable` (router_port.py:2353-2356). Not ported with a coordinator yet.
+    fn recovery_projection(&self) -> Result<Value, &'static str> {
+        Err("recovery_projection_unavailable")
+    }
 }
 /// Admits every request the gateway admitted, as the node service's host does today.
 pub struct AdmitAsToday;
@@ -592,6 +598,11 @@ impl Serving {
     }
     pub fn ledger(&self) -> Ledger {
         self.port.ledger.clone()
+    }
+    /// The router port's recovery projection (the request gateway's `recovery_public_projection`,
+    /// service.py:386-400 -> backend.py:582-596 -> [`Admission::recovery_projection`]).
+    pub fn recovery_projection(&self) -> Result<Value, &'static str> {
+        self.port.admission.recovery_projection()
     }
     /// The qualification source's current record as `mycelium.route_qualification.v1`
     /// ([`QualificationSource::record`]), for the product application's qualification source.

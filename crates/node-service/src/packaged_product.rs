@@ -15,16 +15,21 @@
 //! Sources (`ProductEvidenceApplication`, `app.py:206-281`), as v0.1.4 publishes them for what this
 //! process really has:
 //! - members: the owner's seed (shared with the headless launcher).
-//! - route status: read through the live route (`_follow`, supervisor.py:2153-2164). This process
+//! - route status, assignments: read through the live route (`_follow`, supervisor.py:2153-2164). This process
 //!   never opens a qualified live route (its serving status is `route_ready: false`,
 //!   `development_unqualified`; the native slice has no `mycelium.live_route_status.v1` producer), so
 //!   the read is v0.1.4's `RouteUnavailableError('route_not_open')`, which `_follow` does not type:
-//!   `route_source_failed`. Only a cold-restart code (`ColdRouteRestartError`) would publish its own
+//!   `route_source_failed` / `assignment_source_failed` (no assignment offers or placements exist in
+//!   this process either: route.py:6910-6948 reads them from the route's plan). Only a cold-restart code (`ColdRouteRestartError`) would publish its own
 //!   reason; this process has no cold restart.
 //! - qualification: the serving root's qualification source (`Serving::qualification_record`), as
 //!   `route_qualification_to_dict(qualification_source.current())` (supervisor.py:2166-2168): the
 //!   development record has no `mycelium.route_qualification.v1` document (`missing`); a source that
 //!   cannot be read (or a serving root that could not be built) publishes `qualification_source_failed`.
+//! - recovery: the request gateway's `recovery_public_projection` asks the router port's M16
+//!   coordinator ([`Serving::recovery_projection`]); this process has none (`AdmitAsToday`), so it is
+//!   v0.1.4's `recovery_projection_unavailable` admission error, published untyped as
+//!   `recovery_source_failed`.
 use crate::{router_port::Serving, service::NodeService};
 use api::{
     app_host::Authority,
@@ -35,7 +40,7 @@ use api::{
     schema::PublicError,
 };
 use desktop::{core::Reply, services::ServiceRequest};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
 
 /// The packaged process as the product routes' owner.
@@ -65,6 +70,18 @@ impl Owner for PackagedOwner {
     /// `route_source = _follow('public_status')`: no qualified live route in this process.
     fn route_status(&self) -> Result<Option<Value>, SourceError> {
         Err(route_not_open())
+    }
+    /// `assignment_source = _follow('product_assignment_records')`: no live route here.
+    fn assignments(&self) -> Option<Result<Vec<Map<String, Value>>, SourceError>> {
+        Some(Err(route_not_open()))
+    }
+    /// `recovery_source`: the router port's projection (an admission error is published untyped).
+    fn recovery(&self) -> Result<Option<Value>, SourceError> {
+        let serving = self.serving.as_ref().map_err(|_| SourceError::Failed)?;
+        serving
+            .recovery_projection()
+            .map(Some)
+            .map_err(|_| SourceError::Failed)
     }
     /// `route_qualification_to_dict(qualification_source.current())` over the serving root's source.
     fn qualification(&self) -> Result<Option<Value>, SourceError> {
