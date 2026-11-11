@@ -3,7 +3,8 @@
 //!
 //! It freezes exactly what the release machine later re-hashes: the source commit (the checkout
 //! must be AT that commit with a clean tree, untracked files included), the executable's sha256 and
-//! the bundle digest (`release::bundle_digest`: every regular file, symlinks/specials refused). The
+//! the bundle digest (`release::bundle_digest`: every regular file and every link target inside the
+//! bundle, never followed; links out of it and specials refused). The
 //! manifest is created exclusively (an existing file is never overwritten) with absolute paths, so
 //! a later `release candidate|status|emit|produce` binds its evidence to these bytes. Nothing is
 //! built, signed, launched or published here.

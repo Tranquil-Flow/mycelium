@@ -281,20 +281,71 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, (String, u64)>) -> R
         if meta.is_dir() {
             walk(root, &path, out)?;
         } else if meta.is_file() {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|e| fail("bundle_unreadable", e))?
-                .to_str()
-                .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 path"))?
-                .replace('\\', "/");
+            let relative = relative_name(root, &path)?;
             let digest = file_sha256(&path)
                 .map_err(|e| fail("bundle_unreadable", format!("{}: {e}", path.display())))?;
             out.insert(relative, (digest, meta.len()));
+        } else if meta.file_type().is_symlink() {
+            // v0.1.4's signable layout keeps relative links inside the bundle
+            // (`Frameworks/mlx.metallib -> ../Resources/mlx.metallib`). A link is never followed:
+            // its target text is part of the frozen bytes, and a link out of the bundle is refused.
+            let relative = relative_name(root, &path)?;
+            let target = fs::read_link(&path).map_err(|e| {
+                fail(
+                    "bundle_unreadable",
+                    format!("{}: {}", path.display(), io_text(&e)),
+                )
+            })?;
+            let text = target
+                .to_str()
+                .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 link target"))?;
+            if !link_stays_inside(&relative, &target) {
+                return Err(fail(
+                    "bundle_link_outside",
+                    format!("{} -> {text}", path.display()),
+                ));
+            }
+            out.insert(
+                relative,
+                (
+                    format!("link:{}", sha256_bytes(text.as_bytes())),
+                    text.len() as u64,
+                ),
+            );
         } else {
             return Err(fail("bundle_special_file", path.display()));
         }
     }
     Ok(())
+}
+fn relative_name(root: &Path, path: &Path) -> Result<String, String> {
+    Ok(path
+        .strip_prefix(root)
+        .map_err(|e| fail("bundle_unreadable", e))?
+        .to_str()
+        .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 path"))?
+        .replace('\\', "/"))
+}
+/// Whether `target`, read relative to the folder holding the link at `relative` (a path inside
+/// the bundle), names a path inside the bundle. Lexical only: nothing is resolved on disk.
+fn link_stays_inside(relative: &str, target: &Path) -> bool {
+    use std::path::Component;
+    if target.is_absolute() {
+        return false;
+    }
+    let mut depth = relative.split('/').count().saturating_sub(1);
+    for component in target.components() {
+        match component {
+            Component::ParentDir => match depth.checked_sub(1) {
+                Some(up) => depth = up,
+                None => return false,
+            },
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    true
 }
 
 // ------------------------------------------------------------------ claims, ledger, profile
