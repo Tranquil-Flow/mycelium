@@ -305,7 +305,9 @@ fn start_with_no_joined_mac_fails_two_macs_required_with_the_steps() {
     assert_eq!(run["participants"][0]["state"], "reported", "{run}");
     // The run joined this Mac's own contributor to the swarm: with no relay running, the next Start
     // is held back for it (`members_joined_without_relay`, app.py:836-842; `relay_gate`,
-    // demo_app.py:94-106), with the shipped message and fix.
+    // demo_app.py:94-106). The body is the code alone (`{"error": "relay_required"}`): the window's
+    // `Reply::error` drops the refusal's message and fix (pre-existing, class D; the page shows
+    // `explain(code)`, run.js:188, as v0.1.4).
     let (code, again) = mac.post("/api/demo/start", json!({}));
     assert_eq!(code, 400, "{again}");
     assert_eq!(again["error"], "relay_required", "{again}");
