@@ -108,6 +108,23 @@ fn an_announcement_without_the_pin_keeps_the_oracle_bytes_and_a_valid_signature(
 
 // ---- U2 RED: the field, the member-side check, the control endpoint (seam: owner_pin_unimplemented) ----
 
+/// RFC 4648 base32 without padding, lowercase (iroh parses it as a key too).
+fn base32(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let (mut out, mut buffer, mut bits) = (String::new(), 0u32, 0u32);
+    for byte in bytes {
+        buffer = (buffer << 8) | u32::from(*byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(ALPHABET[((buffer >> bits) & 31) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        out.push(ALPHABET[((buffer << (5 - bits)) & 31) as usize] as char);
+    }
+    out
+}
 fn pin_key(seed: u8) -> iroh::EndpointId {
     iroh::SecretKey::from_bytes(&[seed; 32]).public()
 }
@@ -355,6 +372,11 @@ fn a_member_takes_the_pin_only_from_a_verified_well_formed_announcement() {
         ),
         (
             json!({"protocol": v1, "endpoint_id": key.to_string().to_uppercase()}),
+            "owner_pin_endpoint_invalid",
+        ),
+        // The same key in iroh's other accepted text form (52-char base32): one encoding only.
+        (
+            json!({"protocol": v1, "endpoint_id": base32(key.as_bytes())}),
             "owner_pin_endpoint_invalid",
         ),
         (
