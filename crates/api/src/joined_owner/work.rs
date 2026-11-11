@@ -13,25 +13,35 @@
 //! LAN or loopback endpoint, reads an interface or branches on the choice.
 use super::{
     epoch::{self, Epoch, StageCarrier},
-    link::{MemberLink, Refusal},
+    link::{MemberLink, Refusal, Stage},
     source::{self, ShardSource, Transferred},
 };
 use crate::{
     app_host,
     joined_shard::{native, route},
-    m16_route::{Codec, SeedMembers},
+    m16_route::{Codec, RouteHandle, SeedMembers},
 };
-use budgets::BudgetId as B;
+use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
     OwnerRunError,
     chain::{PortError, StepError},
-    machine::{CeilingProbe, MonitorProbe},
+    machine::{CeilingProbe, EXECUTION_CEILING_CODE, MonitorProbe},
     state::RunState,
     steps::{activate::ActivationPort, publish::WorkPort, slices::SlicesPort},
 };
 use runtime::iroh_host::LanPolicy;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, net::IpAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    net::IpAddr,
+    path::PathBuf,
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
+};
 
 /// The caller's carrier network choice, passed through unchanged (LAN on one
 /// interface within a policy, or `None` = LocalOnly loopback).
@@ -73,8 +83,9 @@ pub struct EpochStage<'a> {
     pub offer: &'a Value,
 }
 
-/// Issue the seed-signed route over the admitted stages, ask each member for
-/// its carrier address, deliver the route (`serve`, the member serves until the
+/// Issue the seed-signed route over the admitted stages (expiring at
+/// `expires_at`, or the rehearsal default when `None`), ask each member for its
+/// carrier address, deliver the route (`serve`, the member serves until the
 /// epoch ends) and open the owner's epoch on the caller's network.
 #[allow(clippy::too_many_arguments)]
 pub fn open_epoch(
@@ -87,17 +98,33 @@ pub fn open_epoch(
     network: &Network,
     codec: Arc<dyn Codec>,
     within: Duration,
+    expires_at: Option<f64>,
 ) -> Result<Epoch, Refusal> {
     let owner = iroh::SecretKey::generate();
-    let envelope = route::issue(
-        coordinator,
-        model,
-        deployment_id,
-        epoch,
-        &owner.public().to_string(),
-        admitted,
-        app_host::now(),
-    )?;
+    let now = app_host::now();
+    let owner_id = owner.public().to_string();
+    // `None`: the rehearsal default (`route::issue`, MemberChosenWall from now).
+    let envelope = match expires_at {
+        Some(at) => route::issue_until(
+            coordinator,
+            model,
+            deployment_id,
+            epoch,
+            &owner_id,
+            admitted,
+            now,
+            at,
+        ),
+        None => route::issue(
+            coordinator,
+            model,
+            deployment_id,
+            epoch,
+            &owner_id,
+            admitted,
+            now,
+        ),
+    }?;
     let mut addresses = Vec::new();
     for s in stages.iter_mut() {
         addresses.push(s.link.call(json!({"command":"carrier_address"}), within)?);
@@ -132,7 +159,7 @@ pub fn open_epoch(
 /// Wait (bounded) until the epoch's request settled (teardown finished).
 pub fn wait_settled(epoch: &Epoch) -> Result<(), Refusal> {
     let poll = super::span(B::OwnerPoll)?;
-    let end = std::time::Instant::now() + super::span(B::WorkerStartup)?;
+    let end = Instant::now() + super::span(B::WorkerStartup)?;
     let mut seen = 0;
     while !epoch
         .handle()
@@ -141,7 +168,7 @@ pub fn wait_settled(epoch: &Epoch) -> Result<(), Refusal> {
         .map_err(|_| refusal("carrier_state_poisoned"))?
         .teardown_finished
     {
-        if std::time::Instant::now() >= end {
+        if Instant::now() >= end {
             return Err(refusal("owner_epoch_not_settled"));
         }
         seen = epoch.handle().wait(seen, poll);
@@ -167,7 +194,7 @@ pub fn settle_members(
     let mut reports = Vec::new();
     for (m, pid) in stages.iter_mut().zip(&pids) {
         let report = m.link.finish(within)?;
-        let close = std::time::Instant::now() + super::span(B::RouterClose)?;
+        let close = Instant::now() + super::span(B::RouterClose)?;
         loop {
             let probe = m
                 .link
@@ -175,7 +202,7 @@ pub fn settle_members(
             if probe["probe_alive"][pid.to_string()] == false {
                 break;
             }
-            if std::time::Instant::now() >= close {
+            if Instant::now() >= close {
                 return Err(refusal("member_worker_still_alive"));
             }
         }
@@ -235,77 +262,616 @@ pub struct Plan {
     /// The owner root whose resource policy the slices step reads.
     pub owner_root: PathBuf,
 }
+
+// Workflow states as v0.1.4 `ManagedServingWorkflow` (workflow.py:277-345).
+const PREPARED: &str = "prepared";
+const PUBLISHING: &str = "publishing";
+const STAGING: &str = "staging";
+const AWAITING: &str = "awaiting_activation";
+const STARTING: &str = "starting";
+const RUNNING: &str = "api_running";
+const FAILED: &str = "failed";
+const STOPPED: &str = "stopped";
+/// Lease-expired participant (v0.1.4 `managed_control_member_stale`).
+const MEMBER_STALE: &str = "joined_route_member_stale";
+
+struct Flow {
+    state: &'static str,
+    error: Option<String>,
+    version: u64,
+    transferred: Vec<Value>,
+    epoch: u64,
+    route: Option<RouteHandle>,
+    gateway: Option<Value>,
+    serve_reports: Vec<Value>,
+    /// Every route of this run expires here: publish wall + worker wall.
+    expires_at: Option<f64>,
+}
+struct Shared {
+    flow: Mutex<Flow>,
+    changed: Condvar,
+}
+impl Shared {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Flow> {
+        self.flow.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    fn update(&self, f: impl FnOnce(&mut Flow)) {
+        let mut flow = self.lock();
+        f(&mut flow);
+        flow.version += 1;
+        drop(flow);
+        self.changed.notify_all();
+    }
+    fn set(&self, state: &'static str) {
+        self.update(|f| f.state = state);
+    }
+    fn snapshot(flow: &Flow) -> Value {
+        json!({"state":flow.state,"error_code":flow.error,"route_ready":false,
+            "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
+            "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at})
+    }
+}
+/// A closed code survives as the workflow's error code, anything else is
+/// `managed_workflow_failed` (workflow.py:337-343).
+fn closed(r: &Refusal) -> String {
+    if owner_run::machine::closed_code(&r.0) {
+        r.0.clone()
+    } else {
+        "managed_workflow_failed".into()
+    }
+}
+enum Command {
+    /// Open the next epoch (activation, and again after each spent request).
+    Open,
+}
+struct Start {
+    members: Vec<WorkMember>,
+    plan: Plan,
+    network: Network,
+    codec: Arc<dyn Codec>,
+}
 /// The owner's work port over the joined route for one run.
 pub struct OwnerWork {
-    _private: (),
+    coordinator: Arc<seed::Coordinator>,
+    clocks: Clocks,
+    seed: SeedMembers,
+    skew: f64,
+    /// Participants in stage order with the generation their registration signed.
+    stages: Vec<(String, u64)>,
+    owner_root: PathBuf,
+    shared: Arc<Shared>,
+    start: Option<Start>,
+    proposal: Option<Value>,
+    commands: Option<mpsc::Sender<Command>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
+    /// Member links handed back by teardown.
+    returned: Vec<WorkMember>,
 }
 impl OwnerWork {
     /// The port for `members` (in stage order) and `plan`; nothing starts until
     /// `start_serving`. `network` is handed through unchanged.
     pub fn new(
-        _coordinator: Arc<seed::Coordinator>,
-        _members: Vec<WorkMember>,
-        _plan: Plan,
-        _network: Network,
-        _codec: Arc<dyn Codec>,
-        _clocks: Clocks,
+        coordinator: Arc<seed::Coordinator>,
+        members: Vec<WorkMember>,
+        plan: Plan,
+        network: Network,
+        codec: Arc<dyn Codec>,
+        clocks: Clocks,
     ) -> Result<Self, Refusal> {
-        Ok(Self { _private: () })
+        let stages = members
+            .iter()
+            .map(|m| {
+                m.registration["message"]["member"]["generation"]
+                    .as_u64()
+                    .map(|g| (m.node_id.clone(), g))
+                    .ok_or_else(|| refusal("joined_shard_invalid"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let skew = super::span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31)?;
+        Ok(Self {
+            seed: epoch::seed_members(&coordinator),
+            coordinator,
+            clocks,
+            skew: skew.as_secs_f64(),
+            stages,
+            owner_root: plan.owner_root.clone(),
+            shared: Arc::new(Shared {
+                flow: Mutex::new(Flow {
+                    state: PREPARED,
+                    error: None,
+                    version: 0,
+                    transferred: Vec::new(),
+                    epoch: 0,
+                    route: None,
+                    gateway: None,
+                    serve_reports: Vec::new(),
+                    expires_at: None,
+                }),
+                changed: Condvar::new(),
+            }),
+            start: Some(Start {
+                members,
+                plan,
+                network,
+                codec,
+            }),
+            proposal: None,
+            commands: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+            returned: Vec::new(),
+        })
     }
-    /// Read member leases from `seed` instead of the coordinator's own rows.
-    pub fn with_seed_view(self, _seed: SeedMembers) -> Self {
+    /// Read member leases from `seed` (an injected view) instead of the
+    /// coordinator's own rows at its clock.
+    pub fn with_seed_view(mut self, seed: SeedMembers) -> Self {
+        self.seed = seed;
         self
     }
-    /// Wait (bounded) until `done` holds for the workflow state.
-    pub fn wait_state(&self, _done: impl Fn(&Value) -> bool, _within: Duration) -> Value {
-        Value::Null
+    /// The workflow state document (as `workflow_state`).
+    pub fn state(&self) -> Value {
+        Shared::snapshot(&self.shared.lock())
     }
-    pub fn rollover_due(&self, _state: &RunState) -> Option<bool> {
-        None
+    /// Wait (bounded by `within`) until `done` holds for the workflow state;
+    /// returns the last state read.
+    pub fn wait_state(&self, done: impl Fn(&Value) -> bool, within: Duration) -> Value {
+        let end = Instant::now() + within;
+        let mut flow = self.shared.lock();
+        loop {
+            let state = Shared::snapshot(&flow);
+            let left = end.saturating_duration_since(Instant::now());
+            if done(&state) || left.is_zero() {
+                return state;
+            }
+            flow = self
+                .shared
+                .changed
+                .wait_timeout(flow, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
     }
-    pub fn ceiling_reached(&self, _state: &RunState) -> CeilingProbe {
-        CeilingProbe::Unavailable
+    /// The open epoch's loopback gateway `{addr, bearer, qualification}`.
+    pub fn gateway(&self) -> Option<Value> {
+        self.shared.lock().gateway.clone()
     }
-    pub fn monitor(&self, _state: &RunState) -> MonitorProbe {
+    /// The open epoch is single-use (U5, per-request epochs): after its
+    /// request settled, retire it and open the next one over freshly prepared
+    /// stages.
+    pub fn next_epoch(&self) -> Result<(), Refusal> {
+        if self.shared.lock().state != RUNNING {
+            return Err(refusal("route_not_serving"));
+        }
+        self.send(Command::Open)
+    }
+    fn send(&self, command: Command) -> Result<(), Refusal> {
+        self.commands
+            .as_ref()
+            .ok_or_else(|| refusal("managed_workflow_stopped"))?
+            .send(command)
+            .map_err(|_| refusal("managed_workflow_stopped"))
+    }
+    /// `rollover_due(ctx)` on the run's clock.
+    pub fn rollover_due(&self, state: &RunState) -> Option<bool> {
+        rollover_due(state, (self.clocks.mono)())
+    }
+    /// `ceiling_reached(ctx)` on the run's clock.
+    pub fn ceiling_reached(&self, state: &RunState) -> CeilingProbe {
+        ceiling_reached(state, (self.clocks.mono)())
+    }
+    /// `monitor(ctx)` (demo_chain.py:1166-1186): the ceiling first, then the
+    /// workflow's own failure, then a participant whose seed lease ran out
+    /// (the open epoch's death evidence, read by its pump each OwnerPoll; with
+    /// no epoch open, the same seed-row rule as `observe_member_leases`).
+    pub fn monitor(&self, state: &RunState) -> MonitorProbe {
+        if let CeilingProbe::Code(Some(code)) = self.ceiling_reached(state) {
+            return MonitorProbe::Code(Some(code));
+        }
+        let (current, error, route) = {
+            let flow = self.shared.lock();
+            (flow.state, flow.error.clone(), flow.route.clone())
+        };
+        if current == FAILED || current == STOPPED {
+            return MonitorProbe::Code(Some(
+                error.unwrap_or_else(|| "managed_workflow_stopped".into()),
+            ));
+        }
+        let lease_evidence = route.is_some_and(|r| {
+            r.state.lock().is_ok_and(|o| {
+                o.stages.iter().any(|s| {
+                    s.death_evidence
+                        .as_ref()
+                        .is_some_and(|e| e["source"] == "seed_member_lease")
+                })
+            })
+        });
+        if lease_evidence
+            || self
+                .stages
+                .iter()
+                .any(|(node, generation)| self.lease_ran_out(node, *generation))
+        {
+            return MonitorProbe::Code(Some(MEMBER_STALE.into()));
+        }
         MonitorProbe::Code(None)
     }
-    /// `chain.teardown`: stop the work, close the epoch and the source.
+    /// The member's CURRENT seed row is the one the run admitted and the seed
+    /// clock is past its lease plus the members' clock skew (the member's own
+    /// fence point): `m16_route::observe_member_leases`' rule.
+    fn lease_ran_out(&self, node: &str, generation: u64) -> bool {
+        let Some((row, now)) = (self.seed)(node) else {
+            return false;
+        };
+        row["node_id"] == node
+            && row["generation"].as_u64() == Some(generation)
+            && now.is_finite()
+            && row["lease_expires_at"]
+                .as_f64()
+                .filter(|l| l.is_finite())
+                .is_some_and(|lease| now >= lease + self.skew)
+    }
+    /// `chain.teardown`: stop the work (between member operations), close the
+    /// open epoch (members release their compute), close the shard source and
+    /// join the worker. Idempotent.
     pub fn teardown(&mut self) -> Result<(), String> {
+        self.stop.store(true, Ordering::SeqCst);
+        self.commands.take();
+        if let Some(start) = self.start.take() {
+            self.returned.extend(start.members);
+        }
+        if let Some(t) = self.thread.take() {
+            let members = t.join().map_err(|_| "ThreadPanicked".to_owned())?;
+            self.returned.extend(members);
+        }
         Ok(())
     }
+    /// The member links, handed back after [`OwnerWork::teardown`] (the run
+    /// never closes them: members stay joined).
+    pub fn take_members(&mut self) -> Vec<WorkMember> {
+        std::mem::take(&mut self.returned)
+    }
 }
-fn not_ported() -> OwnerRunError {
-    OwnerRunError::new("owner_run_step_not_ported")
+impl Drop for OwnerWork {
+    fn drop(&mut self) {
+        if let Err(e) = self.teardown() {
+            eprintln!("owner work teardown: {e}");
+        }
+    }
+}
+fn refused(code: &str) -> PortError {
+    PortError::Refused(OwnerRunError::new(code))
 }
 impl WorkPort for OwnerWork {
+    /// The joined route has no local cleanup tick: members own their cleanup.
     fn install_cleanup_progress(&mut self) -> Result<(), StepError> {
         Ok(())
     }
-    fn start_serving(&mut self, _proposal: &Value) -> Result<Value, PortError> {
-        Err(PortError::Refused(not_ported()))
+    /// `ChainOps.start_serving`: start the owned worker (consent and transfer
+    /// per participant, then native prepare) and return at once; the route's
+    /// gateway exists only after activation, so `registry_origin` is null.
+    fn start_serving(&mut self, proposal: &Value) -> Result<Value, PortError> {
+        let Some(start) = self.start.take() else {
+            return Err(refused("managed_workflow_not_startable"));
+        };
+        let Some(wall) = start.plan.worker_walls.values().copied().min() else {
+            return Err(refused("member_wall_limit_invalid"));
+        };
+        // Counted from the publish step (demo_chain.py:896): no route outlives
+        // the members' worker wall.
+        let expires_at = (self.clocks.wall)() + wall as f64;
+        let within = super::span(B::MemberChosenWall).map_err(|e| refused(e.code))?;
+        let (commands, inbox) = mpsc::channel();
+        let worker = Worker {
+            shared: self.shared.clone(),
+            coordinator: self.coordinator.clone(),
+            members: start.members,
+            plan: start.plan,
+            network: start.network,
+            codec: start.codec,
+            stop: self.stop.clone(),
+            inbox,
+            expires_at,
+            within,
+            serve_within: Duration::from_secs(wall),
+        };
+        self.proposal = Some(proposal.clone());
+        self.shared.update(|f| {
+            f.state = PUBLISHING;
+            f.expires_at = Some(expires_at);
+        });
+        let thread = std::thread::Builder::new()
+            .name("joined-owner-work".into())
+            .spawn(move || worker.run())
+            .map_err(|_| refused("managed_workflow_failed"))?;
+        self.thread = Some(thread);
+        self.commands = Some(commands);
+        Ok(json!({"registry_origin":null}))
     }
     fn workflow_state(&mut self) -> Result<Value, StepError> {
-        Ok(Value::Null)
+        Ok(self.state())
     }
 }
 impl ActivationPort for OwnerWork {
-    fn activate(&mut self, _proposal: &Value) -> Result<(), PortError> {
-        Err(PortError::Refused(not_ported()))
+    /// `activate_serving(proposal)`: only the started proposal, only once the
+    /// stages are prepared; schedules the route (issue -> serve -> epoch).
+    fn activate(&mut self, proposal: &Value) -> Result<(), PortError> {
+        if self.proposal.as_ref() != Some(proposal) || self.shared.lock().state != AWAITING {
+            return Err(refused("activation_failed"));
+        }
+        self.send(Command::Open).map_err(|e| refused(&e.0))
     }
 }
 impl SlicesPort for OwnerWork {
+    /// No slice fetch on the joined route: every member receives its stage
+    /// shard pushed by the owner in the work phase (U1).
     fn node_slice_plans(&mut self) -> Result<Option<BTreeMap<String, Value>>, StepError> {
-        Err(not_ported().into())
+        Ok(None)
     }
     fn storage_policy(&mut self) -> Result<Option<Value>, StepError> {
-        Err(not_ported().into())
+        let policy = crate::preferences::resource_policy::read(&self.owner_root).map_err(|_| {
+            StepError::Exception {
+                class: "ResourcePolicyError".into(),
+            }
+        })?;
+        Ok(policy.and_then(|p| p.get("storage_bytes").cloned()))
     }
 }
-/// `rollover_due(ctx)` (demo_chain.py:1132-1141).
-pub fn rollover_due(_state: &RunState, _now: f64) -> Option<bool> {
-    None
+
+/// The owned worker of one started run.
+struct Worker {
+    shared: Arc<Shared>,
+    coordinator: Arc<seed::Coordinator>,
+    members: Vec<WorkMember>,
+    plan: Plan,
+    network: Network,
+    codec: Arc<dyn Codec>,
+    stop: Arc<AtomicBool>,
+    inbox: mpsc::Receiver<Command>,
+    expires_at: f64,
+    /// Member operation wait (transfer, prepare, control calls).
+    within: Duration,
+    /// The members' worker wall: how long a member may serve one route.
+    serve_within: Duration,
 }
-/// `ceiling_reached(ctx)` (demo_chain.py:1143-1164).
-pub fn ceiling_reached(_state: &RunState, _now: f64) -> CeilingProbe {
-    CeilingProbe::Unavailable
+impl Worker {
+    fn run(mut self) -> Vec<WorkMember> {
+        let mut open = None;
+        let worked = self.work(&mut open);
+        let released = match open.take() {
+            Some(epoch) => self.retire(epoch),
+            None => Ok(()),
+        };
+        let result = worked.and(released);
+        self.shared.update(|f| {
+            f.route = None;
+            f.gateway = None;
+            match result {
+                Err(r) if f.state != FAILED => {
+                    f.state = FAILED;
+                    f.error = Some(closed(&r));
+                }
+                Err(_) => {}
+                Ok(()) if f.state != FAILED => f.state = STOPPED,
+                Ok(()) => {}
+            }
+        });
+        self.members
+    }
+    fn stopped(&self) -> Result<(), Refusal> {
+        if self.stop.load(Ordering::SeqCst) {
+            return Err(refusal("managed_workflow_stopped"));
+        }
+        Ok(())
+    }
+    fn work(&mut self, open: &mut Option<Epoch>) -> Result<(), Refusal> {
+        let source = ShardSource::start(
+            self.coordinator.clone(),
+            self.plan.objects.clone(),
+            self.plan.journal.clone(),
+            self.network.clone(),
+        )?;
+        let offers = self.transfer_all(&source);
+        let released = source.close();
+        let offers = offers?;
+        released?;
+        let challenges = native::Challenges::new();
+        self.shared.set(STAGING);
+        let mut admitted = self.prepare(&challenges, &offers)?;
+        self.shared.set(AWAITING);
+        let mut number = 0;
+        while let Ok(Command::Open) = self.inbox.recv() {
+            self.stopped()?;
+            if let Some(spent) = open.take() {
+                self.retire(spent)?;
+            }
+            if admitted.is_empty() {
+                self.shared.set(STAGING);
+                admitted = self.prepare(&challenges, &offers)?;
+            }
+            self.stopped()?;
+            self.shared.set(STARTING);
+            number += 1;
+            let mut stages: Vec<EpochStage<'_>> = self
+                .members
+                .iter_mut()
+                .zip(&offers)
+                .map(|(m, offer)| EpochStage {
+                    node_id: &m.node_id,
+                    link: m.link.as_mut(),
+                    offer,
+                })
+                .collect();
+            let epoch = open_epoch(
+                &self.coordinator,
+                &self.plan.model,
+                &self.plan.deployment_id,
+                number,
+                &std::mem::take(&mut admitted),
+                &mut stages,
+                &self.network,
+                self.codec.clone(),
+                self.within,
+                Some(self.expires_at),
+            )?;
+            let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
+                "qualification":epoch.qualification().ok(),
+                "route_expires_at":epoch.host().message()["expires_at"]});
+            let handle = epoch.handle().clone();
+            *open = Some(epoch);
+            self.shared.update(|f| {
+                f.route = Some(handle);
+                f.gateway = Some(gateway);
+                f.epoch = number;
+                f.state = RUNNING;
+            });
+        }
+        Ok(())
+    }
+    fn transfer_all(&mut self, source: &ShardSource) -> Result<Vec<Value>, Refusal> {
+        let mut offers = Vec::new();
+        for (i, m) in self.members.iter_mut().enumerate() {
+            if self.stop.load(Ordering::SeqCst) {
+                return Err(refusal("managed_workflow_stopped"));
+            }
+            let done = transfer_stage(
+                source,
+                &self.coordinator,
+                m.link.as_mut(),
+                &m.registration,
+                &m.node_id,
+                &self.plan.document,
+                &format!("{}-transfer-{i}", self.plan.run_id),
+                self.within,
+            )?;
+            let row = json!({"node_id":m.node_id,"received_bytes":done.received["received_bytes"]});
+            self.shared.update(|f| f.transferred.push(row));
+            offers.push(done.offer);
+        }
+        Ok(offers)
+    }
+    /// One single-use challenge per stage; both stages load in parallel.
+    fn prepare(
+        &mut self,
+        challenges: &native::Challenges,
+        offers: &[Value],
+    ) -> Result<Vec<native::Admitted>, Refusal> {
+        let mut stages = Vec::new();
+        for (m, offer) in self.members.iter_mut().zip(offers) {
+            stages.push(Stage {
+                range: *self
+                    .plan
+                    .ranges
+                    .get(&m.node_id)
+                    .ok_or_else(|| refusal("joined_route_range_invalid"))?,
+                member: m.link.as_mut(),
+                offer,
+            });
+        }
+        super::link::prepare(
+            challenges,
+            &self.coordinator,
+            &mut stages,
+            self.plan.tokens,
+            &self.plan.forbidden_source,
+            self.within,
+        )
+    }
+    /// Retire an epoch: a settled request gets its members' signed serve
+    /// reports and worker-gone proofs; an idle one is closed first, after
+    /// which each member ends its serve (its compute released) and reports.
+    fn retire(&mut self, epoch: Epoch) -> Result<(), Refusal> {
+        let settled = epoch
+            .handle()
+            .state
+            .lock()
+            .map_err(|_| refusal("carrier_state_poisoned"))?
+            .teardown_finished;
+        let mut reports = Vec::new();
+        if settled {
+            let mut stages: Vec<SettleStage<'_>> = self
+                .members
+                .iter_mut()
+                .map(|m| SettleStage {
+                    node_id: &m.node_id,
+                    link: m.link.as_mut(),
+                })
+                .collect();
+            reports = settle_members(&epoch, &mut stages, self.serve_within)?.0;
+        }
+        let refusals = epoch.close();
+        if !settled {
+            for m in self.members.iter_mut() {
+                let report = m.link.finish(self.serve_within)?;
+                reports.push(json!({"node_id":m.node_id,"teardown":report["teardown"],
+                    "failure":report["failure"]}));
+            }
+        }
+        self.shared.update(|f| {
+            f.route = None;
+            f.gateway = None;
+            f.serve_reports = reports;
+            if let Some(code) = refusals.first() {
+                f.serve_reports.push(json!({"pump_refusal":code}));
+            }
+        });
+        Ok(())
+    }
+}
+
+/// `_smallest_worker_wall(ctx)` (demo_chain.py:1125-1130): the smallest
+/// positive integer `max_wall_seconds` of the run-wide and per-node work limits.
+pub fn smallest_worker_wall(state: &RunState) -> Option<u64> {
+    let nodes = state
+        .work_nodes
+        .as_ref()
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|n| n.values())
+        .map(|r| &r["work_limits"]);
+    state
+        .work_limits
+        .iter()
+        .chain(nodes)
+        .filter_map(|l| l["max_wall_seconds"].as_u64())
+        .filter(|w| *w > 0)
+        .min()
+}
+/// `rollover_due(ctx)` (demo_chain.py:1132-1141): due at the run's publish
+/// clock + the smallest worker wall - min(max(ceiling lead, margin), wall/2).
+/// A zero margin, no execution clock or no wall is never due.
+pub fn rollover_due(state: &RunState, now: f64) -> Option<bool> {
+    let margin = B::RolloverMargin.span(Entries::ZERO).ok()?;
+    let (Some(started), Some(wall)) = (
+        state.execution_clock_started_at,
+        smallest_worker_wall(state),
+    ) else {
+        return Some(false);
+    };
+    if margin.millis() == 0 {
+        return Some(false);
+    }
+    let lead = B::EffectiveRolloverLead
+        .wall_span(Span::from_millis(wall.checked_mul(1000)?), Entries::ZERO)
+        .ok()?;
+    Some(now >= started + wall as f64 - lead.millis() as f64 / 1000.0)
+}
+/// `ceiling_reached(ctx)` (demo_chain.py:1143-1164): `execution_ceiling_reached`
+/// once the run's clock reaches the smallest worker wall - the ceiling lead.
+pub fn ceiling_reached(state: &RunState, now: f64) -> CeilingProbe {
+    let (Some(started), Some(wall)) = (
+        state.execution_clock_started_at,
+        smallest_worker_wall(state),
+    ) else {
+        return CeilingProbe::Code(None);
+    };
+    let Ok(lead) = B::ExecutionCeilingLead.span(Entries::ZERO) else {
+        return CeilingProbe::Raised {
+            class: "BudgetUnavailable".into(),
+        };
+    };
+    if now < started + wall as f64 - lead.millis() as f64 / 1000.0 {
+        return CeilingProbe::Code(None);
+    }
+    CeilingProbe::Code(Some(EXECUTION_CEILING_CODE.into()))
 }

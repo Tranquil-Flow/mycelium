@@ -60,12 +60,40 @@ pub fn issue(
     stages: &[native::Admitted],
     now: f64,
 ) -> Result<Value> {
-    if stages.len() < 2 || owner_endpoint_id.parse::<iroh::EndpointId>().is_err() || epoch == 0 {
-        return Err(fail("joined_route_invalid"));
-    }
     let wall = budgets::BudgetId::MemberChosenWall
         .span(budgets::Entries::ZERO)
         .map_err(|_| fail("budget_unavailable"))?;
+    issue_until(
+        coordinator,
+        model,
+        deployment_id,
+        epoch,
+        owner_endpoint_id,
+        stages,
+        now,
+        now + wall.millis() as f64 / 1000.0,
+    )
+}
+/// [`issue`] with the route's expiry given by the caller: the owner's run passes
+/// its members' REAL worker wall counted from the run's publish step (PH3b S4a,
+/// demo_chain.py:896,1125-1164), so no route outlives the workers it names.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_until(
+    coordinator: &seed::Coordinator,
+    model: &Value,
+    deployment_id: &str,
+    epoch: u64,
+    owner_endpoint_id: &str,
+    stages: &[native::Admitted],
+    now: f64,
+    expires_at: f64,
+) -> Result<Value> {
+    if stages.len() < 2 || owner_endpoint_id.parse::<iroh::EndpointId>().is_err() || epoch == 0 {
+        return Err(fail("joined_route_invalid"));
+    }
+    if !expires_at.is_finite() || expires_at <= now {
+        return Err(fail("joined_route_expired"));
+    }
     let mut rows = Vec::new();
     let mut next = 0;
     let mut nodes = std::collections::BTreeSet::new();
@@ -105,7 +133,7 @@ pub fn issue(
         "deployment_epoch":epoch,"topology_version":epoch,"model_id":model["model_id"],
         "resolved_commit":model["resolved_commit"],"manifest_digest":model["manifest_digest"],
         "owner_endpoint_id":owner_endpoint_id,"stages":rows,"issued_at":now,
-        "expires_at":now + wall.millis() as f64 / 1000.0,"route_ready":false,"scope":SCOPE}),
+        "expires_at":expires_at,"route_ready":false,"scope":SCOPE}),
     )
 }
 fn checked(route: &Value, key_digest: &str, now: f64) -> Result<Value> {

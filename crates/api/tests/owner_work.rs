@@ -208,6 +208,8 @@ impl Codec for NoCodec {
     }
 }
 
+/// What the test keeps of a handed-over member: what it saw, and its expected bytes.
+type Watched = (Arc<Mutex<Seen>>, Vec<u8>);
 struct Joined {
     node_id: String,
     member: TestMember,
@@ -363,7 +365,7 @@ impl Swarm {
         }
     }
     /// Hand the members to an owner work port (in stage order).
-    fn work(&mut self, clocks: Clocks) -> (OwnerWork, Vec<(Arc<Mutex<Seen>>, Vec<u8>)>) {
+    fn work(&mut self, clocks: Clocks) -> (OwnerWork, Vec<Watched>) {
         let plan = self.plan(600);
         let mut taken = Vec::new();
         let mut members = Vec::new();
