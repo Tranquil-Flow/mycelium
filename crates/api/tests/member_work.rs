@@ -504,3 +504,125 @@ fn an_operator_driven_member_prepares_without_an_announcement() {
     }
     assert!(work.discard().is_ok());
 }
+
+// ---- Lane EP2 item 2: the member serves ONE epoch for the run, until the route's signed expiry ----
+//
+// v0.1.4: the member's native worker lives for its consented wall (worker.py:342) and serves every
+// request of the run's route (`run_registry_server`, supervisor.py:4196, :4427-4428); the member
+// does not end serving after one operation's wall. v0.2: the serve operation lasts until the
+// route's signed `expires_at` (publish + the smallest consented wall), bounded by the member's own
+// consent wall from its first prepare and its command allowance (NativeShard, per command).
+
+/// `serve` of a seed-signed v2 route naming this member, with an owner that dials the member's
+/// carrier and stays silent; the dispatcher's operation wall (`op_wall`) is shorter than the
+/// route's lifetime (`lifetime`). Returns the serve outcome and when it ended (wall clock), and the
+/// route's expiry.
+fn serve_route(member: &Joined, op_wall: Duration, lifetime: Duration) -> (Result<Value, String>, f64, f64) {
+    let mut work = Work::new(member.member_root.clone());
+    let (offer, shard) = custody(member, "run-ep2-transfer-0");
+    work.native = Some(api::joined_shard::native::NativeShard::new(shard).unwrap());
+    let document = json!({"controlled_proof":"serve-deadline"});
+    let digest = |v: &Value| protocol::canonical::digest(v).unwrap();
+    work.proof_digest = Some(digest(&document));
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = api::managed_carrier::HostClock::default();
+    let until = |id: B| clock.monotonic().checked_add(id.span(Entries::ZERO).unwrap()).unwrap();
+    let mut host = LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap();
+    let address = host.address().unwrap();
+    let owner = iroh::SecretKey::generate();
+    let row = member.current(&member.signer).unwrap();
+    let stage = |i: usize, start: u64, end: u64| {
+        json!({"stage_index":i,"placement_id":format!("{}:{start}-{end}",row["node_id"].as_str().unwrap()),
+            "member":row,"carrier_endpoint_id":address.id.to_string(),"run":"run-ep2-transfer-0",
+            "offer_digest":digest(&offer),"proof_digest":digest(&document),"range":[start,end],
+            "worker_pid":4242,"tokens":32,"memory":4_000_000_000u64})
+    };
+    let now = app_host::now();
+    let expires_at = now + lifetime.as_secs_f64();
+    let message = json!({"protocol":api::joined_shard::route::ROUTE_V2,
+        "swarm_id":member.seed.coordinator.swarm_id(),"deployment_id":"12345678-1234-5678-9234-abcdefabcdef",
+        "deployment_epoch":1,"topology_version":1,"model_id":"Qwen/Qwen3-0.6B",
+        "resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
+        "manifest_digest":digest(&json!("manifest")),"owner_endpoint_id":owner.public().to_string(),
+        "stages":[stage(0,0,14),stage(1,14,28)],"issued_at":now,"expires_at":expires_at,
+        "route_ready":false,"scope":api::joined_shard::route::SCOPE});
+    let signer = member.seed.coordinator.signer();
+    let route = json!({"protocol":"mycelium.joined_shard.signed.v1","signature":signer.sign(&message).unwrap(),
+        "verification_key":signer.public_key_record(),"message":message});
+    // The owner: dials the member's carrier twice (data + control) and stays silent.
+    let (done, hold) = std::sync::mpsc::channel::<()>();
+    let (endpoint, dial) = (address.id, address.clone());
+    let dialer = std::thread::spawn(move || {
+        let address = dial;
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let clock = api::managed_carrier::HostClock::default();
+        let until = |id: B| clock.monotonic().checked_add(id.span(Entries::ZERO).unwrap()).unwrap();
+        let mut host = LoopbackHost::bind_with_secret(&rt, &clock, until(B::RouterClose), owner).unwrap();
+        let connections: Vec<_> = (0..2)
+            .map(|_| {
+                host.connect_channel(&address, transport::Channel::Router, &clock, until(B::RouterClose))
+                    .unwrap()
+            })
+            .collect();
+        let held = hold.recv_timeout(B::WorkerStartup.span(Entries::ZERO).map(|s| Duration::from_millis(s.millis())).unwrap());
+        drop(connections);
+        host.close(&clock, until(B::RouterClose)).unwrap();
+        held.is_ok()
+    });
+    let operation = Operation {
+        request: json!({"command":"serve","operation_id":3,"route":route}),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        deadline: Instant::now() + op_wall,
+        origin: Origin::Remote,
+        id: Some(3),
+    };
+    let served = work.serve(
+        Some(member),
+        &Carrier {
+            host: &host,
+            runtime: &rt,
+            clock: &clock,
+            endpoint,
+            lan: None,
+        },
+        &member.signer,
+        &operation,
+    );
+    let ended = app_host::now();
+    done.send(()).unwrap();
+    assert!(dialer.join().unwrap(), "the owner held its connections until the serve ended");
+    host.close(&clock, until(B::RouterClose)).unwrap();
+    assert!(work.discard().is_ok());
+    (served, ended, expires_at)
+}
+
+/// Item 2: the serve operation's deadline is the route's signed expiry, not the dispatcher's
+/// one-operation wall: with an operation wall shorter than the route's lifetime the member keeps
+/// serving the epoch until the route expires (it does not end `operator_cancelled` at the
+/// operation wall).
+#[test]
+fn a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wall() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let poll = Duration::from_millis(B::OwnerPoll.span(Entries::ZERO).unwrap().millis());
+    let lifetime = Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis());
+    let (served, ended, expires_at) = serve_route(&member, poll * 2, lifetime);
+    let report = served.unwrap();
+    assert!(
+        matches!(report["teardown"].as_str(), Some("route_expired" | "owner_closed")),
+        "the epoch ends at the route's expiry: {report}"
+    );
+    assert!(
+        ended >= expires_at - poll.as_secs_f64(),
+        "served until {ended}, the route expires at {expires_at}"
+    );
+}
