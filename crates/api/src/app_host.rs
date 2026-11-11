@@ -320,9 +320,11 @@ pub struct PreparedSeed {
     coordinator: Arc<::seed::Coordinator>,
 }
 /// Whether that prepared state is there (`any(p.name != 'network.json' for p in
-/// state_root.iterdir())` without metadata, authority.py:390,410): the seed's key or its database.
+/// state_root.iterdir())` without metadata, authority.py:390,410): the seed's directory (made
+/// first, so a failure at the seed key leaves it alone), the seed's key or its database.
 fn prepared_state(root: &Path) -> bool {
     [
+        root.join("seed-rs"),
         root.join(SEED_IDENTITY_FILE),
         root.join("seed-rs").join("seed.sqlite"),
     ]
@@ -336,7 +338,16 @@ pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicE
     fs::create_dir_all(&dir).map_err(|_| failure())?;
     fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .map_err(|_| failure())?;
-    let (signer, _, _) = identity_in(root, SEED_IDENTITY_FILE)?;
+    // `load_or_create_node_signer(seed.key)`: a key that cannot be written is the identity's own
+    // refusal, `node_identity_path_invalid` (its refused `O_CREAT`, identity.py:309-322 @
+    // f4e366e9); the private store cannot tell the file's create from its write, so both answer it.
+    let (signer, _, _) = identity_in(root, SEED_IDENTITY_FILE).map_err(|error| {
+        if error.code == "authority_state_write_failed" {
+            PublicError::new(409, "node_identity_path_invalid")
+        } else {
+            error
+        }
+    })?;
     let material = ::seed::tls::ensure_local_tls_material(&dir.join("tls"))
         .map_err(|e| PublicError::new(409, e.0))?;
     let options = ::seed::Options::new(
