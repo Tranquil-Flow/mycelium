@@ -117,6 +117,12 @@ fn the_relay_client_is_pinned_at_the_path_the_relay_reads_with_v014s_bytes() {
     assert_eq!(relay.bytes, V014_RELAY_BYTES);
     // The probe pin is unchanged beside it.
     assert!(pins.iter().any(|p| p.path == RESOURCE_PROBE_PATH));
+    // Its licence notice is pinned to v0.1.4's bytes at v0.2's licence path.
+    let licence = package::relay_license_pin();
+    assert_eq!(
+        (licence.path.as_str(), licence.kind, licence.sha256.as_str()),
+        (RELAY_LICENSE, Kind::Resource, V014_RELAY_LICENSE_SHA256)
+    );
 }
 
 #[test]
