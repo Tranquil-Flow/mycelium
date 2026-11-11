@@ -275,7 +275,7 @@ impl Host {
                 .core
                 .upgrade()
                 .ok_or(OwnerError("managed_owner_closed"))?;
-            let demo = locked(&core)?.demo.clone();
+            let demo = locked(&core)?.run.demo.clone();
             if !demo.active() {
                 return Err(OwnerError("owner_run_not_active"));
             }
@@ -564,6 +564,7 @@ pub(super) fn start(
         let _lifecycle = locked(&lifecycle)?;
         let c = locked(core)?;
         if !c
+            .run
             .contributor
             .as_ref()
             .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))
@@ -590,6 +591,7 @@ pub(super) fn start(
             || !c.running
             || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
             || !c
+                .run
                 .contributor
                 .as_ref()
                 .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))
@@ -657,6 +659,7 @@ pub(super) fn start(
         || !c.running
         || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
         || !c
+            .run
             .contributor
             .as_ref()
             .is_some_and(|s| Arc::ptr_eq(&s.signer, &signer))

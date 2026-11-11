@@ -43,7 +43,7 @@ fn actual_headless_factory_and_installed_view_do_not_retain_core_after_owner_dro
         let weak = Arc::downgrade(&core);
         let mut runs = owner_runs(&core);
         let view = runs.view();
-        core.lock().unwrap().demo = view.clone();
+        core.lock().unwrap().run.demo = view.clone();
         assert!(view.status().is_none());
         if installed {
             runs.demo_action(Action::DemoStop, &Map::new(), &mut StopFacts)
@@ -83,7 +83,7 @@ fn r32_public_compile_refuses_missing_preparation_consent() {
     let core = Arc::new(Mutex::new(load_core(root.0.clone()).unwrap()));
     let published = Arc::new(PublishedStatus::new());
     let runs = Arc::new(Mutex::new(owner_runs(&core)));
-    core.lock().unwrap().demo = runs.lock().unwrap().view();
+    core.lock().unwrap().run.demo = runs.lock().unwrap().view();
     let backend = PersistentBackend::new(
         root.0.clone(),
         HeadlessHost {
@@ -223,7 +223,10 @@ fn actual_headless_ports_share_one_agent_and_keep_missing_producers_closed() {
     let root = Root::new("ports");
     let core = Arc::new(Mutex::new(load_core(root.0.clone()).unwrap()));
     let mut ports = HeadlessChainPorts::new(core.clone());
-    assert!(Arc::ptr_eq(&ports.contributor.core, &ports.reports.core));
+    assert!(Arc::ptr_eq(
+        &ports.contributor.host.0,
+        &ports.reports.host.0
+    ));
     assert!(Arc::ptr_eq(&ports.contributor.agent, &ports.reports.agent));
     assert!(ports.ports().contributor.is_some());
     assert!(ports.ports().reports.is_some());

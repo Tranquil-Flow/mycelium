@@ -16,16 +16,14 @@ use api::{
     acquisition::{self, Acquisition, HttpTransport},
     actions::{Action, Backend, Control},
     app_host::{
-        self, Authority, HostView, IDENTITY_FILE, NETWORK_FILE, SEED_IDENTITY_FILE,
-        build_pair_request, cap, hex, identity, identity_in, now, random,
+        self, Authority, HostView, IDENTITY_FILE, NETWORK_FILE, cap, hex, identity, now, random,
     },
     authority_view,
     desktop::{Desktop, Session},
-    handoff::{self, Coordinator, Entropy},
     http::serve_connection,
     installation_descriptor::{self, Failure, Member as DescriptorMember, Paths, Source},
     jobj,
-    joined_member::{self, NoSeedServer, SeedHop, observe_device, planning_caps},
+    joined_member::{self, NoSeedServer, SeedHop, observe_device},
     leave::{
         Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave, status_view,
     },
@@ -35,7 +33,8 @@ use api::{
         ChainPorts, ModelAdapter, SharedHostChain, acquisition_exception, prepared_source_from,
         unwired,
     },
-    owner_driver::{DemoRuns, DemoView, Timing, fresh_identity},
+    owner_driver::{DemoRuns, Timing, fresh_identity},
+    owner_ports::{self, OwnerPorts, RunFields, RunHost, RunView, contributor_dir, step_exception},
     pairing::SignedBackend,
     persistent::{Host, PersistentBackend, RelayState},
     preferences::{
@@ -43,10 +42,9 @@ use api::{
     },
     relay::{EndpointHost, Hooks, LocalHandler, OwnerRelay, Probe, Proxy, SeedBackend},
     resources::{self, Observation, Observer, ProbeObserver},
-    run_exchange::{Announce, RunExchange},
+    run_exchange::RunExchange,
     schema::{PublicError, Raised, STATUS_FIELDS, Snapshot},
     seed::SeedOptions,
-    slice_fetch::{SliceTransport, SnapshotRangeTransport},
     status::PublishedStatus,
     swarm::publisher::app::{AppPublisher, OwnerFacts},
     windows::PendingWindows,
@@ -66,16 +64,7 @@ mod product;
 use api::app_host::start_seed;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use budgets::{BudgetId, Entries};
-use owner_run::{
-    action::DemoFacts,
-    chain::StepError,
-    machine::OwnerRunError,
-    steps::{
-        contributor::ContributorPort,
-        exchange::{Announcement, ClockSkew, MemberRow, ReportsPort},
-        model::Reverify,
-    },
-};
+use owner_run::{chain::StepError, steps::model::Reverify};
 use protocol::identity::Identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -131,17 +120,15 @@ struct Core {
     /// `DemoApp.swarm_publisher` (`swarm_publish.py`): explicit opt-in listing custody. Its own
     /// locks; never held together with Core's (see `swarm_publish_tick`).
     swarm_publisher: Arc<AppPublisher>,
-    /// `DemoApp.owner_run` as the status and the fast-mode gate read it (never blocks on the run).
-    demo: DemoView,
-    /// `DemoApp.local_contributor`: the owner's own member (`local_contributor.py`), renewed by the loop.
-    contributor: Option<ContributorState>,
+    /// `DemoApp.owner_run` as the status and the fast-mode gate read it (never blocks on the run),
+    /// `DemoApp.local_contributor` (the owner's own member, renewed by the loop) and
+    /// `DemoApp.run_exchange` (`api::owner_ports`).
+    run: RunFields,
     // Serializes bootstrap side effects and cleanup; never held with Core on entry.
     bootstrap_lifecycle: Arc<Mutex<()>>,
     bootstrap_incarnation: Arc<()>,
     bootstrap: Option<observation::target::Worker>,
     bootstrap_failure: Option<api::bootstrap_process::CleanupFailure>,
-    /// `DemoApp.run_exchange`, bound to the seed runtime it was made for (`exchange.mailbox is mailbox`).
-    exchange: Option<Arc<RunExchange>>,
     compiler: Option<std::sync::Weak<Mutex<compiler::Compiler>>>,
     /// Actual prepared runtime and its sole retained-input custody owner.
     compiled_workflow: Option<api::compiled_handoff::CompiledHandoff>,
@@ -199,14 +186,6 @@ impl app_host::Cell for CoreCell {
         member_seed_options()
     }
 }
-/// The live side of the owner's local contributor: its node and membership session.
-struct ContributorState {
-    node: String,
-    signer: Arc<Identity>,
-    session: Option<api::member::Session>,
-    /// The session's lease while the renewal loop has the session out on the wire.
-    lease: Option<f64>,
-}
 type Shared = Arc<Mutex<Core>>;
 
 /// `self.authority.status()` (`api::joined_member`, shared with the packaged host).
@@ -217,464 +196,82 @@ fn authority_status(core: &Core) -> Json {
 fn renew_target(core: &Shared) {
     app_host::renew_member(&CoreCell(core.clone()));
 }
-// ---- the owner's own contributor (local_contributor.py, app.py:882-909 @ f4e366e9)
-
-/// `<root>/local-contributor`: the contributor's own state directory (identity, membership, consent).
-fn contributor_dir(root: &Path) -> PathBuf {
-    root.join("local-contributor")
-}
-fn session_lease(session: &Option<api::member::Session>) -> Option<f64> {
-    session
-        .as_ref()
-        .and_then(api::member::Session::lease_expires_at)
-}
-
-/// `create_local_contributor(owner_app)` behind `_start_local_contributor`: the consent gate, then the member
-/// joins its own owner's seed over the pinned local TLS - a retained membership resumes
-/// (`LocalOwnerMember.start`), a first one is paired (`pair_request` -> `approve_pairing(ttl 120)` ->
-/// `accept_pairing`). v0.1.4 does not renew at once, so the member stays `NEW` until the renewal loop's first
-/// pass (executed: `status_after_start` lifecycle `NEW`).
-fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
-    let lifecycle = core
-        .lock()
-        .map_err(|_| failure())?
-        .bootstrap_lifecycle
-        .clone();
-    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
-    let (root, runtime, record, already, target, running, has_policy) = {
-        let c = core.lock().map_err(|_| failure())?;
-        (
-            c.root.clone(),
-            c.seed.clone(),
-            c.swarm.clone(),
-            c.contributor.is_some(),
-            c.target,
-            c.running,
-            resource_policy::read(&c.root).ok().flatten(),
-        )
-    };
-    if already {
-        return Err(PublicError::new(400, "local_contributor_already_running"));
-    }
-    observation::target::admit_cleanup_free(&root).map_err(|e| PublicError::new(409, e.0))?;
-    let current = HeadlessHost {
-        core: core.clone(),
-        runs: None,
-    }
-    .membership_state()
-    .as_deref()
-        == Some("current");
-    // `local_contributor_owner_consent_required` / `local_owner_unavailable` are ValueErrors (409).
-    let (Some(policy), Some(runtime), Some(record)) = (has_policy, runtime, record) else {
-        return Err(failure());
-    };
-    if target || !running || !current {
-        return Err(failure());
-    }
-    let dir = contributor_dir(&root);
-    fs::create_dir_all(&dir).map_err(|_| failure())?;
-    fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
-        .map_err(|_| failure())?;
-    let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
-    let (signer, _, node) = identity(&dir)?;
-    let options = runtime.options();
-    let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-    let env = api::peer::JoinEnv {
-        signer: &signer,
-        clock: &now,
-        random_hex: &random_hex,
-        seed: &options,
-    };
-    let session = if api::peer::load_membership_state(&dir)?.is_some() {
-        match api::peer::start(&dir, &signer, true, &env) {
-            Ok(started) => started.session,
-            Err(failed) => return Err(failed.error),
-        }
-    } else {
-        let (seed_signer, _, _) = identity_in(&root, SEED_IDENTITY_FILE)?;
-        let coordinator = Coordinator {
-            signer: seed_signer,
-            swarm_id,
-            seed_url: runtime.seed_url.clone(),
+/// The owner-run composition over this core (`api::owner_ports`, shared with the packaged host).
+#[derive(Clone)]
+struct HeadlessRun(Shared);
+impl RunHost for HeadlessRun {
+    type Managed = observation::Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut RunView<'_, observation::Managed>) -> R) -> R {
+        let mut guard = match self.0.lock() {
+            Ok(core) => core,
+            Err(poisoned) => poisoned.into_inner(),
         };
-        let storage = policy.get("storage_bytes").cloned().unwrap_or(Value::Null);
-        let quota = json!({"storage_bytes": storage, "network_bytes_per_day": storage, "background_allowed": false});
-        let request = build_pair_request(&dir, &dir)?;
-        let handoff = handoff::approve_pairing(
-            &root,
-            true,
-            Some(&coordinator),
-            &request.to_value(),
-            &json!(120),
-            &quota,
-            now(),
-            &Entropy::os,
-        )?;
-        match api::peer::accept_handoff(&dir, true, &handoff.to_value(), &env) {
-            Ok(accepted) => accepted.session,
-            Err(error) => return Err(error),
-        }
-    };
-    if session.is_none() {
-        return Err(failure());
+        let Core {
+            authority,
+            run,
+            closed,
+            left,
+            relay,
+            ..
+        } = &mut *guard;
+        f(&mut RunView {
+            relay_absent: matches!(relay.state(), RelayState::Absent),
+            authority,
+            run,
+            closed: *closed,
+            left: *left,
+        })
     }
-    let lease = session_lease(&session);
-    {
-        let mut c = core.lock().map_err(|_| failure())?;
-        c.contributor = Some(ContributorState {
-            node: node.clone(),
-            signer: Arc::new(signer),
-            session,
-            lease,
-        });
-    }
-    Ok(jobj! {
-        "created" => true, "physical_hosts" => 1u64, "node_id" => node,
-        "membership_state" => "current", "route_ready" => false,
-    })
-}
-
-/// One pass of the contributor's half of `DemoApp._renew_loop` (`contributor.renew()`).
-fn renew_contributor(core: &Shared) {
-    let (root, runtime, session) = {
-        let Ok(mut c) = core.lock() else { return };
-        if c.closed || !c.running || c.left || c.target {
-            return;
-        }
-        let (Some(runtime), Some(state)) = (c.seed.clone(), c.contributor.as_mut()) else {
-            return;
-        };
-        let Some(session) = state.session.take() else {
-            return;
-        };
-        (c.root.clone(), runtime, session)
-    };
-    let mut session = session;
-    let dir = contributor_dir(&root);
-    if let Ok((signer, _, _)) = identity(&dir) {
-        let options = runtime.options();
-        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-        let env = api::peer::JoinEnv {
-            signer: &signer,
-            clock: &now,
-            random_hex: &random_hex,
-            seed: &options,
-        };
-        if let Err(error) = api::peer::renew(&dir, true, Some(&mut session), &env) {
-            eprintln!("contributor renew: {}", error.code);
+    fn bootstrap_lifecycle(&self) -> Arc<Mutex<()>> {
+        match self.0.lock() {
+            Ok(core) => core.bootstrap_lifecycle.clone(),
+            Err(poisoned) => poisoned.into_inner().bootstrap_lifecycle.clone(),
         }
     }
-    if let Ok(mut c) = core.lock()
-        && let Some(state) = c.contributor.as_mut()
-        && state.session.is_none()
-    {
-        state.lease = session.lease_expires_at();
-        state.session = Some(session);
+    fn membership_current(&self) -> bool {
+        app_host::membership_state(&CoreCell(self.0.clone())).as_deref() == Some("current")
     }
-}
-
-/// `app._stop_local_contributor()`: the membership stays retained, the live session ends.
-fn stop_local_contributor(core: &Shared) -> Result<(), PublicError> {
-    // target::close puts refused cleanup owners back. Retain their contributor
-    // too: reporting stopped or permitting a replacement would erase the debt.
-    let lifecycle = core
-        .lock()
-        .map_err(|_| failure())?
-        .bootstrap_lifecycle
-        .clone();
-    let _lifecycle = lifecycle.lock().map_err(|_| failure())?;
-    observation::target::close_locked(core).map_err(|e| PublicError::new(409, e.0))?;
-    core.lock().map_err(|_| failure())?.contributor = None;
-    Ok(())
-}
-
-// ---- the run exchange (demo_app.ensure_exchange, app.py:1245-1250)
-
-/// `ensure_exchange(app)`: an owner with a running seed has one exchange per seed runtime (v0.1.4 keys it on the
-/// control mailbox), announcing the run model while idle. The idle refresh is prepared outside any lock and
-/// committed under the run's own lock so it can never overwrite a run that started in between.
-fn ensure_exchange(core: &Shared) -> Option<Arc<RunExchange>> {
-    let (exchange, wanted, demo) = {
-        let mut c = core.lock().ok()?;
-        if c.target || c.swarm.is_none() || !c.running {
-            return None;
-        }
-        // The seed runtime owns the exact exchange mounted on its server. Never key this on an
-        // allocation address: a closed runtime's address can be reused by its replacement.
-        let exchange = c.seed.as_ref()?.exchange.clone();
-        c.exchange = Some(exchange.clone());
-        let document =
-            run_model::document_json(&c.root, std::env::var(run_model::ENV).ok().as_deref(), None);
-        (exchange, document.ok(), c.demo.clone())
-    };
-    let phase = exchange.announcement(None).get("phase").cloned();
-    let idle = matches!(&phase, Some(Json::Str(p)) if p == "idle" || p == "stopped");
-    if idle
-        && !demo.active()
-        && let Some(document) = wanted
-    {
-        let model = json!({
-            "choice": document.get("selected").map_or(Value::Null, Json::to_value),
-            "model_id": document.get("model_id").map_or(Value::Null, Json::to_value),
-            "resolved_commit": document.get("resolved_commit").map_or(Value::Null, Json::to_value),
-        });
-        if let Ok(prepared) = exchange.prepare_announcement(Announce {
-            phase: "idle".into(),
-            model: Some(model),
-            ..Announce::default()
-        }) {
-            demo.while_inactive(|| exchange.commit_announcement(&prepared, true));
-        }
+    fn admit_contributor(&self, root: &Path) -> Result<(), PublicError> {
+        observation::target::admit_cleanup_free(root).map_err(|e| PublicError::new(409, e.0))
     }
-    Some(exchange)
-}
-
-#[allow(unsafe_code)] // geteuid(2) has no preconditions
-fn effective_uid() -> u32 {
-    unsafe { libc::geteuid() }
-}
-/// `installed_sidecar()` (`native_runtime.py:8-22`): the native sidecar beside the executable, a regular file
-/// this user owns, executable and not writable by others. `MYCELIUM_L10_TEST_SIDECAR` is the test launcher's seam.
-fn installed_sidecar() -> Result<PathBuf, Failure> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let invalid = || Failure::new("ValueError", "native_sidecar_installation_invalid");
-    let candidate = match std::env::var("MYCELIUM_L10_TEST_SIDECAR") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => std::env::current_exe()
-            .map_err(|_| invalid())?
-            .parent()
-            .ok_or_else(invalid)?
-            .join("native")
-            .join("mycelium-iroh-sidecar"),
-    };
-    let path = fs::canonicalize(candidate).map_err(|_| invalid())?;
-    let meta = fs::symlink_metadata(&path).map_err(|_| invalid())?;
-    let mode = meta.permissions().mode();
-    if !meta.is_file() || meta.uid() != effective_uid() || mode & 0o100 == 0 || mode & 0o022 != 0 {
-        return Err(invalid());
+    fn close_contributor(&self) -> Result<(), PublicError> {
+        observation::target::close_locked(&self.0).map_err(|e| PublicError::new(409, e.0))
     }
-    Ok(path)
-}
-
-/// The local agent's collaborators over the process core.
-struct AgentView<'a> {
-    core: &'a Shared,
-    exchange: Arc<RunExchange>,
-    node: String,
-    /// The snapshot `prepared_model` just verified, for the `describe` of the same descriptor.
-    prepared: Option<(PathBuf, acquisition::PreparedFacts)>,
-}
-impl AgentView<'_> {
-    fn acquisition(&self) -> Result<Acquisition, Failure> {
-        self.core
-            .lock()
-            .ok()
-            .and_then(|c| c.acquisition.clone())
-            .ok_or_else(|| Failure::new("AttributeError", "demo_step_failed"))
+    fn resource_check(&self) -> Option<&'static str> {
+        resource_check(&self.0)
     }
-    /// `_prepare_slice_root(run_id)`: this Mac's empty per-run slice root inside its artifact cache.
-    fn prepare_slice_root(&self, run_id: &str) -> Result<String, Failure> {
-        use std::os::unix::fs::DirBuilderExt;
-        let base = self.acquisition()?.state_root().join("slices");
-        let invalid = || Failure::new("ValueError", "slice_destination_invalid");
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&base)
-            .map_err(|_| invalid())?;
-        for entry in fs::read_dir(&base).map_err(|_| invalid())?.flatten() {
-            let kind = entry.file_type();
-            if entry.file_name() != run_id && kind.is_ok_and(|t| t.is_dir() && !t.is_symlink()) {
-                fs::remove_dir_all(entry.path()).unwrap_or_default();
-            }
-        }
-        let root = base.join(run_id);
-        if !root.exists() {
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .create(&root)
-                .map_err(|_| invalid())?;
-        }
-        let meta = fs::symlink_metadata(&root).map_err(|_| invalid())?;
-        if meta.file_type().is_symlink()
-            || fs::canonicalize(&root).ok().as_deref() != Some(root.as_path())
-        {
-            return Err(invalid());
-        }
-        Ok(root.to_string_lossy().into_owned())
+    fn acquisition(&self) -> Option<Acquisition> {
+        self.0.lock().ok().and_then(|c| c.acquisition.clone())
     }
-}
-impl AgentHost for AgentView<'_> {
-    fn bootstrap(&mut self, run: &str, deployment: &str, offer: &str) -> Result<(), Failure> {
-        observation::bootstrap(self.core, &self.node, run, deployment, offer)
+    fn bootstrap(
+        &self,
+        node: &str,
+        run: &str,
+        deployment: &str,
+        offer: &str,
+    ) -> Result<(), Failure> {
+        observation::bootstrap(&self.0, node, run, deployment, offer)
             .map_err(|error| Failure::new("RuntimeError", error.0))
     }
-    fn announcement(&mut self) -> Result<Option<Value>, api::local_agent::ExchangeUnavailable> {
-        Ok(Some(
-            self.exchange.announcement(Some(&self.node)).to_value(),
-        ))
+    fn sidecar(&self) -> Result<PathBuf, Failure> {
+        installed_sidecar()
     }
-    fn member(&mut self) -> Option<String> {
-        self.core
-            .lock()
-            .ok()
-            .and_then(|c| c.contributor.as_ref().map(|s| s.node.clone()))
-    }
-    fn run_active(&mut self) -> bool {
-        let demo = self.core.lock().ok().map(|c| c.demo.clone());
-        demo.is_some_and(|demo| demo.active())
-    }
-    fn resource_check(&mut self) -> Option<String> {
-        resource_check(self.core).map(str::to_owned)
-    }
-    fn prepared_model(&mut self) -> Result<(String, String), Failure> {
-        let acquisition = self.acquisition()?;
-        let prepared = acquisition
-            .prepared_source()
-            .map_err(|e| Failure::new("AcquisitionError", e.code()))?;
-        self.prepared = Some(prepared);
-        let model = acquisition.model();
-        Ok((model.model_id.to_owned(), model.resolved_commit.to_owned()))
-    }
-    fn describe(
-        &mut self,
-        run_id: &str,
-        deployment_id: &str,
-        slice_manifest_digest: Option<&str>,
-    ) -> Result<Value, Failure> {
-        let (root, swarm, lease) = {
-            let c = self
-                .core
-                .lock()
-                .map_err(|_| Failure::new("RuntimeError", "demo_step_failed"))?;
-            let swarm = c
-                .swarm
-                .as_ref()
-                .and_then(|s| s["swarm_id"].as_str().map(str::to_owned));
-            (
-                c.root.clone(),
-                swarm,
-                c.contributor.as_ref().and_then(|s| s.lease),
-            )
-        };
-        let dir = contributor_dir(&root);
-        let state = api::peer::load_membership_state(&dir)
-            .ok()
-            .flatten()
-            .ok_or_else(|| Failure::new("RemoteMacMemberError", "peer_member_not_current"))?;
-        // `staging_control_snapshot`: a stopped or expired member cannot describe itself.
-        if lease.is_none_or(|lease| now() >= lease) {
-            return Err(Failure::new(
-                "RemoteMacMemberError",
-                "peer_member_not_current",
-            ));
-        }
-        let (signer, endpoint, node) =
-            identity(&dir).map_err(|_| Failure::new("ValueError", "endpoint_identity_invalid"))?;
-        let member = DescriptorMember {
-            node_id: node,
-            endpoint_id: endpoint,
-            verification_key_digest: signer.verification_key_digest(),
-            generation: state
-                .get("membership_generation")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            incarnation: state
-                .get("incarnation")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-        };
-        let source = match slice_manifest_digest {
-            Some(digest) => Source::Slice {
-                source_root: self.prepare_slice_root(run_id)?,
-                manifest_digest: digest.to_owned(),
-            },
-            None => {
-                let (root, facts) = match self.prepared.take() {
-                    Some(prepared) => prepared,
-                    None => self
-                        .acquisition()?
-                        .prepared_source()
-                        .map_err(|e| Failure::new("AcquisitionError", e.code()))?,
-                };
-                Source::Whole {
-                    source_root: root.to_string_lossy().into_owned(),
-                    manifest_digest: facts.manifest_digest,
-                }
-            }
-        };
-        let paths = Paths {
-            state_root: dir.to_string_lossy().into_owned(),
-            endpoint_secret_file: dir.join(IDENTITY_FILE).to_string_lossy().into_owned(),
-            python_executable: std::env::current_exe()
-                .ok()
-                .and_then(|p| fs::canonicalize(p).ok())
-                .map_or_else(String::new, |p| p.to_string_lossy().into_owned()),
-            sidecar_binary: installed_sidecar()?.to_string_lossy().into_owned(),
-        };
-        installation_descriptor::installation_descriptor(
-            &signer,
-            &member,
-            swarm.as_deref().unwrap_or_default(),
-            run_id,
-            deployment_id,
-            true,
-            &source,
-            &paths,
-            now(),
-        )
-    }
-    /// `OwnerRunConsent.member_caps`: `planning_caps(root)` (standing caps intersected with the policy).
-    fn member_caps(&mut self) -> Result<Value, Failure> {
-        let root = self
-            .core
-            .lock()
-            .map_err(|_| Failure::new("RuntimeError", "demo_step_failed"))?
-            .root
-            .clone();
-        Ok(planning_caps(&root).unwrap_or_else(|| json!({})))
-    }
-    /// `OwnerRunConsent.storage_cap`: `int(read_resource_policy(root)['storage_bytes'])`.
-    fn storage_cap(&mut self) -> Result<u64, Failure> {
-        let root = self
-            .core
-            .lock()
-            .map_err(|_| Failure::new("RuntimeError", "demo_step_failed"))?
-            .root
-            .clone();
-        resource_policy::read(&root)
-            .ok()
-            .flatten()
-            .and_then(|p| p.get("storage_bytes").and_then(Value::as_u64))
-            .ok_or_else(|| Failure::new("KeyError", "demo_step_failed"))
-    }
-    /// `slice_root(run_id)`: the per-run root `describe` prepared in this Mac's artifact cache.
-    fn slice_root(&mut self, run_id: &str) -> Result<PathBuf, Failure> {
-        Ok(self.acquisition()?.state_root().join("slices").join(run_id))
-    }
-    /// `SnapshotRangeTransport(source.source_root, ...)` over this Mac's own verified snapshot. The
-    /// compiled-bundle clone shortcut is not wired (the Rust compiler keeps no transfer bundle there),
-    /// so the owner's slice is read by range from the snapshot and verified like any other.
-    fn slice_transport(&mut self, _announcement: &Value) -> Option<Box<dyn SliceTransport>> {
-        let acquisition = self.acquisition().ok()?;
-        let (root, _) = acquisition.prepared_source().ok()?;
-        let model = acquisition.model();
-        Some(Box::new(SnapshotRangeTransport::new(
-            root,
-            model.model_id,
-            model.resolved_commit,
-            None,
-        )))
-    }
-    fn sink(&mut self, report: &Value) -> Result<(), api::local_agent::ExchangeUnavailable> {
-        self.exchange
-            .submit_local(&self.node, report)
-            .map_err(|_| api::local_agent::ExchangeUnavailable)
-    }
-    fn clock(&mut self) -> f64 {
-        now()
-    }
+}
+/// `installed_sidecar()` (`api::owner_ports`); `MYCELIUM_L10_TEST_SIDECAR` is the test launcher's seam.
+fn installed_sidecar() -> Result<PathBuf, Failure> {
+    owner_ports::installed_sidecar(std::env::var_os("MYCELIUM_L10_TEST_SIDECAR").map(PathBuf::from))
+}
+fn start_local_contributor(core: &Shared) -> Result<Json, PublicError> {
+    owner_ports::start_local_contributor(&HeadlessRun(core.clone()))
+}
+fn renew_contributor(core: &Shared) {
+    owner_ports::renew_contributor(&HeadlessRun(core.clone()));
+}
+fn stop_local_contributor(core: &Shared) -> Result<(), PublicError> {
+    owner_ports::stop_local_contributor(&HeadlessRun(core.clone()))
+}
+fn ensure_exchange(core: &Shared) -> Option<Arc<RunExchange>> {
+    owner_ports::ensure_exchange(&HeadlessRun(core.clone()))
 }
 
 /// `DemoApp._public_route` for the pairing window, the link probe and the member-report inbox
@@ -727,7 +324,7 @@ impl HeadlessLeave {
             .map_err(|_| "member_leave_state_unavailable".to_owned())?;
         if core.bootstrap.is_some()
             || core.bootstrap_failure.is_some()
-            || core.contributor.is_some()
+            || core.run.contributor.is_some()
             || core.compiled_workflow.is_some()
         {
             return Ok(false);
@@ -875,13 +472,13 @@ impl Host for HeadlessHost {
         String::from_utf8(out.stdout).ok()?.trim().parse().ok()
     }
     fn run_active(&self) -> bool {
-        self.with(|c| c.demo.clone()).active()
+        self.with(|c| c.run.demo.clone()).active()
     }
     fn acquisition_active(&self) -> bool {
         self.with(|c| c.acquisition_active)
     }
     fn owner_run_active(&self) -> bool {
-        self.with(|c| c.demo.clone()).active()
+        self.with(|c| c.run.demo.clone()).active()
     }
     fn demo_action(
         &mut self,
@@ -926,7 +523,7 @@ impl Host for HeadlessHost {
         app_host::stop_authority(&self.cell());
     }
     fn status_document(&self) -> Json {
-        let demo = self.with(|c| c.demo.clone()).status();
+        let demo = self.with(|c| c.run.demo.clone()).status();
         self.with(|c| status_json(c, demo))
     }
     fn adopt_target_role(&mut self) -> Result<(), PublicError> {
@@ -1187,7 +784,7 @@ fn start_relay(core: &Shared, body: &Map<String, Value>) -> Result<Json, PublicE
     // swarm listing is enabled (its listing points at this relay). Both are read from their own
     // short-held cells (the run view installed at launch, the publisher's status snapshot), never
     // the core lock, so a long action holding the core cannot starve the relay's renewal.
-    let (demo, publisher) = endpoint.with(|c| (c.demo.clone(), c.swarm_publisher.clone()));
+    let (demo, publisher) = endpoint.with(|c| (c.run.demo.clone(), c.swarm_publisher.clone()));
     let probe: Probe = Arc::new(move || Ok(demo.active() || publisher.listing_enabled()));
     let root = endpoint.with(|c| c.root.clone());
     let mut relay =
@@ -1203,65 +800,18 @@ fn relay_hooks() -> Hooks {
     }))
 }
 
-/// What `demo_app.action` asks the app (`demo_app.py:109-133`), read once under the core lock.
-struct HostFacts {
-    owner: bool,
-    exchange: bool,
-    joined_without_relay: u64,
-}
-impl DemoFacts for HostFacts {
-    fn owner(&self) -> bool {
-        self.owner
-    }
-    fn ensure_exchange(&mut self) -> bool {
-        self.exchange
-    }
-    fn members_joined_without_relay(&self) -> Option<u64> {
-        Some(self.joined_without_relay)
-    }
-}
-/// `app.installation_role`, `ensure_exchange(app) is not None` (an owner authority with its control mailbox:
-/// the swarm exists and its seed coordinator runs) and `members_joined_without_relay()` (members other than
-/// the owner while no relay object exists; `app.py:836-842`).
-fn demo_facts(core: &Shared) -> HostFacts {
-    ensure_exchange(core);
-    let c = match core.lock() {
-        Ok(c) => c,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let owner = !c.target;
-    let exchange = owner && c.swarm.is_some() && c.running && c.seed.is_some();
-    let joined_without_relay = match (&c.seed, c.relay.state()) {
-        (Some(seed), RelayState::Absent) if owner && c.swarm.is_some() => seed
-            .coordinator
-            .members(None)
-            .map_or(0, |m| m.len().saturating_sub(1) as u64),
-        _ => 0,
-    };
-    HostFacts {
-        owner,
-        exchange,
-        joined_without_relay,
-    }
+fn demo_facts(core: &Shared) -> owner_ports::HostFacts {
+    owner_ports::demo_facts(&HeadlessRun(core.clone()))
 }
 
 /// The owner run's view of this process (`AppDemoChain` reads these from `app`): see `api::owner_chain`.
 #[derive(Clone)]
 struct HeadlessPorts {
     core: Shared,
-    /// The in-process agent that answers the owner's announcements as this Mac's member (`chain.agent`).
-    agent: Arc<Mutex<Option<LocalAgent>>>,
 }
 impl HeadlessPorts {
     fn new(core: Shared) -> Self {
-        Self {
-            core,
-            agent: Arc::new(Mutex::new(None)),
-        }
-    }
-    fn exchange(&self) -> Result<Arc<RunExchange>, StepError> {
-        ensure_exchange(&self.core)
-            .ok_or_else(|| OwnerRunError::new("owner_exchange_unavailable").into())
+        Self { core }
     }
     fn with<R>(&self, f: impl FnOnce(&mut Core) -> R) -> R {
         match self.core.lock() {
@@ -1275,8 +825,8 @@ impl HeadlessPorts {
 /// local agent. No callback captures a Host, Runner, or these temporary borrows.
 struct HeadlessChainPorts {
     model: ModelAdapter<HeadlessPorts>,
-    contributor: HeadlessPorts,
-    reports: HeadlessPorts,
+    contributor: OwnerPorts<HeadlessRun>,
+    reports: OwnerPorts<HeadlessRun>,
     observation: compiler::Observation,
     compiler: compiler::SharedCompiler,
 }
@@ -1292,9 +842,9 @@ impl HeadlessChainPorts {
         core.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .compiler = Some(Arc::downgrade(&compiler));
-        let ports = HeadlessPorts::new(core);
+        let ports = OwnerPorts::new(HeadlessRun(core.clone()));
         Self {
-            model: ModelAdapter::new(ports.clone()),
+            model: ModelAdapter::new(HeadlessPorts::new(core)),
             contributor: ports.clone(),
             reports: ports,
             observation,
@@ -1335,17 +885,6 @@ impl owner_run::owner_chain::ChainPorts for HeadlessChainPorts {
     // Source enums, receipt records and manifest digests cannot substitute.
 }
 
-/// A failure inside a step keeps only its class (`owner_run.py:420-422`): a 400 is a `DemoError`.
-fn step_exception(error: PublicError) -> StepError {
-    let class = if error.status == 400 {
-        "DemoError"
-    } else {
-        error.raised.identity().0
-    };
-    StepError::Exception {
-        class: class.to_owned(),
-    }
-}
 impl ChainPorts for HeadlessPorts {
     fn owner_and_running(&self) -> bool {
         self.with(|c| !c.target && c.running)
@@ -1436,141 +975,7 @@ impl ChainPorts for HeadlessPorts {
     fn check_rollover_members(&self, _: &Value) -> Result<(), StepError> {
         Err(unwired("model", "NP-L10-rollover", "SE-L10-ROLLOVER"))
     }
-    fn contributor(&mut self) -> Option<&mut dyn ContributorPort> {
-        Some(self)
-    }
-    fn reports(&mut self) -> Option<&mut dyn ReportsPort> {
-        Some(self)
-    }
 }
-impl ContributorPort for HeadlessPorts {
-    /// `with app.guard: if app.local_contributor is None: app._start_local_contributor()`.
-    fn ensure_local_contributor(&mut self) -> Result<String, StepError> {
-        if let Some(node) = self.with(|c| c.contributor.as_ref().map(|s| s.node.clone())) {
-            return Ok(node);
-        }
-        start_local_contributor(&self.core).map_err(step_exception)?;
-        self.with(|c| c.contributor.as_ref().map(|s| s.node.clone()))
-            .ok_or_else(|| StepError::Exception {
-                class: "AttributeError".to_owned(),
-            })
-    }
-    /// `getattr(app, 'run_exchange', None) is not None`.
-    fn exchange_available(&self) -> bool {
-        self.with(|c| c.exchange.is_some())
-    }
-    fn attach_agent(&mut self, _local: &str) -> Result<(), StepError> {
-        *self
-            .agent
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(LocalAgent::new());
-        Ok(())
-    }
-}
-impl ReportsPort for HeadlessPorts {
-    fn forget_reports(&mut self) {
-        if let Ok(exchange) = self.exchange() {
-            exchange.forget_reports();
-        }
-    }
-    fn announce(&mut self, announcement: &Announcement) -> Result<(), StepError> {
-        let exchange = self.exchange()?;
-        let per_node: Map<String, Value> =
-            announcement.per_node.iter().flatten().cloned().collect();
-        exchange
-            .announce(Announce {
-                phase: announcement.phase.clone(),
-                run_id: Some(announcement.run_id.clone()),
-                deployment_id: Some(announcement.deployment_id.clone()),
-                model: Some(json!({
-                    "choice": api::model_catalog::find(&announcement.model_id, &announcement.resolved_commit)
-                        .and_then(api::model_catalog::choice_for_model),
-                    "model_id": announcement.model_id,
-                    "resolved_commit": announcement.resolved_commit,
-                })),
-                slice_mode: announcement.slice_mode,
-                manifest_digest: Some(announcement.manifest_digest.clone()),
-                work_limits: None,
-                per_node,
-            })
-            .map(|_| ())
-            .map_err(|_| StepError::Exception {
-                class: "ValueError".to_owned(),
-            })
-    }
-    fn reports(&mut self) -> Result<BTreeMap<String, Value>, StepError> {
-        let reports = self.exchange()?.reports();
-        Ok(reports
-            .as_object()
-            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default())
-    }
-    fn members(&mut self) -> Vec<MemberRow> {
-        let Some(seed) = self.with(|c| c.seed.clone()) else {
-            return Vec::new();
-        };
-        seed.coordinator
-            .members(None)
-            .unwrap_or_default()
-            .iter()
-            .map(|m| MemberRow {
-                node_id: m["node_id"].as_str().unwrap_or_default().to_owned(),
-                lifecycle_state: m["lifecycle_state"].as_str().map(str::to_owned),
-                lease_expires_at: m["lease_expires_at"].as_f64(),
-            })
-            .collect()
-    }
-    fn own_node_id(&mut self) -> Option<String> {
-        self.with(|c| c.owner_session.as_ref().map(|s| s.node_id().to_owned()))
-    }
-    fn member_identity(&mut self, node: &str) -> Value {
-        let member = self
-            .with(|c| c.seed.clone())
-            .and_then(|seed| seed.coordinator.member(node).ok())
-            .unwrap_or(Value::Null);
-        json!([
-            member["generation"],
-            member["incarnation"],
-            member["verification_key_digest"],
-            member["endpoint_id"]
-        ])
-    }
-    /// Only authenticated signed exchange observations feed these source-median diagnostics.
-    fn clock_skew(&mut self, nodes: &[String]) -> Result<Option<ClockSkew>, StepError> {
-        let offsets = self.with(|c| c.seed.as_ref().map(|seed| seed.clock_offsets.clone()));
-        Ok(offsets.and_then(|offsets| {
-            let peers = offsets.exceeded(Some(nodes));
-            (!peers.is_empty()).then(|| ClockSkew {
-                exceeded: peers,
-                tolerance: offsets.tolerance(),
-            })
-        }))
-    }
-    fn tick_local(&mut self) {
-        let agent = self
-            .agent
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        let (Some(mut agent), Ok(exchange)) = (agent, self.exchange()) else {
-            return;
-        };
-        if let Some(node) = self.with(|c| c.contributor.as_ref().map(|s| s.node.clone())) {
-            let mut view = AgentView {
-                core: &self.core,
-                exchange,
-                node,
-                prepared: None,
-            };
-            agent.tick(&mut view);
-        }
-        *self
-            .agent
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(agent);
-    }
-}
-
 /// Everything the host above does not serve. It publishes the status after each action.
 struct Rest {
     core: Shared,
@@ -1749,7 +1154,7 @@ fn swarm_publish_tick(core: &Shared) {
         (
             c.swarm_publisher.clone(),
             !c.target,
-            c.demo.clone(),
+            c.run.demo.clone(),
             c.acquisition.as_ref().map(|a| a.model().model_id),
             c.relay.origin(),
         )
@@ -1777,7 +1182,7 @@ fn publish(core: &Shared, published: &PublishedStatus) -> Result<(), PublicError
             .lock()
             .map_err(|_| PublicError::new(503, "status_unavailable"))?;
         core.revision += 1;
-        (core.demo.clone(), core.revision)
+        (core.run.demo.clone(), core.revision)
     };
     let demo = demo.status();
     let json = {
@@ -2002,13 +1407,11 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
         offline: offline_requested(),
         revision: 0,
         pending: PendingWindows::default(),
-        demo: DemoView::default(),
-        contributor: None,
+        run: RunFields::default(),
         bootstrap_lifecycle: Arc::new(Mutex::new(())),
         bootstrap_incarnation: Arc::new(()),
         bootstrap: None,
         bootstrap_failure: None,
-        exchange: None,
         compiler: None,
         compiled_workflow: None,
         compiled_receipt: None,
@@ -2130,7 +1533,7 @@ fn run() -> Result<(), String> {
     }
     let runs = {
         let chain = owner_runs(&core);
-        core.lock().map_err(|_| "core_poisoned")?.demo = chain.view();
+        core.lock().map_err(|_| "core_poisoned")?.run.demo = chain.view();
         Arc::new(Mutex::new(chain))
     };
     let persistent = PersistentBackend::new(

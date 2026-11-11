@@ -42,6 +42,7 @@ pub mod native_worker_link;
 pub mod observation_host;
 pub mod owner_chain;
 pub mod owner_driver;
+pub mod owner_ports;
 pub mod pairing;
 pub mod pairing_windows;
 pub mod peer;

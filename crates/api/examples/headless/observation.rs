@@ -640,6 +640,7 @@ pub(super) fn bootstrap(
     let signer = {
         let core = locked(core)?;
         let local = core
+            .run
             .contributor
             .as_ref()
             .ok_or(OwnerError("managed_control_member_stale"))?;
@@ -678,7 +679,7 @@ pub(super) fn bootstrap(
     }
     let authorize = || -> OResult<()> {
         host.pin()?;
-        let demo = locked(core)?.demo.clone();
+        let demo = locked(core)?.run.demo.clone();
         if !demo.active() {
             return Err(OwnerError("owner_run_not_active"));
         }

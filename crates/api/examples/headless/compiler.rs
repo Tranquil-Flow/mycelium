@@ -160,7 +160,7 @@ impl Compiler {
             (
                 c.root.clone(),
                 c.seed.clone(),
-                c.contributor.as_ref().map(|m| m.node.clone()),
+                c.run.contributor.as_ref().map(|m| m.node.clone()),
             )
         };
         let facts = lock(&self.observation.0)?
@@ -661,7 +661,7 @@ pub(super) fn public_compile(
                 .as_ref()
                 .and_then(Weak::upgrade)
                 .ok_or_else(refusal)?,
-            c.contributor.as_ref().map(|v| v.node.clone()),
+            c.run.contributor.as_ref().map(|v| v.node.clone()),
         )
     };
     let mut compiler = lock(&compiler).map_err(|_| refusal())?;
