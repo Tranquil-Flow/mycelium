@@ -22,7 +22,10 @@ class Copy(HTMLParser):
         self.parts=[]
         self.skip=0
     def handle_starttag(self, tag, attrs):
-        if tag == 'button' and 'data-glow-choice' in dict(attrs): self.skip += 1
+        # Independent controls: hue (Green/Blue) and theme (Dark/Light) labels
+        # are UI state, not owner copy, so they stay out of the pin.
+        if tag == 'button' and {'data-glow-choice', 'data-theme-choice'} & set(dict(attrs)):
+            self.skip += 1
     def handle_endtag(self, tag):
         if tag == 'button' and self.skip: self.skip -= 1
     def handle_data(self, data):

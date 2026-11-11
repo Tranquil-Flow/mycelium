@@ -516,35 +516,35 @@ table.vision-table td:last-child {
   stroke: var(--line);
   stroke-width: 1px;
 }
-/* On light paper the glow becomes ink: thinner, quieter halos and mats. */
-@media (prefers-color-scheme: light) {
-  .fx-halo {
-    opacity: 0.16;
-  }
-  .fx-mat {
-    opacity: 0.14;
-  }
-  .fx-strand {
-    opacity: 0.7;
-  }
-  .fx-hair {
-    opacity: 0.45;
-  }
-  .fx-core {
-    opacity: 0.85;
-  }
-  .fx-p1,
-  .fx-p2,
-  .fx-p3 {
-    stroke: var(--glow);
-  }
-  .fx-p1 {
-    fill-opacity: 0.2;
-  }
-  .fx-p2 {
-    fill-opacity: 0.45;
-  }
-  .fx-p3 {
-    fill-opacity: 0.75;
-  }
+/* On light paper the glow becomes ink: thinner, quieter halos and mats.
+   Keyed off data-theme (set before first paint by theme.js) instead of a
+   media query, so a manual theme choice restyles the art too. */
+:root[data-theme="light"] .fx-halo {
+  opacity: 0.16;
+}
+:root[data-theme="light"] .fx-mat {
+  opacity: 0.14;
+}
+:root[data-theme="light"] .fx-strand {
+  opacity: 0.7;
+}
+:root[data-theme="light"] .fx-hair {
+  opacity: 0.45;
+}
+:root[data-theme="light"] .fx-core {
+  opacity: 0.85;
+}
+:root[data-theme="light"] .fx-p1,
+:root[data-theme="light"] .fx-p2,
+:root[data-theme="light"] .fx-p3 {
+  stroke: var(--glow);
+}
+:root[data-theme="light"] .fx-p1 {
+  fill-opacity: 0.2;
+}
+:root[data-theme="light"] .fx-p2 {
+  fill-opacity: 0.45;
+}
+:root[data-theme="light"] .fx-p3 {
+  fill-opacity: 0.75;
 }

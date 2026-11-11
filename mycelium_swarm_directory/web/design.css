@@ -34,37 +34,32 @@
   --glow: #06a8f0;
   --core: #b4f5ff;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #e9eddf;
-    --bg-2: #f6f7ed;
-    --card: #f6f7ed;
-    --card-2: #dce3d0;
-    --ink: #1b2c18;
-    --muted: #405638;
-    --accent: #245c22;
-    --accent-ink: #fff;
-    --line: #adbaa0;
-    --line-2: #6b7e60;
-    --strand: #245c22;
-    --glow: #245c22;
-    --core: #163d16;
-  }
-  :root[data-glow="blue"] {
-    --bg: #eae9e2;
-    --bg-2: #f7f5ee;
-    --card: #f7f5ee;
-    --card-2: #dfdfd7;
-    --ink: #202d3b;
-    --muted: #405267;
-    --accent: #24568c;
-    --accent-ink: #fff;
-    --line: #aab4bf;
-    --line-2: #758394;
-    --strand: #24568c;
-    --glow: #24568c;
-    --core: #173a61;
-  }
+/* Owner light mode (11 Nov): sage ground, ink copy, white ✳ Mycelium in the
+   header. theme.js sets data-theme on <html> from the stored choice (or the
+   OS) in a blocking head script, before first paint, so this block - not a
+   media query - is the single source of truth for light; a manual choice can
+   never disagree with it. Placed after the glow blocks so it wins the tie
+   (same specificity, later in the file). */
+:root[data-theme="light"] {
+  --bg: #a6b18b;
+  --bg-2: #a6b18b;
+  --card: #a6b18b;
+  --card-2: #a6b18b;
+  --ink: #22261c;
+  --muted: #343a2a;
+  --accent: #0f4218;
+  --accent-ink: #f7f2e7;
+  --line: #575e48;
+  --line-2: #4a503d;
+  --strand: #175624;
+  --glow: #124a1c;
+  --core: #0e3d18;
+}
+/* The owner's white ✳ Mycelium: cream in the header only, where it sits
+   outside main (so the 4.5:1 hero gate does not measure it). Dark mode keeps
+   inheriting the near-cream --ink, so this rule is light-only. */
+:root[data-theme="light"] .brand {
+  color: #f7f2e7;
 }
 html {
   scrollbar-gutter: stable;
@@ -459,9 +454,12 @@ button {
     flex-basis: 100%;
     height: 30px;
   }
-  .top .glow-switch button {
-    min-width: 52px;
-    padding-inline: 8px;
+  .top .glow-switch button,
+  .top .theme-switch button {
+    /* Both switches must share the second header row with the nav button on
+       a 390px screen; 44px keeps the touch target at the floor. */
+    min-width: 44px;
+    padding-inline: 6px;
   }
   :is(.apex, .vision-page) .top .wrap {
     position: relative;

@@ -8,9 +8,15 @@ import { INTRO_MS, STAGING_INTRO_KEY } from "./mycelium-geometry.js";
 const stage = document.body;
 const reduce = matchMedia("(prefers-reduced-motion: reduce)");
 const scheme = matchMedia("(prefers-color-scheme: light)");
+// Owner light mode: theme.js already set <html data-theme> before first paint
+// (stored choice, else the OS), so the state starts from that and only an
+// explicit click below ever writes the choice back.
+const THEME_KEY = "mycelium-site-theme-v1";
 const state = {
   glow: document.documentElement.dataset.glow || "green",
-  theme: scheme.matches ? "light" : "dark",
+  theme:
+    document.documentElement.dataset.theme ||
+    (scheme.matches ? "light" : "dark"),
   style: "mycelium",
 };
 // STAGING ONLY: the server injects [data-bg-choice] buttons only on
@@ -61,10 +67,16 @@ function rebuild() {
   const gen = ++generation;
   window.__myceliumScene = undefined; // no renderer may attach to a disposed scene
   stage.dataset.theme = state.theme;
+  document.documentElement.dataset.theme = state.theme;
   for (const button of document.querySelectorAll("[data-glow-choice]"))
     button.setAttribute(
       "aria-pressed",
       String(button.dataset.glowChoice === state.glow),
+    );
+  for (const button of document.querySelectorAll("[data-theme-choice]"))
+    button.setAttribute(
+      "aria-pressed",
+      String(button.dataset.themeChoice === state.theme),
     );
   for (const button of styleButtons)
     button.setAttribute("aria-pressed", String(button.dataset.bgChoice === state.style));
@@ -118,11 +130,38 @@ for (const button of document.querySelectorAll("[data-glow-choice]"))
     } catch {}
     rebuild();
   });
+for (const button of document.querySelectorAll("[data-theme-choice]"))
+  button.addEventListener("click", () => {
+    const next = button.dataset.themeChoice === "light" ? "light" : "dark";
+    if (state.theme === next) return;
+    state.theme = next;
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {}
+    rebuild();
+  });
 scheme.addEventListener("change", () => {
-  state.theme = scheme.matches ? "light" : "dark";
-  rebuild();
+  // The OS only moves the theme while no explicit choice is stored.
+  let stored = null;
+  try {
+    stored = localStorage.getItem(THEME_KEY);
+  } catch {}
+  if (stored !== "light" && stored !== "dark") {
+    state.theme = scheme.matches ? "light" : "dark";
+    rebuild();
+  }
 });
 window.addEventListener("storage", (e) => {
+  if (e.key === THEME_KEY) {
+    state.theme =
+      e.newValue === "light" || e.newValue === "dark"
+        ? e.newValue
+        : scheme.matches
+          ? "light"
+          : "dark";
+    rebuild();
+    return;
+  }
   if (e.key !== "mycelium-site-glow-v1") return;
   state.glow = e.newValue === "blue" ? "blue" : "green";
   document.documentElement.dataset.glow = state.glow;
