@@ -1984,8 +1984,11 @@ fn a_second_chat_on_the_same_epoch_runs_without_a_new_prepare_or_route() {
     }
     assert_eq!(r.service.qualification().unwrap(), qualification);
     {
+        // Formatted BEFORE the lock: `state()` takes the same mutex, so a
+        // failing assertion would otherwise deadlock instead of failing.
+        let shown = r.state();
         let o = r.handle.state.lock().unwrap();
-        assert_eq!((o.requests, o.settled_requests), (2, 2), "{}", r.state());
+        assert_eq!((o.requests, o.settled_requests), (2, 2), "{shown}");
         assert_eq!(o.connections, 4, "no new carrier connection for chat 2");
         assert!(!o.retired());
     }
@@ -2186,14 +2189,13 @@ fn a_failed_reset_is_never_acknowledged_and_retires_the_epoch() {
         r.state()
     );
     {
+        // Formatted BEFORE the lock: `state()` takes the same mutex, so a
+        // failing assertion would otherwise deadlock instead of failing.
+        let shown = r.state();
         let o = r.handle.state.lock().unwrap();
-        assert!(
-            o.teardown_attempts >= 2,
-            "settled by a re-dial: {}",
-            r.state()
-        );
-        assert!(o.stages[1].acknowledged_ms.is_some());
-        assert!(o.retired());
+        assert!(o.teardown_attempts >= 2, "settled by a re-dial: {shown}");
+        assert!(o.stages[1].acknowledged_ms.is_some(), "{shown}");
+        assert!(o.retired(), "{shown}");
     }
     assert_eq!(r.submit(4).unwrap_err().code, "route_dropped");
     let reports = r.finish();
