@@ -324,10 +324,7 @@ fn packaged_join_refuses_a_handoff_whose_seed_is_not_the_links_pin() {
         "{status}"
     );
     let again = poll(&member);
-    assert_eq!(
-        again["body"]["error"], "join_seed_pin_mismatch",
-        "{again}"
-    );
+    assert_eq!(again["body"]["error"], "join_seed_pin_mismatch", "{again}");
     assert_eq!(
         owner.mac.status()["authority"]["member_count"],
         1,

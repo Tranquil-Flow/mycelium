@@ -87,7 +87,10 @@ impl FakeTunnel {
         self.hooks_with(|_| {})
     }
     /// [`FakeTunnel::hooks`], then `edit` (a test's clock or release observer).
-    fn hooks_with(&self, edit: impl Fn(&mut api::relay::Hooks) + Send + Sync + 'static) -> RelayHooks {
+    fn hooks_with(
+        &self,
+        edit: impl Fn(&mut api::relay::Hooks) + Send + Sync + 'static,
+    ) -> RelayHooks {
         let script = self.script.clone();
         Arc::new(move || {
             let mut hooks = api::relay::Hooks::production(None);
@@ -162,9 +165,10 @@ fn post(core: &Arc<dyn Core>, path: &str, body: &Value) -> (u16, Value) {
     );
     // The Start may wait for the tunnel's whole ready wait.
     let reply = rx
-        .recv_timeout(millis(
-            B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayStartSelfReadyWaitL355,
-        ) + millis(B::WorkerStartup))
+        .recv_timeout(
+            millis(B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayStartSelfReadyWaitL355)
+                + millis(B::WorkerStartup),
+        )
         .unwrap();
     (
         reply.status,
@@ -194,7 +198,10 @@ fn quit_closes_a_relay_whose_start_is_still_waiting_for_its_tunnel() {
     let base = state_root("quit-inflight");
     let fake = FakeTunnel::new(&base, true);
     let state = base.join("owner");
-    std::fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
     let mut mac = Mac::launch(
         &state,
         NetworkConfig {
@@ -239,7 +246,11 @@ fn quit_closes_a_relay_whose_start_is_still_waiting_for_its_tunnel() {
             ),
         "a Start after Quit began: {later:?}"
     );
-    assert_eq!(launches, vec![pid], "a Start after Quit began launched a tunnel");
+    assert_eq!(
+        launches,
+        vec![pid],
+        "a Start after Quit began launched a tunnel"
+    );
 }
 
 /// No test here can start a real `cloudflared` (review PH3a Q4: this Mac has one on `PATH`, and
@@ -289,7 +300,10 @@ fn quit_while_a_start_waits_for_the_old_relays_release_starts_no_new_relay() {
     let base = state_root("quit-release");
     let fake = FakeTunnel::new(&base, false);
     let state = base.join("owner");
-    std::fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
     // The relays' clock in seconds, moved by the test only.
     let now = Arc::new(AtomicU64::new(0f64.to_bits()));
     let (events, seen) = mpsc::channel::<ReleaseEvent>();

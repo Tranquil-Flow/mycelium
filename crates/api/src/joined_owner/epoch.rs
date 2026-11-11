@@ -113,7 +113,15 @@ impl Epoch {
             &coordinator,
             Arc::new(move |code: &str| record_code(&seen, code)),
         );
-        Self::open_with(coordinator, envelope, owner, carriers, codec, seed, refusals)
+        Self::open_with(
+            coordinator,
+            envelope,
+            owner,
+            carriers,
+            codec,
+            seed,
+            refusals,
+        )
     }
     /// [`Epoch::open`] with the seed view the pump reads member leases from.
     pub fn open_watched(
@@ -124,7 +132,15 @@ impl Epoch {
         codec: Arc<dyn Codec>,
         seed: SeedMembers,
     ) -> Result<Self, PublicError> {
-        Self::open_with(coordinator, envelope, owner, carriers, codec, seed, Arc::default())
+        Self::open_with(
+            coordinator,
+            envelope,
+            owner,
+            carriers,
+            codec,
+            seed,
+            Arc::default(),
+        )
     }
     /// [`Epoch::open_watched`] whose refusals start in `refusals` (shared with the seed view).
     fn open_with(
@@ -320,8 +336,7 @@ impl Epoch {
                 while !stop.load(Ordering::SeqCst) {
                     if observed.is_none_or(|at| at.elapsed() >= poll) {
                         observed = Some(std::time::Instant::now());
-                        if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed)
-                        {
+                        if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed) {
                             record(e.code);
                         }
                     }

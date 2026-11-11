@@ -12,7 +12,9 @@
 #[path = "support/packaged_macs.rs"]
 mod macs;
 use desktop::lifecycle::Poll;
-use macs::{Mac, approve_and_join, consent, join_body, member, owner, private, state_root, test_network};
+use macs::{
+    Mac, approve_and_join, consent, join_body, member, owner, private, state_root, test_network,
+};
 use serde_json::{Value, json};
 use std::{
     os::unix::fs::{DirBuilderExt, PermissionsExt},
