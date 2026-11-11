@@ -817,3 +817,136 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
     };
     assert_eq!(verdict, Ok(Poll::Verified));
 }
+
+// ---- REVIEW-lanePH1 finding 4: the chat state's model gate never starves status and Stop ----
+
+/// The packaged model gate held by the test: every `/chat/*` request waits inside it, as one
+/// waits for a native compose under the gate's lock, until released.
+#[derive(Clone, Default)]
+struct HeldGate(Arc<(std::sync::Mutex<(bool, usize)>, std::sync::Condvar)>);
+impl HeldGate {
+    fn wait_inside(&self, count: usize) {
+        let deadline = Instant::now() + millis(B::WorkerStartup);
+        let mut gate = self.0.0.lock().unwrap();
+        while gate.1 < count {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !left.is_zero(),
+                "only {} requests reached the model gate",
+                gate.1
+            );
+            gate = self.0.1.wait_timeout(gate, left).unwrap().0;
+        }
+    }
+    fn release(&self) {
+        self.0.0.lock().unwrap().0 = true;
+        self.0.1.notify_all();
+    }
+}
+impl node_service::desktop_host::ModelGate for HeldGate {
+    fn ready(&self) -> Result<(), PublicError> {
+        let mut gate = self.0.0.lock().unwrap();
+        gate.1 += 1;
+        self.0.1.notify_all();
+        while !gate.0 {
+            gate = self.0.1.wait(gate).unwrap();
+        }
+        gate.1 -= 1;
+        Ok(())
+    }
+}
+/// Releases the held gate however the test ends.
+struct OpenGate(HeldGate);
+impl Drop for OpenGate {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+/// v0.1.4's page server (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9) has no admitted cap:
+/// the page's status and its Stop answer whatever the chat state's handlers are doing. On the
+/// packaged window the chat state first waits for the model gate (a native compose under the
+/// gate's lock); with the page's four callbacks waiting there, the status and Stop still answer,
+/// neither with a capacity refusal.
+#[test]
+fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
+    use desktop::{channel::Request, lifecycle::Cleanup};
+    let node = NodeService::new(
+        Arc::new(FailsAtOnce),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let private = private();
+    let gate = HeldGate::default();
+    let open = OpenGate(gate.clone());
+    let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
+        .gated(Arc::new(gate.clone()));
+    let source = node_service::app_host::ModelSource::new(
+        private.clone(),
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+    );
+    let (core, mut cleanup) = node_service::packaged::assemble(services, source);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let submit = |method: &str, path: &str| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        core.submit(
+            Request {
+                window: "main".into(),
+                method: method.into(),
+                uri: format!("{}{path}", desktop::channel::ORIGIN),
+                headers: vec![
+                    (
+                        if path.starts_with("/chat/") {
+                            "x-mycelium-chat"
+                        } else {
+                            "x-mycelium-action"
+                        }
+                        .into(),
+                        "1".into(),
+                    ),
+                    ("content-type".into(), "application/json".into()),
+                ],
+                body: b"{}".to_vec(),
+            },
+            Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+        );
+        rx
+    };
+    let answer = |rx: std::sync::mpsc::Receiver<desktop::core::Reply>, what: &str| {
+        let reply = rx
+            .recv_timeout(millis(B::ModelSelection))
+            .unwrap_or_else(|_| panic!("{what} got no answer"));
+        let body: Value = serde_json::from_slice(&reply.body).unwrap_or(Value::Null);
+        (reply.status, body)
+    };
+    let states: Vec<_> = (0..node_service::packaged::CALLBACK_CAPACITY.get())
+        .map(|_| submit("POST", "/chat/api/state"))
+        .collect();
+    gate.wait_inside(states.len());
+    for (method, path) in [("GET", "/api/status"), ("POST", "/api/serving/stop")] {
+        let reply = answer(submit(method, path), path);
+        assert!(
+            !(reply.0 == 503
+                && matches!(
+                    reply.1["error"].as_str(),
+                    Some("desktop_callback_capacity" | "native_service_capacity")
+                )),
+            "{path} refused for capacity while the chat state waits for the model: {reply:?}"
+        );
+    }
+    drop(open);
+    for state in states {
+        let state = answer(state, "a chat state");
+        assert_eq!(state.0, 200, "{state:?}");
+    }
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    let verdict = loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert_eq!(verdict, Ok(Poll::Verified));
+}
