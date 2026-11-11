@@ -159,7 +159,7 @@ fn run() -> Result<()> {
     let carrier = Identity::from_secret(&addr.id.to_string(), &signer.secret_bytes())
         .map_err(|_| "identity_failed")?;
     let mut session: Option<Membership> = None;
-    let mut owned = Work::new(root.clone());
+    let mut owned = Work::operator(root.clone());
     let input = control::Input::start(owner_control.is_some())?;
     let status: work::Status =
         work::Live::new(json!({"joined":false,"left":false,"worker_pid":null,"route_ready":false}));

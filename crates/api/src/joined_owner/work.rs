@@ -76,6 +76,19 @@ pub fn transfer_stage(
     )
 }
 
+/// The seed-signed transfer (offer `run`, grant `assignment_id`) of stage `stage` of the owner
+/// run `run_id`: distinct per member (the source journal keys byte accounting by grant).
+pub fn transfer_run(run_id: &str, stage: usize) -> String {
+    format!("{run_id}{TRANSFER}{stage}")
+}
+/// The owner run a stage transfer belongs to ([`transfer_run`]'s `run_id`), if it is one.
+pub fn transfer_owner_run(run: &str) -> Option<&str> {
+    let (owner, stage) = run.rsplit_once(TRANSFER)?;
+    (!owner.is_empty() && !stage.is_empty() && stage.bytes().all(|b| b.is_ascii_digit()))
+        .then_some(owner)
+}
+const TRANSFER: &str = "-transfer-";
+
 /// One route stage the epoch delivers its route to.
 pub struct EpochStage<'a> {
     pub node_id: &'a str,
@@ -1141,7 +1154,7 @@ impl Worker {
                 &m.registration,
                 &m.node_id,
                 &self.plan.document,
-                &format!("{}-transfer-{i}", self.plan.run_id),
+                &transfer_run(&self.plan.run_id, i),
                 self.within,
             )?;
             let row = json!({"node_id":m.node_id,"received_bytes":done.received["received_bytes"]});

@@ -633,6 +633,9 @@ pub struct Work {
     pub left: bool,
     /// The latest owner-signed run announcement this member verified (its share), if any.
     announced: Option<VerifiedAnnouncement>,
+    /// Native work needs the announced share of the offer's own run (an announced owner);
+    /// `false` for the operator-driven member (`Work::operator`).
+    require_share: bool,
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
@@ -643,11 +646,16 @@ impl Work {
             proof_digest: None,
             left: false,
             announced: None,
+            require_share: true,
         }
     }
-    /// A member driven by its local operator (the example's CLI-pinned owner, no announcement).
+    /// A member driven by its local operator (the example's CLI-pinned owner, no announcement):
+    /// its native prepare is bounded by its own consent caps only.
     pub fn operator(root: PathBuf) -> Self {
-        Self::new(root)
+        Self {
+            require_share: false,
+            ..Self::new(root)
+        }
     }
     /// Take the share (`work_limits`) of a newly verified announcement for this member; work is
     /// then admitted only within it.
@@ -669,9 +677,41 @@ impl Work {
     /// `Ok(None)`: nothing was announced (operator path) or no share for this member; otherwise
     /// the worker limits of the share.
     pub fn admit_share(&self, session: Option<&impl Member>) -> Result<Option<Value>> {
-        let Some(verified) = self.announced.as_ref() else {
-            return Ok(None);
-        };
+        match self.announced.as_ref() {
+            Some(verified) => Self::admit(verified, &self.root, session),
+            None => Ok(None),
+        }
+    }
+    /// The share of the offer's OWN owner run (REVIEW-lanePH3B-S4AF F1): only the held
+    /// announcement whose `run_id` is the run the offer's transfer belongs to
+    /// (`joined_owner::work::transfer_run`) decides; another run's announcement never does.
+    /// `required` (native prepare of an announced owner's work): no announced share for this run
+    /// refuses `member_share_unannounced` (fail closed; v0.1.4 checks the share of the CURRENT
+    /// announcement before accepting work, demo_target.py:516-519, 531-538).
+    pub fn admit_share_for(
+        &self,
+        session: Option<&impl Member>,
+        offer: &Value,
+        required: bool,
+    ) -> Result<Option<Value>> {
+        let run = offer["message"]["run"]
+            .as_str()
+            .and_then(crate::joined_owner::work::transfer_owner_run);
+        let verified = self
+            .announced
+            .as_ref()
+            .filter(|v| run.is_some() && v.announcement()["run_id"].as_str() == run);
+        match verified {
+            Some(v) if !required || v.work_limits().is_some() => Self::admit(v, &self.root, session),
+            _ if required => Err("member_share_unannounced".into()),
+            _ => Ok(None),
+        }
+    }
+    fn admit(
+        verified: &VerifiedAnnouncement,
+        root: &Path,
+        session: Option<&impl Member>,
+    ) -> Result<Option<Value>> {
         let binding = session
             .ok_or("not_joined")?
             .session()
@@ -683,7 +723,7 @@ impl Work {
         if verified.seed_key_digest() != binding.seed_key_digest {
             return Err("owner_pin_announcement_unverified".into());
         }
-        let consent = standing_consent::load(&self.root)
+        let consent = standing_consent::load(root)
             .map_err(|_| "joined_shard_consent_required")?
             .ok_or("joined_shard_consent_required")?;
         if consent["state"] != "granted"
@@ -714,8 +754,10 @@ impl Work {
         let (host, rt, clock) = (carrier_side.host, carrier_side.runtime, carrier_side.clock);
         let policy = carrier_side.lan;
         operation.check()?;
-        // Item 3: announced work fits the member's bound consent before custody or dial.
-        self.admit_share(session)?;
+        // Item 3 / F1: this run's share, when already announced, fits the member's bound consent
+        // before custody or dial (the owner pushes before the run's `work` announcement: an
+        // unknown share is checked at `prepare_native`; another run's share never applies).
+        self.admit_share_for(session, &request["offer"], false)?;
         let remaining = operation
             .deadline
             .saturating_duration_since(std::time::Instant::now());
@@ -895,6 +937,10 @@ impl Work {
                 }
             }
         }
+        // F1: the share announced for the offer's own run fits this member's bound caps, before
+        // any native worker (custody stays owned on a refusal).
+        let offer = self.native.as_ref().ok_or("native_required")?.offer().clone();
+        self.admit_share_for(session, &offer, self.require_share)?;
         let member = session.ok_or("not_joined")?;
         let range =
             serde_json::from_value(request["range"].clone()).map_err(|_| "range_invalid")?;
