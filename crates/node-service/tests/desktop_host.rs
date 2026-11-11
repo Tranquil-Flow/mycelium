@@ -1025,3 +1025,18 @@ fn a_test_root_is_removed_when_its_test_ends() {
         "{failing:?} was left behind by a failing test"
     );
 }
+/// The page shows why a stopped chat ended: v0.1.4 sets `error = cancel_reason or
+/// 'chat_cancelled'` for a cancelled terminal (chat.py:367-369 @ f4e366e9; Stop -> teardown
+/// `cancel_all('chat_cancelled')`, demo_chain.py:1322-1335), so the native path's Stop shows
+/// `[stopped: chat_cancelled]`, not `error null` (REVIEW-lanePH1F; lane PH3b S5 item 4).
+#[test]
+fn a_stop_ends_the_native_chat_chat_cancelled_as_the_page_shows() {
+    for route in ["/api/serving/stop", "/api/demo/stop"] {
+        let seen = chat_with_stop(route, StopAt::Registered);
+        assert_eq!(
+            seen.outcome,
+            (json!("cancelled"), json!("chat_cancelled")),
+            "{route}"
+        );
+    }
+}

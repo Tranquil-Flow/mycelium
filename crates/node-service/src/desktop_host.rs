@@ -227,6 +227,9 @@ pub struct DesktopServices {
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
     rate: Arc<Mutex<crate::chat_edge::RateWindow>>,
+    /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): `/chat/*` uses
+    /// it while the run serves; otherwise the SLICE-1 native path above answers.
+    chat_run: Option<api::chat_service::ChatService>,
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
@@ -361,6 +364,21 @@ impl DesktopServices {
         self.model = Some(gate);
         self
     }
+    /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): while
+    /// `run` serves, `/chat/api/{state,send,events}` go through the shipped `ChatService`;
+    /// `timing` is the owner's per-chat timing file (v0.2's own evidence folder, never v0.1.4's).
+    pub fn with_chat_run(
+        mut self,
+        run: Arc<dyn api::chat_service::RunRoute>,
+        timing: Option<std::path::PathBuf>,
+    ) -> Result<Self, PublicError> {
+        self.chat_run = Some(api::chat_service::ChatService::new(
+            run,
+            Arc::new(api::chat_service::MonotonicClock::default()),
+            timing,
+        )?);
+        Ok(self)
+    }
     fn with_host(
         node: NodeService,
         capacity: NonZeroUsize,
@@ -406,6 +424,7 @@ impl DesktopServices {
             })),
             chat: Arc::new(Mutex::new(None)),
             rate: Arc::default(),
+            chat_run: None,
             started: std::time::Instant::now(),
             capacity,
         }
