@@ -405,6 +405,16 @@ pub struct Publishing {
     pub publisher: Arc<AppPublisher>,
     pub ticks: Arc<HostLoop>,
 }
+/// The status's `swarm` field (`_swarm_status`, app.py:430-436, and `swarm_publish.status`,
+/// swarm_publish.py:524-530 @ f4e366e9) of this process, which is always the owner
+/// ([`PackagedHost`]'s `owner`): the custody's own status, or `{enabled: false, mode: null}` for a
+/// host without one. Never blocks on directory work.
+pub fn swarm_status(publishing: Option<&Publishing>) -> Value {
+    publishing.map_or_else(
+        || serde_json::json!({"enabled": false, "mode": null}),
+        |publishing| publishing.publisher.status_json(),
+    )
+}
 /// Whole seconds of wall time for the signed directory documents.
 pub fn unix_seconds() -> i64 {
     std::time::SystemTime::now()

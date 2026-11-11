@@ -383,7 +383,12 @@ impl DesktopServices {
             return reply;
         }
         match (request.method.as_str(), request.target.as_str()) {
-            ("GET", "/api/status") => Self::json(self.node.published_status()?),
+            ("GET", "/api/status") => {
+                // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
+                let mut status = self.node.published_status()?;
+                status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                Self::json(status)
+            }
             ("POST", "/chat/api/state") if body == json!({}) => {
                 let closed = self
                     .gate
