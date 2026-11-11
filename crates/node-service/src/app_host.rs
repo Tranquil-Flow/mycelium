@@ -751,18 +751,11 @@ impl Host for PackagedHost {
     fn environment(&self, name: &str) -> Option<String> {
         std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
     }
-    /// `host_memory_bytes()`: this Mac's physical memory, `None` when unknown. Read with the
-    /// same `hw.memsize` probe the native driver uses (native.rs `host`).
+    /// `_device_memory_bytes()` (app.py:1123-1126): this Mac's physical memory, `None` when
+    /// unknown; the network's (the composition's seam, else `hw.memsize`), which the status's
+    /// memory choices read too.
     fn device_memory_bytes(&self) -> Option<u64> {
-        let output = crate::spawn::confined_output("/usr/sbin/sysctl", &["-n", "hw.memsize"])
-            .ok()
-            .filter(|output| output.status.success())?;
-        String::from_utf8(output.stdout)
-            .ok()?
-            .trim()
-            .parse()
-            .ok()
-            .filter(|bytes| *bytes > 0)
+        self.network.device_memory_bytes()
     }
     /// `fast_mode.run_active(app)`. This process has no chain compile/serving thread or
     /// workflow, so it is the owner run alone. A poisoned node counts as active (refuse a change).

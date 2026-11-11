@@ -11,6 +11,13 @@
 //! `resource_policy` app.js:231, :474; `authority` app.js:172-260 (members :252-260); `leave`
 //! app.js:373; `join_flow` app.js:499-535, :578, :592. `renewal_error` is read by no page script:
 //! it is part of the published document only (API readers).
+use crate::{
+    app_host::{Authority, ManagedSlot},
+    jobj, joined_member,
+    preferences::{fast_mode, resource_policy, run_model},
+    windows::PendingWindows,
+    wire::Json,
+};
 use serde_json::Value;
 
 /// What the app records between its passes and shows in its status: `DemoApp.renew_error`
@@ -25,4 +32,86 @@ pub struct Recorded {
     pub standing_error_http: Option<Value>,
     pub standing_last: Option<Value>,
     pub last_report: Option<Value>,
+}
+
+/// The facts a host reads beside its authority: the run-model and token-path environment
+/// overrides and this Mac's RAM (`host_memory_bytes()`, app.py:267-273, or v0.1.4's test seam).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Facts<'a> {
+    pub run_model_env: Option<&'a str>,
+    pub fast_mode_env: Option<&'a str>,
+    pub device_memory_bytes: Option<u64>,
+}
+
+/// `run_model.document(root)` (run_model.py:116-131) with `consent_document(model,
+/// device_memory_bytes=...)` (model_resources.py:605-631): the picker and the consent choices.
+/// A choice that cannot be read leaves the picker out (`null`).
+pub fn run_model(root: &std::path::Path, facts: &Facts<'_>) -> Json {
+    run_model::document_json(root, facts.run_model_env, facts.device_memory_bytes)
+        .unwrap_or(Json::Null)
+}
+/// `asdict(self.run_model_contract())` (app.py:1264, serving.py:150-160): every registered model is
+/// a bf16 safetensors source served by MLX in float32 with int8 weights, greedy, seed 0
+/// (serving.py:189-265); `null` when the run model cannot be read.
+pub fn model_contract(run: &Json) -> Json {
+    match (run.get("model_id"), run.get("resolved_commit")) {
+        (Some(Json::Str(id)), Some(Json::Str(commit))) => jobj! {
+            "model_id" => id.as_str(), "resolved_commit" => commit.as_str(),
+            "source_representation" => "bfloat16-safetensors", "runtime_backend" => "mlx",
+            "runtime_dtype" => "float32", "runtime_quantization" => "int8-weight-only",
+            "decoding" => "quantized_greedy_token_id", "sampling_seed" => 0u64,
+        },
+        _ => Json::Null,
+    }
+}
+/// `fast_mode.document(self.root)` (fast_mode.py:22-40); `null` when it cannot be read.
+pub fn fast_mode(root: &std::path::Path, facts: &Facts<'_>) -> Json {
+    fast_mode::document_json(root, facts.fast_mode_env).unwrap_or(Json::Null)
+}
+/// `self.renew_error` (app.py:1272).
+pub fn renewal_error(recorded: &Recorded) -> Json {
+    recorded.renewal_error.map_or(Json::Null, Json::from)
+}
+/// `self._leave_status()`: a joined Mac's leave record (member_leave.py), `null` for an owner.
+pub fn leave<M: ManagedSlot>(c: &Authority<M>) -> Json {
+    if !c.target {
+        return Json::Null;
+    }
+    let leave = crate::leave::MemberLeave::new(&c.root, crate::leave::Limits::default());
+    crate::leave::status_view(&leave).map_or(Json::Null, Json::from)
+}
+/// The fields of `DemoApp.status()` both hosts take from the authority and `facts`, in the source's
+/// key order (`STATUS_FIELDS`): `model_contract`, `run_model`, `fast_mode`, `installation_role`,
+/// `resource_policy`, `authority` (owner member rows: node_id / generation / lifecycle_state /
+/// clock, app.py:1253-1258), `renewal_error`, `leave`, `join_flow` (`_join_flow_status`,
+/// app.py:1214-1237, with what the app recorded).
+pub fn shared<M: ManagedSlot>(
+    c: &Authority<M>,
+    pending: &PendingWindows,
+    facts: &Facts<'_>,
+) -> Vec<(&'static str, Json)> {
+    let run = run_model(&c.root, facts);
+    vec![
+        ("model_contract", model_contract(&run)),
+        ("run_model", run),
+        ("fast_mode", fast_mode(&c.root, facts)),
+        (
+            "installation_role",
+            if c.target { "target" } else { "owner" }.into(),
+        ),
+        (
+            "resource_policy",
+            resource_policy::read(&c.root)
+                .ok()
+                .flatten()
+                .map_or(Json::Null, Json::from),
+        ),
+        ("authority", joined_member::authority_status(c)),
+        ("renewal_error", renewal_error(&c.recorded)),
+        ("leave", leave(c)),
+        (
+            "join_flow",
+            joined_member::join_flow_status(&c.root, c.target, &c.windows, pending, &c.recorded),
+        ),
+    ]
 }

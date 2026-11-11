@@ -625,12 +625,14 @@ pub fn authority_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
     }
 }
 /// `_join_flow_status()` (app.py:1214-1237): the standing disclosure (the join-consent document),
-/// then the owner's windows, or the joined Mac's standing consent and pending join window.
+/// then the owner's windows, or the joined Mac's standing consent (with the acceptor's last offer),
+/// the standing error, its pending join window and its last report, as the app `recorded` them.
 pub fn join_flow_status(
     root: &Path,
     target: bool,
     windows: &PairingWindows,
     pending: &PendingWindows,
+    recorded: &crate::app_status::Recorded,
 ) -> Json {
     let disclosure = jobj! {
         "text" => standing_consent::DISCLOSURE_TEXT, "digest" => standing_consent::DISCLOSURE_DIGEST,
@@ -642,6 +644,7 @@ pub fn join_flow_status(
             "pending_windows" => pending.json(), "member_reports" => Json::Obj(Vec::new()),
         };
     }
+    let optional = |value: &Option<Value>| value.as_ref().map_or(Json::Null, Json::from);
     let grant = standing_consent::load(root).ok().flatten();
     let join = private_state::load(&root.join("join-window.json"), cap())
         .ok()
@@ -652,10 +655,11 @@ pub fn join_flow_status(
             None => Json::Null,
             Some(g) => jobj! {
                 "state" => &g["state"], "caps" => &g["caps"], "granted_at" => &g["granted_at"],
-                "withdrawn_at" => &g["withdrawn_at"], "last" => Json::Null,
+                "withdrawn_at" => &g["withdrawn_at"], "last" => optional(&recorded.standing_last),
             },
         },
-        "standing_error" => Json::Null, "standing_error_http" => Json::Null,
+        "standing_error" => recorded.standing_error.as_deref().map_or(Json::Null, Json::from),
+        "standing_error_http" => optional(&recorded.standing_error_http),
         "join_window" => match join {
             None => Json::Null,
             Some(j) => jobj! {
@@ -663,7 +667,7 @@ pub fn join_flow_status(
                 "pinned" => !j["seed_key_digest"].is_null(),
             },
         },
-        "last_report" => Json::Null,
+        "last_report" => optional(&recorded.last_report),
     }
 }
 /// `authority.start()` of a joined target (`RemoteMacMember.start` -> `_resume`, app.py:613-626):
