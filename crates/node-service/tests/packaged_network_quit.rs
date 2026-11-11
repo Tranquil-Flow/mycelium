@@ -12,6 +12,9 @@
 //! the test releases it; only then does it print a `trycloudflare.com` origin, and it then blocks
 //! until it is terminated. Every launch is appended to a file, so a Start that should start nothing
 //! is checked by count.
+//!
+//! Also here: the test Macs (`support/packaged_macs.rs` `test_network`) cannot start a real
+//! `cloudflared` at all.
 #![cfg(feature = "desktop-shell")]
 #[path = "support/packaged_macs.rs"]
 mod macs;
@@ -226,4 +229,34 @@ fn quit_closes_a_relay_whose_start_is_still_waiting_for_its_tunnel() {
         "a Start after Quit began: {later:?}"
     );
     assert_eq!(launches, vec![pid], "a Start after Quit began launched a tunnel");
+}
+
+/// No test here can start a real `cloudflared` (review PH3a Q4: this Mac has one on `PATH`, and
+/// the packaged tests run the production hooks): the test Macs' relay client lookup finds nothing,
+/// so a quick-tunnel Start that forgot `provider: external` fails closed and no relay runs. The
+/// lookup is asserted before any Start, so this test never spawns one itself.
+#[test]
+fn a_test_mac_cannot_start_a_real_cloudflared() {
+    let hooks = (macs::test_network().hooks)();
+    assert_eq!(
+        (hooks.binary)(),
+        None,
+        "the test Macs' relay hooks find a relay client"
+    );
+    let state = state_root("no-cloudflared");
+    let mac = Mac::launch(&state, macs::test_network());
+    let started = mac.post(
+        "/api/network/start",
+        json!({"relay_acknowledged": true, "max_seconds": 1800}),
+    );
+    let network = mac.status()["network"].clone();
+    assert_eq!(mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+    assert_eq!(
+        (started.0, started.1["error"].clone()),
+        (409, json!("action_not_completed")),
+        "a quick-tunnel Start without a relay client: {}",
+        started.1
+    );
+    assert_ne!(network["state"], "relay_process_running", "{network}");
 }
