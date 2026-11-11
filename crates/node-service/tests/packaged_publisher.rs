@@ -325,16 +325,15 @@ fn packaged_quit_leaves_a_tick_held_in_a_directory_exchange_at_the_close_deadlin
     }
     let accepted = directory.accepted();
     let (core, mut cleanup) = packaged_core(&state);
-    create(&core);
-    // The custody's next pass opens its withdrawal exchange with the directory, which never
-    // answers.
+    // The custody's first pass opens its withdrawal exchange with the directory, which never
+    // answers; Quit begins while that exchange has most of its own budget left.
     let deadline = Instant::now() + millis(B::WorkerStartup);
     while directory.accepted() == accepted {
         assert!(
             Instant::now() < deadline,
             "the custody's tick never reached the directory"
         );
-        std::thread::sleep(millis(B::OwnerPoll) / 5);
+        std::thread::sleep(millis(B::OwnerPoll) / 50);
     }
     let (result, took) = quit(&mut cleanup);
     assert_eq!(result, Ok(Poll::Verified));
