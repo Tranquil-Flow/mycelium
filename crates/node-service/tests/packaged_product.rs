@@ -744,17 +744,18 @@ fn the_serving_roots_qualification_record_reaches_the_snapshot() {
 }
 
 /// `assignment_source` (`route.product_assignment_records`, route.py:6910-6948: assignment offers x
-/// placements) is read through the live route, and `recovery_source` is the request gateway's
-/// `recovery_public_projection`, which needs the router port's M16 coordinator. The packaged
-/// process has neither (no qualified live route, `AdmitAsToday`), so both publish what v0.1.4
-/// publishes for a source that cannot be read: `assignment_source_failed` (oracle `serving[2]`) and
-/// `recovery_source_failed` (oracle `serving[1]`), byte for byte, and no assignment, stage, load
-/// proof, route or recovery entity is published.
+/// placements) is read through the live route; the packaged process has none, so it publishes what
+/// v0.1.4 publishes for a source that cannot be read: `assignment_source_failed` (oracle
+/// `serving[2]`). `recovery_source`: the v0.1.4 Mac app composes its product application through
+/// `build_registry_stack` (supervisor.py:2060-2064, 4370), whose route (the deployment registry) has
+/// no `recovery_public_projection`, so no recovery source is composed (supervisor.py:2148, 2202-2207)
+/// and the projector publishes `recovery_source_missing` (projector.py:510-516; oracle `owner_only`).
+/// Rows byte for byte; no assignment, stage, load proof, route or recovery entity is published.
 #[test]
-fn the_packaged_assignment_and_recovery_sources_publish_v014s_unreadable_source() {
+fn the_packaged_assignment_and_recovery_sources_publish_what_the_v014_app_publishes() {
     let (root, host, snapshot) = served("assignments");
     assert_source_as_oracle(&snapshot, "assignment-source", "serving", 2);
-    assert_source_as_oracle(&snapshot, "recovery-source", "serving", 1);
+    assert_source_as_oracle(&snapshot, "recovery-source", "owner_only", 0);
     let kinds: BTreeSet<&str> = snapshot["entities"]
         .as_array()
         .unwrap()
