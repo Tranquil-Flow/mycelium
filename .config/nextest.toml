@@ -66,6 +66,11 @@ setup = "headless-release"
 #    They are 5384 s of the 6068 s of summed test time; the other 3009 tests sum to 684 s.
 #    The list below is generated from target/nextest/merge/junit.xml (testcases with time > 5):
 #    after a merge run, re-list them (name = test, binary_id = classname) and update this block.
+#  * added 2026-11-11 from the lane SC merge run (budget-model tests over 5 s once the RU-053 pins are valid and
+#    the catalogue tests do their full check instead of failing early on a stale pin): the RU-053 admitted
+#    closure (289 s), the launch-graph fixpoint (156 s) and its census table (7 s), and the sixteen
+#    admission_catalogue_ru053_refuses_* tests (5-75 s each, selected by name prefix so a new one is covered).
+#    With several lanes building, nine of them crossed the 60 s limit in every quick run.
 # A test that still passes the filter but runs for 60 s (15 s period x 4) is killed and fails the run.
 [profile.quick]
 fail-fast = true
@@ -220,6 +225,11 @@ not (
   | (binary_id(=runtime::sidecar_relay_modes) & test(=an_unreachable_relay_waits_the_window_names_it_and_still_publishes_ready_as_the_oracle))
   | (binary_id(=runtime::iroh_pool_process) & test(=a_dial_is_capped_by_the_connect_bound_not_the_stream_bound))
   | (binary_id(=budget-model::inventory_report) & test(=report_on_current_data_has_counts_and_one_closure_line_without_failing))
+  | (binary_id(=budget-model::inventory_ru053_admissions) & test(=ru053_admitted_closure_matches_catalogue))
+  | (binary_id(=budget-model::inventory_launch_graph) &
+     (test(=launch_graph_is_the_fixpoint_of_the_reference_rules_over_the_oracle)
+      | test(=table_covers_all_scoped_files_and_frozen_equals_the_pyz_census)))
+  | (binary_id(=budget-model::inventory_admission_catalogue) & test(/^admission_catalogue_ru053_refuses_/))
 )
 '''
 
