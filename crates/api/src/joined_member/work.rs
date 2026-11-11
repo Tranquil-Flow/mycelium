@@ -645,6 +645,10 @@ impl Work {
             announced: None,
         }
     }
+    /// A member driven by its local operator (the example's CLI-pinned owner, no announcement).
+    pub fn operator(root: PathBuf) -> Self {
+        Self::new(root)
+    }
     /// Take the share (`work_limits`) of a newly verified announcement for this member; work is
     /// then admitted only within it.
     pub fn announced(&mut self, verified: &VerifiedAnnouncement) {

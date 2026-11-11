@@ -119,6 +119,10 @@ impl Joined {
     /// The owner's signed read answer for this member, announcing `work_limits` for it, verified
     /// by the member's own exchange client against the seed key it pinned at join.
     fn announced(&self, work_limits: Option<Value>) -> VerifiedAnnouncement {
+        self.announced_for("run-s4b", work_limits)
+    }
+    /// [`Joined::announced`] for the owner run `run_id`.
+    fn announced_for(&self, run_id: &str, work_limits: Option<Value>) -> VerifiedAnnouncement {
         let now = app_host::now();
         let coordinator = &self.seed.coordinator;
         let session = self.session.lock().unwrap().clone().unwrap();
@@ -158,7 +162,7 @@ impl Joined {
         exchange
             .announce(Announce {
                 phase: "work".into(),
-                run_id: Some("run-s4b".into()),
+                run_id: Some(run_id.into()),
                 deployment_id: Some("dep-s4b".into()),
                 per_node: json!({session.node_id(): node})
                     .as_object()
@@ -209,6 +213,11 @@ impl Drop for Joined {
 /// One `receive` work request on a loopback carrier. The request names no source: a request the
 /// work admission lets through ends at `source_id_missing`, before any custody or dial.
 fn receive(work: &mut Work, member: &Joined) -> Result<Value, String> {
+    // The owner run's stage transfer (`<run_id>-transfer-<stage>`) the S4b announcements name.
+    receive_offer(work, member, &json!({"message":{"run":"run-s4b-transfer-0"}}))
+}
+/// [`receive`] of `offer`.
+fn receive_offer(work: &mut Work, member: &Joined, offer: &Value) -> Result<Value, String> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -225,7 +234,7 @@ fn receive(work: &mut Work, member: &Joined) -> Result<Value, String> {
         Identity::from_secret(&endpoint.to_string(), &member.signer.secret_bytes()).unwrap();
     let wall = B::MemberChosenWall.span(Entries::ZERO).unwrap().millis();
     let operation = Operation {
-        request: json!({"command":"receive","operation_id":1,"offer":{}}),
+        request: json!({"command":"receive","operation_id":1,"offer":offer}),
         cancelled: Arc::new(AtomicBool::new(false)),
         deadline: Instant::now() + Duration::from_millis(wall),
         origin: Origin::Remote,
@@ -327,4 +336,171 @@ fn a_share_above_the_members_caps_is_refused_by_name_before_custody() {
         assert_eq!(work.share(), Some(&limits));
         assert_eq!(receive(&mut work, &member), Err(code.into()), "{limits}");
     }
+}
+
+// ---- Lane EP2 / REVIEW-lanePH3B-S4AF F1: the share is checked for the offer's OWN run ----
+//
+// Shipped app: DemoApp (app.py:505) -> `demo_app.py:156-172` DemoTargetAgent.tick ->
+// `_step` (demo_target.py:430): whole-snapshot mode downloads the model first (step 0, :449-454,
+// before the `work` announcement), and the share is checked against the CURRENT announcement
+// `a` (its run_id, :447) at step 4 (`_share_refusal`, :351-367, :516-519) BEFORE the work is
+// accepted and its worker started (step 6, :531-538). v0.2 (S4aF) pushes the shard in the slices
+// step, before the run's `work` announcement: so the member checks the run's share at
+// `prepare_native`, against the announcement of the offer's own run (fail closed), and at custody
+// only when this run's share is already known.
+
+/// A seed-signed shard offer for this member, transfer `run` (`<owner run>-transfer-<stage>`), and
+/// the member's custody of it (no bytes fetched: nothing reaches a native worker).
+fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard) {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let session = member.session.lock().unwrap().clone().unwrap();
+    let carrier_key = iroh::SecretKey::generate();
+    let carrier =
+        Identity::from_secret(&carrier_key.public().to_string(), &member.signer.secret_bytes())
+            .unwrap();
+    let registration =
+        api::joined_shard::register(&session, &member.signer, &carrier, app_host::now()).unwrap();
+    let mut recipe = case["node_plans"]["node-0"].clone();
+    recipe["node_id"] = json!(session.node_id());
+    recipe.as_object_mut().unwrap().remove("node_plan_digest");
+    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+    let source_key = iroh::SecretKey::generate();
+    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
+    let offer = api::joined_shard::issue(
+        &member.seed.coordinator,
+        &registration,
+        run,
+        &case["node_files"]["node-0"][0],
+        &recipe,
+        &source,
+    )
+    .unwrap();
+    let shard = api::joined_shard::JoinedShard::begin(
+        &member.member_root,
+        &session,
+        &member.signer,
+        &carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    (offer, shard)
+}
+/// The owner's `prepare_native` for stage [0, 14) with a fresh challenge.
+fn prepare(work: &mut Work, member: &Joined) -> Result<Value, String> {
+    let challenges = api::joined_shard::native::Challenges::new();
+    let nonce = challenges.issue("node", [0, 14]).unwrap();
+    let wall = B::MemberChosenWall.span(Entries::ZERO).unwrap().millis();
+    let operation = Operation {
+        request: json!({"command":"prepare_native","operation_id":2,"range":[0,14],"tokens":32,
+            "nonce":nonce,"forbidden_source":member.root.join("snapshot")}),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        deadline: Instant::now() + Duration::from_millis(wall),
+        origin: Origin::Remote,
+        id: Some(2),
+    };
+    work.prepare_native(Some(member), &member.signer, &operation)
+}
+const OVER_MEMORY: u64 = 8_000_000_000;
+
+/// F1: with the S4aF order the member takes the shard BEFORE the run's `work` announcement (no
+/// share known: custody admitted on the hard limits), then the owner asks for the native prepare.
+/// A share announced for THIS run above the member's own bound caps refuses the prepare by name,
+/// before any native worker, and the custody stays owned (discardable).
+#[test]
+fn a_share_above_the_caps_announced_for_this_run_after_the_push_refuses_the_prepare() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let mut work = Work::new(member.member_root.clone());
+    let (offer, shard) = custody(&member, "run-ep2-transfer-0");
+    assert_eq!(
+        receive_offer(&mut work, &member, &offer),
+        Err("source_id_missing".into()),
+        "the push precedes the `work` announcement: custody on the hard limits"
+    );
+    work.shard = Some(shard);
+    work.announced(&member.announced_for(
+        "run-ep2",
+        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
+    ));
+    assert_eq!(
+        prepare(&mut work, &member),
+        Err("member_memory_cap_below_share".into())
+    );
+    assert!(
+        work.native.as_ref().is_some_and(|n| n.worker_pid().is_none()) || work.shard.is_some(),
+        "custody kept, no worker"
+    );
+    assert!(work.discard().is_ok());
+}
+
+/// F1, stale announcement: the member still holds the PREVIOUS run's announcement (a smaller
+/// share that fits) when this run's prepare arrives: refused (fail closed,
+/// `member_share_unannounced`); once this run's larger share is read, it is refused by name. At
+/// custody a previous run's share is never applied (here: larger than the caps, this run's offer
+/// is still admitted on the hard limits).
+#[test]
+fn a_previous_runs_announcement_never_decides_this_runs_share() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let mut work = Work::new(member.member_root.clone());
+    let (offer, shard) = custody(&member, "run-ep2-transfer-1");
+    work.announced(&member.announced_for(
+        "run-ep1",
+        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
+    ));
+    assert_eq!(
+        receive_offer(&mut work, &member, &offer),
+        Err("source_id_missing".into()),
+        "another run's share is not this offer's"
+    );
+    work.shard = Some(shard);
+    work.announced(&member.announced_for(
+        "run-ep1",
+        Some(share(1_000_000_000, 1_000_000_000, 300)),
+    ));
+    assert_eq!(
+        prepare(&mut work, &member),
+        Err("member_share_unannounced".into()),
+        "the previous run's smaller share does not admit this run"
+    );
+    work.announced(&member.announced_for(
+        "run-ep2",
+        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
+    ));
+    assert_eq!(
+        prepare(&mut work, &member),
+        Err("member_memory_cap_below_share".into())
+    );
+    assert!(work.discard().is_ok());
+}
+
+/// The operator-driven member (`Work::operator`, the example's CLI-pinned owner) has no
+/// announcement: its prepare is not refused for a missing share (its consent caps still bound
+/// the worker at prepare).
+#[test]
+fn an_operator_driven_member_prepares_without_an_announcement() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let mut work = Work::operator(member.member_root.clone());
+    let (_, shard) = custody(&member, "run-ep2-transfer-0");
+    work.shard = Some(shard);
+    let prepared = prepare(&mut work, &member);
+    assert!(
+        prepared
+            .as_ref()
+            .is_err_and(|code| code != "member_share_unannounced" && !code.ends_with("_below_share")),
+        "reaches the native prepare (no worker binary here): {prepared:?}"
+    );
+    if let Some(native) = work.native.as_mut() {
+        assert!(native.worker_pid().is_none());
+    }
+    assert!(work.discard().is_ok());
 }
