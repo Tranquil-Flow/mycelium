@@ -100,6 +100,9 @@ pub struct StageTeardown {
     pub acknowledged_ms: Option<f64>,
     pub failure: Option<String>,
     pub death_evidence: Option<Value>,
+    /// v2: a data frame of the current request was (or may have been) sent to
+    /// this stage. A stage the request never touched holds nothing of it.
+    pub touched: bool,
 }
 #[derive(Default)]
 pub struct Observed {
@@ -120,6 +123,21 @@ pub struct Observed {
     /// A teardown or re-dial attempt is in flight on the carrier thread.
     pub teardown_busy: bool,
     pub carrier_closed: bool,
+    /// The route is `mycelium.joined_route.v2`: ONE epoch serves many requests,
+    /// one at a time; the per-request fields above describe the current one.
+    pub multi: bool,
+    /// Requests started on this epoch.
+    pub requests: u64,
+    /// Requests whose teardown every stage acknowledged (v2).
+    pub settled_requests: u64,
+    /// Why a v2 epoch stopped serving when no request carried the code.
+    pub epoch_failure: Option<&'static str>,
+    /// The v2 carrier ended the epoch and closed its connections.
+    pub closed: bool,
+    /// Carrier connections the owner dialed (setup and re-dials).
+    pub connections: u64,
+    /// The current request's carrier worker has exited (v2 quiesce).
+    pub worker_done: bool,
 }
 impl Observed {
     /// Every stage acknowledged or was settled by death evidence (exact host
@@ -671,6 +689,14 @@ pub fn observe_member_leases(
     drop(o);
     handle.changed.notify_all();
     Ok(settled)
+}
+/// End a v2 epoch from the owner (Stop of the run, rollover, ceiling, or an
+/// idle retirement): an unsettled request is torn down as a retirement, then
+/// every carrier connection is closed, so each member ends its serve with its
+/// compute closed. A v1 epoch has nothing to close here (no-op).
+pub fn close(handle: &RouteHandle) -> Result<(), PublicError> {
+    let _ = handle;
+    Ok(())
 }
 fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0

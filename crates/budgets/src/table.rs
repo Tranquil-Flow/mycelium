@@ -500,6 +500,7 @@ table! {
     UnknownMemberWall => (Duration(Span::from_millis(60_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:834 @ f5bfb709")),
     WorkerCleanupReserve => (Duration(Span::from_millis(10_000)), Policy, Source("mycelium_a13_macos/worker.py:35 @ f5bfb709")),
     WorkerStartup => (Duration(Span::from_millis(30_000)), Operational(Phase::Start), Source("mycelium_a13_macos/worker.py:36 @ f5bfb709")),
+    JoinedEpochMaxSessions => (Count(Entries::new(1_024)), Resource, Source("mycelium_request_gateway/service.py:308 @ f4e366e9; RequestGatewayService max_sessions default, one gateway per run: the lifetime admissions of one multi-request joined route epoch and the member's settled-request set; not a concurrency limit")),
     ExecutionCeilingLead => (Duration(Span::from_millis(30_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:1111 @ f5bfb709")),
     RolloverMargin => (Duration(Span::from_millis(120_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:268 @ f5bfb709")),
     EffectiveRolloverLead => (Derived(Formula::RolloverLead), Policy, Source("mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709")),

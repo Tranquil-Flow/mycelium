@@ -51,6 +51,14 @@ pub trait StageCompute {
     fn close(&mut self) -> Result<Value, Error>;
     /// Kill and reap; evidence only after the OS reported the exit.
     fn abort(&mut self) -> Result<Value, Error>;
+    /// Release one request's session state and keep the compute for the next
+    /// request of a multi-request epoch (lane EP0/EP1). Never interrupts a
+    /// step; Ok only when the state was released. A compute that cannot reset
+    /// refuses, and the member then ends its epoch with the compute closed.
+    fn reset(&mut self, current: Current<'_>) -> Result<Value, Error> {
+        let _ = current;
+        Err(Error("joined_native_reset_unsupported"))
+    }
 }
 impl StageCompute for NativeShard {
     fn offer(&self) -> &Value {
@@ -74,6 +82,9 @@ impl StageCompute for NativeShard {
     }
     fn abort(&mut self) -> Result<Value, Error> {
         NativeShard::abort(self)
+    }
+    fn reset(&mut self, current: Current<'_>) -> Result<Value, Error> {
+        NativeShard::reset(self, &|| current())
     }
 }
 /// Serving context: the member's carrier host and the operator operation bounds.
@@ -156,7 +167,7 @@ pub fn serve(
 ) -> Outcome<Value> {
     let began = Instant::now();
     let live = (s.current)().map_err(|e| e.0.to_owned())?;
-    let (index, message) = route::verify_member(
+    let (index, message) = route::verify_member_epoch(
         route_envelope,
         &live,
         compute.offer(),
