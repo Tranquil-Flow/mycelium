@@ -221,6 +221,8 @@ pub struct DesktopServices {
     /// The packaged host's network and authority, for the status (`crate::packaged_network`).
     network: Arc<crate::packaged_network::Network>,
     authority: Option<Arc<Mutex<api::app_host::Authority>>>,
+    /// The packaged host's owner run, for the status's `owner_run` (`crate::packaged_run`).
+    run: crate::packaged_run::RunConfig,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -308,9 +310,31 @@ impl DesktopServices {
         publisher: Arc<api::swarm::publisher::app::AppPublisher>,
         network: crate::packaged_network::NetworkConfig,
     ) -> Self {
+        Self::packaged_with_run(
+            node,
+            capacity,
+            private,
+            source,
+            publisher,
+            network,
+            crate::packaged_run::RunConfig::default(),
+        )
+    }
+    /// [`DesktopServices::packaged_with_network`] with the owner's run composed over `run`'s seams
+    /// (`PackagedHost::with_run`, lane PH3b S3); `run` is also the status's handle to it.
+    pub fn packaged_with_run(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+        publisher: Arc<api::swarm::publisher::app::AppPublisher>,
+        network: crate::packaged_network::NetworkConfig,
+        run: crate::packaged_run::RunConfig,
+    ) -> Self {
         let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
             .with_network(network)
-            .with_publisher(publisher);
+            .with_publisher(publisher)
+            .with_run(run.clone());
         let qualification = development_source(&node);
         // `PublishedStatus.start()` (published_status.py:26-30, app.py:630-632 @ f4e366e9): the
         // packaged app publishes a complete initial status before the window's first request, so
@@ -319,7 +343,9 @@ impl DesktopServices {
         if let Err(error) = api::actions::Backend::publish(&mut node.clone()) {
             eprintln!("status_publish_failed: {}", error.code);
         }
-        Self::with_host(node, capacity, private, host, qualification)
+        let mut services = Self::with_host(node, capacity, private, host, qualification);
+        services.run = run;
+        services
     }
     /// The packaged host's network (its relay, closed by the packaged Quit).
     pub fn network(&self) -> Arc<crate::packaged_network::Network> {
@@ -363,6 +389,7 @@ impl DesktopServices {
             actions: Arc::new(Control::new(backend)),
             network,
             authority,
+            run: crate::packaged_run::RunConfig::default(),
             serving,
             fast_mode,
             loops,
@@ -443,6 +470,8 @@ impl DesktopServices {
                     self.authority.as_deref(),
                     &self.network,
                 );
+                // v0.1.4's `owner_run` (`demo_app.owner_status`, `crate::packaged_run`).
+                crate::packaged_run::status_overlay(&mut status, &self.run);
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {

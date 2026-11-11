@@ -32,6 +32,8 @@ pub mod packaged;
 pub mod packaged_network;
 #[cfg(any(feature = "desktop-shell", feature = "packaged"))]
 pub mod packaged_product;
+#[cfg(any(feature = "desktop-shell", feature = "packaged"))]
+pub mod packaged_run;
 pub mod phase;
 pub mod planning;
 pub mod private_state;

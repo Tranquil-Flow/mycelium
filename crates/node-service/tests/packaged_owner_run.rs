@@ -125,7 +125,8 @@ impl Repository {
                             .to_string()
                             .into_bytes(),
                     )
-                } else if let Some(rest) = target.strip_prefix(&format!("/{id}/resolve/{commit}/")) {
+                } else if let Some(rest) = target.strip_prefix(&format!("/{id}/resolve/{commit}/"))
+                {
                     let path = rest.split('?').next().unwrap_or_default();
                     files
                         .iter()
@@ -144,8 +145,10 @@ impl Repository {
                         out.extend(body);
                         out
                     }
-                    None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        .to_vec(),
+                    None => {
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_vec()
+                    }
                 };
                 stream.write_all(&reply).unwrap_or_default();
             }
@@ -223,7 +226,12 @@ fn create_and_prepare(mac: &Mac) {
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or(Value::Null)
         },
-        |s| matches!(s["state"].as_str(), Some("prepared" | "failed" | "cancelled")),
+        |s| {
+            matches!(
+                s["state"].as_str(),
+                Some("prepared" | "failed" | "cancelled")
+            )
+        },
     );
     assert_eq!(status["state"], "prepared", "{status}");
 }
@@ -274,35 +282,38 @@ fn start_with_no_joined_mac_fails_two_macs_required_with_the_steps() {
     assert_eq!(code, 200, "{started}");
     assert_eq!(started["state"], "running", "{started}");
     assert_eq!(started["reason"], "start", "{started}");
-    let run = mac.until(
-        "the run ended",
-        owner_run,
-        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
-    );
+    let run = mac.until("the run ended", owner_run, |r| {
+        matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving"))
+    });
     assert_eq!(run["protocol"], "mycelium.a13_owner_run.v1", "{run}");
     assert_eq!(run["state"], "failed", "{run}");
     assert_eq!(run["failed_step"], "descriptors", "{run}");
     assert_eq!(run["error_code"], "two_macs_required", "{run}");
     assert_eq!(run["steps"][0]["state"], "done", "{run}");
     assert_eq!(
-        run["steps"][0]["detail"],
-        "Qwen/Qwen2.5-0.5B-Instruct \u{b7} whole snapshot per Mac",
+        run["steps"][0]["detail"], "Qwen/Qwen2.5-0.5B-Instruct \u{b7} whole snapshot per Mac",
         "{run}"
     );
     assert_eq!(run["steps"][1]["state"], "done", "{run}");
     assert_eq!(run["steps"][2]["detail"], "1 of 1 Macs reported", "{run}");
-    assert_eq!(run["participants"].as_array().map(Vec::len), Some(1), "{run}");
+    assert_eq!(
+        run["participants"].as_array().map(Vec::len),
+        Some(1),
+        "{run}"
+    );
     assert_eq!(run["participants"][0]["label"], "This Mac (owner)", "{run}");
     assert_eq!(run["participants"][0]["state"], "reported", "{run}");
-    // A finished run does not hold the next Start back (`owner_run_active` only while active).
+    // The run joined this Mac's own contributor to the swarm: with no relay running, the next Start
+    // is held back for it (`members_joined_without_relay`, app.py:836-842; `relay_gate`,
+    // demo_app.py:94-106), with the shipped message and fix.
     let (code, again) = mac.post("/api/demo/start", json!({}));
-    assert_eq!(code, 200, "{again}");
-    let run = mac.until(
-        "the second run ended",
-        owner_run,
-        |r| r["state"] == "failed" && r["run_id"] == again["run_id"],
+    assert_eq!(code, 400, "{again}");
+    assert_eq!(again["error"], "relay_required", "{again}");
+    assert_eq!(
+        owner_run(&mac)["run_id"],
+        run["run_id"],
+        "no second run started"
     );
-    assert_eq!(run["error_code"], "two_macs_required", "{run}");
     assert_eq!(mac.quit(), Ok(Poll::Verified));
 }
 
@@ -343,14 +354,11 @@ fn stop_mid_run_ends_it_stopped() {
     let run = mac.until("the run stopped", owner_run, |r| r["state"] != "stopping");
     assert_eq!(run["state"], "stopped", "{run}");
     assert_eq!(run["failed_step"], Value::Null, "{run}");
-    // Rebuild needs a run that serves (`owner_run_rebuild_requires_run`).
+    // Rebuild passes the same relay gate as Start (demo_app.py:123-124): this Mac's contributor
+    // joined while no relay runs.
     let refused = mac.post("/api/demo/rebuild", json!({}));
     assert_eq!(refused.0, 400, "{}", refused.1);
-    assert_eq!(
-        refused.1["error"], "owner_run_rebuild_requires_run",
-        "{}",
-        refused.1
-    );
+    assert_eq!(refused.1["error"], "relay_required", "{}", refused.1);
     assert_eq!(mac.quit(), Ok(Poll::Verified));
 }
 

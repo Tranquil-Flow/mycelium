@@ -465,6 +465,8 @@ pub struct PackagedHost {
     /// `_renew_loop` for a joined target over the network's member cell (none before
     /// [`PackagedHost::with_network`]). Quit stops and reaps it with the host's other loops.
     member_renewal: Option<Arc<HostLoop>>,
+    /// `DemoApp.owner_run` (lane PH3b S3, `crate::packaged_run`); none before [`PackagedHost::with_run`].
+    run: Option<crate::packaged_run::OwnerRun>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -579,6 +581,7 @@ impl PackagedHost {
                 crate::packaged_network::NetworkConfig::default(),
             ),
             member_renewal: None,
+            run: None,
         };
         host.refresh_fast_mode();
         host
@@ -676,6 +679,105 @@ impl PackagedHost {
                 Err(code) => eprintln!("member renewal: {code}"),
             }
         }
+        self
+    }
+    /// This host with the owner's run (`DemoApp.owner_run`, lane PH3b S3, `crate::packaged_run`),
+    /// installed into `config` for the window's status and Quit: `/api/demo/{start,stop,rebuild}`
+    /// run `demo_app.action` over it (demo_app.py:109-133 @ f4e366e9). The run reads this host's
+    /// authority, network and model source; the owner's local contributor's lease is renewed every
+    /// `RenewLoopSelfClosedWait` (`DemoApp._renew_loop`'s `contributor.renew()`, app.py:911-927) on its
+    /// own loop, which Quit stops. A state refused at bind has no run (Start keeps the 409).
+    pub fn with_run(mut self, config: crate::packaged_run::RunConfig) -> Self {
+        let Ok(authority) = self.authority.clone() else {
+            return self;
+        };
+        let model = self.model.clone();
+        let (root, node) = (self.root.clone(), self.node.clone());
+        let hooks = crate::packaged_run::ModelHooks {
+            acquisition: {
+                let model = model.clone();
+                Box::new(move || model.as_ref().and_then(|m| m.lock().acquisition.clone()))
+            },
+            resource_check: {
+                let (model, root) = (model.clone(), root.clone());
+                Box::new(move || model.as_ref()?.resource_violation(&root))
+            },
+            // `DemoApp.reverify_model_snapshot` (app.py:976-999 @ f4e366e9): re-hash a snapshot left
+            // on disk by an earlier run under the standing storage consent; every power / thermal /
+            // network gate stays.
+            reverify: {
+                let (authority, node) = (authority.clone(), node.clone());
+                Box::new(move || {
+                    use owner_run::steps::model::Reverify;
+                    let Some(model) = model.as_ref() else {
+                        return Reverify::Failed;
+                    };
+                    let policy = resource_policy::read(&root).ok().flatten();
+                    let current = crate::packaged_network::membership_state(&authority).as_deref()
+                        == Some("current");
+                    let usable = !node.closed().unwrap_or(true)
+                        && policy.is_some()
+                        && app_host::running(&*authority)
+                        && current
+                        && !model.active();
+                    let acquisition = model.lock().acquisition.clone();
+                    let (Some(policy), Some(acquisition), true) = (policy, acquisition, usable)
+                    else {
+                        return Reverify::Failed;
+                    };
+                    if !matches!(
+                        acquisition.status().state.as_str(),
+                        "closed" | "idle" | "failed" | "cancelled"
+                    ) {
+                        return Reverify::Failed;
+                    }
+                    if let Some(reason) = model.resource_violation(&root) {
+                        model.lock().policy_error = Some(reason);
+                        return Reverify::Failed;
+                    }
+                    let storage = policy
+                        .get("storage_bytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    match acquisition.reverify_closed_snapshot(storage) {
+                        Ok(_) => {
+                            let mut state = model.lock();
+                            state.policy_error = None;
+                            state.active = true;
+                            Reverify::Done
+                        }
+                        Err(_) => Reverify::Failed,
+                    }
+                })
+            },
+        };
+        let host = crate::packaged_run::PackagedRun::new(
+            authority,
+            self.network.clone(),
+            self.node.clone(),
+            hooks,
+            config.sidecar.clone(),
+        );
+        let renewal = {
+            let host = host.clone();
+            HostLoop::start(
+                "packaged-contributor-renewal",
+                BudgetId::PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917,
+                &self.node,
+                true,
+                move || crate::packaged_run::OwnerRun::renew_contributor(&host),
+            )
+        };
+        let renewal = match renewal {
+            Ok(renewal) => Some(renewal),
+            Err(code) => {
+                eprintln!("contributor renewal: {code}");
+                None
+            }
+        };
+        self.run = Some(crate::packaged_run::OwnerRun::install(
+            host, &config, renewal,
+        ));
         self
     }
     /// The host's network (relay, pending windows, join seams), for the action root and the Quit.
@@ -783,9 +885,13 @@ impl Host for PackagedHost {
     fn resource_check(&mut self) -> Option<&'static str> {
         self.model.as_ref()?.resource_violation(&self.root)
     }
-    /// `app.owner_run.active()`: the node service's run still owns its driver.
+    /// `app.owner_run.active()`: the owner's run (`crate::packaged_run`) or the node service's run
+    /// still owns its driver.
     fn owner_run_active(&self) -> bool {
-        self.node.run_active().unwrap_or(true)
+        self.run
+            .as_ref()
+            .is_some_and(crate::packaged_run::OwnerRun::active)
+            || self.node.run_active().unwrap_or(true)
     }
     /// `app._refresh_fast_mode_process()`, after the file is written.
     fn fast_mode_changed(&mut self) {
@@ -819,13 +925,27 @@ impl Host for PackagedHost {
         self.acquisition(app_host::reopen_acquisition_if_needed);
     }
     /// `PersistentBackend` hands `/api/demo/{start,stop,rebuild}` to the host
-    /// (`demo_app.action`). Stop and Rebuild are the node service's own (the inner backend:
-    /// the same shared service); Start keeps the trait default until the plan path is ported.
+    /// (`demo_app.action`, demo_app.py:109-133 @ f4e366e9): the owner's run (`with_run`, lane PH3b
+    /// S3). A Stop also stops the node service's own local run when one is active (the packaged
+    /// chat's native run, which the page's Stop ends too). Without a composed run, Stop and Rebuild
+    /// are the node service's own and Start keeps the trait default.
     fn demo_action(
         &mut self,
         action: Action,
         body: &Map<String, Value>,
     ) -> Result<Json, PublicError> {
+        if let Some(run) = &self.run {
+            if action == Action::DemoStop && self.node.run_active().unwrap_or(false) {
+                let mut node = self.node.clone();
+                if let Err(error) = node
+                    .prepare(action, body)
+                    .and_then(|()| node.execute_json(action, body))
+                {
+                    eprintln!("node run stop: {}", error.code);
+                }
+            }
+            return run.demo_action(action, body);
+        }
         match action {
             Action::DemoStop | Action::DemoRebuild => {
                 let mut node = self.node.clone();

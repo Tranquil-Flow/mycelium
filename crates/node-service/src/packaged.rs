@@ -177,6 +177,9 @@ pub struct WindowQuit {
     model: ModelClose,
     /// `self.public_relay.close()` (app.py:1848-1850), started as Quit begins.
     relay: crate::packaged_network::RelayClose,
+    /// `demo_app.close` and `_stop_local_contributor` (`crate::packaged_run`), started as Quit
+    /// begins, before every other step.
+    run: Option<crate::packaged_run::RunClose>,
     /// The first step that failed, reported once every step ran.
     failed: Option<CleanupError>,
 }
@@ -204,6 +207,9 @@ impl Cleanup for AppCleanup {
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
             Self::Service(quit) => {
+                if let Some(run) = &mut quit.run {
+                    run.begin();
+                }
                 quit.deadline = quit.origin.and_then(|origin| {
                     origin.checked_add(Duration::from_millis(deadline.millis()))
                 });
@@ -251,13 +257,15 @@ impl Cleanup for AppCleanup {
                 let swarm = quit.swarm.as_mut().map_or(Some(Ok(())), SwarmClose::poll);
                 let model = quit.model.poll();
                 let relay = quit.relay.poll();
-                let (Some(swarm), Some(relay)) = (swarm, relay) else {
+                let run = quit.run.as_mut().map_or(Some(Ok(())), |run| run.poll());
+                let (Some(swarm), Some(relay), Some(run)) = (swarm, relay, run) else {
                     return Ok(Poll::Pending);
                 };
                 if model == Ok(Poll::Pending) {
                     return Ok(Poll::Pending);
                 }
                 for step in [
+                    run.map(|()| Poll::Verified),
                     swarm.map(|()| Poll::Verified),
                     model,
                     relay.map(|()| Poll::Verified),
@@ -485,25 +493,10 @@ pub fn core_with_network(
         state_root,
         ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
         network,
+        RunConfig::default(),
     )
 }
-/// The owner run's composition seams (lane PH3b S3, `crate::packaged_run`): where the installed
-/// native sidecar is (`installed_sidecar`, native_runtime.py:8-22; `None`: beside the executable,
-/// `native/mycelium-iroh-sidecar`), and a read-only handle to the run's status view once composed.
-#[derive(Clone, Default)]
-pub struct RunConfig {
-    pub sidecar: Option<PathBuf>,
-    pub view: Arc<Mutex<Option<api::owner_driver::DemoView>>>,
-}
-impl RunConfig {
-    /// The composed run's status view (none before the composition installed one).
-    pub fn observed(&self) -> Option<api::owner_driver::DemoView> {
-        self.view
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-}
+pub use crate::packaged_run::RunConfig;
 /// [`core_with_network`] with the owner run's composition seams given.
 pub fn core_with_run(
     state_root: &Path,
@@ -512,8 +505,12 @@ pub fn core_with_run(
     network: NetworkConfig,
     run: RunConfig,
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
-    drop(run);
-    core_with_network(state_root, transport, observer, network)
+    compose(
+        state_root,
+        ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
+        network,
+        run,
+    )
 }
 /// The core and cleanup for the window, from the state root.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
@@ -521,12 +518,14 @@ pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
         state_root,
         ModelSource::hub(state_root.to_owned()),
         NetworkConfig::default(),
+        RunConfig::default(),
     )
 }
 fn compose(
     state_root: &Path,
     source: ModelSource,
     network: NetworkConfig,
+    run: RunConfig,
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     let dirs = prepare_dirs(state_root)?;
     let private = dirs.private.clone();
@@ -553,16 +552,23 @@ fn compose(
     );
     // `DemoApp.swarm_publisher`: the listing custody's state beside the owner's private state.
     let publisher = Arc::new(api::swarm::publisher::app::AppPublisher::new(&private));
-    let services = DesktopServices::packaged_with_network(
+    // `DemoApp.owner_run` (lane PH3b S3, `crate::packaged_run`): composed with the host; Quit
+    // stops and joins it first (`DemoApp.close` -> `demo_app.close`, app.py:1815-1825).
+    let services = DesktopServices::packaged_with_run(
         node,
         CALLBACK_CAPACITY,
         &private,
         source.clone(),
         publisher,
         network,
+        run.clone(),
     )
     .gated(native);
-    Ok(assemble(services, source))
+    let (core, mut cleanup) = assemble(services, source);
+    if let AppCleanup::Service(quit) = &mut cleanup {
+        quit.run = Some(crate::packaged_run::RunClose::new(run));
+    }
+    Ok((core, cleanup))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`
 /// (the same source the services' packaged host was given): the composition's last step, also
@@ -600,6 +606,7 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
             swarm,
             model: ModelClose::new(source),
             relay,
+            run: None,
             failed: None,
         })),
     )
