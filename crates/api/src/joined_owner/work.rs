@@ -1033,6 +1033,11 @@ impl Worker {
             f.cleanup_error = cleanup;
             match failure {
                 Some(r) => {
+                    // v0.1.4 keeps the raised exception's text beside the closed code
+                    // (workflow.py:337-343 `raise`): an open code is written to stderr.
+                    if !owner_run::machine::closed_code(&r.0) {
+                        eprintln!("owner_work_failed: {}", r.0);
+                    }
                     f.state = FAILED;
                     f.error = Some(closed(&r));
                 }
