@@ -728,6 +728,15 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
         return cell.try_with(|c| c.running = true).ok_or_else(failure);
     };
     let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
+    // `_start_runtime` loads the seed key bound to the seed database (`load_bound_seed_signer`,
+    // mycelium_seed/authority.py:113-139 @ f4e366e9): a lost key is `seed_authority_key_missing`,
+    // never a fresh, unbound key (which `prepare_seed` would create).
+    if matches!(
+        fs::symlink_metadata(root.join(SEED_IDENTITY_FILE)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Err(PublicError::new(409, "seed_authority_key_missing"));
+    }
     // `_start_runtime`: existing metadata makes a missing TLS root a fail-closed identity loss,
     // never fresh material (authority.py:508-512 @ f4e366e9); an existing empty directory is
     // still filled (`ensure_local_tls_material`).
