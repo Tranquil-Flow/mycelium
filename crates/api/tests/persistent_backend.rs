@@ -94,6 +94,8 @@ impl Host for FakeHost {
     }
 }
 struct Inner(Arc<Mutex<Vec<String>>>);
+/// The inner trace's mark that makes the inner backend refuse every later action.
+const REFUSE: &str = "test:refuse";
 impl Backend for Inner {
     fn prepare(&mut self, action: Action, _: &Map<String, Value>) -> Result<(), PublicError> {
         self.0
@@ -102,13 +104,11 @@ impl Backend for Inner {
             .push(format!("inner:prepare:{action:?}"));
         Ok(())
     }
-    fn execute(&mut self, action: Action, body: &Map<String, Value>) -> Result<Value, PublicError> {
-        self.0
-            .lock()
-            .unwrap()
-            .push(format!("inner:execute:{action:?}"));
-        // A body naming `refused` stands for an action its owner refuses (no effect).
-        if body.contains_key("refused") {
+    fn execute(&mut self, action: Action, _: &Map<String, Value>) -> Result<Value, PublicError> {
+        let mut trace = self.0.lock().unwrap();
+        trace.push(format!("inner:execute:{action:?}"));
+        // Once the test marked it, the inner backend refuses its actions (no effect).
+        if trace.iter().any(|t| t == REFUSE) {
             return Err(PublicError::new(409, "action_not_completed"));
         }
         Ok(json!({"state": "stopped", "route_ready": false}))
@@ -486,26 +486,41 @@ fn revoking_this_mac_cancels_its_acquisition_after_the_revocation() {
     };
     c.action("/api/revoke-self", &body(json!({"confirm": true})))
         .unwrap();
-    assert!(inner.lock().unwrap().contains(&"inner:execute:RevokeSelf".to_owned()));
+    assert!(
+        inner
+            .lock()
+            .unwrap()
+            .contains(&"inner:execute:RevokeSelf".to_owned())
+    );
     assert_eq!(cancels(&host), 1, "revoke-self did not cancel the download");
     c.action(
         "/api/revoke",
         &body(json!({"node_id": "another-mac", "generation": 1})),
     )
     .unwrap();
-    assert_eq!(cancels(&host), 0, "revoking another member cancelled this Mac's download");
+    assert_eq!(
+        cancels(&host),
+        0,
+        "revoking another member cancelled this Mac's download"
+    );
     c.action(
         "/api/revoke",
         &body(json!({"node_id": "this-mac", "generation": 1})),
     )
     .unwrap();
-    assert_eq!(cancels(&host), 1, "revoking this Mac did not cancel its download");
     assert_eq!(
-        refused(c.action(
-            "/api/revoke-self",
-            &body(json!({"confirm": true, "refused": true}))
-        )),
+        cancels(&host),
+        1,
+        "revoking this Mac did not cancel its download"
+    );
+    inner.lock().unwrap().push(REFUSE.into());
+    assert_eq!(
+        refused(c.action("/api/revoke-self", &body(json!({"confirm": true})))),
         (409, "action_not_completed")
     );
-    assert_eq!(cancels(&host), 0, "a refused revocation cancelled the download");
+    assert_eq!(
+        cancels(&host),
+        0,
+        "a refused revocation cancelled the download"
+    );
 }

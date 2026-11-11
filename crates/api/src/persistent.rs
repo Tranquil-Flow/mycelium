@@ -1196,7 +1196,23 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 Ok(self.host.status_document())
             }
             // Revocation is the authority's: only the closed/role gate and the shape live here.
-            Action::Revoke | Action::RevokeSelf => self.inner.execute_json(action, body),
+            // Once it succeeded for this Mac, `self._cancel_acquisition()` (app.py:1645-1660 @
+            // f4e366e9): `/api/revoke-self` always, `/api/revoke` when it names this Mac's member.
+            Action::RevokeSelf => {
+                let revoked = self.inner.execute_json(action, body)?;
+                self.host.cancel_acquisition();
+                Ok(revoked)
+            }
+            Action::Revoke => {
+                let revoked = self.inner.execute_json(action, body)?;
+                let this_mac = self.host.membership_binding().is_some_and(|member| {
+                    body.get("node_id") == Some(&Value::from(member.node_id))
+                });
+                if this_mac {
+                    self.host.cancel_acquisition();
+                }
+                Ok(revoked)
+            }
             _ => self.inner.execute_json(action, body),
         }
     }
