@@ -115,6 +115,47 @@ fn freeze_binds_the_commit_the_exe_and_the_bundle_bytes() {
 }
 
 #[test]
+fn freeze_binds_a_relative_link_inside_the_bundle_and_refuses_links_out_of_it() {
+    // The real bundle has v0.1.4's signable Metal layout (c85059e): the metallib bytes live in
+    // `Contents/Resources` and `Contents/Frameworks/mlx.metallib` is the relative link
+    // `../Resources/mlx.metallib`. A candidate must be freezable, and the link's target is part
+    // of the frozen bytes.
+    use std::os::unix::fs::symlink;
+    let sandbox = Sandbox::new();
+    let contents = sandbox.app().join("Contents");
+    fs::create_dir_all(contents.join("Resources")).unwrap();
+    fs::create_dir_all(contents.join("Frameworks")).unwrap();
+    fs::write(contents.join("Resources/mlx.metallib"), "metal").unwrap();
+    fs::write(contents.join("Resources/other.metallib"), "metal").unwrap();
+    let link = contents.join("Frameworks/mlx.metallib");
+    symlink("../Resources/mlx.metallib", &link).unwrap();
+    let out = sandbox.root.join("candidate.json");
+    let frozen = sandbox.freeze(&sandbox.head, &out);
+    assert_eq!(frozen.status.code(), Some(0), "{}", text(&frozen));
+    let manifest = release::Manifest::load(&out).unwrap();
+    assert_eq!(manifest.verify_bytes(), Ok(()));
+    // Same bytes behind another target: a different candidate.
+    fs::remove_file(&link).unwrap();
+    symlink("../Resources/other.metallib", &link).unwrap();
+    assert!(
+        manifest
+            .verify_bytes()
+            .unwrap_err()
+            .contains("package_bundle_mismatch")
+    );
+    // A link that leaves the bundle is refused, never followed.
+    for target in ["/etc/hosts", "../../../outside", "../Resources/../../../x"] {
+        fs::remove_file(&link).unwrap();
+        symlink(target, &link).unwrap();
+        let refused = release::bundle_digest(&sandbox.app()).unwrap_err();
+        assert!(
+            refused.contains("bundle_link_outside"),
+            "{target}: {refused}"
+        );
+    }
+}
+
+#[test]
 fn freeze_refuses_another_commit_a_dirty_tree_and_an_existing_manifest() {
     let sandbox = Sandbox::new();
     let out = sandbox.root.join("candidate.json");
