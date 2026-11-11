@@ -699,6 +699,53 @@ fn packaged_owner_create_seed_key_failure_commits_no_swarm() {
     assert_eq!(private_json(&root.join("resource-policy.json")), consent());
 }
 
+/// `/api/start` over what a failed create prepared (review A2-F2; the sandbox denies creating the
+/// seed's TLS directory, as in `packaged_owner_create_failed_preparation_commits_no_swarm`).
+/// v0.1.4 `/api/start` calls `authority.start()` only when the app is not running (app.py:1632-1635
+/// @ f4e366e9): right after the failure the authority is still started and the answer is 200
+/// (authority.py:384-385); once stopped, the restart finds no metadata beside prepared entries and
+/// refuses 409 `authority_partial_state` before it starts anything (authority.py:386-391),
+/// recorded as the last failure. Executed oracle (a2 review `oracle-probes.json`, case
+/// `start_precommit`): create 409 `local_tls_path_invalid`, start 200, stop 200, start 409
+/// `authority_partial_state` with that failure recorded for `/api/start`, nothing committed.
+#[test]
+fn packaged_owner_start_after_failed_preparation_refuses_partial_state() {
+    if let Some(root) = sandbox_child_root() {
+        let host = compose(&root);
+        let answers = [
+            answer(&create(&host)),
+            answer(&post(&host, "/api/start", json!({}))),
+            answer(&post(&host, "/api/stop", json!({}))),
+            answer(&post(&host, "/api/start", json!({}))),
+        ];
+        print_trace(&json!({
+            "answers": answers,
+            "last_failure": last_failure(&root),
+            "committed": committed(&root),
+        }));
+        return;
+    }
+    let root = private_root();
+    let trace = sandboxed(
+        "packaged_owner_start_after_failed_preparation_refuses_partial_state",
+        &root,
+        "/seed-rs/tls",
+    );
+    assert_eq!(
+        trace,
+        json!({
+            "answers": [
+                [409, "local_tls_path_invalid"],
+                [200, ""],
+                [200, ""],
+                [409, "authority_partial_state"],
+            ],
+            "last_failure": ["/api/start", "authority_partial_state"],
+            "committed": [false, false, false],
+        })
+    );
+}
+
 /// A stopped owner whose retained membership cannot be read. `/api/create` asks
 /// `authority.status()` (app.py:1604), whose branch without a coordinator lets
 /// `load_membership_state`'s `DurableMembershipError` out (authority.py:669-674), answered 409 with
