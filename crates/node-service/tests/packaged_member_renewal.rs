@@ -123,15 +123,22 @@ fn packaged_member_renewal_survives_failed_passes_while_its_lease_is_valid() {
     assert_eq!(joined["membership_state"], "current", "{joined}");
     // The member's seed path fails: several renewal passes in a row cannot reach it.
     forwarder.refuse.store(true, Ordering::SeqCst);
-    let failing = member_lease(&owner.mac).unwrap();
     let deadline = Instant::now() + millis(B::WorkerStartup);
-    while forwarder.refused.load(Ordering::SeqCst) < 3 {
-        assert!(
-            Instant::now() < deadline,
-            "no renewal attempt reached the seed path"
-        );
-        std::thread::sleep(millis(RENEWAL));
-    }
+    let refused = |passes: usize| {
+        while forwarder.refused.load(Ordering::SeqCst) < passes {
+            assert!(
+                Instant::now() < deadline,
+                "no renewal attempt reached the seed path"
+            );
+            std::thread::sleep(millis(RENEWAL));
+        }
+    };
+    // A pass whose connection the forwarder accepted just before it began refusing still lands.
+    // The passes are sequential, so that one is over when the first refused pass is counted:
+    // the lease read then is the one the three further failing passes must leave alone.
+    refused(1);
+    let failing = member_lease(&owner.mac).unwrap();
+    refused(4);
     assert_eq!(
         member_lease(&owner.mac),
         Some(failing),
