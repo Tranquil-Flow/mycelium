@@ -61,6 +61,17 @@ fn the_page_reads_the_applications_running_flag_on_both_macs() {
     assert_eq!(started.0, 200, "start: {}", started.1);
     let again = member.status();
     assert_eq!(again["running"], true, "after /api/start: {again}");
+    // S4c-a item 2: `/api/start` of a target with a membership binding reports to the owner
+    // ("Reconnect can be clicked while this member is still running. The owner's in-memory report
+    // inbox may have restarted alone", app.py:1641-1643 -> `_auto_report('periodic')`), recorded as
+    // `join_flow.last_report` (:1161, :1236). The join's own report came first.
+    assert_eq!(
+        after["join_flow"]["last_report"]["purpose"], "join",
+        "{after}"
+    );
+    let report = &again["join_flow"]["last_report"];
+    assert_eq!(report["purpose"], "periodic", "after /api/start: {again}");
+    assert_eq!(report["state"], "delivered", "{report}");
 
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));

@@ -32,6 +32,16 @@ pub struct Recorded {
     pub standing_error_http: Option<Value>,
     pub standing_last: Option<Value>,
     pub last_report: Option<Value>,
+    /// `DemoApp._next_periodic_report` (app.py:532, :1162): `None` = `0.0`, due at the first tick.
+    pub next_periodic_report: Option<std::time::Instant>,
+}
+/// The 300 s between two periodic capability reports (`MemberPeriodicReport`, app.py:1162).
+pub fn periodic_report_period() -> std::time::Duration {
+    budgets::BudgetId::MemberPeriodicReport
+        .span(budgets::Entries::ZERO)
+        .map_or(std::time::Duration::ZERO, |s| {
+            std::time::Duration::from_millis(s.millis())
+        })
 }
 /// `_renew_loop`'s code for a pass that failed while the app was running (app.py:925-927).
 pub const RENEWAL_UNAVAILABLE: &str = "renewal_unavailable";
@@ -46,6 +56,15 @@ pub enum RenewalPass {
     Failed,
 }
 impl Recorded {
+    /// `_auto_report`'s end (app.py:1161-1162): `self.last_report = record` and
+    /// `self._next_periodic_report = time.monotonic() + 300` ([`periodic_report_period`]).
+    pub fn reported(&mut self, record: Value, _now: std::time::Instant) {
+        self.last_report = Some(record);
+    }
+    /// `_standing_tick`'s `due = time.monotonic() >= self._next_periodic_report` (app.py:1197).
+    pub fn periodic_report_due(&self, _now: std::time::Instant) -> bool {
+        false
+    }
     /// Record a pass of `_renew_loop`; `running_open` is `self.running and not
     /// self.closed.is_set()` read after the pass (app.py:926).
     pub fn renewal(&mut self, pass: RenewalPass, running_open: bool) {

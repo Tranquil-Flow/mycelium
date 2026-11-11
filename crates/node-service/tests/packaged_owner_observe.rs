@@ -517,3 +517,66 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
     drop(repository);
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// S4c-a item 2 (REVIEW-lanePH3B-S2 F4): the joined Mac's capability report stays current as the
+/// shipped app keeps it. v0.1.4 @ f4e366e9: every report after the membership exists carries its
+/// generation (`signed_capability_link_report`, peer.py:1118-1139, called by `_measure_and_sign`
+/// app.py:1128-1136 from `_auto_report` :1138-1163), and the standing loop reports `periodic` on its
+/// first tick after a launch and every 300 s (`_next_periodic_report`, :532, :1162; `_standing_tick`
+/// :1195-1199 -> standing_consent.py:362-363), recorded as `join_flow.last_report` (:1236).
+/// Here the member is relaunched after its join (no re-join): its first standing pass reports, and
+/// the owner's run (observe test double, as above) gets past compile's report check
+/// (`member_capability_report_stale`, chain_compile `_capability_rows`).
+#[test]
+fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_rejoin() {
+    let base = state_root("observe-relaunch");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar.clone()),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+    );
+    let state = member.state.clone();
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    let member = launch(
+        &state,
+        &repository,
+        NetworkConfig {
+            seams: owner.seams.clone(),
+            sidecar: Some(sidecar),
+            ..NetworkConfig::default()
+        },
+        RunConfig::default(),
+    );
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let run = until_within(
+        "the run ended",
+        observe_patience() + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    println!("S4c-a relaunched member: {run}");
+    assert_eq!(run["steps"][2]["detail"], "2 of 2 Macs reported", "{run}");
+    assert_eq!(run["steps"][3]["state"], "done", "{run}");
+    assert_ne!(
+        run["error_code"], "member_capability_report_stale",
+        "the relaunched member's report is current: {run}"
+    );
+    assert_ne!(
+        run["error_code"], "member_capability_report_required",
+        "{run}"
+    );
+    let report = member.status()["join_flow"]["last_report"].clone();
+    assert_eq!(report["purpose"], "periodic", "{report}");
+    assert_eq!(report["state"], "delivered", "{report}");
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
