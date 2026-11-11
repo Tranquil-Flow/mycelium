@@ -213,41 +213,9 @@ type Shared = Arc<Mutex<Core>>;
 fn authority_status(core: &Core) -> Json {
     joined_member::authority_status(&core.authority)
 }
-/// The same pass for a joined TARGET (`authority.renew()` is `RemoteMacMember.renew()` there): the live
-/// membership session is taken out of the core while the heartbeat is on the wire. A failure is logged
-/// and tried again at the next pass (the oracle sets `renewal_error = 'renewal_unavailable'`).
+/// The same pass for a joined TARGET (`api::app_host::renew_member`, shared with the packaged host).
 fn renew_target(core: &Shared) {
-    let (root, session) = {
-        let Ok(mut c) = core.lock() else { return };
-        if c.closed || !c.running || c.left || !c.target {
-            return;
-        }
-        let Some(session) = c.session.take() else {
-            return;
-        };
-        c.session_view = Some((session.generation(), session.lease_expires_at()));
-        (c.root.clone(), session)
-    };
-    let mut session = session;
-    if let Ok((signer, _, _)) = identity(&root) {
-        let options = member_seed_options();
-        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
-        let env = api::peer::JoinEnv {
-            signer: &signer,
-            clock: &now,
-            random_hex: &random_hex,
-            seed: &options,
-        };
-        if let Err(error) = api::peer::renew(&root, true, Some(&mut session), &env) {
-            eprintln!("member renew: {}", error.code);
-        }
-    }
-    if let Ok(mut c) = core.lock() {
-        c.session_view = None;
-        if c.session.is_none() {
-            c.session = Some(session);
-        }
-    }
+    app_host::renew_member(&CoreCell(core.clone()));
 }
 // ---- the owner's own contributor (local_contributor.py, app.py:882-909 @ f4e366e9)
 

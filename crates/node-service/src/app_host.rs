@@ -447,6 +447,9 @@ pub struct PackagedHost {
     publishing: Option<Publishing>,
     /// `DemoApp.public_relay`, the pending windows and the join seams (`crate::packaged_network`).
     network: Arc<crate::packaged_network::Network>,
+    /// `_renew_loop` for a joined target over the network's member cell (none before
+    /// [`PackagedHost::with_network`]). Quit stops and reaps it with the host's other loops.
+    member_renewal: Option<Arc<HostLoop>>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -560,6 +563,7 @@ impl PackagedHost {
                 &root_for_network,
                 crate::packaged_network::NetworkConfig::default(),
             ),
+            member_renewal: None,
         };
         host.refresh_fast_mode();
         host
@@ -633,8 +637,25 @@ impl PackagedHost {
     }
     /// This host with its network over `config` (the relay's hooks and the join seams) in place of
     /// the app's own (`crate::packaged_network`); before the host is handed to its services.
+    ///
+    /// A joined Mac's own lease renewal starts with it (`_renew_loop` for a target, app.py:911-927
+    /// @ f4e366e9), every `config.renewal`, as one of the host's loops (Quit stops and reaps it).
     pub fn with_network(mut self, config: crate::packaged_network::NetworkConfig) -> Self {
+        let renewal = config.renewal;
         self.network = crate::packaged_network::Network::new(&self.root, config);
+        if let Ok(authority) = &self.authority {
+            let (network, authority) = (self.network.clone(), authority.clone());
+            match HostLoop::start(
+                "packaged-member-renewal",
+                renewal,
+                &self.node,
+                true,
+                move || network.renew_member(&authority),
+            ) {
+                Ok(renewing) => self.member_renewal = Some(renewing),
+                Err(code) => eprintln!("member renewal: {code}"),
+            }
+        }
         self
     }
     /// The host's network (relay, pending windows, join seams), for the action root and the Quit.
@@ -656,7 +677,11 @@ impl PackagedHost {
     }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {
-        self.policy.iter().cloned().collect()
+        self.policy
+            .iter()
+            .chain(self.member_renewal.iter())
+            .cloned()
+            .collect()
     }
     /// One acquisition step over this host's model source, `None` without one.
     fn acquisition<R>(

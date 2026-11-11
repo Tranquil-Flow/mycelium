@@ -868,6 +868,44 @@ pub fn renew_owner(cell: &impl Cell) {
         }
     });
 }
+/// One pass of `DemoApp._renew_loop` for a joined TARGET (`authority.renew()` is
+/// `RemoteMacMember.renew()`, app.py:911-927 @ f4e366e9): the live membership session is taken out
+/// of the host while the heartbeat is on the wire (its generation and lease stay visible through
+/// `session_view`), over the member's own seed path ([`Cell::member_seed_options`]). A closed, left,
+/// stopped or owner host renews nothing. A failure is logged and tried again at the next pass (the
+/// oracle sets `renewal_error = 'renewal_unavailable'`).
+pub fn renew_member(cell: &impl Cell) {
+    let Some(Some((root, session))) = cell.try_with(|c| {
+        if c.closed || !c.running || c.left || !c.target {
+            return None;
+        }
+        let session = c.session.take()?;
+        c.session_view = Some((session.generation(), session.lease_expires_at()));
+        Some((c.root.clone(), session))
+    }) else {
+        return;
+    };
+    let mut session = session;
+    if let Ok((signer, _, _)) = identity(&root) {
+        let options = cell.member_seed_options();
+        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+        let env = crate::peer::JoinEnv {
+            signer: &signer,
+            clock: &now,
+            random_hex: &random_hex,
+            seed: &options,
+        };
+        if let Err(error) = crate::peer::renew(&root, true, Some(&mut session), &env) {
+            eprintln!("member renew: {}", error.code);
+        }
+    }
+    cell.try_with(|c| {
+        c.session_view = None;
+        if c.session.is_none() {
+            c.session = Some(session);
+        }
+    });
+}
 /// Target side of `authority.pair_request()`: one signed, recipient-keyed request, reused
 /// until it expires (authority.py:841-871).
 pub fn pair_request(cell: &impl Cell) -> Result<Json, PublicError> {

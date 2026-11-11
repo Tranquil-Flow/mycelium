@@ -11,7 +11,9 @@
 #[path = "support/packaged_macs.rs"]
 mod macs;
 use desktop::lifecycle::Poll;
-use macs::{Mac, STORAGE, approve_and_join, consent, join_body, member, owner, state_root};
+use macs::{
+    Mac, STORAGE, approve_and_join, consent, join_body, member, owner, private, state_root,
+};
 use serde_json::{Value, json};
 
 /// The member's window shows v0.1.4's join-consent document before anything is chosen; a grant
@@ -139,6 +141,40 @@ fn packaged_join_refusals_are_v014s() {
         refused(&member, "/api/join/window", changed),
         (400, "consent_retry_changed".into())
     );
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
+/// A joined Mac holds no seed authority, whatever its page asks: `/api/create` on a target is
+/// refused `owner_role_required` before anything runs (`DemoApp._action`, app.py:1346-1348 @
+/// f4e366e9), and its root never gets a seed key or seed state (`seed-identity.json`, `seed-rs/`),
+/// after the join or after the attempt (REPORT-laneS1R: a target root must never create them).
+#[test]
+fn packaged_member_root_never_holds_seed_authority() {
+    let base = state_root("no-seed");
+    let owner = owner(&base);
+    let member = member(&base, &owner);
+    let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    let joined = approve_and_join(&owner, &member);
+    assert_eq!(joined["membership_state"], "current", "{joined}");
+    let seed_authority = |mac: &Mac| {
+        ["seed-rs", "seed-identity.json"]
+            .into_iter()
+            .filter(|path| private(&mac.state).join(path).exists())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(seed_authority(&member), Vec::<&str>::new());
+    let created = member.post("/api/create", json!({"consent": consent(STORAGE)}));
+    assert_eq!(
+        (created.0, created.1["error"].clone()),
+        (400, json!("owner_role_required")),
+        "{}",
+        created.1
+    );
+    assert_eq!(seed_authority(&member), Vec::<&str>::new());
+    assert_eq!(member.status()["installation_role"], "target");
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();

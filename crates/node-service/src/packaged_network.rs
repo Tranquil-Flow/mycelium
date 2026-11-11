@@ -173,6 +173,11 @@ impl Network {
         };
         lock(&self.relay).bind_seed(joined_member::seed_backend(seed, swarm));
     }
+    /// One pass of `_renew_loop` for a joined target (`authority.renew()` = `RemoteMacMember.renew`)
+    /// over this host's member cell (its seed path, `_left`).
+    pub fn renew_member(&self, authority: &Mutex<Authority>) {
+        app_host::renew_member(&self.cell(authority));
+    }
     /// `_start_public_relay` after the persistent backend's closed/role/shape checks: the relay is
     /// taken out of this host while it starts, so the endpoint seams (which lock the authority)
     /// never meet the relay's own lock.
