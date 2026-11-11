@@ -728,6 +728,14 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
         return cell.try_with(|c| c.running = true).ok_or_else(failure);
     };
     let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
+    // `_start_runtime`: existing metadata makes a missing TLS root a fail-closed identity loss,
+    // never fresh material (authority.py:508-512 @ f4e366e9); an existing empty directory is
+    // still filled (`ensure_local_tls_material`).
+    if !root.join("seed-rs").join("tls").is_dir() {
+        return Err(
+            PublicError::new(409, "authority_tls_identity_missing").raised_by(Raised::Authority)
+        );
+    }
     let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
     let dir = root.join("authority").join("member");
     let (signer, _, _) = identity(&root)?;
