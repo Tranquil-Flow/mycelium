@@ -148,11 +148,6 @@ impl std::ops::DerefMut for Core {
 }
 /// The owner's seed runtime, with the observation mount's managed owner.
 type SeedRuntime = app_host::SeedRuntime<observation::Managed>;
-impl app_host::ManagedSlot for observation::Managed {
-    fn close(&self) -> Result<(), &'static str> {
-        observation::Managed::close(self).map_err(|error| error.0)
-    }
-}
 /// The core as the library authority's cell: the authority is the core's own state; the relay,
 /// `closed`, `left` and the loopback test seed path of a joining member are this launcher's.
 struct CoreCell(Shared);
@@ -235,7 +230,7 @@ impl RunHost for HeadlessRun {
         observation::target::admit_cleanup_free(root).map_err(|e| PublicError::new(409, e.0))
     }
     fn close_contributor(&self) -> Result<(), PublicError> {
-        observation::target::close_locked(&self.0).map_err(|e| PublicError::new(409, e.0))
+        observation::target::close_locked(self).map_err(|e| PublicError::new(409, e.0))
     }
     fn resource_check(&self) -> Option<&'static str> {
         resource_check(&self.0)
@@ -250,7 +245,7 @@ impl RunHost for HeadlessRun {
         deployment: &str,
         offer: &str,
     ) -> Result<(), Failure> {
-        observation::bootstrap(&self.0, node, run, deployment, offer)
+        observation::bootstrap(self, node, run, deployment, offer)
             .map_err(|error| Failure::new("RuntimeError", error.0))
     }
     fn sidecar(&self) -> Result<PathBuf, Failure> {
