@@ -403,6 +403,58 @@ impl api::leave::LeaveWorker for PackagedLeave {
     }
 }
 
+/// `member_leave.resume_leave` at start for a joined Mac (member_leave.py:295-306 @ f4e366e9): a
+/// completed leave keeps the Mac fenced and left, an interrupted one is resumed over the same steps.
+/// A failure keeps its code on stderr (the leave's own record keeps the debt).
+pub fn resume_leave(
+    network: &Arc<Network>,
+    authority: &Mutex<Authority>,
+    model: Option<ModelSource>,
+) {
+    struct Resume {
+        leave: PackagedLeave,
+    }
+    impl api::leave::Steps for Resume {
+        fn step(&mut self, name: &str) -> Result<(), Option<String>> {
+            if name == "withdraw_consent" {
+                let now = api::leave::LeaveWorker::now_seconds(&self.leave);
+                return api::preferences::standing_consent::withdraw(&self.leave.network.root, now)
+                    .map(|_| ())
+                    .map_err(|e| Some(e.0.to_owned()));
+            }
+            api::leave::LeaveWorker::step(&mut self.leave, name)
+        }
+        fn inflight(&mut self) -> Result<i64, api::leave::Unobservable> {
+            api::leave::LeaveWorker::inflight(&mut self.leave)
+        }
+        fn compute_cleanup(&mut self) -> Option<Result<api::leave::ComputeCleanup, String>> {
+            api::leave::LeaveWorker::compute_cleanup(&mut self.leave)
+        }
+        fn mark(&mut self, fence: bool, left: bool) {
+            self.leave.network.mark(fence, left);
+        }
+    }
+    let (target, root) = {
+        let a = lock(authority);
+        (a.target, a.root.clone())
+    };
+    if !target {
+        return;
+    }
+    let leave = api::leave::MemberLeave::new(&root, api::leave::Limits::default());
+    let mut steps = Resume {
+        leave: PackagedLeave {
+            network: network.clone(),
+            model,
+        },
+    };
+    if let Err(error) =
+        api::leave::resume_leave(&leave, &mut steps, &mut api::leave::SystemClock::default())
+    {
+        eprintln!("member_leave_resume_failed: {error:?}");
+    }
+}
+
 /// The parts of v0.1.4's `status()` (app.py:1263-1283) the packaged status takes from this host:
 /// `network`, `installation_role`, `resource_policy`, `authority`, `join_flow` (the join-consent
 /// document, `standing_disclosure`, for both roles) and `leave`.

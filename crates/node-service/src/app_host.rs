@@ -644,6 +644,9 @@ impl PackagedHost {
         let renewal = config.renewal;
         self.network = crate::packaged_network::Network::new(&self.root, config);
         if let Ok(authority) = &self.authority {
+            // `if self.installation_role == 'target': self._resume_leave()` (app.py:644): a completed
+            // leave stays fenced and left (no renewal), an interrupted one is finished.
+            crate::packaged_network::resume_leave(&self.network, authority, self.model.clone());
             let (network, authority) = (self.network.clone(), authority.clone());
             match HostLoop::start(
                 "packaged-member-renewal",
@@ -869,6 +872,17 @@ impl Host for PackagedHost {
         app_host::owner_window(&self.network.cell(self.authority()?), action, body)
     }
     // ---- the network window and the join (lane PH3a, `crate::packaged_network`) ----
+    /// The joined Mac's side of one member leave (`member_leave.app_steps`): `crate::packaged_network`.
+    fn leave_worker(&mut self) -> Box<dyn api::leave::LeaveWorker> {
+        Box::new(crate::packaged_network::PackagedLeave {
+            network: self.network.clone(),
+            model: self.model.clone(),
+        })
+    }
+    /// `resume_leave` / a smooth leave's begin: `_leave_fence = True` and, once left, `_left = True`.
+    fn leave_mark(&mut self, fence: bool, left: bool) {
+        self.network.mark(fence, left);
+    }
     fn relay_state(&self) -> api::persistent::RelayState {
         self.network.state()
     }

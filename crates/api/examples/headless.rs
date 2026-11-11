@@ -732,35 +732,11 @@ impl HeadlessLeave {
         {
             return Ok(false);
         }
-        // Missing memory after restart is insufficient. Require absent durable
-        // worker/stage evidence, rejecting unreadable paths and symlink residue.
-        let contributor = core.root.join("local-contributor");
-        let native = contributor.join("native-bootstrap");
-        for path in [&contributor, &native] {
-            let absent_or_directory = match fs::symlink_metadata(path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-                Err(_) => return Err("member_compute_ownership_unavailable".into()),
-                Ok(metadata) => metadata.is_dir(),
-            };
-            if !absent_or_directory {
-                return Ok(false);
-            }
-        }
-        let native_empty = match fs::read_dir(&native) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
-            Err(_) => return Err("member_compute_ownership_unavailable".into()),
-            Ok(mut entries) => entries.next().is_none(),
-        };
-        if !native_empty {
-            return Ok(false);
-        }
-        let previous = private_state::load(&core.root.join("leave-state.json"), cap())
-            .map_err(|e| e.0.to_owned())?;
-        // A removed stage is not enough to retire already-recorded cleanup debt.
-        Ok(previous.is_none_or(|record| {
-            record.get("steps").is_some_and(Value::is_array)
-                && !api::leave::cleanup_pending(&record)
-        }))
+        // Missing memory after restart is insufficient: the durable half
+        // (`api::joined_member`, shared with the packaged host).
+        let root = core.root.clone();
+        drop(core);
+        joined_member::none_owned_on_disk(&root)
     }
 }
 impl LeaveWorker for HeadlessLeave {
