@@ -45,7 +45,7 @@ use std::{
 pub const ACQUISITION_PROTOCOL: &str = "mycelium.swarm_artifact_acquisition.v1";
 /// `mycelium_swarm_artifacts.LEDGER_PROTOCOL` (:37).
 pub const LEDGER_PROTOCOL: &str = "mycelium.swarm_artifact_acquisition_ledger.v1";
-/// `ArtifactAcquisitionStore(history_limit=64)` (artifact_provisioner.py:214).
+/// `ArtifactAcquisitionStore(history_limit=64)` (artifact_provisioner.py:215).
 pub const DEFAULT_HISTORY_LIMIT: u64 = 64;
 
 /// A Python `str`: its code points in order, lone surrogates included.
@@ -1330,7 +1330,9 @@ fn sync_directory(directory: &Path) -> Result<()> {
 /// destination (created first, `open("xb")`), the canonical bytes, fsync, mode 0600, rename,
 /// fsync of the directory; the temporary is removed whatever happens, and an error removing it
 /// replaces the one in flight, as the `finally` does. Only a temporary this call created is
-/// removed.
+/// removed. Both syncs are `File::sync_all` (F_FULLFSYNC on macOS), the crate cache's practice,
+/// where the oracle calls `os.fsync` (`rustix::fs::fsync` would be that call); the outcome is
+/// the same on APFS.
 fn atomic_json(destination: &Path, document: &PyValue) -> Result<()> {
     let mut name = std::ffi::OsString::from(".");
     name.push(destination.file_name().unwrap_or_default());
