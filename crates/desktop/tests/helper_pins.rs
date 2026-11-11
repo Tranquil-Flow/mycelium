@@ -222,3 +222,63 @@ fn assembly_places_only_the_pinned_probe_bytes_beside_the_executable() {
         "a refused build leaves no bundle"
     );
 }
+
+/// One assembly of the fixture bundle with the probe copied from `probe_dir` into `out`.
+fn assemble(tree: &Tree, probe_dir: &str, out: &str) -> bundle::Built {
+    let native = native_fixture(tree);
+    let icon = Path::new(env!("CARGO_MANIFEST_DIR")).join("icons/icon-windowed.icns");
+    let exe = tree.0.join("exe");
+    fs::write(&exe, b"not mach-o").unwrap();
+    let probe = tree.0.join(probe_dir).join("resource_probe");
+    fs::create_dir_all(probe.parent().unwrap()).unwrap();
+    fs::write(&probe, b"probe bytes").unwrap();
+    let pin = Entry {
+        path: RESOURCE_PROBE_PATH.into(),
+        kind: Kind::Helper,
+        bytes: 11,
+        sha256: format!("{:x}", Sha256::digest(b"probe bytes")),
+    };
+    let out = tree.0.join(out);
+    fs::create_dir(&out).unwrap();
+    bundle::build_with_helpers(
+        &bundle::Spec {
+            executable: &exe,
+            native_inputs: &native,
+            icon: &icon,
+            out_dir: &out,
+            expected_native_inputs_sha256: None,
+        },
+        &[(&probe, &pin)],
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_content_manifest_does_not_depend_on_where_the_probe_was_built() {
+    // `repro/verify-two-paths.sh` at 1069d58: the two builds (target-a, target-b) gave the same
+    // app, and differed only in CONTENT-MANIFEST.json, which named the probe's absolute source
+    // `<CARGO_TARGET_DIR>/release/resource_probe`. The probe is built by the recipe like the
+    // executable, so its build path is not part of the bundle.
+    let tree = Tree::new();
+    let a = assemble(&tree, "target-a/release", "out-a");
+    let b = assemble(&tree, "target-bb-longer/deeper/release", "out-b");
+    let (a, b) = (
+        bundle::content_manifest(&a).unwrap(),
+        bundle::content_manifest(&b).unwrap(),
+    );
+    assert_eq!(a, b);
+}
+
+#[test]
+fn the_content_manifest_states_v02s_own_identity() {
+    // Owner ruling 25: the identity record names v0.2's own name and identifier, not the
+    // v0.1.4 retention policy it carried before.
+    let tree = Tree::new();
+    let built = assemble(&tree, "probe", "out");
+    let identity = &bundle::content_manifest(&built).unwrap()["identity"];
+    assert_eq!(identity["display_name"], "Mycelium");
+    assert_eq!(identity["bundle_identifier"], "org.mycelium.app");
+    let policy = identity["policy"].as_str().unwrap();
+    assert!(!policy.contains("v0.1.4 name, identifier"), "{policy}");
+    assert!(policy.contains("ruling 25"), "{policy}");
+}
