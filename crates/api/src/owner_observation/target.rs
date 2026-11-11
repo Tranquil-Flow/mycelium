@@ -160,6 +160,19 @@ impl Worker {
             .and(retried)
     }
 }
+/// The owner's local target worker is also a joined Mac's own bootstrap worker (the headless
+/// launcher's member host drives it through `crate::member_agent`).
+impl crate::member_agent::MemberWorker for Worker {
+    fn running(&self) -> bool {
+        Worker::running(self)
+    }
+    fn scope(&self) -> &Value {
+        Worker::scope(self)
+    }
+    fn close(&mut self) -> OResult<()> {
+        Worker::close(self)
+    }
+}
 impl Drop for Worker {
     fn drop(&mut self) {
         if let Err(e) = self.close() {

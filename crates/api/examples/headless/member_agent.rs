@@ -7,7 +7,7 @@ use super::*;
 use api::{
     bootstrap_process::TrustedBootstrap,
     managed_carrier::TargetFence,
-    member_agent::{self, HostState, MemberHost, MemberWorker, OResult, RemoteTarget, Slot},
+    member_agent::{self, HostState, MemberHost, OResult, RemoteTarget, Slot},
     target_pump::TargetPump,
 };
 use observation::target::{self, Wake};
@@ -31,17 +31,6 @@ fn host_state(c: &Core) -> HostState {
         running: c.running,
         left: c.left,
         closed: c.closed,
-    }
-}
-impl MemberWorker for target::Worker {
-    fn running(&self) -> bool {
-        target::Worker::running(self)
-    }
-    fn scope(&self) -> &Value {
-        target::Worker::scope(self)
-    }
-    fn close(&mut self) -> OResult<()> {
-        target::Worker::close(self)
     }
 }
 impl MemberHost for HeadlessMember {

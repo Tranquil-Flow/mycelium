@@ -15,19 +15,16 @@
 use api::{
     acquisition::{self, Acquisition, HttpTransport},
     actions::{Action, Backend, Control},
-    app_host::{
-        self, Authority, HostView, IDENTITY_FILE, NETWORK_FILE, cap, hex, identity, now, random,
-    },
+    app_host::{self, Authority, HostView, NETWORK_FILE, cap, now, random},
     authority_view,
     desktop::{Desktop, Session},
     http::serve_connection,
-    installation_descriptor::{self, Failure, Member as DescriptorMember, Paths, Source},
+    installation_descriptor::Failure,
     jobj,
     joined_member::{self, NoSeedServer, SeedHop},
     leave::{
         Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave, status_view,
     },
-    local_agent::{AgentHost, LocalAgent},
     native_session::{MonotonicClock, NativeLauncher},
     owner_chain::{
         ChainPorts, ModelAdapter, SharedHostChain, acquisition_exception, prepared_source_from,
@@ -65,6 +62,7 @@ use api::app_host::start_seed;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use budgets::{BudgetId, Entries};
 use owner_run::{chain::StepError, steps::model::Reverify};
+#[cfg(test)]
 use protocol::identity::Identity;
 use serde_json::{Map, Value, json};
 #[cfg(test)]
