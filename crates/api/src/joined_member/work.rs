@@ -636,6 +636,8 @@ pub struct Work {
     /// Native work needs the announced share of the offer's own run (an announced owner);
     /// `false` for the operator-driven member (`Work::operator`).
     require_share: bool,
+    /// The first native prepare: the member's consent wall counts from it.
+    prepared_at: Option<std::time::Instant>,
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
@@ -647,6 +649,7 @@ impl Work {
             left: false,
             announced: None,
             require_share: true,
+            prepared_at: None,
         }
     }
     /// A member driven by its local operator (the example's CLI-pinned owner, no announcement):
@@ -941,6 +944,7 @@ impl Work {
         // any native worker (custody stays owned on a refusal).
         let offer = self.native.as_ref().ok_or("native_required")?.offer().clone();
         self.admit_share_for(session, &offer, self.require_share)?;
+        self.prepared_at.get_or_insert_with(std::time::Instant::now);
         let member = session.ok_or("not_joined")?;
         let range =
             serde_json::from_value(request["range"].clone()).map_err(|_| "range_invalid")?;
@@ -1042,6 +1046,25 @@ impl Work {
             .as_deref()
             .ok_or("native_proof_required")?;
         let current = || member.current(signer);
+        // EP2: ONE serve is the run's whole epoch: it lasts until the route's signed expiry (the
+        // owner's publish + the smallest consented wall), not the dispatcher's one-operation wall,
+        // and never past this member's own consent wall counted from its first prepare (the
+        // command allowance is checked per step and reset by NativeShard). An unverifiable expiry
+        // is refused by the route check inside `serve`.
+        let consent = standing_consent::load(&self.root)
+            .map_err(|_| "joined_shard_consent_required")?
+            .ok_or("joined_shard_consent_required")?;
+        let wall = consent["caps"]["max_wall_seconds"]
+            .as_u64()
+            .filter(|w| *w > 0)
+            .ok_or("joined_native_consent_invalid")?;
+        let now = std::time::Instant::now();
+        let consented = self.prepared_at.unwrap_or(now) + std::time::Duration::from_secs(wall);
+        let expiry = operation.request["route"]["message"]["expires_at"]
+            .as_f64()
+            .filter(|e| e.is_finite())
+            .map(|e| now + std::time::Duration::from_secs_f64((e - app_host::now()).max(0.0)))
+            .unwrap_or(operation.deadline);
         stage::serve(
             &stage::Serve {
                 host: carrier_side.host,
@@ -1049,7 +1072,7 @@ impl Work {
                 clock: carrier_side.clock,
                 current: &current,
                 cancelled: operation.cancelled.clone(),
-                deadline: operation.deadline,
+                deadline: expiry.min(consented),
             },
             native,
             &operation.request["route"],
