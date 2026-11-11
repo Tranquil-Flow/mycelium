@@ -1469,3 +1469,51 @@ fn packaged_quit_joins_the_policy_loop() {
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+// ---- `/api/run-model`: the choice re-opens the run model's acquisition ----
+
+/// `DemoApp._choose_run_model` (app.py:855-868 @ f4e366e9): the saved choice is followed by
+/// `acquisition_policy_error = None; self._open_acquisition()`, which closes the open acquisition
+/// (`closed` persisted) and opens the chosen model's in its own `model-source-<rev12>` directory
+/// (app.py:649-672). When that open raises (`AcquisitionError`, here the chosen model's directory
+/// is a file: `_private_root` -> `acquisition_state_root_unsafe`), the exception is the action's
+/// answer (the handler's 409 `public_failure_code`, app.py:2012-2031), never a success.
+#[test]
+fn packaged_run_model_choice_reopens_the_acquisition_and_answers_an_open_failure() {
+    const OTHER: &str = "model-source-c1899de289a0";
+    let state = state_root();
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let host = action_root(&state, &source);
+    let idle_closed = |model: &api::model_catalog::Model| {
+        json!({"state": "closed", "downloaded_bytes": 0, "total_bytes": 0, "error_code": null,
+               "model": api::acquisition::model_identity(model)})
+    };
+    let catalog = api::model_catalog::registered();
+    // Qwen3-0.6B: the acquisition moves to its own directory; the starter's is closed.
+    let chosen = host.call("/api/run-model", json!({"choice": "qwen3-0.6b"}));
+    assert_eq!(chosen.0, 200, "run-model: {}", chosen.1);
+    assert_eq!(entries(&state), [SOURCE, OTHER, "v02-node"]);
+    assert_eq!(acquisition_status(&state), idle_closed(&catalog[1]));
+    assert_eq!(entries(&state.join(OTHER)), ["acquisition.lock"]);
+    // The starter again: back to its directory, the Qwen3 acquisition closed in turn.
+    let chosen = host.call("/api/run-model", json!({"choice": "a9-route"}));
+    assert_eq!(chosen.0, 200, "run-model: {}", chosen.1);
+    let other_status: Value =
+        serde_json::from_slice(&std::fs::read(state.join(OTHER).join("status.json")).unwrap())
+            .unwrap();
+    assert_eq!(other_status, idle_closed(&catalog[2]));
+    // The chosen model's directory cannot be an acquisition root: the open's refusal answers.
+    std::fs::remove_dir_all(state.join(OTHER)).unwrap();
+    std::fs::write(state.join(OTHER), b"not a directory").unwrap();
+    let refused = host.call("/api/run-model", json!({"choice": "qwen3-0.6b"}));
+    assert_eq!(
+        refusal(&refused),
+        (409, "acquisition_state_root_unsafe"),
+        "a failed acquisition open was answered as a success"
+    );
+    assert_eq!(std::fs::read(state.join(OTHER)).unwrap(), b"not a directory");
+    drop(host);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
