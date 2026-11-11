@@ -15,7 +15,9 @@
 mod macs;
 use budgets::BudgetId as B;
 use desktop::lifecycle::Poll;
-use macs::{Mac, approve_and_join, join_body, member_lease, millis, owner, state_root, test_network};
+use macs::{
+    Mac, approve_and_join, join_body, member_lease, millis, owner, state_root, test_network,
+};
 use node_service::packaged_network::NetworkConfig;
 use serde_json::json;
 use std::{
@@ -167,7 +169,10 @@ fn a_renewal_pass_on_the_wire_never_extends_the_lease_after_leave() {
     let first = member_lease(&owner.mac).unwrap();
     let deadline = Instant::now() + millis(B::WorkerStartup);
     while member_lease(&owner.mac).unwrap() <= first {
-        assert!(Instant::now() < deadline, "the member's lease was not renewed");
+        assert!(
+            Instant::now() < deadline,
+            "the member's lease was not renewed"
+        );
         std::thread::sleep(millis(RENEWAL));
     }
     // The next pass is held on the wire.
@@ -206,7 +211,8 @@ fn a_renewal_pass_on_the_wire_never_extends_the_lease_after_leave() {
     assert_eq!(left.0, 200, "leave: {}", left.1);
     assert_eq!(left.1["state"], "left", "{}", left.1);
     assert_eq!(
-        now, stopped,
+        now,
+        stopped,
         "the member's lease moved after its leave answered (a pass on the wire committed later; \
          the leave answered while it was held: {})",
         early_lease.is_some()
