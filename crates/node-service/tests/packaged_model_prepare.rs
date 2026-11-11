@@ -1230,6 +1230,17 @@ fn assembled(
     source: &ModelSource,
     driver: Arc<dyn Driver>,
 ) -> (Arc<dyn Core>, AppCleanup) {
+    let (core, mut cleanup, _) = assembled_unbound(state, source, driver);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    (core, cleanup)
+}
+/// [`assembled`] before the shell bound its clock, with the window's services (a clone of what
+/// the core serves) for the test to call directly.
+fn assembled_unbound(
+    state: &Path,
+    source: &ModelSource,
+    driver: Arc<dyn Driver>,
+) -> (Arc<dyn Core>, AppCleanup, DesktopServices) {
     let dirs = packaged::prepare_dirs(state).unwrap();
     let node = NodeService::new(
         driver,
@@ -1242,9 +1253,8 @@ fn assembled(
         &dirs.private,
         source.clone(),
     );
-    let (core, mut cleanup) = packaged::assemble(services, source.clone());
-    cleanup.bind_clock(Instant::now()).unwrap();
-    (core, cleanup)
+    let (core, cleanup) = packaged::assemble(services.clone(), source.clone());
+    (core, cleanup, services)
 }
 /// Quit to its result: the cleanup's first non-pending answer within the quit allowance.
 fn quit_result(cleanup: &mut AppCleanup) -> Result<Poll, desktop::lifecycle::CleanupError> {
@@ -1368,6 +1378,196 @@ fn packaged_quit_reports_a_failed_close() {
         "a failed close was reported as a clean Quit"
     );
     assert_eq!(acquisition_status(&state), Value::Null);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+// ---- REVIEW-lanePH1 finding 1: Quit closes the download when the window's services hang ----
+
+/// A chat run that ignores cancellation and ends only when the test releases it (then failed, so
+/// the node service can settle it: `FX-SLICE1-quit-after-failure`); until then the window's
+/// services cannot finish their cleanup.
+#[derive(Clone, Default)]
+struct HeldRun(Arc<(Mutex<bool>, Condvar)>);
+impl HeldRun {
+    fn release(&self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+    }
+}
+impl Driver for HeldRun {
+    fn run(&self, _: &mut Job) -> Result<(), PublicError> {
+        let mut released = self.0.0.lock().unwrap();
+        while !*released {
+            released = self.0.1.wait(released).unwrap();
+        }
+        Err(PublicError::new(503, "worker_native_exited"))
+    }
+}
+/// Releases the held run however the test ends.
+struct ReleaseRun(HeldRun);
+impl Drop for ReleaseRun {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+/// Quit's first non-pending answer within the api model-route tests' patience (`None`: still
+/// pending then), and whether the acquisition's `closed` was on disk while Quit still answered
+/// pending.
+fn quit_watching_the_close(
+    cleanup: &mut AppCleanup,
+    state: &Path,
+) -> (Option<Result<Poll, desktop::lifecycle::CleanupError>>, bool) {
+    let deadline = Instant::now() + patience();
+    let mut closed_while_pending = false;
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => {
+                closed_while_pending |= acquisition_status(state)["state"] == "closed";
+                std::thread::sleep(poll());
+            }
+            Ok(Poll::Pending) => return (None, closed_while_pending),
+            other => return (Some(other), closed_while_pending),
+        }
+    }
+}
+/// The window with a chat run its services wait for, and its Quit begun as the shell begins it,
+/// with the shell's clock bound `elapsed` before now (how long the window has already waited).
+fn quit_with_hung_services(
+    state: &Path,
+    elapsed: Duration,
+) -> (Arc<dyn Core>, AppCleanup, ReleaseRun) {
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(state, repository.transport(), &observed);
+    let run = HeldRun::default();
+    let (core, mut cleanup, _) = assembled_unbound(state, &source, Arc::new(run.clone()));
+    assert_created(&core);
+    let sent = core.call(
+        "/chat/api/send",
+        json!({"prompt": "hello", "max_new_tokens": 1}),
+    );
+    assert_eq!(sent.0, 200, "send: {}", sent.1);
+    cleanup
+        .bind_clock(Instant::now().checked_sub(elapsed).unwrap())
+        .unwrap();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    (core, cleanup, ReleaseRun(run))
+}
+/// v0.1.4's `DemoApp.close` joins the run for at most its allowance (`run.join(60)`) and closes the
+/// acquisition whatever the join found (app.py:1835-1847 @ f4e366e9), so the next launch answers
+/// `closed`. Here the window's services stay pending (a chat run that never ends) and the shell's
+/// clock says the allowance is nearly spent (less than the closes' own budget left): Quit closes
+/// the download now, still within the allowance, and stays pending while the services do; once
+/// the allowance ran out it reports the services' deadline (exit 0, as v0.1.4 ignores the join),
+/// never `Verified`.
+#[test]
+fn packaged_quit_closes_the_download_in_time_when_the_window_services_hang() {
+    let state = state_root();
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let left = millis(B::AcquisitionCloseJoinSlack);
+    let (core, mut cleanup, release) = quit_with_hung_services(&state, allowance - left);
+    let (result, closed_while_pending) = quit_watching_the_close(&mut cleanup, &state);
+    assert!(
+        closed_while_pending,
+        "Quit did not close the download while the window's services hung ({result:?}): {}",
+        acquisition_status(&state)
+    );
+    assert_eq!(
+        result,
+        Some(Err(desktop::lifecycle::CleanupError::Deadline)),
+        "the services never finished: Quit reports their deadline"
+    );
+    assert_eq!(acquisition_status(&state), status_doc("closed", 0, 0, None));
+    drop(release);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+/// The same with the allowance already spent when the window polls its Quit: the closes still
+/// run, and the services' deadline is reported only once `closed` is written.
+#[test]
+fn packaged_quit_reports_the_window_deadline_after_the_closes_ran() {
+    let state = state_root();
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let (core, mut cleanup, release) =
+        quit_with_hung_services(&state, allowance + millis(B::AcquisitionCloseJoinSlack));
+    let (result, _) = quit_watching_the_close(&mut cleanup, &state);
+    assert_eq!(
+        (result, acquisition_status(&state)),
+        (
+            Some(Err(desktop::lifecycle::CleanupError::Deadline)),
+            status_doc("closed", 0, 0, None)
+        ),
+        "the window's deadline was not reported after the download was closed"
+    );
+    drop(release);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+/// A run that waits for its cancellation (bounded by the stage-cleanup budget) and says whether
+/// it was cancelled.
+#[derive(Clone, Default)]
+struct EndsWhenCancelled(Arc<(Mutex<Option<bool>>, Condvar)>);
+impl Driver for EndsWhenCancelled {
+    fn run(&self, job: &mut Job) -> Result<(), PublicError> {
+        let deadline = Instant::now() + millis(B::StageCleanup);
+        while !job.cancelled() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        *self.0.0.lock().unwrap() = Some(job.cancelled());
+        self.0.1.notify_all();
+        Err(PublicError::new(503, "request_cancelled"))
+    }
+}
+/// REVIEW-lanePH1 finding 1b: when the window's services refuse Quit's begin (here the shell never
+/// bound its clock), v0.1.4 still runs every later step of `DemoApp.close` (app.py:1815-1847):
+/// the window stops admitting requests (`self.closed.set()`), its running chat is cancelled
+/// (`owner_run.stop()`), the download is closed, and the refusal is reported last.
+#[test]
+fn packaged_quit_fences_and_cancels_when_the_services_refuse_its_begin() {
+    let state = state_root();
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let run = EndsWhenCancelled::default();
+    let (core, mut cleanup, services) = assembled_unbound(&state, &source, Arc::new(run.clone()));
+    assert_created(&core);
+    let sent = core.call(
+        "/chat/api/send",
+        json!({"prompt": "hello", "max_new_tokens": 1}),
+    );
+    assert_eq!(sent.0, 200, "send: {}", sent.1);
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let cancelled = {
+        let (ended, changed) = &*run.0;
+        let ended = changed
+            .wait_timeout_while(ended.lock().unwrap(), millis(B::ModelSelection), |e| {
+                e.is_none()
+            })
+            .unwrap()
+            .0;
+        *ended
+    };
+    assert_eq!(
+        cancelled,
+        Some(true),
+        "Quit's begin was refused and the running chat was never cancelled"
+    );
+    let state_answer = services.call("/chat/api/state", json!({}));
+    assert_eq!(
+        refusal(&state_answer),
+        (503, "application_closed"),
+        "Quit's begin was refused and the window still admits requests"
+    );
+    assert_eq!(
+        quit_result(&mut cleanup),
+        Err(desktop::lifecycle::CleanupError::Clock)
+    );
+    assert_eq!(acquisition_status(&state), status_doc("closed", 0, 0, None));
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
