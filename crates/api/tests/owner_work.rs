@@ -763,14 +763,11 @@ fn a_member_that_never_answers_its_discard_leaves_cleanup_unproven_within_the_st
     work.teardown().unwrap();
 }
 
+/// What a Stop answered: teardown's result and the final workflow state.
+type Stopped = (Result<(), String>, Value);
 /// Stop `work` on its own thread; the result arrives on the receiver (the thread hands the port
 /// back so a late teardown still joins).
-fn stop(
-    mut work: OwnerWork,
-) -> (
-    mpsc::Receiver<(Result<(), String>, Value)>,
-    std::thread::JoinHandle<OwnerWork>,
-) {
+fn stop(mut work: OwnerWork) -> (mpsc::Receiver<Stopped>, std::thread::JoinHandle<OwnerWork>) {
     let (done, ended) = mpsc::channel();
     let stopper = std::thread::spawn(move || {
         let result = work.teardown();

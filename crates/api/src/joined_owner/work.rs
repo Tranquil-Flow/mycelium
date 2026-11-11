@@ -359,6 +359,10 @@ pub struct OwnerWork {
     proposal: Option<Value>,
     commands: Option<mpsc::Sender<Command>>,
     stop: Arc<AtomicBool>,
+    /// Each participant's canceller (Stop interrupts the member operation in flight).
+    cancels: Vec<Cancel>,
+    /// Set once the worker reached its exit tail (it cancels on its own from there).
+    exiting: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
     /// Member links handed back by teardown.
     returned: Vec<WorkMember>,
@@ -384,6 +388,7 @@ impl OwnerWork {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let skew = super::span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31)?;
+        let cancels = members.iter().filter_map(|m| m.cancel.clone()).collect();
         Ok(Self {
             seed: epoch::seed_members(&coordinator),
             coordinator,
@@ -416,6 +421,8 @@ impl OwnerWork {
             proposal: None,
             commands: None,
             stop: Arc::new(AtomicBool::new(false)),
+            cancels,
+            exiting: Arc::new(AtomicBool::new(false)),
             thread: None,
             returned: Vec::new(),
         })
@@ -528,9 +535,11 @@ impl OwnerWork {
                 .filter(|l| l.is_finite())
                 .is_some_and(|lease| now >= lease + self.skew)
     }
-    /// `chain.teardown`: stop the work (between member operations), close the
-    /// open epoch (members release their compute), close the shard source and
-    /// join the worker. Idempotent.
+    /// `chain.teardown`: stop the work, interrupting the member operation in
+    /// flight (F4: `cancel_operation`, re-sent every OwnerPoll because a cancel
+    /// reaches only an admitted operation, until the worker reached its exit
+    /// tail), close the open epoch and the shard source, release the members'
+    /// stage (R1, bounded by the stop allowance) and join the worker. Idempotent.
     pub fn teardown(&mut self) -> Result<(), String> {
         self.stop.store(true, Ordering::SeqCst);
         self.commands.take();
@@ -538,6 +547,22 @@ impl OwnerWork {
             self.returned.extend(start.members);
         }
         if let Some(t) = self.thread.take() {
+            let poll = super::span(B::OwnerPoll);
+            if let Err(e) = &poll {
+                eprintln!("owner work stop: {} (one cancel round only)", e.code);
+            }
+            loop {
+                if !self.exiting.load(Ordering::SeqCst) {
+                    for cancel in &self.cancels {
+                        cancel();
+                    }
+                }
+                let Ok(poll) = poll else { break };
+                if t.is_finished() || self.exiting.load(Ordering::SeqCst) {
+                    break;
+                }
+                self.wait_state(|s| s["state"] == FAILED || s["state"] == STOPPED, poll);
+            }
             let members = t.join().map_err(|_| "ThreadPanicked".to_owned())?;
             self.returned.extend(members);
         }
@@ -589,6 +614,7 @@ impl WorkPort for OwnerWork {
             network: start.network,
             codec: start.codec,
             stop: self.stop.clone(),
+            exiting: self.exiting.clone(),
             inbox,
             expires_at,
             within,
@@ -714,6 +740,7 @@ struct Worker {
     network: Network,
     codec: Arc<dyn Codec>,
     stop: Arc<AtomicBool>,
+    exiting: Arc<AtomicBool>,
     inbox: mpsc::Receiver<Command>,
     expires_at: f64,
     /// Member operation wait (transfer, prepare, control calls).
@@ -727,15 +754,23 @@ impl Worker {
     fn run(mut self) -> Vec<WorkMember> {
         let mut open = None;
         let worked = self.work(&mut open);
+        // A Stop that arrived while working ends the workflow `stopped`
+        // (whatever the interrupted member operation answered).
+        let stopping = self.stop.load(Ordering::SeqCst);
+        self.exiting.store(true, Ordering::SeqCst);
+        // F4: on the exit an open epoch's members answer within the stop allowance.
         let released = match open.take() {
-            Some(epoch) => self.retire(epoch),
+            Some(epoch) => self.retire(epoch, self.stop_allowance),
             None => Ok(()),
         };
         // R1: every exit releases what the members hold.
         let discarded = self.release_members();
         // A teardown failure is kept on its own even when the work failed first.
         let cleanup = released.as_ref().err().map(closed).or(discarded);
-        let failure = worked.err().or(released.err());
+        let failure = match stopping {
+            true => None,
+            false => worked.err().or(released.err()),
+        };
         self.shared.update(|f| {
             f.route = None;
             f.gateway = None;
@@ -831,7 +866,7 @@ impl Worker {
         while let Ok(Command::Open) = self.inbox.recv() {
             self.stopped()?;
             if let Some(spent) = open.take() {
-                self.retire(spent)?;
+                self.retire(spent, self.serve_within)?;
             }
             if admitted.is_empty() {
                 self.shared.set(STAGING);
@@ -928,7 +963,7 @@ impl Worker {
     /// Retire an epoch: a settled request gets its members' signed serve
     /// reports and worker-gone proofs; an idle one is closed first, after
     /// which each member ends its serve (its compute released) and reports.
-    fn retire(&mut self, epoch: Epoch) -> Result<(), Refusal> {
+    fn retire(&mut self, epoch: Epoch, within: Duration) -> Result<(), Refusal> {
         let settled = epoch
             .handle()
             .state
@@ -945,12 +980,12 @@ impl Worker {
                     link: &mut m.link,
                 })
                 .collect();
-            reports = settle_members(&epoch, &mut stages, self.serve_within)?.0;
+            reports = settle_members(&epoch, &mut stages, within)?.0;
         }
         let refusals = epoch.close();
         if !settled {
             for m in self.members.iter_mut() {
-                let report = m.link.finish(self.serve_within)?;
+                let report = m.link.finish(within)?;
                 reports.push(json!({"node_id":m.node_id,"teardown":report["teardown"],
                     "failure":report["failure"]}));
             }
