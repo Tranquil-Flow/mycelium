@@ -140,7 +140,10 @@ impl Observed {
         let mut probe = probe.lock().unwrap();
         while !probe.inside {
             let left = deadline.saturating_duration_since(Instant::now());
-            assert!(!left.is_zero(), "nothing observed this Mac while the probe was held");
+            assert!(
+                !left.is_zero(),
+                "nothing observed this Mac while the probe was held"
+            );
             probe = changed.wait_timeout(probe, left).unwrap().0;
         }
     }
@@ -1250,7 +1253,10 @@ fn quit_result(cleanup: &mut AppCleanup) -> Result<Poll, desktop::lifecycle::Cle
     loop {
         match cleanup.poll() {
             Ok(Poll::Pending) => {
-                assert!(Instant::now() < deadline, "the packaged core did not clean up");
+                assert!(
+                    Instant::now() < deadline,
+                    "the packaged core did not clean up"
+                );
                 std::thread::sleep(poll());
             }
             other => return other,
@@ -1325,7 +1331,12 @@ fn packaged_quit_waits_for_the_close_to_be_written() {
     assert_eq!(quit_result(&mut cleanup), Ok(Poll::Verified));
     assert_eq!(
         acquisition_status(&state),
-        status_doc("closed", size_of(&files, "config.json"), total(&files), None),
+        status_doc(
+            "closed",
+            size_of(&files, "config.json"),
+            total(&files),
+            None
+        ),
         "Verified before the close was written"
     );
     drop(core);
@@ -1513,7 +1524,10 @@ fn packaged_run_model_choice_reopens_the_acquisition_and_answers_an_open_failure
         (409, "acquisition_state_root_unsafe"),
         "a failed acquisition open was answered as a success"
     );
-    assert_eq!(std::fs::read(state.join(OTHER)).unwrap(), b"not a directory");
+    assert_eq!(
+        std::fs::read(state.join(OTHER)).unwrap(),
+        b"not a directory"
+    );
     drop(host);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }

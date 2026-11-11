@@ -40,7 +40,8 @@ use std::{
 pub const CALLBACK_CAPACITY: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 /// The window core's own bound on callbacks in flight: the admitted ones ([`CALLBACK_CAPACITY`])
 /// plus as many always-servable Stop/status callbacks, which `DesktopServices` bounds apart.
-pub const SERVICE_CAPACITY: NonZeroUsize = CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(2).unwrap());
+pub const SERVICE_CAPACITY: NonZeroUsize =
+    CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(2).unwrap());
 pub const MODEL_NOT_INSTALLED: &str = "model_not_installed";
 /// The prepared model is located but its native driver could not be composed (the cause is on
 /// stderr); the next chat request tries again.
@@ -452,14 +453,9 @@ fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, App
     );
     // `DemoApp.swarm_publisher`: the listing custody's state beside the owner's private state.
     let publisher = Arc::new(api::swarm::publisher::app::AppPublisher::new(&private));
-    let services = DesktopServices::packaged(
-        node,
-        CALLBACK_CAPACITY,
-        &private,
-        source.clone(),
-        publisher,
-    )
-    .gated(native);
+    let services =
+        DesktopServices::packaged(node, CALLBACK_CAPACITY, &private, source.clone(), publisher)
+            .gated(native);
     Ok(assemble(services, source))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`

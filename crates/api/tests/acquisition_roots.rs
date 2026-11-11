@@ -160,7 +160,11 @@ fn the_policy_verdict_follows_the_attempt_the_membership_then_this_mac() {
             "{running}"
         );
         assert_eq!(
-            acquisition_policy_verdict(running, || true, || Some("resource_power_policy_violation")),
+            acquisition_policy_verdict(
+                running,
+                || true,
+                || Some("resource_power_policy_violation")
+            ),
             PolicyVerdict::Cancel("resource_power_policy_violation"),
             "{running}"
         );

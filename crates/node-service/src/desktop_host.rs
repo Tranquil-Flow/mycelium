@@ -406,7 +406,12 @@ impl DesktopServices {
                 // other callback (status, Stop, Quit's begin) takes it on the window's thread.
                 // `chat` stays the single-admission fence: one send at a time, the rest 429.
                 let closing = || -> Result<(), PublicError> {
-                    if self.gate.lock().map_err(|_| err("desktop_poisoned"))?.closing {
+                    if self
+                        .gate
+                        .lock()
+                        .map_err(|_| err("desktop_poisoned"))?
+                        .closing
+                    {
                         return Err(err("application_closed"));
                     }
                     Ok(())

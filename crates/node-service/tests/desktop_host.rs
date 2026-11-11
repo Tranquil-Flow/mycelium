@@ -448,7 +448,12 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     );
     let stop = answered_within(&host, "POST", "/api/serving/stop", json!({}))
         .expect("Stop blocked behind a send waiting for its start");
-    assert_ne!(stop.status, 503, "{:?}", String::from_utf8_lossy(&stop.body));
+    assert_ne!(
+        stop.status,
+        503,
+        "{:?}",
+        String::from_utf8_lossy(&stop.body)
+    );
     // Quit's begin is the window's own call: it must return at once too.
     let (began_tx, began) = std::sync::mpsc::channel();
     let quitting = host.clone();

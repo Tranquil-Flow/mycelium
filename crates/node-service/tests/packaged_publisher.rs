@@ -74,7 +74,10 @@ impl SilentDirectory {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        let (accepted, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+        let (accepted, stop) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(false)),
+        );
         let (counting, stopping) = (accepted.clone(), stop.clone());
         let server = std::thread::spawn(move || {
             let mut held = Vec::new();
@@ -154,7 +157,10 @@ fn quit(cleanup: &mut AppCleanup) -> (Result<Poll, CleanupError>, Duration) {
     loop {
         match cleanup.poll() {
             Ok(Poll::Pending) => {
-                assert!(Instant::now() < deadline, "the packaged core did not clean up");
+                assert!(
+                    Instant::now() < deadline,
+                    "the packaged core did not clean up"
+                );
                 std::thread::sleep(millis(B::OwnerPoll) / 5);
             }
             other => return (other, began.elapsed()),
