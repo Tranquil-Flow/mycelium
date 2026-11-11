@@ -349,6 +349,101 @@ fn assert_successor_lineage(successor: &PathCancellation, send_scope: [PyJson; 3
     assert_eq!(core.entry_node(&successor.request_id), None, "{case}");
 }
 
+/// A successor path of request R that a re-sent ManifestLocked registered twice, its path id
+/// spelled `first` and then the Python-equal `second` (the relay accepts the re-send, as its
+/// registrations compare with ==, relay.py:1101-1103). `_participant_nodes_by_path` and
+/// `_path_subjects` are dicts written with the frame's path id (iroh.py:4034, :4037), so both
+/// writes land on one key, kept in its first spelling, now holding the second subject. The gates
+/// look that key up by the subject's path id (:4311, :4364) and `_forget_path` pops it
+/// (:4715-4716). `on_path` says whether this node is one of the path's participants: then the
+/// apply of (R, "P", 1) hands the merged successor to the Router once and forgets the one key;
+/// else the successor's own participant gate refuses it, found through the other spelling, and
+/// it stays registered with R's entry.
+fn assert_path_key_merge(first: PyJson, second: PyJson, on_path: bool) {
+    let case = format!("path id {first:?} then {second:?}, this node on the path: {on_path}");
+    let nodes: Vec<&str> = if on_path {
+        vec![NODE, "peer-node"]
+    } else {
+        vec!["peer-node"]
+    };
+    let original = subject("R", "P", 1);
+    let merged = subject_at(s("R"), second.clone(), int(0));
+    let mut core = transport(5.0);
+    register(&mut core, &original);
+    core.set_participants(first.clone(), nodes.iter().copied());
+    core.set_path_subject(subject_at(s("R"), first.clone(), int(0)));
+    core.set_participants(second.clone(), nodes.iter().copied());
+    core.set_path_subject(merged.clone());
+    let on_original = send(&mut core, 1, "R", "P", 1);
+
+    // One subject for the one key, in its place: the second registration replaced the first.
+    assert_eq!(
+        core.path_subjects(),
+        &[original.clone(), merged.clone()],
+        "{case}"
+    );
+
+    let mut router = Router::default();
+    let receipt = accepted(core.apply_controlled_path_cancellation(
+        Some(&mut router),
+        &original,
+        true,
+        Some(107.0),
+    ));
+
+    let (successor_trace, router_calls) = if on_path {
+        (
+            applied(&merged, vec![]),
+            vec![original.clone(), merged.clone()],
+        )
+    } else {
+        (
+            SubjectTrace {
+                subject: merged.clone(),
+                gate: Gate::NotParticipant,
+                sends: vec![],
+                router: None,
+                accepted: false,
+            },
+            vec![original.clone()],
+        )
+    };
+    assert_eq!(
+        receipt.subjects,
+        vec![
+            applied(&original, vec![reserved(on_original, Some(107.0))]),
+            successor_trace,
+        ],
+        "{case}"
+    );
+    assert_eq!(router.owner_calls, router_calls, "{case}");
+    assert_eq!(
+        core.cancellation_observed(&s("R"), &second, &int(0)),
+        on_path,
+        "{case}"
+    );
+    let kept_nodes = (!on_path).then(|| nodes.clone());
+    for spelling in [&first, &second] {
+        assert_eq!(
+            core.participants(spelling)
+                .map(|held| held.iter().map(String::as_str).collect::<Vec<_>>()),
+            kept_nodes,
+            "{case}, participants looked up as {spelling:?}"
+        );
+    }
+    if on_path {
+        assert_eq!(core.path_subjects(), &[] as &[PathCancellation], "{case}");
+        assert_eq!(core.entry_node(&s("R")), None, "{case}");
+    } else {
+        assert_eq!(
+            core.path_subjects(),
+            std::slice::from_ref(&merged),
+            "{case}"
+        );
+        assert_eq!(core.entry_node(&s("R")), Some(NODE), "{case}");
+    }
+}
+
 /// A worker started at 100 s under the supplied absolute 107 s: the deadline verbatim and
 /// `max(0, 107 - 100)` left (:2975-2976).
 const AT_100_UNTIL_107: CancelWindow = CancelWindow {
@@ -1029,6 +1124,21 @@ fn subject_cancel_successor_lineage_included() {
     ];
     for (request_id, path_id, send_scope, met) in ids {
         assert_successor_lineage(&subject_at(request_id, path_id, int(0)), send_scope, met);
+    }
+    // A path id is a dict key in `_path_subjects` and `_participant_nodes_by_path`: a re-sent
+    // ManifestLocked spelled 5.0 for path 5 (or True for 1, 1.0 for True, -0.0 for 0) writes the
+    // same key, the gates find it under either spelling and `_forget_path` pops it. (first
+    // spelling, second spelling)
+    let spellings = [
+        (int(5), py("5.0")),
+        (int(1), py("true")),
+        (py("true"), py("1.0")),
+        (int(0), py("-0.0")),
+    ];
+    for (first, second) in spellings {
+        for on_path in [true, false] {
+            assert_path_key_merge(first.clone(), second.clone(), on_path);
+        }
     }
 }
 
