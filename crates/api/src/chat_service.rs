@@ -402,6 +402,16 @@ struct Inner {
     state: Mutex<State>,
     workers: Mutex<Vec<JoinHandle<()>>>,
 }
+/// Runs [`ChatService::unwound`] when `work` ends, also by a panic (REVIEW-lanePH3B-S5 F6).
+struct Finally<'a> {
+    service: &'a ChatService,
+    id: &'a str,
+}
+impl Drop for Finally<'_> {
+    fn drop(&mut self) {
+        self.service.unwound(self.id);
+    }
+}
 /// `ChatService` (chat.py:211).
 #[derive(Clone)]
 pub struct ChatService {
@@ -737,6 +747,7 @@ impl ChatService {
     }
     /// `_work` (chat.py:342-398).
     fn work(&self, id: &str, gateway: Arc<dyn RouteGateway>, prompt: &str) {
+        let _finally = Finally { service: self, id };
         let (run_id, max_new_tokens, cancel) = {
             let state = self.state_lock();
             let Some(record) = state.requests.get(id) else {
@@ -817,6 +828,29 @@ impl ChatService {
         }
         let mut state = self.state_lock();
         if let Some(record) = state.requests.get_mut(id) {
+            record.done = true;
+        }
+        if state.busy.as_deref() == Some(id) {
+            state.busy = None;
+        }
+    }
+    /// `_work`'s `except Exception` + `finally` (chat.py:376-398) for a chat whose work unwound
+    /// before it ended: `cancel_reason`, else `chat_generation_failed_panic` (`failure_code`,
+    /// chat.py:202-207); done; `busy` cleared. A no-op for a chat that ended.
+    fn unwound(&self, id: &str) {
+        let finished = self.inner.clock.now();
+        let mut state = self.state_lock();
+        if let Some(record) = state.requests.get_mut(id)
+            && !record.done
+        {
+            let reason = record.cancel_reason.clone();
+            record.terminal = Some(if reason.is_some() {
+                "cancelled"
+            } else {
+                "failed"
+            });
+            record.error = Some(reason.unwrap_or_else(|| "chat_generation_failed_panic".into()));
+            record.finished = Some(finished);
             record.done = true;
         }
         if state.busy.as_deref() == Some(id) {
