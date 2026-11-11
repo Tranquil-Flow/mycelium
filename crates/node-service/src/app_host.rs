@@ -708,9 +708,10 @@ impl Host for PackagedHost {
     fn fast_mode_changed(&mut self) {
         self.refresh_fast_mode();
     }
-    /// `acquisition_policy_error = None; _open_acquisition()` after the run-model choice is saved.
-    fn run_model_saved(&mut self) {
-        self.acquisition(app_host::run_model_saved);
+    /// `acquisition_policy_error = None; _open_acquisition()` after the run-model choice is saved;
+    /// a failed open is the choice's answer (app.py:866-867 @ f4e366e9).
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
+        self.acquisition(app_host::run_model_saved).unwrap_or(Ok(()))
     }
     fn set_acquisition_policy_error(&mut self, reason: Option<&'static str>) {
         self.acquisition(|view, _| *view.policy_error = reason);

@@ -1206,10 +1206,15 @@ pub fn open_acquisition(
     Ok(())
 }
 /// `acquisition_policy_error = None; _open_acquisition()` once the run-model choice is saved
-/// (app.py:866-867): selection never starts a download.
-pub fn run_model_saved(view: &mut AcquisitionView<'_>, site: &AcquisitionSite<'_>) {
+/// (app.py:866-867 @ f4e366e9): selection never starts a download. An open that fails is the
+/// choice's answer (the handler's 409 with the library's code, app.py:2012-2031), as v0.1.4's
+/// `_open_acquisition` raises into `_choose_run_model`; the saved choice stays saved.
+pub fn run_model_saved(
+    view: &mut AcquisitionView<'_>,
+    site: &AcquisitionSite<'_>,
+) -> Result<(), PublicError> {
     *view.policy_error = None;
-    open_acquisition(view, site).unwrap_or(());
+    open_acquisition(view, site)
 }
 /// `self.acquisition.start(grant)` then `self._acquisition_active = True`: the status document answered.
 pub fn acquisition_start(

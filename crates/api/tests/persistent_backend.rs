@@ -74,8 +74,9 @@ impl Host for FakeHost {
     fn fast_mode_changed(&mut self) {
         self.with(|s| s.trace.push("host:fast_mode_changed".into()));
     }
-    fn run_model_saved(&mut self) {
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
         self.with(|s| s.trace.push("host:run_model_saved".into()));
+        Ok(())
     }
 }
 struct Inner(Arc<Mutex<Vec<String>>>);

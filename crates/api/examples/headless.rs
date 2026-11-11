@@ -1397,9 +1397,10 @@ impl Host for HeadlessHost {
         let mut runs = runs.lock().map_err(|_| failure())?;
         runs.demo_action(action, body, &mut facts)
     }
-    fn run_model_saved(&mut self) {
-        // acquisition_policy_error = None; _open_acquisition(): selection never starts a download.
-        self.with(|c| with_acquisition(c, app_host::run_model_saved));
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
+        // acquisition_policy_error = None; _open_acquisition(): selection never starts a download;
+        // a failed open is the choice's answer (app.py:866-867).
+        self.with(|c| with_acquisition(c, app_host::run_model_saved))
     }
     fn resource_check(&mut self) -> Option<&'static str> {
         resource_check(&self.core)

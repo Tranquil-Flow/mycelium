@@ -102,8 +102,11 @@ pub trait Host: Send {
     fn owner_run_active(&self) -> bool;
     /// `app._refresh_fast_mode_process()`, after the file is written.
     fn fast_mode_changed(&mut self) {}
-    /// `acquisition_policy_error = None; _open_acquisition()`, after the choice is saved.
-    fn run_model_saved(&mut self) {}
+    /// `acquisition_policy_error = None; _open_acquisition()`, after the choice is saved; a failed
+    /// open is the choice's answer.
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
+        Ok(())
+    }
     /// `time.time()` for consent timestamps.
     fn now_seconds(&self) -> f64 {
         std::time::SystemTime::now()
