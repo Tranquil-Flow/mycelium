@@ -227,8 +227,9 @@ pub struct DesktopServices {
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
     rate: Arc<Mutex<crate::chat_edge::RateWindow>>,
-    /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): `/chat/*` uses
-    /// it while the run serves; otherwise the SLICE-1 native path above answers.
+    /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): once a run is
+    /// composed it answers every `/chat/*` route (lane S5F); without one the SLICE-1 native path
+    /// above answers.
     chat_run: Option<api::chat_service::ChatService>,
     /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
     run_chats: Option<api::chat_service::RunChats>,
@@ -366,9 +367,11 @@ impl DesktopServices {
         self.model = Some(gate);
         self
     }
-    /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): while
-    /// `run` serves, `/chat/api/{state,send,events}` go through the shipped `ChatService`;
-    /// `timing` is the owner's per-chat timing file (v0.2's own evidence folder, never v0.1.4's).
+    /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): from now
+    /// on `/chat/api/{state,send,events}` always go through the shipped `ChatService`, which answers
+    /// `chat_not_ready` / `chat_warming_up` / `chat_switching_runs` itself while `run` does not serve
+    /// (lane S5F); `timing` is the owner's per-chat timing file (v0.2's own evidence folder, never
+    /// v0.1.4's).
     pub fn with_chat_run(
         mut self,
         run: Arc<dyn api::chat_service::RunRoute>,
@@ -389,17 +392,16 @@ impl DesktopServices {
     pub fn run_chats(&self) -> Option<api::chat_service::RunChats> {
         self.run_chats.clone()
     }
-    /// The route chat service while the owner run serves (S5); `None`: the native path answers.
+    /// The route chat service once a run is composed: then it answers EVERY `/chat/*` route, as the
+    /// shipped app's only chat path does (`DemoApp.chat_route` app.py:1926 -> `chat.handle`
+    /// chat.py:553-584 -> `ChatService`; not serving -> its own 503 codes, chat.py:311-318). `None`:
+    /// no run is composed and the SLICE-1 native path answers. A host never has both paths, so a
+    /// native chat and a route chat can never run at once (lane S5F, REVIEW-lanePH3B-S5 F1/F3).
     fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
-        self.chat_run.as_ref().filter(|chat| chat.serving())
-    }
-    /// The route chat service when it holds the record `body.request_id` names.
-    fn route_chat_of(&self, body: &Value) -> Option<&api::chat_service::ChatService> {
-        let id = body["request_id"].as_str()?;
-        self.chat_run.as_ref().filter(|chat| chat.knows(id))
+        self.chat_run.as_ref()
     }
     /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
-    /// Quit's fence, one chat at a time across both paths (`chat_busy`), then the service.
+    /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
     fn route_send(
         &self,
         chat: &api::chat_service::ChatService,
@@ -417,14 +419,6 @@ impl DesktopServices {
             .closing
         {
             return Err(refused(err("application_closed")));
-        }
-        let native_busy = self
-            .chat
-            .try_lock()
-            .map(|c| c.as_ref().is_some_and(|c| !c.done))
-            .unwrap_or(true);
-        if native_busy {
-            return Err(api::chat::ChatError::new(429, "chat_busy"));
         }
         chat.send(
             "local",
@@ -560,8 +554,7 @@ impl DesktopServices {
                     .chat
                     .try_lock()
                     .map(|c| c.as_ref().is_some_and(|c| !c.done))
-                    .unwrap_or(true)
-                    || self.chat_run.as_ref().is_some_and(|c| c.busy());
+                    .unwrap_or(true);
                 Self::json(
                     json!({"available":!closed,"busy":busy,"model_id":"Qwen2.5-0.5B-Instruct","served_by":[],"switching_runs":false,"rejoining":false,"warming_up":false,"limits":crate::chat_edge::limits_json()}),
                 )
@@ -596,9 +589,7 @@ impl DesktopServices {
                     .chat
                     .try_lock()
                     .map_err(|_| PublicError::new(429, "chat_busy"))?;
-                if chat.as_ref().is_some_and(|c| !c.done)
-                    || self.chat_run.as_ref().is_some_and(|c| c.busy())
-                {
+                if chat.as_ref().is_some_and(|c| !c.done) {
                     return Err(PublicError::new(429, "chat_busy"));
                 }
                 // Quit may have begun meanwhile: nothing is rolled over or admitted after it (an

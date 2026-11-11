@@ -33,7 +33,7 @@ impl Service for Backend<'_> {
         true
     }
     fn state(&self) -> Result<Value, ChatError> {
-        // While the owner run serves, the shipped `ChatService` answers (lane PH3b S5).
+        // With a run composed, the shipped `ChatService` answers (lanes PH3b S5, S5F).
         if let Some(chat) = self.host.routed_chat() {
             return Ok(chat.state());
         }
@@ -49,8 +49,9 @@ impl Service for Backend<'_> {
         self.value("/chat/api/send", body)
     }
     fn events(&self, body: Value) -> Result<Value, ChatError> {
-        // A route chat's record lives in the service (it answers at once, chat.py:454-474).
-        if let Some(chat) = self.host.route_chat_of(&body) {
+        // With a run composed, every record lives in the service (it answers at once,
+        // chat.py:454-474).
+        if let Some(chat) = self.host.routed_chat() {
             return chat.events(&body);
         }
         let bytes = serde_json::to_vec(&body).map_err(|_| converted(err("native_json_failed")))?;
