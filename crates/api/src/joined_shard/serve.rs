@@ -65,8 +65,7 @@ pub trait StageCompute {
     /// request of a multi-request epoch (lane EP0/EP1). Never interrupts a
     /// step; Ok only when the state was released. A compute that cannot reset
     /// refuses, and the member then ends its epoch with the compute closed.
-    fn reset(&mut self, current: Current<'_>) -> Result<Value, Error> {
-        let _ = current;
+    fn reset(&mut self, _current: Current<'_>) -> Result<Value, Error> {
         Err(Error("joined_native_reset_unsupported"))
     }
 }
