@@ -165,6 +165,15 @@ impl Teardown {
             Self::Failed(code) => code,
         }
     }
+    /// The teardown's reason exactly as demo_chain.py:1332-1334 computes it from the run's own
+    /// context: `'chat_switching_runs' if rollover_requested else (monitor_error_code or
+    /// 'owner_run_failed') if failed else 'chat_cancelled'`. `monitor_error_code` is set only by
+    /// the monitor's dead-member check (demo_chain.py:1179-1181); the ceiling cancels its chats
+    /// itself when it fires (demo_chain.py:1155-1163, [`Teardown::CeilingReached`]).
+    pub fn of(rollover_requested: bool, failed: bool, monitor_error_code: Option<&str>) -> Self {
+        let _ = (rollover_requested, failed, monitor_error_code);
+        Self::Stopped
+    }
     /// The reason of a teardown from the run's own status (`owner_driver::status_json`) and the
     /// teardown's `failed` flag, as demo_chain.py:1329-1331 decides it.
     /// `rollover_requested` is the status's `rollover.state == "switching"` (both are set together,

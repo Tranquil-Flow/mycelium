@@ -380,6 +380,31 @@ fn the_runs_teardown_cancels_the_chat_with_the_reason_the_page_shows() {
     }
 }
 
+/// The teardown's reason is the shipped expression over the run's context (demo_chain.py:1332-1334
+/// @ f4e366e9): rollover requested wins, a failed run shows the monitor's dead-member code or
+/// `owner_run_failed`, a plain Stop `chat_cancelled`.
+#[test]
+fn the_teardown_reason_is_the_shipped_expression() {
+    assert_eq!(Teardown::of(false, false, None), Teardown::Stopped);
+    assert_eq!(Teardown::of(true, false, None), Teardown::SwitchingRuns);
+    assert_eq!(
+        Teardown::of(true, true, Some("authority_state_write_failed")),
+        Teardown::SwitchingRuns
+    );
+    assert_eq!(
+        Teardown::of(false, true, Some("authority_state_write_failed")),
+        Teardown::Failed("authority_state_write_failed".into())
+    );
+    assert_eq!(
+        Teardown::of(false, true, None),
+        Teardown::Failed("owner_run_failed".into())
+    );
+    assert_eq!(
+        Teardown::of(false, false, Some("ignored")),
+        Teardown::Stopped
+    );
+}
+
 /// The teardown's reason from the run's status (demo_chain.py:1329-1331): rollover requested ->
 /// `chat_switching_runs`; failed -> the monitor's code (a serving failure: the ceiling,
 /// `joined_route_member_stale`, ...) else `owner_run_failed`; a plain Stop -> `chat_cancelled`.
