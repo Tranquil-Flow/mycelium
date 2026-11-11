@@ -1123,8 +1123,14 @@ pub fn cancel_acquisition(view: &mut AcquisitionView<'_>) {
     *view.active = false;
 }
 /// `if acquisition is None or its state_root differs: self._open_acquisition()`.
+///
+/// An open acquisition keeps its root's physical path (`acquisition::Acquisition::state_root`,
+/// legitimate ancestor aliases such as macOS `/var` admitted once), so the wanted root is compared
+/// physically: the same root spelled through an alias is the same root.
 pub fn reopen_acquisition_if_needed(view: &mut AcquisitionView<'_>, site: &AcquisitionSite<'_>) {
-    let wanted = acquisition_root(site).ok();
+    let wanted = acquisition_root(site)
+        .ok()
+        .map(|root| std::fs::canonicalize(&root).unwrap_or(root));
     if view.acquisition.is_none()
         || wanted.as_deref()
             != view

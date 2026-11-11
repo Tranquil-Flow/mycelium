@@ -122,5 +122,18 @@ fn app_host_reopen_keeps_the_open_acquisition_below_a_symlinked_ancestor() {
         "idle",
         "the same root must not be closed and reopened"
     );
-    view.acquisition.take().expect("kept").close().unwrap();
+    // A different root (this Mac becomes a target: the staging consumer's `serving` root) still
+    // closes the open acquisition and opens the run model's there.
+    let target = AcquisitionSite {
+        target: true,
+        ..site
+    };
+    app_host::reopen_acquisition_if_needed(&mut view, &target);
+    assert_eq!(opened.status().state, "closed");
+    let reopened = view.acquisition.take().expect("reopened");
+    assert_eq!(
+        reopened.state_root(),
+        fs::canonicalize(app_host::acquisition_root(&target).unwrap()).unwrap()
+    );
+    reopened.close().unwrap();
 }
