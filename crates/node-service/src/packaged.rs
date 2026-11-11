@@ -487,6 +487,34 @@ pub fn core_with_network(
         network,
     )
 }
+/// The owner run's composition seams (lane PH3b S3, `crate::packaged_run`): where the installed
+/// native sidecar is (`installed_sidecar`, native_runtime.py:8-22; `None`: beside the executable,
+/// `native/mycelium-iroh-sidecar`), and a read-only handle to the run's status view once composed.
+#[derive(Clone, Default)]
+pub struct RunConfig {
+    pub sidecar: Option<PathBuf>,
+    pub view: Arc<Mutex<Option<api::owner_driver::DemoView>>>,
+}
+impl RunConfig {
+    /// The composed run's status view (none before the composition installed one).
+    pub fn observed(&self) -> Option<api::owner_driver::DemoView> {
+        self.view
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+/// [`core_with_network`] with the owner run's composition seams given.
+pub fn core_with_run(
+    state_root: &Path,
+    transport: Arc<dyn Transport>,
+    observer: Arc<dyn Observer>,
+    network: NetworkConfig,
+    run: RunConfig,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    drop(run);
+    core_with_network(state_root, transport, observer, network)
+}
 /// The core and cleanup for the window, from the state root.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     compose(
