@@ -787,7 +787,9 @@ fn acquisition_status_hostile_documents_are_bounded() {
         bytes.resize(size, b' ');
         bytes
     };
-    let rows: Vec<(&str, Option<Vec<u8>>, Option<Vec<u8>>, &str)> = vec![
+    /// (row, current.json, history.json, expected open outcome)
+    type Row = (&'static str, Option<Vec<u8>>, Option<Vec<u8>>, &'static str);
+    let rows: Vec<Row> = vec![
         // Inside the bound a deep document is ordinary corruption.
         (
             "current lists 32",
