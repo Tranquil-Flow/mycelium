@@ -79,9 +79,10 @@ def test_source_offer_in_every_html_response(directory, path):
 
 @pytest.mark.parametrize('path', [path for path, (_, mime) in ASSETS.items() if mime.startswith('text/html')])
 def test_ccai_discord_invite_in_every_html_response(directory, path):
-    """The owner's CCAI Discord invite is a real footer link on every shell
-    (plus once per CCAI section on /about), with the same off-origin link
-    hygiene as the source offer."""
+    """The owner's CCAI Discord invite is a real footer link on every shell,
+    plus once in-page where the owner asked for it (the landing 'This is the
+    first step' row, the Contributing card, both About CCAI sections), with
+    the same off-origin link hygiene as the source offer."""
     connection = http.client.HTTPConnection('127.0.0.1', directory.server_port)
     try:
         connection.request('GET', path)
@@ -92,7 +93,7 @@ def test_ccai_discord_invite_in_every_html_response(directory, path):
         links = Links()
         links.feed(body)
         invites = [link for link in links.links if link.get('href') == DISCORD]
-        assert len(invites) == {'/about': 3}.get(path, 1)  # /about: footer, both CCAI sections
+        assert len(invites) == {'/': 2, '/about': 3, '/swarms': 2, '/swarms/': 2}.get(path, 1)  # /about: footer + both CCAI sections; others: footer + one in-page spot
         for link in invites:
             assert 'noopener' in link.get('rel', '').split()
             assert 'target' not in link
@@ -103,12 +104,19 @@ def test_ccai_discord_invite_in_every_html_response(directory, path):
         connection.close()
 
 
-def test_the_invite_sits_in_both_ccai_sections_of_about():
+def test_the_invite_sits_in_every_owner_named_spot():
     from pathlib import Path
-    body = (Path(__file__).resolve().parents[2] / 'mycelium_swarm_directory/web/about.html').read_text()
+    web = Path(__file__).resolve().parents[2] / 'mycelium_swarm_directory/web'
+    about = (web / 'about.html').read_text()
     for section_id in ('s-bigger', 't-stack'):
-        start = body.index(f'id="{section_id}"')
-        assert DISCORD in body[start:body.index('</section>', start)], section_id
+        start = about.index(f'id="{section_id}"')
+        assert DISCORD in about[start:about.index('</section>', start)], section_id
+    home = (web / 'apex.html').read_text()
+    closing = home.split('<h2>This is the first step</h2>', 1)[1].split('</section>', 1)[0]
+    assert DISCORD in closing, 'landing closing CTA row'
+    app = (web / 'index.html').read_text()
+    contributing = app.split('id="panel-contributing"', 1)[1].split('</section>', 1)[0]
+    assert DISCORD in contributing, 'Contributing card'
 
 
 @pytest.mark.parametrize('theme', ['light', 'dark'])
