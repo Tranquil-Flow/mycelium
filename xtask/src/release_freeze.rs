@@ -74,6 +74,17 @@ pub fn freeze(
         })
     };
     let (exe, bundle) = (absolute(exe, "exe")?, absolute(bundle, "bundle")?);
+    // The candidate's executable is the bundle's own (lane RELF item 7, review F5).
+    if exe != bundle.join("Contents/MacOS/mycelium") {
+        return Err(fail(
+            "freeze_exe_outside_bundle",
+            format!(
+                "exe {} is not {}/Contents/MacOS/mycelium",
+                exe.display(),
+                bundle.display()
+            ),
+        ));
+    }
     if !fs::symlink_metadata(&exe).is_ok_and(|m| m.is_file()) {
         return Err(fail(
             "freeze_path_invalid",

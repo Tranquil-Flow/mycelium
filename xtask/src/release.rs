@@ -299,7 +299,7 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, (String, u64)>) -> R
             let text = target
                 .to_str()
                 .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 link target"))?;
-            if !link_stays_inside(&relative, &target) {
+            if !link_stays_inside(&relative, &target) || !resolves_inside(root, &path) {
                 return Err(fail(
                     "bundle_link_outside",
                     format!("{} -> {text}", path.display()),
@@ -325,6 +325,54 @@ fn relative_name(root: &Path, path: &Path) -> Result<String, String> {
         .to_str()
         .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 path"))?
         .replace('\\', "/"))
+}
+/// Whether the link at `link` resolves inside `root` on disk, following the links its target
+/// passes through (lane RELF item 7, review F5: `esc -> up/../..` with `up -> ..` is lexically
+/// inside but leaves the bundle). Nothing is read through a link; a missing component is taken as
+/// named, so a dangling chain that would land outside is refused too. At most 40 hops.
+fn resolves_inside(root: &Path, link: &Path) -> bool {
+    use std::path::Component;
+    fn resolve(root: &Path, mut at: PathBuf, target: &Path, hops: &mut u32) -> Option<PathBuf> {
+        if target.is_absolute() {
+            return None;
+        }
+        for component in target.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    at.pop();
+                }
+                Component::Normal(name) => {
+                    let next = at.join(name);
+                    let is_link =
+                        fs::symlink_metadata(&next).is_ok_and(|m| m.file_type().is_symlink());
+                    if is_link {
+                        *hops += 1;
+                        if *hops > 40 {
+                            return None;
+                        }
+                        let inner = fs::read_link(&next).ok()?;
+                        at = resolve(root, at, &inner, hops)?;
+                    } else {
+                        at = next;
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => return None,
+            }
+            if !at.starts_with(root) {
+                return None;
+            }
+        }
+        Some(at)
+    }
+    let (Ok(root), Some(parent)) = (fs::canonicalize(root), link.parent()) else {
+        return false;
+    };
+    let (Ok(start), Ok(target)) = (fs::canonicalize(parent), fs::read_link(link)) else {
+        return false;
+    };
+    let mut hops = 0;
+    resolve(&root, start, &target, &mut hops).is_some()
 }
 /// Whether `target`, read relative to the folder holding the link at `relative` (a path inside
 /// the bundle), names a path inside the bundle. Lexical only: nothing is resolved on disk.
