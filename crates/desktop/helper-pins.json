@@ -3,7 +3,7 @@
     "path": "Contents/MacOS/native/resource_probe",
     "kind": "Helper",
     "bytes": 675232,
-    "sha256": "563b9206c56e9cd4988b55ed1660c72a8ed62f12b985005afbee462174a7726d"
+    "sha256": "f2a4417f71db3d9ecc010b554ef5a7ef623d875d24b968627bee09a621a22bd1"
   },
   {
     "path": "Contents/MacOS/native/cloudflared",
