@@ -472,6 +472,12 @@ impl DesktopServices {
                 );
                 // v0.1.4's `owner_run` (`demo_app.owner_status`, `crate::packaged_run`).
                 crate::packaged_run::status_overlay(&mut status, &self.run);
+                // v0.1.4's `demo_target` member card (PH3b S2).
+                crate::packaged_network::member_status(
+                    &mut status,
+                    self.authority.as_deref(),
+                    &self.network,
+                );
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {
