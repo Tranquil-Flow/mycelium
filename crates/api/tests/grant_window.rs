@@ -15,11 +15,14 @@ use api::{
     seed::SeedOptions,
 };
 use budgets::{BudgetId as B, Entries};
-use protocol::{artifact_grant::ChunkRequest, identity::Identity};
+use protocol::{
+    artifact_grant::{ChunkRequest, Grant},
+    identity::Identity,
+};
 use runtime::{
     artifact_journal::{DurableConfig, DurableObjects},
-    iroh_artifact::ChunkSession,
-    iroh_artifact_source::ArtifactService,
+    iroh_artifact::{ArtifactError, ChunkSession},
+    iroh_artifact_source::{AdmittedChunk, ArtifactObjects, ArtifactService},
     iroh_host::LoopbackHost,
     sidecar_artifact::{grant_limits, serve_limits},
 };
@@ -28,7 +31,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc,
     },
@@ -201,6 +204,34 @@ impl Rig {
         });
         self.renew().unwrap();
     }
+    /// The owner revokes the member at its seed (`revoke_seed_member`: STOPPED under the next
+    /// generation). The member is not told: it keeps its old session.
+    fn revoke_action(&self) -> impl FnOnce() + Send + 'static {
+        let coordinator = self.coordinator.clone();
+        let node = self.session.node_id().to_owned();
+        let generation = self.session.generation().unwrap();
+        move || {
+            let row = coordinator
+                .advance_member_generation(&node, generation, "STOPPED")
+                .unwrap();
+            assert_eq!(row["lifecycle_state"], "STOPPED");
+        }
+    }
+    /// The same member resumes ELSEWHERE: the seed advances its generation, while this member
+    /// keeps using its old session (and its old, locally fresh lease).
+    fn resume_elsewhere(&mut self) {
+        let before = self.session.generation().unwrap();
+        let (time, signer, options) = (self.time.clone(), &self.signer, &self.options);
+        let resumed = with_env(&time, signer, options, |env| {
+            peer::start(&self.member_root, signer, true, env)
+                .unwrap()
+                .session
+                .unwrap()
+        });
+        assert!(resumed.generation().unwrap() > before);
+        let row = self.coordinator.member(self.session.node_id()).unwrap();
+        assert_eq!(row["generation"], json!(resumed.generation().unwrap()));
+    }
     /// The owner's seed goes away (the member's renewals fail at the transport).
     fn seed_down(&mut self) {
         if let Some(server) = self.server.take() {
@@ -261,6 +292,60 @@ impl Drop for Rig {
     }
 }
 
+/// A seed action the test arms to land while the owner source is reading a chunk.
+type Armed = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+/// The source's durable object store, unchanged, except that an armed action runs while a chunk
+/// is being read: after the owner's pre-read seed check, before its post-read one.
+struct Hooked<S> {
+    inner: S,
+    armed: Armed,
+}
+impl<S: ArtifactObjects> ArtifactObjects for Hooked<S> {
+    fn verified_size(&self, digest: &str) -> Option<u64> {
+        self.inner.verified_size(digest)
+    }
+    fn admit_and_read(
+        &self,
+        grant: &Grant,
+        request: &ChunkRequest,
+        nonce: &str,
+        expiry: u64,
+        now: u64,
+    ) -> Result<AdmittedChunk, ArtifactError> {
+        let action = self.armed.lock().unwrap().take();
+        if let Some(action) = action {
+            action();
+        }
+        self.inner
+            .admit_and_read(grant, request, nonce, expiry, now)
+    }
+}
+/// Counts the bytes the owner source (`JoinedSource`) hands to the wire.
+struct Served<S> {
+    inner: S,
+    bytes: Arc<AtomicU64>,
+}
+impl<S: ArtifactObjects> ArtifactObjects for Served<S> {
+    fn verified_size(&self, digest: &str) -> Option<u64> {
+        self.inner.verified_size(digest)
+    }
+    fn admit_and_read(
+        &self,
+        grant: &Grant,
+        request: &ChunkRequest,
+        nonce: &str,
+        expiry: u64,
+        now: u64,
+    ) -> Result<AdmittedChunk, ArtifactError> {
+        let chunk = self
+            .inner
+            .admit_and_read(grant, request, nonce, expiry, now)?;
+        self.bytes
+            .fetch_add(chunk.bytes.len() as u64, Ordering::SeqCst);
+        Ok(chunk)
+    }
+}
+
 fn material(node: &str) -> (Value, Value, Vec<u8>) {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../planner/tests/fixtures/source-slices.json"
@@ -294,6 +379,15 @@ enum Between {
     OwnerGone,
     /// The member resumed: its generation changed at the seed.
     GenerationChanged,
+    /// R1: the owner revoked the member at its seed before chunk 2; the member keeps its old
+    /// session, so its own checks still pass.
+    RevokedAtSeed,
+    /// R1: the member resumed elsewhere before chunk 2 (generation advanced at the seed); this
+    /// member keeps its old session, so its own checks still pass.
+    ResumedAtSeed,
+    /// R1: the owner revokes the member while chunk 2 is being read (after the source's pre-read
+    /// seed check passed); the member keeps its old session.
+    RevokedMidRead,
 }
 struct Outcome {
     /// Each chunk's fetch result, in order (a refusal ends the transfer).
@@ -304,6 +398,9 @@ struct Outcome {
     expected: Vec<u8>,
     lease_at_issue: f64,
     last_fetch_at: f64,
+    /// Bytes the owner source handed to the wire, and the length of chunk 1.
+    served: u64,
+    first_chunk: u64,
 }
 
 /// One transfer of the fixture shard in three chunks; `step` seconds pass before chunks 2 and 3.
@@ -331,6 +428,9 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
     let coordinator = rig.coordinator.clone();
     let journal = rig.root.join("journal");
     let source_time = rig.time.clone();
+    let armed: Armed = Arc::new(Mutex::new(None));
+    let served_bytes = Arc::new(AtomicU64::new(0));
+    let (source_armed, source_served) = (armed.clone(), served_bytes.clone());
     let source = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -360,7 +460,14 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
             .send((address, signer.public_key_record()))
             .unwrap();
         let offer = offer_rx.recv().unwrap();
-        let wrapped = joined_shard::JoinedSource::new(coordinator.clone(), offer, store).unwrap();
+        let hooked = Hooked {
+            inner: store,
+            armed: source_armed,
+        };
+        let wrapped = Served {
+            inner: joined_shard::JoinedSource::new(coordinator.clone(), offer, hooked).unwrap(),
+            bytes: source_served,
+        };
         let service = ArtifactService::new(
             signer,
             coordinator.signer().public_key_record(),
@@ -455,6 +562,13 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
                         rig.renew().unwrap();
                     }
                 }
+                Between::RevokedAtSeed if i == 1 => rig.revoke_action()(),
+                Between::ResumedAtSeed if i == 1 => rig.resume_elsewhere(),
+                Between::RevokedMidRead if i == 1 => {
+                    *armed.lock().unwrap() = Some(Box::new(rig.revoke_action()));
+                }
+                // The member does nothing else: it keeps its old, locally fresh session.
+                Between::RevokedAtSeed | Between::ResumedAtSeed | Between::RevokedMidRead => {}
             }
         }
         last_fetch_at = rig.time.now();
@@ -515,6 +629,8 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
         expected: bytes,
         lease_at_issue,
         last_fetch_at,
+        served: served_bytes.load(Ordering::SeqCst),
+        first_chunk: part,
     }
 }
 
@@ -695,4 +811,72 @@ fn a_stale_generation_renewal_refusal_still_fences_the_member() {
         member.current(&rig.signer).unwrap_err().0,
         "member_renewal_failed"
     );
+}
+
+/// R1: the owner's per-chunk check against the member's CURRENT seed row is what refuses, on its
+/// own: the member keeps its old session (locally fresh lease, its own checks pass) after the
+/// owner revoked it at the seed. The owner source refuses chunk 2 at its `verified_size` gate with
+/// the existing typed code, hands no byte past chunk 1, and the member keeps its byte debt.
+/// v0.1.4: a member that is not live gets nothing (`peer_model_source.py:256-262`,
+/// `model_source_member_not_live`).
+#[test]
+fn a_member_revoked_at_the_seed_gets_no_further_chunk_from_the_owner_source() {
+    let mut rig = Rig::new();
+    let out = transfer(&mut rig, 1, Between::RevokedAtSeed);
+    assert_eq!(
+        out.chunks,
+        vec![
+            Ok(()),
+            Err("artifact_source_refused:artifact_object_unavailable".to_owned())
+        ],
+        "the owner source must refuse a revoked member's next chunk"
+    );
+    assert_eq!(
+        out.served, out.first_chunk,
+        "no byte past chunk 1 leaves the owner source"
+    );
+    assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
+}
+
+/// R1: the member resumed elsewhere (its generation advanced at the seed) while this member keeps
+/// its old session: the owner source refuses (v0.1.4 `managed_control_member_stale`).
+#[test]
+fn a_member_whose_generation_advanced_at_the_seed_gets_no_further_chunk_from_the_owner_source() {
+    let mut rig = Rig::new();
+    let out = transfer(&mut rig, 1, Between::ResumedAtSeed);
+    assert_eq!(
+        out.chunks,
+        vec![
+            Ok(()),
+            Err("artifact_source_refused:artifact_object_unavailable".to_owned())
+        ],
+        "the owner source must refuse a superseded generation's next chunk"
+    );
+    assert_eq!(
+        out.served, out.first_chunk,
+        "no byte past chunk 1 leaves the owner source"
+    );
+    assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
+}
+
+/// R1: the owner revokes the member while chunk 2 is being read, after the source's pre-read seed
+/// check passed: the post-read check refuses with `joined_shard_member_changed` and the bytes just
+/// read are not handed out.
+#[test]
+fn a_member_revoked_while_a_chunk_is_read_gets_none_of_its_bytes_from_the_owner_source() {
+    let mut rig = Rig::new();
+    let out = transfer(&mut rig, 1, Between::RevokedMidRead);
+    assert_eq!(
+        out.chunks,
+        vec![
+            Ok(()),
+            Err("artifact_source_refused:joined_shard_member_changed".to_owned())
+        ],
+        "the owner source must re-check the seed after the read"
+    );
+    assert_eq!(
+        out.served, out.first_chunk,
+        "no byte past chunk 1 leaves the owner source"
+    );
+    assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
 }
