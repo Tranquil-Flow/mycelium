@@ -624,7 +624,10 @@ fn the_runs_handle_keeps_its_runs_facts_and_forgets_them_with_a_fresh_run() {
     assert!(!chats.ceiling_reached(), "the ceiling cancels once per run");
     assert_eq!(chats.teardown(true), 1);
     chats.new_run();
-    assert!(chats.ceiling_reached(), "a fresh run may cancel at its own ceiling");
+    assert!(
+        chats.ceiling_reached(),
+        "a fresh run may cancel at its own ceiling"
+    );
     chats.new_run();
     assert_eq!(
         recorder.0.lock().unwrap().as_slice(),
@@ -660,7 +663,11 @@ fn the_timing_file_is_refused_by_its_canonical_path_and_outside_the_state_root()
     // A lower-case variant of v0.1.4's state folder (the same folder on the default volume).
     let lower = state.join("lc").join("mycelium a13 macos demo");
     std::fs::create_dir_all(&lower).unwrap();
-    assert_eq!(refused(lower.join("chat-timing.jsonl")), refusal, "lower-case");
+    assert_eq!(
+        refused(lower.join("chat-timing.jsonl")),
+        refusal,
+        "lower-case"
+    );
     // A symlinked parent whose target is v0.1.4's folder: lexically harmless.
     let demo = state.join("v014").join("Mycelium A13 macOS Demo");
     std::fs::create_dir_all(&demo).unwrap();
@@ -677,11 +684,7 @@ fn the_timing_file_is_refused_by_its_canonical_path_and_outside_the_state_root()
         "Mycelium/programs"
     );
     // Outside the state root, also through `..` below a missing folder.
-    assert_eq!(
-        refused(root.0.join("elsewhere.jsonl")),
-        refusal,
-        "outside"
-    );
+    assert_eq!(refused(root.0.join("elsewhere.jsonl")), refusal, "outside");
     assert_eq!(
         refused(state.join("missing").join("..").join("..").join("x.jsonl")),
         refusal,
@@ -697,7 +700,9 @@ fn the_timing_file_is_refused_by_its_canonical_path_and_outside_the_state_root()
     let real = state.join("real");
     std::fs::create_dir(&real).unwrap();
     assert_eq!(refused(real.join("chat-timing.jsonl")), None, "plain");
-    let spelled = std::env::temp_dir().join(root.0.file_name().unwrap()).join("state");
+    let spelled = std::env::temp_dir()
+        .join(root.0.file_name().unwrap())
+        .join("state");
     assert_eq!(
         TimingFile::under(&spelled, &spelled.join("real").join("chat-timing.jsonl"))
             .err()
@@ -723,12 +728,16 @@ fn a_timing_file_swapped_for_a_symlink_is_not_followed() {
         at: vec![(100, "a")],
         end: 200,
     });
-    let chat = ChatService::new(run_over(gateway, Some(serving("run-1"))), clock, Some(file))
-        .unwrap();
+    let chat =
+        ChatService::new(run_over(gateway, Some(serving("run-1"))), clock, Some(file)).unwrap();
     let sent = chat.send("local", prompt("hi", 1)).unwrap();
     let (_, last) = until_done(&chat, &id_of(&sent));
     assert_eq!(last["terminal"], "completed");
-    assert_eq!(std::fs::read(&target).unwrap(), b"", "the symlink was followed");
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        b"",
+        "the symlink was followed"
+    );
 }
 
 /// A gateway that panics inside `stream` (a defect in a later `RouteGateway`).
@@ -757,6 +766,9 @@ fn a_gateway_that_panics_does_not_leave_the_service_busy() {
         (&last["terminal"], &last["error"]),
         (&json!("failed"), &json!("chat_generation_failed_panic"))
     );
-    let next = chat.send("local", prompt("two", 1)).err().map(|e| e.error.code);
+    let next = chat
+        .send("local", prompt("two", 1))
+        .err()
+        .map(|e| e.error.code);
     assert_eq!(next, None, "the service stayed busy after a panic");
 }

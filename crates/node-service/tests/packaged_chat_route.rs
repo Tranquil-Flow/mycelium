@@ -437,7 +437,11 @@ fn with_a_run_composed_every_chat_route_answers_the_shipped_not_ready_codes() {
     let retry = millis(B::PyFinalMyceliumA13MacosChatRetryAfterSL315C60).as_secs();
     for (status, (switching_runs, warming_up), refusal) in [
         (None, (false, false), json!({"error":"chat_not_ready"})),
-        (Some(warming()), (false, true), json!({"error":"chat_warming_up"})),
+        (
+            Some(warming()),
+            (false, true),
+            json!({"error":"chat_warming_up"}),
+        ),
         (
             Some(switching()),
             (true, false),
@@ -496,7 +500,10 @@ fn with_a_run_composed_every_chat_route_answers_the_shipped_not_ready_codes() {
     );
     assert_eq!(code, 200, "{sent}");
     let (text, last) = until_done(&host.services, &sent["request_id"]);
-    assert_eq!((text.as_str(), &last["terminal"]), ("Hello", &json!("completed")));
+    assert_eq!(
+        (text.as_str(), &last["terminal"]),
+        ("Hello", &json!("completed"))
+    );
     assert_eq!(driver.runs(), 0);
     quit(&host.services);
 }
@@ -605,7 +612,11 @@ fn the_runs_handle_ends_the_route_chat_with_the_shipped_code_for_every_teardown(
             "stop" => {
                 let (status, stopped) = call(&host.services, "/api/demo/stop", json!({}));
                 assert_eq!(status, 200, "{stopped}");
-                assert_eq!(chats.teardown(false), 0, "the host's Stop cancelled it first");
+                assert_eq!(
+                    chats.teardown(false),
+                    0,
+                    "the host's Stop cancelled it first"
+                );
             }
             "rollover" => {
                 chats.rollover_requested();
