@@ -33,11 +33,25 @@ impl Shared {
         };
         let mut held = self.session.lock().map_err(|_| "member_renewal_poisoned")?;
         if let Err(code) = peer::renew(&self.root, true, held.as_mut(), &env) {
-            *self.error.lock().map_err(|_| "member_renewal_poisoned")? = Some(code.code.to_owned());
+            if transient(code.code) {
+                // The next pass tries again; until then the lease decides (`_renew_loop` only
+                // records `renewal_unavailable`, app.py:925-927).
+                eprintln!("member renew: {} (next pass retries)", code.code);
+            } else {
+                *self.error.lock().map_err(|_| "member_renewal_poisoned")? =
+                    Some(code.code.to_owned());
+            }
             return Err(code.code.to_owned());
         }
         Ok(())
     }
+}
+/// v0.1.4 `transient_renewal_failure` (`mycelium_node/reconnect.py:118-129`): only a transport or
+/// coordinator-availability failure (`seed_http_unreachable` without a status, translated to
+/// `peer_transport_unreachable`) is retried on the next pass. Every other refusal (revoked,
+/// generation stale, unknown, expired, a mismatched answer) still fences the member at once.
+pub fn transient(code: &str) -> bool {
+    code == "peer_transport_unreachable"
 }
 pub struct Membership {
     pub session: Arc<Mutex<Option<Session>>>,
@@ -80,7 +94,8 @@ impl Membership {
                     break;
                 }
                 drop(guard);
-                if s.renew_once().is_err() {
+                // A transient failure keeps the schedule; a definitive refusal ends it.
+                if s.renew_once().is_err_and(|code| !transient(&code)) {
                     break;
                 }
             }
@@ -92,7 +107,9 @@ impl Membership {
             thread: Some(thread),
         })
     }
-    /// One renewal pass now, exactly as the renewal thread runs it.
+    /// One renewal pass now, exactly as the renewal thread runs it (`tests/grant_window.rs` drives
+    /// it on its own schedule; this binary only runs it from the thread).
+    #[allow(dead_code)]
     pub fn renew_once(&self) -> Result<(), String> {
         self.shared.renew_once()
     }
