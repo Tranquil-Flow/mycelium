@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Quit while `/api/network/start` still waits for the quick tunnel's origin (review PH3a F1).
+//! v0.1.4 runs Start and `close` under the same `self.guard` (app.py:1344 `_action`, app.py:1831
+//! `DemoApp.close`): a relay a Start brings up is closed by the Quit that follows it
+//! (`self.public_relay.close()`, app.py:1848-1850), and once closed every action answers
+//! `application_closed` (app.py:1345). The packaged Quit must therefore never report `Verified`
+//! while a relay child it did not close still runs, and no relay child may outlive it (the child
+//! is in its own process group, so the app's exit does not end it).
+//!
+//! The tunnel is a fake quick-tunnel `/bin/sh` script given through `NetworkConfig.hooks` (never
+//! `cloudflared`). It reports its pid on a FIFO the test reads, then blocks on a second FIFO until
+//! the test releases it; only then does it print a `trycloudflare.com` origin, and it then blocks
+//! until it is terminated. Every launch is appended to a file, so a Start that should start nothing
+//! is checked by count.
+#![cfg(feature = "desktop-shell")]
+#[path = "support/packaged_macs.rs"]
+mod macs;
+use budgets::BudgetId as B;
+use desktop::{
+    channel::{ORIGIN, Request},
+    core::Core,
+    lifecycle::{Cleanup, CleanupError, Poll},
+};
+use macs::{Mac, millis, state_root};
+use node_service::packaged_network::{NetworkConfig, RelayHooks};
+use serde_json::{Value, json};
+use std::{
+    io::{Read, Write},
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+/// The fake quick tunnel's files: the script, its two FIFOs and its launch log.
+struct FakeTunnel {
+    script: PathBuf,
+    started: PathBuf,
+    release: PathBuf,
+    launches: PathBuf,
+}
+impl FakeTunnel {
+    fn new(base: &Path) -> Self {
+        let dir = base.join("fake-tunnel");
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let fake = Self {
+            script: dir.join("cloudflared-fake"),
+            started: dir.join("started"),
+            release: dir.join("release"),
+            launches: dir.join("launches"),
+        };
+        for fifo in [&fake.started, &fake.release] {
+            let made = std::process::Command::new("/usr/bin/mkfifo")
+                .arg("-m")
+                .arg("600")
+                .arg(fifo)
+                .status()
+                .unwrap();
+            assert!(made.success(), "mkfifo {}", fifo.display());
+        }
+        // fd 3 holds the release FIFO open read-write: the script never blocks opening it, and a
+        // writer finds a reader for as long as the script lives.
+        std::fs::write(
+            &fake.script,
+            format!(
+                "#!/bin/sh\nexec 3<>'{release}'\necho $$ >> '{launches}'\necho $$ > '{started}'\nread _ <&3\necho 'INF |  https://b3f-quit-inflight.trycloudflare.com  |'\nread _ <&3\n",
+                release = fake.release.display(),
+                launches = fake.launches.display(),
+                started = fake.started.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake.script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        fake
+    }
+    /// The production hooks with this script as the relay client and a minimal environment.
+    fn hooks(&self) -> RelayHooks {
+        let script = self.script.clone();
+        Arc::new(move || {
+            let mut hooks = api::relay::Hooks::production(None);
+            let script = script.clone();
+            hooks.binary = Arc::new(move || Some(script.clone()));
+            hooks.env = vec![("PATH".into(), "/usr/bin:/bin".into())];
+            hooks
+        })
+    }
+    /// The pid the script reports once it runs (read from its FIFO), within the worker budget.
+    fn wait_started(&self) -> i32 {
+        let started = self.started.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let read = std::fs::File::open(&started).and_then(|mut f| f.read_to_string(&mut text));
+            tx.send(read.map(|_| text)).unwrap_or(());
+        });
+        let text = rx
+            .recv_timeout(millis(B::WorkerStartup))
+            .expect("the fake tunnel never started")
+            .unwrap();
+        reader.join().unwrap();
+        text.trim().parse().unwrap()
+    }
+    /// Let the script print its origin. A script that is gone has no reader: nothing to release.
+    fn release(&self) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+            .open(&self.release)
+        {
+            Ok(mut fifo) => fifo.write_all(b"go\n").unwrap(),
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NXIO.raw_os_error()) => {}
+            Err(e) => panic!("release: {e}"),
+        }
+    }
+    /// Every pid the script ran as.
+    fn launches(&self) -> Vec<i32> {
+        std::fs::read_to_string(&self.launches)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| line.trim().parse().unwrap())
+            .collect()
+    }
+}
+fn alive(pid: i32) -> bool {
+    rustix::process::Pid::from_raw(pid)
+        .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
+}
+/// Ends a fake this test started that is still running (only after it was observed).
+fn kill(pid: i32) {
+    if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+        rustix::process::kill_process(pid, rustix::process::Signal::KILL).unwrap_or(());
+    }
+}
+fn post(core: &Arc<dyn Core>, path: &str, body: &Value) -> (u16, Value) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    core.submit(
+        Request {
+            window: "main".into(),
+            method: "POST".into(),
+            uri: format!("{ORIGIN}{path}"),
+            headers: vec![
+                ("x-mycelium-action".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(body).unwrap(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap()),
+    );
+    // The Start may wait for the tunnel's whole ready wait.
+    let reply = rx
+        .recv_timeout(millis(
+            B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayStartSelfReadyWaitL355,
+        ) + millis(B::WorkerStartup))
+        .unwrap();
+    (
+        reply.status,
+        serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
+    )
+}
+/// Polls an already begun Quit to its result within the Quit allowance.
+fn finish_quit(mac: &mut Mac, began: Instant) -> Result<Poll, CleanupError> {
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let deadline = began + Duration::from_millis(allowance.millis());
+    loop {
+        match mac.cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(Instant::now() < deadline, "the packaged core did not quit");
+                std::thread::sleep(millis(B::OwnerPoll) / 5);
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Quit begins while the quick-tunnel Start waits for its origin; the tunnel then reports it (a
+/// slow tunnel during Quit). Quit must leave no relay child running and must not be `Verified`
+/// while one runs; a Start arriving after Quit began is refused and launches nothing.
+#[test]
+fn quit_closes_a_relay_whose_start_is_still_waiting_for_its_tunnel() {
+    let base = state_root("quit-inflight");
+    let fake = FakeTunnel::new(&base);
+    let state = base.join("owner");
+    std::fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    let mut mac = Mac::launch(
+        &state,
+        NetworkConfig {
+            hooks: fake.hooks(),
+            ..NetworkConfig::default()
+        },
+    );
+    let body = json!({"relay_acknowledged": true, "max_seconds": 1800});
+    let core = mac.core.clone();
+    let start_body = body.clone();
+    let start = std::thread::spawn(move || post(&core, "/api/network/start", &start_body));
+    let pid = fake.wait_started();
+    // Quit begins while the Start waits for the tunnel's origin.
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let began = Instant::now();
+    mac.cleanup.begin(allowance).unwrap();
+    // A Start after Quit began is refused (`application_closed` once closed, app.py:1345).
+    let later = post(&mac.core, "/api/network/start", &body);
+    // The tunnel reports its origin now.
+    fake.release();
+    let quit = finish_quit(&mut mac, began);
+    let answered = start.join().unwrap();
+    let launches = fake.launches();
+    let running: Vec<i32> = launches.iter().copied().filter(|p| alive(*p)).collect();
+    for pid in &running {
+        kill(*pid);
+    }
+    drop(mac);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    assert!(
+        running.is_empty(),
+        "Quit answered {quit:?} with relay children {running:?} still running (fake pid {pid}; \
+         the in-flight Start answered {answered:?})"
+    );
+    assert_eq!(quit, Ok(Poll::Verified), "Quit's result");
+    assert_ne!(answered.0, 200, "the in-flight Start: {answered:?}");
+    assert!(
+        later.0 != 200
+            && matches!(
+                later.1["error"].as_str(),
+                Some("application_stopping" | "application_closed")
+            ),
+        "a Start after Quit began: {later:?}"
+    );
+    assert_eq!(launches, vec![pid], "a Start after Quit began launched a tunnel");
+}
