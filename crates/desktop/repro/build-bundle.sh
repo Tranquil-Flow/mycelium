@@ -12,8 +12,6 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=env.sh
 . "$here/env.sh"
-# shellcheck source=canonical.sh
-. "$here/canonical.sh"
 out=${1:?OUT_DIR}; variant=${2:-default}
 relay=${MYCELIUM_RELAY_CLIENT:?set MYCELIUM_RELAY_CLIENT to the pinned cloudflared file}
 relay_license=${MYCELIUM_RELAY_LICENSE:?set MYCELIUM_RELAY_LICENSE to the pinned cloudflared licence file}
@@ -23,7 +21,12 @@ case "$variant" in
   probe) feat=qualification-probe ;;
   *) echo "variant: default|probe" >&2; exit 1 ;;
 esac
-canon_acquire "$ROOT"; trap canon_release EXIT
+real_target=$CARGO_TARGET_DIR; real_cargo_home=${CARGO_HOME:-$HOME/.cargo}
+mkdir -p "$real_target"
+canon_acquire "$ROOT" "$real_target" "$real_cargo_home"; trap canon_release EXIT
+# Every builder-specific path is reached through the fixed links (canonical.sh): the source tree,
+# the target dir and the cargo home.
+export CARGO_TARGET_DIR=$MYCELIUM_CANON_TARGET CARGO_HOME=$MYCELIUM_CANON_CARGO_HOME
 cd "$ROOT"
 m="$MYCELIUM_CANON/Cargo.toml"
 nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p node-service --features "$feat" --bin mycelium
