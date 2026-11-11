@@ -37,25 +37,37 @@ impl Shared {
         };
         let mut held = self.session.lock().map_err(|_| "member_renewal_poisoned")?;
         if let Err(code) = peer::renew(&self.root, true, held.as_mut(), &env) {
-            if transient(code.code) {
-                // The next pass tries again; until then the lease decides (`_renew_loop` only
-                // records `renewal_unavailable`, app.py:925-927).
-                eprintln!("member renew: {} (next pass retries)", code.code);
-            } else {
+            if final_refusal(code.code) {
                 *self.error.lock().map_err(|_| "member_renewal_poisoned")? =
                     Some(code.code.to_owned());
+            } else {
+                // The next pass tries again; until then the member's own lease decides
+                // (`_renew_loop` only records `renewal_unavailable`, app.py:917-927).
+                eprintln!("member renew: {} (next pass retries)", code.code);
             }
             return Err(code.code.to_owned());
         }
         Ok(())
     }
 }
-/// v0.1.4 `transient_renewal_failure` (`mycelium_node/reconnect.py:118-129`): only a transport or
-/// coordinator-availability failure (`seed_http_unreachable` without a status, translated to
-/// `peer_transport_unreachable`) is retried on the next pass. Every other refusal (revoked,
-/// generation stale, unknown, expired, a mismatched answer) still fences the member at once.
-pub fn transient(code: &str) -> bool {
-    code == "peer_transport_unreachable"
+/// The shipped v0.1.4 app's rule (`_renew_loop`, app.py:911-927 over `RemoteMacMember.renew`,
+/// peer.py:1037-1060): every failed pass is tried again on the next one, and the member stays
+/// current only while its OWN lease lasts (`_control_snapshot`, peer.py:625-640). A refusal is
+/// final when v0.1.4 records a terminal disposition for it (`_translate`, peer.py:300-325:
+/// revoked, generation stale, unknown, expired; the snapshot then refuses at once), or when the
+/// seed no longer answers this session's identity at all (`seed_message_mismatch`: the generation
+/// moved on, `mycelium_seed/coordinator.py:1354-1362`; the shipped app's snapshot refuses that
+/// member at once through its retained-binding check, peer.py:631-638). Everything else (relay
+/// 5xx, seed 500, a truncated reply, transport) is retried.
+pub fn final_refusal(code: &str) -> bool {
+    matches!(
+        code,
+        "peer_member_revoked"
+            | "peer_generation_stale"
+            | "peer_member_unknown"
+            | "peer_member_expired"
+            | "seed_message_mismatch"
+    )
 }
 pub struct Membership {
     pub session: Arc<Mutex<Option<Session>>>,
@@ -137,8 +149,8 @@ impl Membership {
                     break;
                 }
                 drop(guard);
-                // A transient failure keeps the schedule; a definitive refusal ends it.
-                if s.renew_once().is_err_and(|code| !transient(&code)) {
+                // Any failure keeps the schedule; only a final refusal ends it.
+                if s.renew_once().is_err_and(|code| final_refusal(&code)) {
                     break;
                 }
             }

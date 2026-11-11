@@ -795,9 +795,10 @@ fn a_transient_renewal_failure_keeps_the_member_current_and_renewing() {
     assert!(member.current(&rig.signer).is_ok());
 }
 
-/// Guard: a refusal that is not a transport failure (the member's generation moved on at the seed)
-/// still fences the member at once; v0.1.4 retries only transport/availability failures
-/// (`mycelium_node/reconnect.py:118-129`).
+/// Guard: the seed no longer answers this session's identity (the member's generation moved on at
+/// the seed: `seed_message_mismatch`, `mycelium_seed/coordinator.py:1354-1362`): the member is
+/// fenced at once, as the shipped app's snapshot refuses it through its retained binding
+/// (peer.py:631-638).
 #[test]
 fn a_stale_generation_renewal_refusal_still_fences_the_member() {
     let mut rig = Rig::new();
