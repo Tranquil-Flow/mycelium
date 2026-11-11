@@ -516,6 +516,9 @@ pub struct Authority<M: ManagedSlot = Unmanaged> {
     /// `(generation, lease_expires_at)` of `session` while the renewal loop has it out on the wire, so the
     /// status never flickers to "absent" during a heartbeat.
     pub session_view: Option<(Option<u64>, Option<f64>)>,
+    /// What the app's loops and join recorded for its status (`renewal_error`, the standing
+    /// consent's error, last offer and last report).
+    pub recorded: crate::app_status::Recorded,
 }
 impl<M: ManagedSlot> Authority<M> {
     /// The authority part of `DemoApp.__init__` over `root`: the installation role, the owner's
@@ -569,6 +572,7 @@ impl<M: ManagedSlot> Authority<M> {
             windows: Arc::new(PairingWindows::system()),
             seed: None,
             owner_session: None,
+            recorded: crate::app_status::Recorded::default(),
         })
     }
     /// The owner authority this process answers for: a persisted v0.1.x one, else the one-member swarm

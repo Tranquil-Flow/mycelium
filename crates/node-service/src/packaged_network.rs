@@ -60,6 +60,9 @@ pub struct NetworkConfig {
     /// `_renew_loop`'s period for a joined target (`self.closed.wait(20)`, app.py:917): the app's
     /// `RenewLoopSelfClosedWait`; a test runs the same loop on a shorter budget.
     pub renewal: budgets::BudgetId,
+    /// v0.1.4's `_device_memory_bytes()` test seam (app.py:1123-1126 @ f4e366e9): the RAM that
+    /// bounds this Mac's per-run memory consent. `None` (the app's own): this Mac's `hw.memsize`.
+    pub device_memory_bytes: Option<u64>,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -74,6 +77,7 @@ impl Default for NetworkConfig {
                 )
             }),
             seams: JoinSeams::default(),
+            device_memory_bytes: None,
         }
     }
 }
