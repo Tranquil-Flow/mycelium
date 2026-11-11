@@ -656,6 +656,46 @@ impl Work {
             .as_ref()
             .and_then(VerifiedAnnouncement::work_limits)
     }
+    /// Announced work is admitted only from an announcement verified against this membership's
+    /// seed key (`owner_pin_announcement_unverified`), under standing consent granted AND bound to
+    /// this membership (`joined_shard_consent_required`), and within the member's caps: the
+    /// announced share through `standing_limits` (`member_wall_limit_invalid`,
+    /// `member_wall_cap_below_share`, `member_resources_invalid`, `member_memory_cap_below_share`,
+    /// `member_storage_cap_below_share`, `worker_limits_invalid`), v0.1.4 standing_consent.py:230-261.
+    /// `Ok(None)`: nothing was announced (operator path) or no share for this member; otherwise
+    /// the worker limits of the share.
+    pub fn admit_share(&self, session: Option<&impl Member>) -> Result<Option<Value>> {
+        let Some(verified) = self.announced.as_ref() else {
+            return Ok(None);
+        };
+        let binding = session
+            .ok_or("not_joined")?
+            .session()
+            .lock()
+            .map_err(|_| "session_poisoned")?
+            .as_ref()
+            .and_then(Session::binding)
+            .ok_or("not_joined")?;
+        if verified.seed_key_digest() != binding.seed_key_digest {
+            return Err("owner_pin_announcement_unverified".into());
+        }
+        let consent = standing_consent::load(&self.root)
+            .map_err(|_| "joined_shard_consent_required")?
+            .ok_or("joined_shard_consent_required")?;
+        if consent["state"] != "granted"
+            || consent["binding"]
+                != json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,
+                    "seed_key_digest":binding.seed_key_digest})
+        {
+            return Err("joined_shard_consent_required".into());
+        }
+        match verified.work_limits() {
+            None => Ok(None),
+            Some(share) => crate::standing_acceptor::standing_limits(&consent, Some(share))
+                .map(Some)
+                .map_err(|e| e.0.to_owned()),
+        }
+    }
     /// `receive`: one seed-signed shard offer over the artifact carrier into retained custody.
     #[allow(clippy::too_many_arguments)]
     pub fn receive(
@@ -670,6 +710,8 @@ impl Work {
         let (host, rt, clock) = (carrier_side.host, carrier_side.runtime, carrier_side.clock);
         let policy = carrier_side.lan;
         operation.check()?;
+        // Item 3: announced work fits the member's bound consent before custody or dial.
+        self.admit_share(session)?;
         let remaining = operation
             .deadline
             .saturating_duration_since(std::time::Instant::now());

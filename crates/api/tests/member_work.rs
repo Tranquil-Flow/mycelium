@@ -284,6 +284,14 @@ fn announced_work_without_bound_standing_consent_is_refused_before_custody() {
         Err("source_id_missing".into()),
         "bound, within caps"
     );
+    // A share verified against ANOTHER swarm's seed key is not this membership's.
+    let other = Joined::new();
+    work.announced(&other.announced(Some(share(1_000_000_000, 1_000_000_000, 300))));
+    assert_eq!(
+        receive(&mut work, &member),
+        Err("owner_pin_announcement_unverified".into()),
+        "another seed"
+    );
 }
 
 /// The announced share must fit the member's bound caps; each excess is refused by name before
@@ -311,7 +319,9 @@ fn a_share_above_the_members_caps_is_refused_by_name_before_custody() {
             share(1_000_000_000, 1_000_000_000, 5),
             "member_wall_limit_invalid",
         ),
-        (share(0, 1_000_000_000, 300), "member_resources_invalid"),
+        // `member_resources_invalid` (a zero or missing rss/disk) is unreachable here: a
+        // conforming owner refuses to announce it (`demo_announcement_invalid`, run_exchange.rs
+        // check_node_extra); `standing_limits` still refuses it on the member.
     ] {
         work.announced(&member.announced(Some(limits.clone())));
         assert_eq!(work.share(), Some(&limits));
