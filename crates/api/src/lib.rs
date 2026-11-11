@@ -11,6 +11,7 @@ pub mod bootstrap_process;
 pub mod bootstrap_stage;
 pub mod capability;
 pub mod chat;
+pub mod chat_service;
 pub mod clock_offset;
 pub mod compiled_handoff;
 pub mod compiler_inputs;
