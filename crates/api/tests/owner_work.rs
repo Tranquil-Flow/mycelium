@@ -446,6 +446,7 @@ impl TestMember {
         ) else {
             return Err(Refusal("test_member_not_prepared".into()));
         };
+        let serve_for = script.serve_for.unwrap_or(span(B::MemberChosenWall));
         let mut compute = Controlled {
             offer,
             owned: true,
@@ -468,7 +469,7 @@ impl TestMember {
                 clock,
                 current: &live,
                 cancelled,
-                deadline: Instant::now() + span(B::MemberChosenWall),
+                deadline: Instant::now() + serve_for,
             },
             &mut compute,
             &command["route"],
@@ -489,6 +490,9 @@ struct Serving {
     reset_fails: bool,
     /// The step with this global index signals `.1`, then waits for `.2` (a chat in flight).
     hold: Option<(u64, mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    /// The member's own serve deadline (its consent wall ending while the epoch is idle);
+    /// default: the member's chosen wall.
+    serve_for: Option<Duration>,
 }
 const VOCAB: usize = 64;
 /// Controlled final-stage logits: argmax at `token` (MYAC header of the native link).
@@ -2094,4 +2098,99 @@ fn s_node(_: &[Watched], i: usize, state: &Value) -> String {
         .as_str()
         .unwrap()
         .to_owned()
+}
+
+// ---- REVIEW-laneEP F3/F9: an epoch retired while idle refuses with a named code, promptly ----
+//
+// v0.1.4: a route that stops serving is `route_not_open` (route.py:4614-4620) and the chat answers
+// 503 `chat_route_not_qualified` (chat.py:113-120) at once; the run itself is ended only by Stop,
+// rollover, the ceiling or the monitor (ruling 23). The owner work port watches its open epoch
+// every owner poll: a member whose serve ended (its reply arrived), or an epoch the carrier
+// already retired, makes readiness and the next submission refuse with a named code instead of
+// readiness reading OK and the next chat failing at the carrier or the 30 s hop deadline.
+
+/// GET /v1/qualification/current every few ms until it is refused or `within` ran out.
+fn readiness_within(gateway: &Value, within: Duration) -> (u16, Value) {
+    let end = Instant::now() + within;
+    loop {
+        let (status, body) = sse_client::http(
+            gateway_addr(gateway),
+            "GET",
+            "/v1/qualification/current",
+            &bearer(gateway),
+            "",
+        );
+        if status != 200 || Instant::now() >= end {
+            return (status, body);
+        }
+        std::thread::sleep(span(B::OwnerPoll) / 4);
+    }
+}
+
+/// F3: member 1's own serve deadline ends while the epoch is idle (its consent wall). Within a few
+/// owner polls readiness and the next chat are refused `joined_route_member_ended`; the run stays
+/// `api_running` and shows the retirement; Stop still discards every member.
+#[test]
+fn a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owner_polls() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    scripts[1].serve_for = Some(span(B::OwnerPoll) * 4);
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    let (seen, _, control) = &members[1];
+    assert!(
+        control.wait(seen, |s| s.served.is_some(), span(B::WorkerStartup)),
+        "member 1's serve ended at its own deadline"
+    );
+    let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 6);
+    assert_ne!(status, 200, "readiness after a member ended the epoch: {ready}");
+    assert!(ready.to_string().contains("joined_route_member_ended"), "{ready}");
+    let posted = Instant::now();
+    let (status, refused) = post(&gateway);
+    assert_eq!(status, 409, "{refused}");
+    assert!(refused.to_string().contains("joined_route_member_ended"), "{refused}");
+    assert!(posted.elapsed() < span(B::OwnerPoll) * 4, "refused promptly");
+    let state = work.state();
+    assert_eq!(state["state"], "api_running", "{state}");
+    assert_eq!(state["epoch_retired"], "joined_route_member_ended", "{state}");
+    work.teardown().unwrap();
+    let state = work.state();
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    assert!(
+        state["serve_reports"].as_array().unwrap().iter().any(|r| r["node_id"] == "node-b"),
+        "the ended serve's report is kept: {state}"
+    );
+}
+
+/// F9: the last chat completed, then its own reset failed and retired the epoch. Readiness no
+/// longer reads OK while the next submission is refused: both say `route_dropped`.
+#[test]
+fn readiness_after_a_completed_then_retired_epoch_agrees_with_the_refused_submission() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    scripts[1].reset_fails = true;
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    let all = chat(&gateway);
+    assert_eq!(all.last().map(|e| e["type"].clone()), Some(json!("completed")), "{all:?}");
+    let (seen, _, control) = &members[1];
+    assert!(
+        control.wait(seen, |s| count(s, "reset_attempt") == 1, span(B::WorkerStartup)),
+        "the final stage's reset was attempted"
+    );
+    let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 6);
+    assert_ne!(status, 200, "readiness after a completed-then-retired epoch: {ready}");
+    assert!(ready.to_string().contains("route_dropped"), "{ready}");
+    let (status, refused) = post(&gateway);
+    assert_eq!(status, 409, "{refused}");
+    assert!(refused.to_string().contains("route_dropped"), "{refused}");
+    work.teardown().unwrap();
+    assert_eq!(work.state()["state"], "stopped");
 }
