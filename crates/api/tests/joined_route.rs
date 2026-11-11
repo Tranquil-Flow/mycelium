@@ -5,7 +5,6 @@
 //! are NOT route qualification. The real two-process run is the ignored test in
 //! support/joined_route_process.rs.
 use api::app_host;
-use api::sse_client;
 use api::{
     joined_shard::route::{self, Path},
     m16_requests::{Executor, Host, M16Requests},
@@ -20,6 +19,8 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
+#[path = "support/sse_client.rs"]
+mod sse_client;
 
 fn span(id: budgets::BudgetId) -> std::time::Duration {
     std::time::Duration::from_millis(id.span(budgets::Entries::ZERO).unwrap().millis())

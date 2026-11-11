@@ -1,107 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Minimal HTTP/SSE client for the product request gateway: the panicking test helpers
-//! [`http`] / [`stream`] and the fallible [`request`] / [`events`] the chat service uses.
+//! Minimal HTTP/SSE client for the product request gateway: the fallible [`request`] / [`events`]
+//! the chat service uses. The panicking test helpers `http` / `stream` live in the api tests
+//! (`tests/support/sse_client.rs`), never in the product crate (lane S5F, REVIEW-lanePH3B-S5 F8).
 use serde_json::Value;
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
-    sync::mpsc,
     time::{Duration, Instant},
 };
-pub fn http(addr: SocketAddr, method: &str, path: &str, extra: &str, body: &str) -> (u16, Value) {
-    let timeout = Duration::from_millis(
-        budgets::BudgetId::ModelSelection
-            .span(budgets::Entries::ZERO)
-            .unwrap()
-            .millis(),
-    );
-    let mut c = TcpStream::connect(addr).unwrap();
-    c.set_read_timeout(Some(timeout)).unwrap();
-    write!(c, "{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{extra}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
-    c.shutdown(std::net::Shutdown::Write).unwrap();
-    let mut response = String::new();
-    c.read_to_string(&mut response).unwrap();
-    let status = response[9..12].parse().unwrap();
-    let body = response.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");
-    (status, serde_json::from_str(body).unwrap_or(Value::Null))
-}
-/// Product SSE consumer: bounded polls end a stream without a terminal; reconnect
-/// with Last-Event-ID and never invent a terminal. Emits (event, arrival) pairs.
-/// The write half stays open (a half-close reads as a client disconnect).
-pub fn stream(
-    addr: SocketAddr,
-    path: String,
-    auth: String,
-    out: mpsc::Sender<(Value, Instant)>,
-    allowance: Duration,
-) {
-    let mut cursor: Option<String> = None;
-    let end = Instant::now() + allowance;
-    let mut idle = 0u32;
-    while Instant::now() < end {
-        let mut c = TcpStream::connect(addr).unwrap();
-        c.set_read_timeout(Some(allowance)).unwrap();
-        let last = cursor
-            .as_ref()
-            .map(|id| format!("Last-Event-ID: {id}\r\n"))
-            .unwrap_or_default();
-        write!(
-            c,
-            "GET {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}{last}Content-Length: 0\r\n\r\n"
-        )
-        .unwrap();
-        let mut reader = BufReader::new(c);
-        let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
-        if !line.starts_with("HTTP/1.1 200") {
-            let mut rest = String::new();
-            if let Err(e) = reader.read_to_string(&mut rest) {
-                rest = format!("<unreadable: {e}>");
-            }
-            panic!("event stream refused: {line}{rest}");
-        }
-        // Every accepted subscribe advances the publisher generation, even when
-        // this connection then delivers no event before its bounded poll ends.
-        if let Some(id) = cursor.as_mut()
-            && let Some((g, seq)) = id.split_once(':')
-        {
-            *id = format!("{}:{seq}", g.parse::<u64>().unwrap() + 1);
-        }
-        let mut delivered = false;
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
-            if let Some(id) = line.strip_prefix("id: ") {
-                cursor = Some(id.trim().to_owned());
-            }
-            if let Some(data) = line.strip_prefix("data: ") {
-                delivered = true;
-                let event: Value = serde_json::from_str(data.trim()).unwrap();
-                let terminal = matches!(
-                    event["type"].as_str(),
-                    Some("completed" | "cancelled" | "failed")
-                );
-                if out.send((event, Instant::now())).is_err() || terminal {
-                    return;
-                }
-            }
-        }
-        // Bounded idle polls end streams by design; the overall allowance bounds
-        // waiting, and many back-to-back empty streams are recorded, not hidden.
-        idle = if delivered { 0 } else { idle + 1 };
-        if idle > 0 && idle.is_multiple_of(32) {
-            eprintln!("sse: {idle} consecutive empty bounded streams on {path}");
-        }
-    }
-}
-
 /// [`request`] / [`events`] failure: the I/O error and whether it happened while connecting.
 pub type IoFailure = (std::io::Error, bool);
-/// One buffered HTTP exchange with the product request gateway (fallible form of [`http`] for
-/// product callers). `extra` carries the header lines (each ending `\r\n`); every read waits at
+/// One buffered HTTP exchange with the product request gateway (the fallible form of the tests'
+/// `http`). `extra` carries the header lines (each ending `\r\n`); every read waits at
 /// most `idle`. Returns the status and the JSON body (`null` when the body is not JSON).
 pub fn request(
     addr: SocketAddr,
@@ -137,7 +47,7 @@ pub enum EventsError {
     /// An event's `data:` line is not JSON.
     Invalid,
 }
-/// The product SSE consumer for product callers (fallible form of [`stream`]): every event goes to
+/// The product SSE consumer for product callers (the fallible form of the tests' `stream`): every event goes to
 /// `on_event` until it answers `Some`. A bounded poll that ends a connection without a terminal is
 /// resumed with `Last-Event-ID`; at most `idle` passes without an event (the shipped client's
 /// socket timeout). `Ok(None)`: a terminal event arrived and `on_event` did not answer it.

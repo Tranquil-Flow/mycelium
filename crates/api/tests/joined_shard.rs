@@ -21,7 +21,8 @@ mod native_process;
 mod process;
 #[path = "support/joined_route_process.rs"]
 mod route_process;
-use api::sse_client;
+#[path = "support/sse_client.rs"]
+mod sse_client;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Pair {
     root: PathBuf,
