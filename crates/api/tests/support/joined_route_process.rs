@@ -1022,3 +1022,144 @@ fn owner_process_streams_chat_stops_and_leaves() {
         began.elapsed()
     );
 }
+
+/// PH3b S4a: the same owner process, but its work phase runs through the owner
+/// WORK PORT (`joined_owner::work::OwnerWork`): consent + transfer + native
+/// prepare per member (start_serving), activation (route -> serve -> epoch),
+/// the next single-use epoch (U5: its re-open cost is measured here), teardown.
+/// The signed route expires at publish wall + the members' worker wall.
+#[test]
+#[ignore = "real Metal + local Qwen3; B16_OWNER_BINARY, B7_MEMBER_BINARY, native pins and resource gate required"]
+fn owner_process_work_port_serves_chat_over_per_request_epochs() {
+    let began = Instant::now();
+    let gate = std::env::var_os("B7_RESOURCE_GATE").expect("resource preflight script");
+    let snapshot = PathBuf::from(std::env::var_os("MYCELIUM_QWEN3_SNAPSHOT").unwrap());
+    let native_binary = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").unwrap();
+    let oracle: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let reference: Vec<u64> = serde_json::from_value(oracle["recorded"]["tokens"].clone()).unwrap();
+    let prompt_ids = oracle["recorded"]["workload"]["prompt_ids"]
+        .as_array()
+        .unwrap()
+        .len();
+    let path = std::env::temp_dir().join(format!("s4a-owner-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    let root = super::native_process::Root(path.canonicalize().unwrap());
+    let key = root.0.join("owner-control.key");
+    let hex: String = super::member_remote::owner_secret()
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    fs::write(&key, hex).unwrap();
+    let mut spawned = Vec::new();
+    let mut addrs = Vec::new();
+    for i in 0..2 {
+        let (m, a) = spawn_member(&root.0.join(format!("member{i}")));
+        spawned.push(m);
+        addrs.push(a);
+    }
+    let args: Vec<std::ffi::OsString> = vec![
+        "--state-root".into(),
+        root.0.join("owner").into(),
+        "--swarm".into(),
+        "s4a-owner".into(),
+        "--control-key".into(),
+        key.into(),
+        "--snapshot".into(),
+        snapshot.into(),
+        "--native-binary".into(),
+        native_binary,
+    ];
+    let mut owner = OwnerProcess::start(&args);
+    for addr in &addrs {
+        owner.call(json!({"command":"admit","member":addr}));
+    }
+    owner.call(json!({"command":"compile","ranges":[[0,14],[14,28]]}));
+    let capacity = prompt_ids + 64;
+    let wall = B::MemberChosenWall.span(Entries::ZERO).unwrap().millis() / 1000;
+    for i in 0..2 {
+        admit_native_load(&gate, &format!("stage={i}"));
+    }
+    let publish_floor = app_host::now();
+    let work = owner.call(json!({"command":"work","tokens":capacity,"worker_wall_seconds":wall}));
+    let publish_ceiling = app_host::now();
+    eprintln!("S4a work port serving {work} elapsed={:?}", began.elapsed());
+    let state = &work["state"];
+    assert_eq!(state["state"], "api_running", "{work}");
+    assert_eq!(state["epoch"], 1, "{work}");
+    let expires = state["gateway"]["route_expires_at"].as_f64().unwrap();
+    assert_eq!(Some(expires), state["route_expires_at"].as_f64(), "{work}");
+    assert!(
+        expires >= publish_floor + wall as f64 && expires <= publish_ceiling + wall as f64,
+        "the signed route expires at publish + the worker wall: {expires} vs [{publish_floor}, {publish_ceiling}] + {wall}"
+    );
+    let chat = |gateway: &Value| -> (Vec<u64>, f64) {
+        let addr: SocketAddr = gateway["addr"].as_str().unwrap().parse().unwrap();
+        let r = post_chat(
+            addr,
+            gateway["bearer"].as_str().unwrap(),
+            &gateway["qualification"],
+            NEW_TOKENS,
+        );
+        let mut all = Vec::new();
+        events_until(&r, NEW_TOKENS + 1, &mut all);
+        r.reader.join().unwrap();
+        assert_eq!(terminal(&all).unwrap()["type"], "completed", "{all:?}");
+        let ttft = all
+            .iter()
+            .find(|(e, _)| e["type"] == "token")
+            .unwrap()
+            .1
+            .duration_since(r.posted)
+            .as_secs_f64()
+            * 1000.0;
+        (token_ids(&all), ttft)
+    };
+    let (tokens, ttft) = chat(&state["gateway"]);
+    assert_eq!(tokens, reference[..NEW_TOKENS], "tokens == oracle");
+    for i in 0..2 {
+        admit_native_load(&gate, &format!("stage={i}"));
+    }
+    let next = owner.call(json!({"command":"work_next"}));
+    let reopen_ms = next["ms"].as_f64().unwrap();
+    assert_eq!(next["state"]["epoch"], 2, "{next}");
+    let (again, ttft2) = chat(&next["state"]["gateway"]);
+    assert_eq!(
+        again,
+        reference[..NEW_TOKENS],
+        "second epoch tokens == oracle"
+    );
+    let stopped = owner.call(json!({"command":"work_stop"}));
+    assert_eq!(stopped["state"], "stopped", "{stopped}");
+    eprintln!(
+        "S4a U5: staged_ms={} first_open_ms={} ttft_ms={ttft:.1}; next epoch (retire + re-prepare + open) ms={reopen_ms:.1} ttft_ms={ttft2:.1}; stopped={stopped}",
+        work["staged_ms"], work["ms"]
+    );
+    if let Some(path) = std::env::var_os("S4A_WORK_EVIDENCE") {
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(&json!({"work":work,"next":next,"stopped":stopped,
+                "ttft_ms":[ttft,ttft2],"reopen_ms":reopen_ms,"tokens":tokens,"route_ready":false}))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    owner.close();
+    for mut m in spawned {
+        let end = Instant::now() + allowance();
+        let status = loop {
+            if let Some(status) = m.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < end,
+                "member did not exit after owner close"
+            );
+            std::thread::yield_now();
+        };
+        assert!(status.success(), "member exit {status:?}");
+    }
+    drop(root);
+    eprintln!("S4a owner work port total elapsed={:?}", began.elapsed());
+}

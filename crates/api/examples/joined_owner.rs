@@ -12,6 +12,10 @@
 //! `compile {ranges}`, `transfer`, `prepare {tokens}`, `open {epoch}` ->
 //! `{gateway, bearer, qualification, worker_pids}`, `settle`, `leave {stage}`,
 //! `close`. Replies: `{ok:true,result}` or `{ok:false,code}`.
+//! The owner work port (`joined_owner::work::OwnerWork`, PH3b S4a) instead of
+//! transfer/prepare/open: `work {tokens, worker_wall_seconds}` (start serving,
+//! activate) -> workflow state with the epoch gateway; `work_next` (the next
+//! single-use epoch); `work_stop` (teardown; member links come back).
 //!
 //! Rehearsal limits (named seams, not product claims): the swarm seed listens
 //! on loopback and a bounded forwarder exposes it on the explicit LAN
@@ -27,7 +31,7 @@ use api::{
         link::{self, MemberLink, Refusal, Stage},
         remote::RemoteMember,
         source::ShardSource,
-        work::{self, EpochStage, SettleStage},
+        work::{self, Clocks, EpochStage, OwnerWork, Plan, SettleStage, WorkMember},
     },
     joined_shard::native,
     m16_route::{Codec, RouteHost},
@@ -214,7 +218,7 @@ impl Drop for Forwarder {
     }
 }
 struct Member {
-    link: RemoteMember,
+    link: Box<dyn MemberLink + Send>,
     registration: Value,
     node_id: String,
     pid: u64,
@@ -241,6 +245,10 @@ struct Owner {
     challenges: native::Challenges,
     admitted: Vec<native::Admitted>,
     epoch: Option<Epoch>,
+    /// The owner work port while it runs (`work` .. `work_stop`), and the
+    /// handed-over members' local facts (node, pid, range) in stage order.
+    work: Option<OwnerWork>,
+    parked: Vec<(String, u64, [u64; 2])>,
     /// The last epoch's request host, kept for verified withdrawals.
     last_host: Option<Arc<RouteHost>>,
     wall: Duration,
@@ -279,7 +287,7 @@ impl Owner {
             .to_owned();
         let pid = status["pid"].as_u64().ok_or("member_status_invalid")?;
         self.members.push(Member {
-            link,
+            link: Box::new(link),
             registration,
             node_id: node_id.clone(),
             pid,
@@ -429,7 +437,7 @@ impl Owner {
             let done = work::transfer_stage(
                 &source,
                 &self.seed.coordinator,
-                &mut m.link,
+                m.link.as_mut(),
                 &m.registration,
                 &m.node_id,
                 &compiled.document,
@@ -469,7 +477,7 @@ impl Owner {
             stages.push(Stage {
                 offer: m.offer.as_ref().ok_or("owner_not_transferred")?,
                 range: m.range,
-                member: &mut m.link,
+                member: m.link.as_mut(),
             });
         }
         self.admitted = link::prepare(
@@ -501,7 +509,7 @@ impl Owner {
                     .as_ref()
                     .ok_or(api::compiler_inputs::Error("owner_not_transferred"))
                     .map_err(|e| e.0.to_owned())?,
-                link: &mut m.link,
+                link: m.link.as_mut(),
             });
         }
         let codec: Arc<dyn Codec> = self.codec.clone();
@@ -539,12 +547,148 @@ impl Owner {
             .iter_mut()
             .map(|m| SettleStage {
                 node_id: &m.node_id,
-                link: &mut m.link,
+                link: m.link.as_mut(),
             })
             .collect();
         let (reports, acks) = work::settle_members(&epoch, &mut stages, self.wall).map_err(code)?;
         let refusals = epoch.close();
         Ok(json!({"reports":reports,"stage_ack_ms":acks,"pump_refusals":refusals}))
+    }
+    /// The owner work port over this run: consent + transfer + native prepare
+    /// per member (start serving), then activation (route -> serve -> epoch).
+    fn work(&mut self, request: &Value) -> Result<Value> {
+        if self.work.is_some() || self.epoch.is_some() || self.members.is_empty() {
+            return Err("owner_work_not_ready".into());
+        }
+        let tokens = request["tokens"].as_u64().ok_or("tokens_invalid")? as usize;
+        let wall = request["worker_wall_seconds"]
+            .as_u64()
+            .ok_or("worker_wall_invalid")?;
+        let compiled = self.compiled.as_ref().ok_or("owner_not_compiled")?;
+        let plan = Plan {
+            run_id: "b16-owner".into(),
+            deployment_id: DEPLOYMENT.into(),
+            model: json!({"model_id":MODEL_ID,"resolved_commit":RESOLVED_COMMIT,
+                "manifest_digest":compiled.manifest_digest}),
+            document: compiled.document.clone(),
+            objects: compiled.objects.clone(),
+            journal: self.root.join("journal"),
+            ranges: self
+                .members
+                .iter()
+                .map(|m| (m.node_id.clone(), m.range))
+                .collect(),
+            tokens,
+            forbidden_source: compiled.source.clone(),
+            worker_walls: self
+                .members
+                .iter()
+                .map(|m| (m.node_id.clone(), wall))
+                .collect(),
+            owner_root: self.root.clone(),
+        };
+        let members = std::mem::take(&mut self.members);
+        let mut parked = Vec::new();
+        let mut handed = Vec::new();
+        for m in members {
+            parked.push((m.node_id.clone(), m.pid, m.range));
+            handed.push(WorkMember {
+                node_id: m.node_id,
+                link: m.link,
+                registration: m.registration,
+            });
+        }
+        self.parked = parked;
+        let origin = Instant::now();
+        let codec: Arc<dyn Codec> = self.codec.clone();
+        let mut port = OwnerWork::new(
+            self.seed.coordinator.clone(),
+            handed,
+            plan,
+            self.lan.clone(),
+            codec,
+            Clocks {
+                mono: Arc::new(move || origin.elapsed().as_secs_f64()),
+                wall: Arc::new(app_host::now),
+            },
+        )
+        .map_err(code)?;
+        let proposal = json!({"max_wall_seconds":wall});
+        let begun = Instant::now();
+        let started = owner_run::steps::publish::WorkPort::start_serving(&mut port, &proposal)
+            .map_err(|e| e.code_or("serving_start_failed"));
+        self.work = Some(port);
+        started?;
+        let port = self.work.as_mut().ok_or("owner_work_absent")?;
+        let staged = port.wait_state(
+            |s| matches!(s["state"].as_str(), Some("awaiting_activation" | "failed")),
+            self.wall * 2,
+        );
+        if staged["state"] != "awaiting_activation" {
+            return Err(staged["error_code"]
+                .as_str()
+                .unwrap_or("owner_work_not_staged")
+                .into());
+        }
+        let staged_ms = begun.elapsed().as_secs_f64() * 1000.0;
+        owner_run::steps::activate::ActivationPort::activate(port, &proposal)
+            .map_err(|e| e.code_or("activation_failed"))?;
+        let serving = port.wait_state(
+            |s| matches!(s["state"].as_str(), Some("api_running" | "failed")),
+            self.wall,
+        );
+        if serving["state"] != "api_running" {
+            return Err(serving["error_code"]
+                .as_str()
+                .unwrap_or("owner_work_not_serving")
+                .into());
+        }
+        Ok(json!({"state":serving,"staged_ms":staged_ms,
+            "ms":begun.elapsed().as_secs_f64()*1000.0}))
+    }
+    /// Retire the spent epoch and open the next one (single-use epochs).
+    fn work_next(&mut self) -> Result<Value> {
+        let port = self.work.as_mut().ok_or("owner_work_absent")?;
+        let before = port.state()["epoch"].as_u64().unwrap_or(0);
+        let begun = Instant::now();
+        port.next_epoch().map_err(code)?;
+        let next = port.wait_state(
+            |s| {
+                s["state"] == "failed"
+                    || (s["state"] == "api_running" && s["epoch"].as_u64() > Some(before))
+            },
+            self.wall,
+        );
+        if next["state"] != "api_running" {
+            return Err(next["error_code"]
+                .as_str()
+                .unwrap_or("owner_work_not_serving")
+                .into());
+        }
+        Ok(json!({"state":next,"ms":begun.elapsed().as_secs_f64()*1000.0}))
+    }
+    /// Teardown: close the open epoch and the source; member links come back.
+    fn work_stop(&mut self) -> Result<Value> {
+        let mut port = self.work.take().ok_or("owner_work_absent")?;
+        port.teardown()?;
+        let state = port.state();
+        let mut back = port.take_members();
+        for (node_id, pid, range) in std::mem::take(&mut self.parked) {
+            let i = back
+                .iter()
+                .position(|m| m.node_id == node_id)
+                .ok_or("owner_work_member_lost")?;
+            let m = back.remove(i);
+            self.members.push(Member {
+                link: m.link,
+                registration: m.registration,
+                node_id,
+                pid,
+                offer: None,
+                range,
+            });
+        }
+        Ok(state)
     }
     fn leave(&mut self, request: &Value) -> Result<Value> {
         if self.epoch.is_some() {
@@ -569,6 +713,9 @@ impl Owner {
         Ok(json!({"left":left,"withdrawn":withdrawn,"qualification_after":after}))
     }
     fn close(&mut self) -> Result<Value> {
+        if self.work.is_some() {
+            self.work_stop()?;
+        }
         if let Some(epoch) = self.epoch.take() {
             epoch.close();
         }
@@ -621,6 +768,8 @@ fn run() -> Result<()> {
         challenges: native::Challenges::new(),
         admitted: Vec::new(),
         epoch: None,
+        work: None,
+        parked: Vec::new(),
         last_host: None,
         wall,
         _forwarder: forwarder,
@@ -654,6 +803,9 @@ fn run() -> Result<()> {
             "prepare" => owner.prepare(&request),
             "open" => owner.open(&request),
             "settle" => owner.settle(),
+            "work" => owner.work(&request),
+            "work_next" => owner.work_next(),
+            "work_stop" => owner.work_stop(),
             "leave" => owner.leave(&request),
             "close" => {
                 closing = true;
