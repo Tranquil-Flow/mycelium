@@ -118,6 +118,7 @@ impl FakeGateway {
     pub fn bearer(&self) -> String {
         self.bearer.clone()
     }
+    #[allow(dead_code)] // not every including test file swaps scripts
     pub fn script(&self, script: Script) {
         *self.shared.script.lock().unwrap() = script;
     }
