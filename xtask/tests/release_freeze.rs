@@ -185,3 +185,64 @@ fn freeze_refuses_another_commit_a_dirty_tree_and_an_existing_manifest() {
     );
     assert_eq!(fs::read_to_string(&out).unwrap(), "{}", "never overwritten");
 }
+
+/// Lane RELF item 7 (review F5, from its scratch demonstration in
+/// `qualification/review-laneREL-bd03439/`): the link check was lexical, so `Contents/esc ->
+/// up/../..` with `Contents/up -> ..` passed although it resolves outside the bundle. A link is
+/// now resolved through the links it passes (never read through), and must stay inside; a
+/// dangling chain that would land outside is refused too. Freeze also refuses an executable that
+/// is not the bundle's own `Contents/MacOS/mycelium`.
+#[test]
+fn freeze_refuses_a_chained_link_that_escapes_the_bundle_and_an_exe_outside_it() {
+    use std::os::unix::fs::symlink;
+    let sandbox = Sandbox::new();
+    let contents = sandbox.app().join("Contents");
+    symlink("..", contents.join("up")).unwrap();
+    // `up` alone resolves to the bundle root: inside, accepted (its target text is frozen).
+    let out = sandbox.root.join("ok.json");
+    let frozen = sandbox.freeze(&sandbox.head, &out);
+    assert_eq!(frozen.status.code(), Some(0), "{}", text(&frozen));
+    for (name, target) in [
+        ("esc", "up/../.."),
+        ("deep", "up/../../out/Mycelium.app/../../x"),
+        ("dangling", "up/../missing-outside"),
+    ] {
+        let link = contents.join(name);
+        symlink(target, &link).unwrap();
+        let refused = release::bundle_digest(&sandbox.app()).unwrap_err();
+        assert!(
+            refused.contains("bundle_link_outside"),
+            "{name} -> {target}: {refused}"
+        );
+        let out = sandbox.root.join(format!("{name}.json"));
+        let frozen = sandbox.freeze(&sandbox.head, &out);
+        assert_ne!(frozen.status.code(), Some(0), "{name}: {}", text(&frozen));
+        assert!(!out.exists());
+        fs::remove_file(&link).unwrap();
+    }
+    // An executable outside the bundle (or another file in it) is not the candidate's exe.
+    let stray = sandbox.root.join("stray-exe");
+    fs::write(&stray, "exe bytes").unwrap();
+    fs::write(sandbox.app().join("Contents/Info2.plist"), "x").unwrap();
+    for exe in [stray, sandbox.app().join("Contents/Info2.plist")] {
+        let out = sandbox.root.join("stray.json");
+        let frozen = Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .args(["release", "freeze", &sandbox.head, "--repo"])
+            .arg(sandbox.root.join("repo"))
+            .arg("--exe")
+            .arg(&exe)
+            .arg("--bundle")
+            .arg(sandbox.app())
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert_eq!(frozen.status.code(), Some(2), "{}", text(&frozen));
+        assert!(
+            text(&frozen).contains("freeze_exe_outside_bundle"),
+            "{}",
+            text(&frozen)
+        );
+        assert!(!out.exists());
+    }
+}
