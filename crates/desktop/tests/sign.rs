@@ -125,6 +125,19 @@ fn adhoc_signing_keeps_pinned_code_bytes_signs_the_executable_and_seals_the_bund
         "{display:?}"
     );
     assert_eq!(receipt["verify"]["exit"], 0);
+    // codesign validates nested code concurrently, so its `--prepared:`/`--validated:` lines come
+    // in another order on other runs (lane RELF: two builds of one commit wrote two different
+    // SIGN-RECEIPT.json); the receipt records the transcript in one canonical (sorted) order.
+    let lines: Vec<&str> = receipt["verify"]["stderr"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap())
+        .collect();
+    let mut sorted = lines.clone();
+    sorted.sort_unstable();
+    assert_eq!(lines, sorted, "verify transcript in canonical order");
+    assert!(lines.iter().any(|l| l.ends_with(": valid on disk")), "{lines:?}");
     assert_eq!(receipt["trust_level"], sign::TRUST_LEVEL);
     let text = receipt.to_string();
     assert!(
