@@ -19,12 +19,17 @@
 //!
 //! A file is decoded as `json.loads(path.read_text())` decodes it ([`loads`]): strict UTF-8,
 //! `NaN`/`Infinity`/`-Infinity`, ints of any size up to 4300 digits, lone surrogates in strings,
-//! and a repeated key keeps its last value. A status is written as `_canonical` writes it (sorted
+//! and a repeated key keeps its last value. A stored file larger than [`MAX_DOCUMENT_BYTES`] or
+//! nesting more than [`MAX_DOCUMENT_DEPTH`] containers is refused with its own code before it can
+//! exhaust memory (the oracle's own limit, `RecursionError` near the 116178th nested container,
+//! is a CPython stack property and not reproduced). A status is written as `_canonical` writes it (sorted
 //! keys, `,`/`:` separators, raw non-ASCII, Python's float `repr`, a final newline); a text holding
 //! a lone surrogate cannot be encoded (`UnicodeEncodeError`), as in the oracle.
 //!
 //! An exception the oracle does not catch keeps its class name as the code (`TypeError`,
-//! `OverflowError`, `UnicodeEncodeError`, `ValueError`, `OSError` with the I/O kind).
+//! `OverflowError`, `UnicodeEncodeError`, `ValueError`, `OSError` with the I/O kind); the two
+//! bounds pass through the store the same way (`artifact_document_too_deep`,
+//! `artifact_document_too_large`).
 use crate::{Error, Result, sha_ref};
 use budgets::{BudgetId as B, Entries};
 use std::{
@@ -32,7 +37,7 @@ use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions},
     hash::{BuildHasher, Hasher},
-    io::{ErrorKind, Write},
+    io::{ErrorKind, Read, Write},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
         fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -192,6 +197,22 @@ const INT_MAX_STR_DIGITS: usize = 4300;
 /// an empty container of its kind: nothing deep is built, and the decoder never recurses.
 const KEPT_DEPTH: usize = 4;
 
+/// The most containers a stored document may nest, counted from the top-level value as 1. A
+/// valid `history.json` nests 4 (history list > status > `sources` > source) and a valid
+/// `current.json` 3; entering a 33rd is `artifact_document_too_deep`, before anything inside it is
+/// read, so neither a deep nor an unclosed document is scanned further. The decoder keeps open
+/// containers on an explicit stack and never recurses, so the bound protects memory, not the
+/// call stack.
+pub const MAX_DOCUMENT_DEPTH: usize = 32;
+/// The largest `current.json`/`history.json` the store reads: 16 MiB. A full history (the
+/// ledger's maximum of 256 statuses) with every text field at its maximum length and every
+/// character written as a `\u` escape stays well under 64 KiB a status, so 16 MiB never refuses
+/// a document the store or the oracle writes. A longer file is `artifact_document_too_large`
+/// after reading at most one byte past the bound (a link to an endless device included).
+pub const MAX_DOCUMENT_BYTES: u64 = 16 * 1024 * 1024;
+const DOCUMENT_TOO_DEEP: &str = "artifact_document_too_deep";
+const DOCUMENT_TOO_LARGE: &str = "artifact_document_too_large";
+
 fn syntax() -> Error {
     Error::new("JSONDecodeError")
 }
@@ -199,7 +220,8 @@ fn syntax() -> Error {
 /// `json.loads(text)` over `bytes` read as `Path.read_text()` reads them (strict UTF-8; the
 /// universal-newline translation cannot change what JSON accepts). `UnicodeDecodeError`,
 /// `JSONDecodeError` or `ValueError` (an int literal over 4300 digits), all `ValueError`s in
-/// CPython. A container nested deeper than four levels keeps only its kind, see [`KEPT_DEPTH`].
+/// CPython, and `artifact_document_too_deep` on entering a container past [`MAX_DOCUMENT_DEPTH`].
+/// A container nested deeper than four levels keeps only its kind, see [`KEPT_DEPTH`].
 pub fn loads(bytes: &[u8]) -> Result<PyValue> {
     let text = std::str::from_utf8(bytes).map_err(|_| Error::new("UnicodeDecodeError"))?;
     let mut decoder = Decoder {
@@ -283,11 +305,15 @@ impl Decoder<'_> {
         Ok(key)
     }
 
-    /// `scan_once` without recursion: open containers live on an explicit stack.
+    /// `scan_once` without recursion: open containers live on an explicit stack, at most
+    /// [`MAX_DOCUMENT_DEPTH`] of them.
     fn value(&mut self) -> Result<PyValue> {
         let mut stack: Vec<Frame> = Vec::new();
         loop {
             let keep = stack.len() < KEPT_DEPTH;
+            if matches!(self.peek(), Some(b'[' | b'{')) && stack.len() >= MAX_DOCUMENT_DEPTH {
+                return Err(Error::new(DOCUMENT_TOO_DEEP));
+            }
             let mut done = match self.peek() {
                 Some(b'[') => {
                     self.at += 1;
@@ -1282,10 +1308,14 @@ fn os_error(e: std::io::Error) -> Error {
 }
 
 /// The codes the store's `except (OSError, UnicodeError, ValueError, json.JSONDecodeError)`
-/// turns into `code`; `TypeError` and `OverflowError` are not caught there and pass through.
+/// turns into `code`; `TypeError` and `OverflowError` are not caught there and pass through, as
+/// do the port's two document bounds.
 fn caught(code: &'static str) -> impl Fn(Error) -> Error {
     move |e| {
-        if matches!(e.code, "TypeError" | "OverflowError") {
+        if matches!(
+            e.code,
+            "TypeError" | "OverflowError" | DOCUMENT_TOO_DEEP | DOCUMENT_TOO_LARGE
+        ) {
             e
         } else {
             Error {
@@ -1295,6 +1325,19 @@ fn caught(code: &'static str) -> impl Fn(Error) -> Error {
             }
         }
     }
+}
+
+/// `path.read_text()` of a stored document, refused as `artifact_document_too_large` past
+/// [`MAX_DOCUMENT_BYTES`] without reading more than one byte beyond it; an I/O error is `code`.
+fn read_document(path: &Path, code: &'static str) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    File::open(path)
+        .and_then(|file| file.take(MAX_DOCUMENT_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|e| Error::io(code, e))?;
+    if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
+        return Err(Error::new(DOCUMENT_TOO_LARGE));
+    }
+    Ok(bytes)
 }
 
 fn now_unix_ms() -> u64 {
@@ -1576,7 +1619,7 @@ impl ArtifactAcquisitionStore {
         if !self.history_path.exists() {
             return Ok(Vec::new());
         }
-        let bytes = fs::read(&self.history_path).map_err(|e| Error::io(HISTORY_CORRUPT, e))?;
+        let bytes = read_document(&self.history_path, HISTORY_CORRUPT)?;
         let PyValue::List(items) = loads(&bytes).map_err(caught(HISTORY_CORRUPT))? else {
             return Err(Error::new(HISTORY_CORRUPT));
         };
@@ -1612,7 +1655,7 @@ impl ArtifactAcquisitionStore {
     }
 
     fn read_current(&self) -> Result<AcquisitionStatus> {
-        let bytes = fs::read(&self.current_path).map_err(|e| Error::io(STATE_CORRUPT, e))?;
+        let bytes = read_document(&self.current_path, STATE_CORRUPT)?;
         let value = loads(&bytes).map_err(caught(STATE_CORRUPT))?;
         validate_acquisition_status(&value).map_err(caught(STATE_CORRUPT))
     }

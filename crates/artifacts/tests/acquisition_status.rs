@@ -916,6 +916,15 @@ fn acquisition_status_hostile_documents_are_bounded() {
         expected.push((*name, *code, true));
         fs::remove_dir_all(&root).unwrap();
     }
+    // A current.json linked to an endless device is refused after reading 16 MiB + 1 bytes
+    // (added with the bound: the unbounded read would never finish).
+    let root = store_root("acq-bounded-zero", None, None);
+    let link = root.join("state/current.json");
+    std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+    let outcome = open_outcome(&root);
+    outcomes.push(("current links to /dev/zero", outcome, link.is_symlink()));
+    expected.push(("current links to /dev/zero", LARGE, true));
+    fs::remove_dir_all(&root).unwrap();
     assert_eq!(outcomes, expected);
 }
 
