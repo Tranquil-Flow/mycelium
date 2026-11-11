@@ -10,7 +10,8 @@
 //! runtime: those host seams answer `409 action_not_completed` (see `crates/api/README.md`).
 //! State lives under v0.2's own data folder, `$HOME/Library/Application
 //! Support/org.mycelium.app/state` (rulings 20 and 25: never the v0.1.4 demo's folder);
-//! `--state-root` overrides it, as the L3 harness and every test do.
+//! `--state-root` overrides it, as every test does; the L3 journey harness launches without it
+//! under a scratch HOME and reads this default (test-support/journeys `Target::state_folder`).
 //! The owner-authority seams (create, authority start/stop, pairing request/approve/accept, the
 //! owner's pairing windows) are `api::app_host`, the same code the packaged executable runs.
 use api::{

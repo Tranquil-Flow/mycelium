@@ -747,6 +747,10 @@ impl Host for PackagedHost {
         self.loaded()
             .is_none_or(|authority| authority.lock().is_ok_and(|a| !a.target))
     }
+    /// The code the state was refused with at bind (`Authority::load`).
+    fn installation_refused(&self) -> Option<&'static str> {
+        self.authority.as_ref().err().copied()
+    }
     /// `os.environ.get(name)`. A value that is not UTF-8 stays set (Python decodes it with
     /// `surrogateescape`), so it is never mistaken for an unset variable.
     fn environment(&self, name: &str) -> Option<String> {
