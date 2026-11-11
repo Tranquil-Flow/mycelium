@@ -509,6 +509,18 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
         );
     }
     assert_eq!(run["route_ready"], false, "{run}");
+    // S4c-a item 4: observe retired both bootstrap offers after their cleanup was acknowledged;
+    // the run's teardown does not clean them again (a retired offer is final, its receipt kept:
+    // `ManagedStageOffers.retire_offer`, managed_offers.py:158-170), so no teardown failure is
+    // recorded and the cleanup is not left unproven.
+    assert_eq!(run["cleanup_unproven"], Value::Null, "{run}");
+    let teardown_failures: Vec<&Value> = run["cleanup_errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["code"] == "owner_teardown_failed")
+        .collect();
+    assert!(teardown_failures.is_empty(), "{run}");
     // Both hello helpers are closed (observe finished only once both acknowledged their cleanup).
     for path in [
         private(&owner.mac.state).join("local-contributor/native-bootstrap/state.json"),
