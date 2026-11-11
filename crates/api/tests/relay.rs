@@ -779,3 +779,193 @@ fn a_closed_proxy_frees_its_port_while_a_request_is_still_in_flight() {
         String::from_utf8_lossy(&answer)
     );
 }
+
+/// A typed budget (`budgets` table) as a `Duration`.
+fn budget(id: budgets::BudgetId) -> Duration {
+    Duration::from_millis(id.span(budgets::Entries::new(0)).expect("budget").millis())
+}
+/// A quick-tunnel client script that never prints an origin. It reports its pid on the
+/// `started` FIFO (when `report` is set), then blocks reading a FIFO it holds open itself until it
+/// is terminated.
+struct SilentTunnel {
+    script: PathBuf,
+    started: PathBuf,
+}
+impl SilentTunnel {
+    fn new(dir: &Path, report: bool) -> Self {
+        let tunnel = Self {
+            script: dir.join("cloudflared-silent"),
+            started: dir.join("started"),
+        };
+        let hold = dir.join("hold");
+        for fifo in [&tunnel.started, &hold] {
+            let made = std::process::Command::new("/usr/bin/mkfifo")
+                .arg("-m")
+                .arg("600")
+                .arg(fifo)
+                .status()
+                .expect("mkfifo");
+            assert!(made.success(), "mkfifo {}", fifo.display());
+        }
+        let started = if report {
+            format!("echo $$ > '{}'\n", tunnel.started.display())
+        } else {
+            String::new()
+        };
+        std::fs::write(
+            &tunnel.script,
+            format!(
+                "#!/bin/sh\nexec 3<>'{hold}'\n{started}read _ <&3\n",
+                hold = hold.display()
+            ),
+        )
+        .expect("script");
+        std::fs::set_permissions(&tunnel.script, std::fs::Permissions::from_mode(0o700))
+            .expect("mode");
+        tunnel
+    }
+    /// The pid the script reports once it runs, within the worker start budget.
+    fn wait_started(&self) -> i32 {
+        let started = self.started.clone();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let read = std::fs::File::open(&started).and_then(|mut f| f.read_to_string(&mut text));
+            tx.send(read.map(|_| text)).unwrap_or(());
+        });
+        let text = rx
+            .recv_timeout(budget(budgets::BudgetId::WorkerStartup))
+            .expect("the tunnel script never started")
+            .expect("started fifo");
+        reader.join().expect("reader");
+        text.trim().parse().expect("pid")
+    }
+    /// Every live process running this script (`Command::spawn` returns once the child has
+    /// exec'd, so a spawned client is visible here as soon as `start` answered).
+    fn running(&self) -> Vec<i32> {
+        let out = std::process::Command::new("/bin/ps")
+            .args(["-axww", "-o", "pid=,command="])
+            .output()
+            .expect("ps");
+        let script = self.script.display().to_string();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|line| line.contains(&script))
+            .filter_map(|line| line.split_whitespace().next()?.parse().ok())
+            .collect()
+    }
+}
+fn kill_script(pid: i32) {
+    if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+        rustix::process::kill_process(pid, rustix::process::Signal::KILL).unwrap_or(());
+    }
+}
+/// Hooks for a quick-tunnel relay over `binary`, with the production ready wait (L355).
+fn silent_hooks(binary: api::relay::Binary) -> Hooks {
+    Hooks {
+        clock: Arc::new(|| 0.0),
+        lifetime_poll: None,
+        ready_wait: budget(
+            budgets::BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayStartSelfReadyWaitL355,
+        ),
+        binary,
+        env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        release_observer: None,
+    }
+}
+
+/// Review B3F 1.3: a relay closed while its quick tunnel is being set up (after `start`'s own
+/// check, before the child is stored: the client lookup, the private directories, the proxy) spawns
+/// nothing. The client lookup closes the relay before it answers, as the app's Quit
+/// (`StartGuard::close`) can at that moment; v0.1.4 runs Start and `close` under one
+/// `self.guard` (app.py:1344, 1831), so no tunnel can start after the close.
+#[test]
+fn a_relay_closed_while_its_tunnel_is_set_up_spawns_no_client() {
+    let root = scratch("closed-during-setup");
+    let tunnel = SilentTunnel::new(&root, false);
+    let relay: Arc<std::sync::OnceLock<std::sync::Weak<Relay>>> = Arc::default();
+    let closer = relay.clone();
+    let script = tunnel.script.clone();
+    let (looked_up, lookups) = mpsc::channel();
+    let hooks = silent_hooks(Arc::new(move || {
+        let relay = closer.get().and_then(std::sync::Weak::upgrade);
+        relay.expect("the relay under test").close();
+        looked_up.send(()).expect("lookup observed");
+        Some(script.clone())
+    }));
+    let started = Arc::new(
+        Relay::new(&root.join("relay"), &json!("cloudflare"), &Map::new(), hooks)
+            .expect("relay"),
+    );
+    relay.set(Arc::downgrade(&started)).expect("set once");
+    let answer = started.start(&json!(true), &json!(1800));
+    let running = tunnel.running();
+    for pid in &running {
+        kill_script(*pid);
+    }
+    assert_eq!(lookups.try_iter().count(), 1, "the client lookup ran once");
+    assert!(
+        running.is_empty(),
+        "a relay closed during its setup spawned tunnel clients {running:?} (start answered {answer:?})"
+    );
+    assert_eq!(answer, Err("relay_start_failed"));
+    std::fs::remove_dir_all(&root).unwrap_or(());
+}
+
+/// Review B3F 1.4: `close()` ends a Start that waits for its tunnel's origin at once (it wakes the
+/// ready wait), so the Start answers within the relay's own close budgets
+/// (`public_relay.py:446-448`, `:239`) of the close, not after the rest of its 45 s ready wait
+/// (L355) while it holds the app's action lock.
+#[test]
+fn close_ends_a_start_that_waits_for_its_origin() {
+    let root = scratch("close-wakes-start");
+    let tunnel = SilentTunnel::new(&root, true);
+    let script = tunnel.script.clone();
+    let relay = Arc::new(
+        Relay::new(
+            &root.join("relay"),
+            &json!("cloudflare"),
+            &Map::new(),
+            silent_hooks(Arc::new(move || Some(script.clone()))),
+        )
+        .expect("relay"),
+    );
+    let starting = relay.clone();
+    let (answered, answer) = mpsc::channel();
+    let start = std::thread::spawn(move || {
+        answered
+            .send(starting.start(&json!(true), &json!(1800)))
+            .expect("answer observed");
+    });
+    let pid = tunnel.wait_started();
+    relay.close();
+    let close_budgets = [
+        budgets::BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL446,
+        budgets::BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL447,
+        budgets::BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfReaderJoinL448,
+        budgets::BudgetId::PyMyceliumA13MacosPublicRelaySeedrelayproxyCloseSelfThreadJoinL239,
+    ]
+    .into_iter()
+    .map(budget)
+    .sum::<Duration>();
+    assert!(
+        close_budgets
+            < budget(
+                budgets::BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayStartSelfReadyWaitL355
+            ),
+        "the observation must end before the ready wait would"
+    );
+    let ended = answer.recv_timeout(close_budgets);
+    let running = tunnel.running();
+    for pid in &running {
+        kill_script(*pid);
+    }
+    assert_eq!(
+        ended,
+        Ok(Err("relay_start_failed")),
+        "the Start must end once the relay closed (tunnel pid {pid})"
+    );
+    start.join().expect("start thread");
+    assert!(running.is_empty(), "the closed relay left {running:?} running");
+    std::fs::remove_dir_all(&root).unwrap_or(());
+}
