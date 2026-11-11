@@ -268,10 +268,15 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
 recipe (env in `repro/env.sh`; Python-free). tauri bakes the absolute `CARGO_MANIFEST_DIR` into the
 exe and `--remap-path-prefix` cannot reach a string literal, so the build runs through one fixed
 symlink (`repro/canonical.sh`, default `~/.hermes/cache/scratch/mycelium-canonical-src`, override
-`MYCELIUM_CANONICAL_SRC`; mkdir lock) and two builds of one commit from different worktrees and
-target dirs give byte-identical bundles (`repro/verify-two-paths.sh SCRATCH`, ignored test
-`two_path_builds_of_the_same_commit_are_byte_identical`; tiny-crate proof + control in
-`tests/repro_canonical.rs`). The canonical sha is for one builder `$HOME` and one canonical path.
+`MYCELIUM_CANONICAL_SRC`; mkdir lock). **Not yet reproducible across target dirs or builders
+(finding REL-R1, review F4):** two builds of one commit from different worktrees give identical bytes
+for every bundle file EXCEPT the executable, whose `LC_UUID` (16 bytes, and the ad-hoc signature
+over it) depends on the `CARGO_TARGET_DIR` path; `verify-two-paths.sh` used equal-length target dir
+names and could not see it. The executable also carries the canonical source path as a literal, by
+default under the builder's `$HOME` (username included), so another account or Mac gets other bytes.
+Byte-identical output is proven only for the same target path and the same canonical path
+(`repro/verify-two-paths.sh SCRATCH`, ignored test `two_path_builds_of_the_same_commit_are_byte_identical`;
+tiny-crate proof + control in `tests/repro_canonical.rs`).
 
 ```text
 source $SCRATCH/env.sh   # (pre-round-9 manual recipe) CARGO_TARGET_DIR, MACOSX_DEPLOYMENT_TARGET=15.6, RUSTFLAGS remap, strip,
