@@ -8,8 +8,10 @@
 //! request (native workers have no KV reset): rotate executor, runtime and route
 //! after settlement. Executor callbacks are nonblocking; carrier I/O runs on an
 //! owned thread. Cleanup is true only after every stage ACKed its PathCancellation
-//! (members ACK after native close/reap) or the host supplied actual death
-//! evidence for a stage. Never synthesizes tokens; route_ready stays false.
+//! (members ACK after native close/reap), the host supplied actual death
+//! evidence for a stage, or the seed showed the stage member's lease ran out
+//! (`observe_member_leases`, a member on another Mac). Never synthesizes
+//! tokens; route_ready stays false.
 use crate::{
     app_host,
     joined_shard::route::{self, Path},
@@ -120,7 +122,8 @@ pub struct Observed {
     pub carrier_closed: bool,
 }
 impl Observed {
-    /// Every stage acknowledged or was settled by exact host death evidence.
+    /// Every stage acknowledged or was settled by death evidence (exact host
+    /// process exit, or the seed's expired member lease).
     pub fn settled(&self) -> bool {
         self.stages
             .iter()
@@ -587,15 +590,87 @@ pub fn record_stage_exit(
 /// seed cannot answer for that node (unknown, or its durable row is unstable).
 pub type SeedMembers = Arc<dyn Fn(&str) -> Option<(Value, f64)> + Send + Sync>;
 
-/// Seed lease expiry as stage death evidence across hosts.
+/// Seed lease expiry as stage death evidence across hosts (gap row 16).
+///
+/// v0.1.4 treats a member whose seed lease ran out as gone: the owner refuses
+/// every command and result wait to it (`control_session.py:315-326`,
+/// `managed_control_member_stale`), the seed refuses its renewal
+/// (`mycelium_seed/coordinator.py:1367-1370`) and the member refuses its own
+/// work past its lease (`peer.py:625-640`; here `joined_shard::live`, the stage
+/// server's `current()` per step). A stage whose CURRENT seed row is the
+/// route's member (same node and generation) and whose lease ended at least the
+/// members' clock tolerance ago by the seed clock is therefore settled: nothing
+/// it could still hold can be serving this route. Evidence is recorded once;
+/// an acknowledged stage is never re-settled; another generation (a resumed
+/// member) is not evidence about the route's member. A request still running
+/// fails `joined_route_member_stale` (v0.1.4's code for the same situation,
+/// `managed_control_member_stale`); an idle epoch retires with it. An earlier
+/// failure (normally the hop deadline) keeps its code.
 ///
 /// Returns the stage indices newly settled by this call.
 pub fn observe_member_leases(
-    _handle: &RouteHandle,
-    _message: &Value,
-    _seed: &SeedMembers,
+    handle: &RouteHandle,
+    message: &Value,
+    seed: &SeedMembers,
 ) -> Result<Vec<usize>, PublicError> {
-    Ok(Vec::new())
+    let skew = B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31
+        .span(Entries::ZERO)
+        .map_err(|_| error("budget_unavailable"))?
+        .millis() as f64
+        / 1000.0;
+    let stages = message["stages"]
+        .as_array()
+        .ok_or(error("joined_route_invalid"))?;
+    // The seed is read first, never under the route lock.
+    let mut expired = Vec::new();
+    for (i, stage) in stages.iter().enumerate() {
+        let node = stage["member"]["node_id"]
+            .as_str()
+            .ok_or(error("joined_route_invalid"))?;
+        let generation = stage["member"]["generation"]
+            .as_u64()
+            .ok_or(error("joined_route_invalid"))?;
+        let Some((row, now)) = seed(node) else {
+            continue;
+        };
+        let lease = row["lease_expires_at"].as_f64().filter(|v| v.is_finite());
+        if row["node_id"] != node
+            || row["generation"].as_u64() != Some(generation)
+            || !now.is_finite()
+            || lease.is_none_or(|lease| now < lease + skew)
+        {
+            continue;
+        }
+        expired.push((
+            i,
+            json!({"source":"seed_member_lease","node_id":node,"generation":generation,
+                "lease_expires_at":row["lease_expires_at"],"observed_at":now,
+                "clock_skew_seconds":skew}),
+        ));
+    }
+    let mut o = handle
+        .state
+        .lock()
+        .map_err(|_| error("joined_route_poisoned"))?;
+    let mut settled = Vec::new();
+    for (i, evidence) in expired {
+        let s = o.stages.get_mut(i).ok_or(error("joined_route_invalid"))?;
+        if s.acknowledged_ms.is_some() || s.death_evidence.is_some() {
+            continue;
+        }
+        s.death_evidence = Some(evidence);
+        settled.push(i);
+    }
+    if settled.is_empty() {
+        return Ok(settled);
+    }
+    if !o.completed && !o.teardown_finished && o.failure.is_none() {
+        o.failure = Some("joined_route_member_stale");
+        o.failed_at_ms = o.started.map(elapsed_ms);
+    }
+    drop(o);
+    handle.changed.notify_all();
+    Ok(settled)
 }
 fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0

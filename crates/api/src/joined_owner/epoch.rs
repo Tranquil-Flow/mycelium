@@ -93,7 +93,7 @@ impl Epoch {
         owner: iroh::SecretKey,
         carriers: Carriers,
         codec: Arc<dyn Codec>,
-        _seed: SeedMembers,
+        seed: SeedMembers,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
@@ -255,6 +255,7 @@ impl Epoch {
             .map_err(|_| fail("joined_owner_thread_failed"))?;
         epoch.threads.push(gateway);
         // Pump: event-driven by carrier changes, bounded by the owner poll.
+        // Each pass first reads the seed's member leases (cross-host death).
         let (service, stop, handle, refusals) = (
             epoch.service.clone(),
             epoch.stop.clone(),
@@ -265,14 +266,20 @@ impl Epoch {
             .name("joined-owner-pump".into())
             .spawn(move || {
                 let mut seen = 0;
+                let record = |code: &'static str| {
+                    // Distinct closed codes in first-seen order: bounded by
+                    // the code set, however long the epoch runs.
+                    let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
+                    if !r.iter().any(|seen| seen == code) {
+                        r.push(code.to_owned());
+                    }
+                };
                 while !stop.load(Ordering::SeqCst) {
+                    if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed) {
+                        record(e.code);
+                    }
                     if let Err(e) = service.tick() {
-                        // Distinct closed codes in first-seen order: bounded by
-                        // the code set, however long the epoch runs.
-                        let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
-                        if !r.iter().any(|seen| seen == e.code) {
-                            r.push(e.code.to_owned());
-                        }
+                        record(e.code);
                     }
                     seen = handle.wait(seen, poll);
                 }
