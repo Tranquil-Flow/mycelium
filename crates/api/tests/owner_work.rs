@@ -354,7 +354,10 @@ impl TestMember {
         shard
             .verify(&self.session, &self.signer, carrier, &app_host::now)
             .map_err(|e| e.0.to_owned())?;
+        let ops = self.control.lock();
         self.seen.lock().unwrap_or_else(|p| p.into_inner()).received = Some(fs::read(shard.path()).unwrap());
+        drop(ops);
+        self.control.changed.notify_all();
         host.close(&clock, deadline())
             .map_err(|e| format!("{e:?}"))?;
         drop(host);
@@ -1908,4 +1911,109 @@ fn a_retired_epoch_is_never_reopened_and_later_chats_are_refused_until_stop() {
             Some("discard")
         );
     }
+}
+
+// ---- REVIEW-lanePH3B-S4AF F2/F3/F4: the whole exit is ONE deadline from the stop allowance ----
+//
+// v0.1.4: `OwnerRun.stop` sets the event every wait polls (owner_run.py:275-283); teardown
+// (demo_chain.py:1322-1335) waits for the members' cleanup until ONE `_stop_deadline`
+// (demo_chain.py:1240-1253), a member not proven by then is `owner_target_cleanup_unproven`
+// (:1392-1396). The owner makes no blocking member call past it.
+
+/// F2 (reviewer probe P2): member 0 never answers its receive (its Mac went silent after the bytes
+/// moved). Stop still ends within the stop allowance; member 0's cleanup is recorded unproven.
+#[test]
+fn a_stop_with_a_member_silent_on_its_receive_ends_within_the_stop_allowance() {
+    let mut s = swarm(2);
+    s.members[0].member.script.insert("receive", Act::Silent);
+    let plan = s.plan(60);
+    let (mut work, members) = s.work_with(host_clocks(), plan);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    assert!(work.start_serving(&json!({"max_wall_seconds":60})).is_ok());
+    let (seen, _, control) = &members[0];
+    assert!(
+        control.wait(seen, |s| s.received.is_some(), span(B::WorkerStartup)),
+        "member 0 received its shard"
+    );
+    let bound = stop_allowance(60, 2);
+    let (ended, _stopper) = stop(work);
+    let stopped = ended.recv_timeout(bound + span(B::OwnerPoll));
+    assert!(
+        stopped.is_ok(),
+        "Stop waited past the stop allowance ({bound:?}) on a silent member"
+    );
+    let (result, state) = stopped.unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(
+        state["cleanup_error"], "owner_target_cleanup_unproven",
+        "{state}"
+    );
+    assert_eq!(
+        state["member_cleanup"][0]["discarded"], false,
+        "{state}"
+    );
+    assert!(
+        members[1].0.lock().unwrap().commands.is_empty(),
+        "member 1 never reached"
+    );
+}
+
+/// F2 + F3 + F4: member 0 never answers its native prepare while member 1's prepare runs. Stop
+/// ends within ONE stop allowance; member 1 (later in stage order) is still cancelled, drained and
+/// discarded with its proof, member 0 alone is unproven.
+#[test]
+fn a_silent_member_early_in_stage_order_leaves_only_its_own_cleanup_unproven() {
+    let mut s = swarm(2);
+    s.members[0]
+        .member
+        .script
+        .insert("prepare_native", Act::Silent);
+    s.members[1]
+        .member
+        .script
+        .insert("prepare_native", Act::Hold);
+    let plan = s.plan(60);
+    let (mut work, members) = s.work_with(host_clocks(), plan);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    assert!(work.start_serving(&json!({"max_wall_seconds":60})).is_ok());
+    assert!(members[1].2.holding("prepare_native", span(B::WorkerStartup)));
+    let (seen, _, control) = &members[0];
+    assert!(control.wait(
+        seen,
+        |s| s.commands.last().map(String::as_str) == Some("prepare_native"),
+        span(B::WorkerStartup)
+    ));
+    let bound = stop_allowance(60, 2);
+    let (ended, _stopper) = stop(work);
+    let stopped = ended.recv_timeout(bound + span(B::OwnerPoll));
+    assert!(
+        stopped.is_ok(),
+        "Stop waited past ONE stop allowance ({bound:?})"
+    );
+    let (result, state) = stopped.unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(
+        state["cleanup_error"], "owner_target_cleanup_unproven",
+        "{state}"
+    );
+    let rows = state["member_cleanup"].as_array().cloned().unwrap_or_default();
+    let row = |node: &str| rows.iter().find(|r| r["node_id"] == node).cloned();
+    let (first, second) = (&s_node(&members, 0, &state), &s_node(&members, 1, &state));
+    assert_eq!(row(first).map(|r| r["discarded"].clone()), Some(json!(false)), "{state}");
+    assert_eq!(row(second).map(|r| r["discarded"].clone()), Some(json!(true)), "{state}");
+    let later = members[1].0.lock().unwrap();
+    assert!(later.cancels >= 1, "member 1's prepare is cancelled");
+    assert_eq!(
+        later.commands,
+        ["consent_status", "receive", "prepare_native", "discard"]
+    );
+}
+/// The node id of stage `i` as the workflow's transfer rows name it.
+fn s_node(_: &[Watched], i: usize, state: &Value) -> String {
+    state["transferred"][i]["node_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
