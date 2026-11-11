@@ -84,6 +84,17 @@ pub type Probe = Arc<dyn Fn() -> Result<bool, ()> + Send + Sync>;
 /// `installed_relay_binary()` (`:250-255`).
 pub type Binary = Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>;
 
+/// What a relay's `close()` reports to a [`ReleaseObserver`] (a test seam; production has none).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseEvent {
+    /// The closing thread has published `closed` (status reads "stopped") and has not yet released
+    /// the child and the proxy listener.
+    Stopping,
+    /// A second closer found the relay closing and waits for that release.
+    AwaitingRelease,
+}
+pub type ReleaseObserver = Arc<dyn Fn(ReleaseEvent) + Send + Sync>;
+
 /// The seams of the source: `_clock`, `_lifetime_poll`, the binary lookup and the environment the
 /// child inherits. [`Hooks::production`] is what the app uses.
 pub struct Hooks {
@@ -95,6 +106,8 @@ pub struct Hooks {
     pub binary: Binary,
     /// The parent environment the child inherits (scrubbed of `TUNNEL_*`/`CLOUDFLARE_*`/`CF_*`/`NO_TLS_VERIFY`).
     pub env: Vec<(String, String)>,
+    /// Told where `close()` stands (tests hold a closer between "stopped" and the release).
+    pub release_observer: Option<ReleaseObserver>,
 }
 impl Hooks {
     /// `time.monotonic`, a 1 s lifetime poll, the 45 s ready wait, `installed_relay_binary()` for
@@ -109,6 +122,7 @@ impl Hooks {
             ),
             binary: Arc::new(move || installed_relay_binary(bundled_dir.as_deref())),
             env: std::env::vars().collect(),
+            release_observer: None,
         }
     }
 }
@@ -208,8 +222,10 @@ struct Handlers {
     chat: Option<RichHandler>,
     swarm: Option<RichHandler>,
 }
+/// What the accept loop and every connection thread share. The listener is NOT here: the accept
+/// thread owns it, so it is closed when `Proxy::close` has joined that thread, even while proxied
+/// requests are still in flight (v0.1.4 `server_close()`, `public_relay.py:240`).
 struct ProxyShared {
-    listener: TcpListener,
     stop: AtomicBool,
     slots: AtomicUsize,
     trust_client_ip: bool,
@@ -227,7 +243,6 @@ impl Proxy {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let port = listener.local_addr()?.port();
         let shared = Arc::new(ProxyShared {
-            listener,
             stop: AtomicBool::new(false),
             slots: AtomicUsize::new(MAX_CONNECTIONS),
             trust_client_ip,
@@ -241,7 +256,7 @@ impl Proxy {
         let accept = shared.clone();
         let handle = thread::Builder::new()
             .name("a13-seed-relay".into())
-            .spawn(move || accept_loop(&accept))?;
+            .spawn(move || accept_loop(&listener, &accept))?;
         Ok(Arc::new(Proxy {
             shared,
             port,
@@ -285,9 +300,9 @@ impl Proxy {
         }
     }
 }
-fn accept_loop(shared: &Arc<ProxyShared>) {
+fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
     loop {
-        let Ok((stream, _)) = shared.listener.accept() else {
+        let Ok((stream, _)) = listener.accept() else {
             if shared.stop.load(Ordering::SeqCst) {
                 return;
             }
@@ -835,6 +850,8 @@ enum Provider {
 }
 struct State {
     closed: bool,
+    /// The closer has released the child and the proxy listener (`closed` is published first).
+    released: bool,
     started: bool,
     process: Option<Child>,
     proxy: Option<Arc<Proxy>>,
@@ -941,6 +958,7 @@ impl Relay {
         }
         let state = State {
             closed: false,
+            released: false,
             started: false,
             process: None,
             proxy: None,
@@ -1291,7 +1309,26 @@ fn terminate(inner: &Arc<Inner>) {
         rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap_or(());
     }
 }
+thread_local! {
+    /// Set on a relay's own lifetime thread: it never waits for a release, because the closer it
+    /// would wait for may be joining it.
+    static ON_LIFETIME_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// How long a second closer waits for the first one's release: the most the release itself may
+/// take (`public_relay.py:446-448` process waits and reader join, `:239` proxy thread join).
+fn release_wait() -> Duration {
+    [
+        BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL446,
+        BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL447,
+        BudgetId::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfReaderJoinL448,
+        BudgetId::PyMyceliumA13MacosPublicRelaySeedrelayproxyCloseSelfThreadJoinL239,
+    ]
+    .into_iter()
+    .map(span)
+    .sum()
+}
 fn lifetime_loop(inner: &Arc<Inner>, poll: Duration) {
+    ON_LIFETIME_THREAD.with(|on| on.set(true));
     loop {
         {
             let st = lock(&inner.state);
@@ -1353,10 +1390,29 @@ fn lifetime_step(inner: &Arc<Inner>) {
         close(inner);
     }
 }
+/// `close()`: like v0.1.4, which holds the relay lock through the whole release
+/// (`public_relay.py:439-454`), a caller that finds the relay already closing returns only once the
+/// child and the proxy listener are released, so a Start after "stopped" can bind the same port.
+/// The relay's own lifetime thread never waits (its closer may be joining it).
 fn close(inner: &Arc<Inner>) {
     let (process, proxy, reader, root, lines, lifetime) = {
         let mut st = lock(&inner.state);
         if st.closed {
+            if st.released || ON_LIFETIME_THREAD.with(std::cell::Cell::get) {
+                return;
+            }
+            drop(st);
+            if let Some(observer) = &inner.hooks.release_observer {
+                observer(ReleaseEvent::AwaitingRelease);
+            }
+            let st = lock(&inner.state);
+            let (st, _) = inner
+                .wake
+                .wait_timeout_while(st, release_wait(), |st| !st.released)
+                .unwrap_or_else(|p| p.into_inner());
+            if !st.released {
+                eprintln!("relay_release_wait_exceeded");
+            }
             return;
         }
         st.closed = true;
@@ -1372,6 +1428,9 @@ fn close(inner: &Arc<Inner>) {
             st.lifetime.take(),
         )
     };
+    if let Some(observer) = &inner.hooks.release_observer {
+        observer(ReleaseEvent::Stopping);
+    }
     if let Some(mut child) = process {
         if matches!(child.try_wait(), Ok(None)) {
             if let Some(pid) =
@@ -1418,6 +1477,8 @@ fn close(inner: &Arc<Inner>) {
                 .unwrap_or(());
         }
     }
+    lock(&inner.state).released = true;
+    inner.wake.notify_all();
 }
 /// `process.wait(limit)` then, if it did not end, `kill()` and `wait(limit)` (`public_relay.py:445-449`).
 /// The child is owned by a waiter thread so no polling is needed.
