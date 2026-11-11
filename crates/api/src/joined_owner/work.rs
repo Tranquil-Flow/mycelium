@@ -286,6 +286,8 @@ struct Flow {
     serve_reports: Vec<Value>,
     /// Every route of this run expires here: publish wall + worker wall.
     expires_at: Option<f64>,
+    /// The closing epoch's teardown refusal, if any (cleanup not proven).
+    cleanup_error: Option<String>,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -308,7 +310,8 @@ impl Shared {
     fn snapshot(flow: &Flow) -> Value {
         json!({"state":flow.state,"error_code":flow.error,"route_ready":false,
             "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
-            "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at})
+            "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
+            "cleanup_error":flow.cleanup_error})
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -387,6 +390,7 @@ impl OwnerWork {
                     gateway: None,
                     serve_reports: Vec::new(),
                     expires_at: None,
+                    cleanup_error: None,
                 }),
                 changed: Condvar::new(),
             }),
@@ -642,18 +646,19 @@ impl Worker {
             Some(epoch) => self.retire(epoch),
             None => Ok(()),
         };
-        let result = worked.and(released);
+        // A teardown failure is kept on its own even when the work failed first.
+        let cleanup = released.as_ref().err().map(closed);
+        let failure = worked.err().or(released.err());
         self.shared.update(|f| {
             f.route = None;
             f.gateway = None;
-            match result {
-                Err(r) if f.state != FAILED => {
+            f.cleanup_error = cleanup;
+            match failure {
+                Some(r) => {
                     f.state = FAILED;
                     f.error = Some(closed(&r));
                 }
-                Err(_) => {}
-                Ok(()) if f.state != FAILED => f.state = STOPPED,
-                Ok(()) => {}
+                None => f.state = STOPPED,
             }
         });
         self.members
@@ -811,9 +816,8 @@ impl Worker {
             f.route = None;
             f.gateway = None;
             f.serve_reports = reports;
-            if let Some(code) = refusals.first() {
-                f.serve_reports.push(json!({"pump_refusal":code}));
-            }
+            f.serve_reports
+                .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
         });
         Ok(())
     }
