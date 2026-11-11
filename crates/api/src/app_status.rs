@@ -105,8 +105,8 @@ pub fn leave<M: ManagedSlot>(c: &Authority<M>) -> Json {
     crate::leave::status_view(&leave).map_or(Json::Null, Json::from)
 }
 /// The fields of `DemoApp.status()` both hosts take from the authority and `facts`, in the source's
-/// key order (`STATUS_FIELDS`): `model_contract`, `run_model`, `fast_mode`, `installation_role`,
-/// `resource_policy`, `authority` (owner member rows: node_id / generation / lifecycle_state /
+/// key order (`STATUS_FIELDS`): `role`, `model_contract`, `run_model`, `fast_mode`, `installation_role`,
+/// `resource_policy`, `running`, `authority` (owner member rows: node_id / generation / lifecycle_state /
 /// clock, app.py:1253-1258), `renewal_error`, `leave`, `join_flow` (`_join_flow_status`,
 /// app.py:1214-1237, with what the app recorded).
 pub fn shared<M: ManagedSlot>(
@@ -116,6 +116,8 @@ pub fn shared<M: ManagedSlot>(
 ) -> Vec<(&'static str, Json)> {
     let run = run_model(&c.root, facts);
     vec![
+        // `'role':'not_yet_serving'` (app.py:1263): a constant of the shipped status.
+        ("role", "not_yet_serving".into()),
         ("model_contract", model_contract(&run)),
         ("run_model", run),
         ("fast_mode", fast_mode(&c.root, facts)),
@@ -130,6 +132,10 @@ pub fn shared<M: ManagedSlot>(
                 .flatten()
                 .map_or(Json::Null, Json::from),
         ),
+        // `'running': self.running` (app.py:1272): the APPLICATION's flag (authority started and not
+        // stopped), never a native worker's; the page enables its member buttons on it
+        // (app.js:181-188, 207-209, 231-235).
+        ("running", c.running.into()),
         ("authority", joined_member::authority_status(c)),
         ("renewal_error", renewal_error(&c.recorded)),
         ("leave", leave(c)),

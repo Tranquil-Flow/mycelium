@@ -513,8 +513,9 @@ fn host_memory_bytes() -> Option<u64> {
 
 /// The parts of v0.1.4's `status()` (app.py:1244-1283) the packaged status takes from this host:
 /// `network`, and from the authority, through the builder the headless launcher shares
-/// (`api::app_status::shared`): `model_contract`, `run_model` (with this Mac's memory choices),
-/// `fast_mode`, `installation_role`, `resource_policy`, `authority`, `renewal_error`, `leave` and
+/// (`api::app_status::shared`): `role`, `model_contract`, `run_model` (with this Mac's memory
+/// choices), `fast_mode`, `installation_role`, `resource_policy`, `running` (the app's own flag,
+/// replacing the node service's native-request flag), `authority`, `renewal_error`, `leave` and
 /// `join_flow`. A document that is not a JSON object is left as it is, never indexed into a panic
 /// (REVIEW-lanePH2 F8).
 pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {

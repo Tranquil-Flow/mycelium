@@ -1017,7 +1017,7 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
     let mut take = |key: &str| shared.remove(key).unwrap_or(Json::Null);
     let values: Vec<(&str, Json)> = vec![
         ("label", LABEL.into()),
-        ("role", "not_yet_serving".into()),
+        ("role", take("role")),
         ("model_contract", take("model_contract")),
         ("run_model", take("run_model")),
         ("fast_mode", take("fast_mode")),
@@ -1038,7 +1038,7 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
         ),
         ("installation_role", take("installation_role")),
         ("resource_policy", take("resource_policy")),
-        ("running", core.running.into()),
+        ("running", take("running")),
         ("authority", take("authority")),
         ("renewal_error", take("renewal_error")),
         ("recovery_error", Json::Null),
