@@ -1216,15 +1216,15 @@ fn judge(env: &Env, cell: &Cell, record: &Record) -> Outcome {
         Ok(sha) => sha,
         Err((code, detail)) => return red(code, id(), detail),
     };
-    if v.argv_is_hint {
-        if let Err((code, detail)) = check_tool_run(env, cell, record) {
-            return red(code, id(), detail);
-        }
+    if v.argv_is_hint
+        && let Err((code, detail)) = check_tool_run(env, cell, record)
+    {
+        return red(code, id(), detail);
     }
-    if v.operator_receipt {
-        if let Err(detail) = names_candidate(env.manifest, record) {
-            return red("operator_receipt_unbound", id(), detail);
-        }
+    if v.operator_receipt
+        && let Err(detail) = names_candidate(env.manifest, record)
+    {
+        return red("operator_receipt_unbound", id(), detail);
     }
     Outcome::Green {
         ev: record.id.clone(),

@@ -360,23 +360,25 @@ fn scan_text(name: &str, rel: &str, bytes: &[u8], report: &mut Report) {
         return; // binary: no text indicators
     }
     let text = String::from_utf8_lossy(bytes);
-    if extensionless(name) && !bytes.starts_with(b"#!") {
-        if let Some(line) = text.lines().find(|l| python_statement(l)) {
-            report.findings.push(Finding {
-                path: rel.into(),
-                code: "NP005",
-                detail: format!("python source statement {:?}", line.trim()),
-            });
-        }
+    if extensionless(name)
+        && !bytes.starts_with(b"#!")
+        && let Some(line) = text.lines().find(|l| python_statement(l))
+    {
+        report.findings.push(Finding {
+            path: rel.into(),
+            code: "NP005",
+            detail: format!("python source statement {:?}", line.trim()),
+        });
     }
-    if shell_script(name, bytes) && python_shebang(bytes).is_none() {
-        if let Some(line) = text.lines().find(|l| python_invocation(l)) {
-            report.findings.push(Finding {
-                path: rel.into(),
-                code: "NP006",
-                detail: format!("script runs python: {:?}", line.trim()),
-            });
-        }
+    if shell_script(name, bytes)
+        && python_shebang(bytes).is_none()
+        && let Some(line) = text.lines().find(|l| python_invocation(l))
+    {
+        report.findings.push(Finding {
+            path: rel.into(),
+            code: "NP006",
+            detail: format!("script runs python: {:?}", line.trim()),
+        });
     }
 }
 
