@@ -262,8 +262,30 @@ impl Worker {
     /// only when its reply has exactly the contract's shape and reports no
     /// residue (active bytes back at or below the post-prepare baseline).
     pub(crate) fn reset_session(&mut self, deadline: Instant) -> Result<Value> {
-        let _ = deadline;
-        Err(Error("native_session_reset_unimplemented"))
+        use stage_contract::native_session as contract;
+        let (reply, body) =
+            self.request_until(&json!({"command":contract::COMMAND}), &[], deadline)?;
+        let exact = |v: &Value, fields: &[&str]| {
+            v.as_object().is_some_and(|o| {
+                o.len() == fields.len() && fields.iter().all(|k| o.contains_key(*k))
+            })
+        };
+        let session = &reply["session"];
+        let within = matches!(
+            (session["active_bytes"].as_u64(), session["baseline_bytes"].as_u64()),
+            (Some(active), Some(baseline)) if active <= baseline
+        );
+        if !body.is_empty()
+            || !exact(&reply, &["ok", "session"])
+            || reply["ok"] != true
+            || !exact(session, contract::REPLY_FIELDS)
+            || session["protocol"] != contract::REPLY_PROTOCOL
+            || session["state_generation"].as_u64().is_none()
+            || !within
+        {
+            return Err(Error("native_session_reset_invalid"));
+        }
+        Ok(session.clone())
     }
     /// Graceful close that leaves the worker owned on failure, so the caller can
     /// still kill and reap the exact child.

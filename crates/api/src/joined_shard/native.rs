@@ -460,8 +460,22 @@ impl NativeShard {
     /// Weights and the worker process stay; a failure leaves the worker owned
     /// for `close`/`abort`.
     pub fn reset(&mut self, current: &dyn Fn() -> Result<Value>) -> Result<Value> {
-        let _ = current;
-        Err(fail("joined_native_reset_unimplemented"))
+        self.check(current)?;
+        self.remaining -= 1;
+        let end = self.started.ok_or(fail("joined_native_not_prepared"))? + self.wall;
+        // Part of the request's close: the owner waits RouterClose for the ACK.
+        let close = budgets::BudgetId::RouterClose
+            .span(budgets::Entries::ZERO)
+            .map_err(|_| fail("budget_unavailable"))?;
+        let deadline = (Instant::now() + std::time::Duration::from_millis(close.millis())).min(end);
+        let session = self
+            .worker
+            .as_mut()
+            .ok_or(fail("joined_native_not_prepared"))?
+            .reset_session(deadline)
+            .map_err(native)?;
+        self.check(current)?;
+        Ok(session)
     }
     /// After an interrupted step the socket framing is not reusable: kill and
     /// reap the exact owned child. Cleanup is proven only by the OS exit report;
