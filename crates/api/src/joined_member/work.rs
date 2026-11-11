@@ -631,6 +631,8 @@ pub struct Work {
     /// Digest of the last signed resident proof THIS process produced.
     pub proof_digest: Option<String>,
     pub left: bool,
+    /// The latest owner-signed run announcement this member verified (its share), if any.
+    announced: Option<VerifiedAnnouncement>,
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
@@ -640,7 +642,19 @@ impl Work {
             shard: None,
             proof_digest: None,
             left: false,
+            announced: None,
         }
+    }
+    /// Take the share (`work_limits`) of a newly verified announcement for this member; work is
+    /// then admitted only within it.
+    pub fn announced(&mut self, verified: &VerifiedAnnouncement) {
+        self.announced = Some(verified.clone());
+    }
+    /// The share work is admitted within: the last verified announcement's `work_limits`.
+    pub fn share(&self) -> Option<&Value> {
+        self.announced
+            .as_ref()
+            .and_then(VerifiedAnnouncement::work_limits)
     }
     /// `receive`: one seed-signed shard offer over the artifact carrier into retained custody.
     #[allow(clippy::too_many_arguments)]

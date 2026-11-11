@@ -131,6 +131,12 @@ impl VerifiedAnnouncement {
     pub fn seed_key_digest(&self) -> &str {
         &self.seed_key_digest
     }
+    /// The share the owner announced for this member (`work_limits`), when it announced one.
+    pub fn work_limits(&self) -> Option<&Value> {
+        self.announcement
+            .get("work_limits")
+            .filter(|limits| !limits.is_null())
+    }
 }
 
 /// The owner control key a member obeys, taken from a verified announcement.
