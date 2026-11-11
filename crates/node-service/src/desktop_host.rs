@@ -379,6 +379,52 @@ impl DesktopServices {
         )?);
         Ok(self)
     }
+    /// The route chat service while the owner run serves (S5); `None`: the native path answers.
+    fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
+        self.chat_run.as_ref().filter(|chat| chat.serving())
+    }
+    /// The route chat service when it holds the record `body.request_id` names.
+    fn route_chat_of(&self, body: &Value) -> Option<&api::chat_service::ChatService> {
+        let id = body["request_id"].as_str()?;
+        self.chat_run.as_ref().filter(|chat| chat.knows(id))
+    }
+    /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
+    /// Quit's fence, one chat at a time across both paths (`chat_busy`), then the service.
+    fn route_send(
+        &self,
+        chat: &api::chat_service::ChatService,
+        body: &Value,
+    ) -> Result<Value, api::chat::ChatError> {
+        let refused = |error: PublicError| api::chat::ChatError {
+            error,
+            retry_after: None,
+        };
+        let plan = crate::chat_edge::plan(body).map_err(refused)?;
+        if self
+            .gate
+            .lock()
+            .map_err(|_| refused(err("desktop_poisoned")))?
+            .closing
+        {
+            return Err(refused(err("application_closed")));
+        }
+        let native_busy = self
+            .chat
+            .try_lock()
+            .map(|c| c.as_ref().is_some_and(|c| !c.done))
+            .unwrap_or(true);
+        if native_busy {
+            return Err(api::chat::ChatError::new(429, "chat_busy"));
+        }
+        chat.send(
+            "local",
+            api::chat_service::Prompt {
+                text: plan.prompt,
+                max_new_tokens: plan.max_new_tokens,
+                clamped: plan.clamped,
+            },
+        )
+    }
     fn with_host(
         node: NodeService,
         capacity: NonZeroUsize,
@@ -503,7 +549,8 @@ impl DesktopServices {
                     .chat
                     .try_lock()
                     .map(|c| c.as_ref().is_some_and(|c| !c.done))
-                    .unwrap_or(true);
+                    .unwrap_or(true)
+                    || self.chat_run.as_ref().is_some_and(|c| c.busy());
                 Self::json(
                     json!({"available":!closed,"busy":busy,"model_id":"Qwen2.5-0.5B-Instruct","served_by":[],"switching_runs":false,"rejoining":false,"warming_up":false,"limits":crate::chat_edge::limits_json()}),
                 )
@@ -538,7 +585,9 @@ impl DesktopServices {
                     .chat
                     .try_lock()
                     .map_err(|_| PublicError::new(429, "chat_busy"))?;
-                if chat.as_ref().is_some_and(|c| !c.done) {
+                if chat.as_ref().is_some_and(|c| !c.done)
+                    || self.chat_run.as_ref().is_some_and(|c| c.busy())
+                {
                     return Err(PublicError::new(429, "chat_busy"));
                 }
                 // Quit may have begun meanwhile: nothing is rolled over or admitted after it (an
@@ -599,6 +648,13 @@ impl DesktopServices {
                     body.as_object()
                         .ok_or(PublicError::new(400, "invalid_request"))?,
                 )?;
+                // The run's Stop tears it down with `chat.cancel_all('chat_cancelled')`
+                // (demo_chain.py:1322-1335 @ f4e366e9); repeated by the run's own hook, a no-op.
+                if path == "/api/demo/stop"
+                    && let Some(chat) = &self.chat_run
+                {
+                    chat.cancel_all(api::chat_service::Teardown::Stopped.code());
+                }
                 Self::json(value)
             }
             _ => Err(PublicError::new(404, "not_found")),
@@ -721,6 +777,10 @@ impl DesktopServices {
                 }
                 "completed" => "completed",
                 "cancelled" => "cancelled",
+                // `/api/demo/stop` cancels the node service's job directly, which ends the
+                // request `failed` with `request_cancelled`; v0.1.4's Stop cancels through the
+                // gateway (`cancel_all`, demo_chain.py:1322-1335), a `cancelled` terminal.
+                "failed" if event.payload["code"] == "request_cancelled" => "cancelled",
                 "failed" => "failed",
                 // `accepted` (and any lifecycle event) carries nothing for the page.
                 _ => {
@@ -734,6 +794,11 @@ impl DesktopServices {
             };
             chat.done = true;
             chat.terminal = Some(terminal);
+            if terminal == "cancelled" {
+                // v0.1.4: `error = cancel_reason or 'chat_cancelled'` (chat.py:368-369); every
+                // cancel on this path is a Stop, whose reason is `chat_cancelled`.
+                chat.error = Some(api::chat_service::Teardown::Stopped.code().to_owned());
+            }
             if terminal == "failed" {
                 // v0.1.4: a failed terminal shows its code (chat.py:366-367).
                 chat.error = Some(

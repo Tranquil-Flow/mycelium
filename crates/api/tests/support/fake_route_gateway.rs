@@ -16,6 +16,7 @@ use std::{
 };
 /// How a stream ends after its tokens.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // not every including test file uses every ending
 pub enum End {
     Completed,
     Failed(&'static str),
