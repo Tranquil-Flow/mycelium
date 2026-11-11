@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-"""The network-use source offer is a real link on every served HTML shell."""
+"""The network-use source offer and the CCAI Discord invite are real links on
+every served HTML shell."""
 import http.client
 import json
 from html.parser import HTMLParser
@@ -13,6 +14,7 @@ from mycelium_swarm_directory.server import ASSETS, DirectoryServer, csp
 from mycelium_swarm_directory.store import MemoryStore
 
 SOURCE = 'https://github.com/Tranquil-Flow/mycelium'
+DISCORD = 'https://discord.gg/XnagJyDsZ'
 DOWNLOAD = {'available': True, 'url': SOURCE + '/releases/tag/v0.1.4',
             'sha256': 'fce4743a7f3a2453f6621753ed3892a6cefaddf52e7a3e98fd79ba51f8930025',
             'version': '0.1.4', 'notarized': False}
@@ -73,6 +75,40 @@ def test_source_offer_in_every_html_response(directory, path):
         assert 'Source code on GitHub' in body
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize('path', [path for path, (_, mime) in ASSETS.items() if mime.startswith('text/html')])
+def test_ccai_discord_invite_in_every_html_response(directory, path):
+    """The owner's CCAI Discord invite is a real footer link on every shell
+    (plus once per CCAI section on /about), with the same off-origin link
+    hygiene as the source offer."""
+    connection = http.client.HTTPConnection('127.0.0.1', directory.server_port)
+    try:
+        connection.request('GET', path)
+        response = connection.getresponse()
+        body = response.read().decode()
+        assert response.status == 200
+        assert response.getheader('Set-Cookie') is None
+        links = Links()
+        links.feed(body)
+        invites = [link for link in links.links if link.get('href') == DISCORD]
+        assert len(invites) == {'/about': 3}.get(path, 1)  # /about: footer, both CCAI sections
+        for link in invites:
+            assert 'noopener' in link.get('rel', '').split()
+            assert 'target' not in link
+        assert 'CCAI Discord' in body
+        footer = body[body.index('<footer'):body.index('</footer>')]
+        assert DISCORD in footer, 'the invite is reachable from every footer'
+    finally:
+        connection.close()
+
+
+def test_the_invite_sits_in_both_ccai_sections_of_about():
+    from pathlib import Path
+    body = (Path(__file__).resolve().parents[2] / 'mycelium_swarm_directory/web/about.html').read_text()
+    for section_id in ('s-bigger', 't-stack'):
+        start = body.index(f'id="{section_id}"')
+        assert DISCORD in body[start:body.index('</section>', start)], section_id
 
 
 @pytest.mark.parametrize('theme', ['light', 'dark'])

@@ -220,7 +220,8 @@ def test_vision_page_requests_only_same_origin_resources():
     assert set(tree.resources) <= {p for p in server.ASSETS}
     for link in tree.links:
         href = link['href']
-        assert href.startswith(('/', '#', 'https://github.com/Tranquil-Flow/mycelium')), href
+        # The owner's CCAI Discord invite (11 Nov) is the only other off-origin link.
+        assert href.startswith(('/', '#', 'https://github.com/Tranquil-Flow/mycelium')) or href == 'https://discord.gg/XnagJyDsZ', href
         if href.startswith('https://'):
             assert 'noopener' in link.get('rel', '') and 'target' not in link
 
