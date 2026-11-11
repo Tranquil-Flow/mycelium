@@ -728,6 +728,15 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
         return cell.try_with(|c| c.running = true).ok_or_else(failure);
     };
     let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
+    // `_start_runtime` loads the seed key bound to the seed database (`load_bound_seed_signer`,
+    // mycelium_seed/authority.py:113-139 @ f4e366e9): a lost key is `seed_authority_key_missing`,
+    // never a fresh, unbound key (which `prepare_seed` would create).
+    if matches!(
+        fs::symlink_metadata(root.join(SEED_IDENTITY_FILE)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Err(PublicError::new(409, "seed_authority_key_missing"));
+    }
     // `_start_runtime`: existing metadata makes a missing TLS root a fail-closed identity loss,
     // never fresh material (authority.py:508-512 @ f4e366e9); an existing empty directory is
     // still filled (`ensure_local_tls_material`).
@@ -738,6 +747,12 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
     }
     let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
     let dir = root.join("authority").join("member");
+    // `_resume` pins the owner's own member to the seed's current address (a relay origin attached
+    // since the last start, authority.py:578-604 @ f4e366e9).
+    if let Err(error) = crate::peer::repin_owner_seed_url(&dir, &runtime.seed_url) {
+        runtime.close();
+        return Err(error);
+    }
     let (signer, _, _) = identity(&root)?;
     let options = runtime.options();
     let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
@@ -859,6 +874,44 @@ pub fn renew_owner(cell: &impl Cell) {
     cell.try_with(|c| {
         if c.owner_session.is_none() && c.seed.is_some() {
             c.owner_session = Some(session);
+        }
+    });
+}
+/// One pass of `DemoApp._renew_loop` for a joined TARGET (`authority.renew()` is
+/// `RemoteMacMember.renew()`, app.py:911-927 @ f4e366e9): the live membership session is taken out
+/// of the host while the heartbeat is on the wire (its generation and lease stay visible through
+/// `session_view`), over the member's own seed path ([`Cell::member_seed_options`]). A closed, left,
+/// stopped or owner host renews nothing. A failure is logged and tried again at the next pass (the
+/// oracle sets `renewal_error = 'renewal_unavailable'`).
+pub fn renew_member(cell: &impl Cell) {
+    let Some(Some((root, session))) = cell.try_with(|c| {
+        if c.closed || !c.running || c.left || !c.target {
+            return None;
+        }
+        let session = c.session.take()?;
+        c.session_view = Some((session.generation(), session.lease_expires_at()));
+        Some((c.root.clone(), session))
+    }) else {
+        return;
+    };
+    let mut session = session;
+    if let Ok((signer, _, _)) = identity(&root) {
+        let options = cell.member_seed_options();
+        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+        let env = crate::peer::JoinEnv {
+            signer: &signer,
+            clock: &now,
+            random_hex: &random_hex,
+            seed: &options,
+        };
+        if let Err(error) = crate::peer::renew(&root, true, Some(&mut session), &env) {
+            eprintln!("member renew: {}", error.code);
+        }
+    }
+    cell.try_with(|c| {
+        c.session_view = None;
+        if c.session.is_none() {
+            c.session = Some(session);
         }
     });
 }
