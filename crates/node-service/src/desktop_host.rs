@@ -182,7 +182,7 @@ struct Chat {
 /// The packaged action root: the desktop action backend over the packaged host, with the node
 /// service (Stop routed through the serving root first) as the delegate for everything the
 /// backend does not own.
-type Actions = Control<PersistentBackend<PackagedHost, ServingActions>>;
+type Actions = Control<PersistentBackend<PackagedHost, crate::packaged_network::PackagedActions>>;
 type Source = Result<Arc<dyn QualificationSource>, PublicError>;
 /// The node service's own development record as the gateway's qualification source.
 fn development_source(node: &NodeService) -> Source {
@@ -210,6 +210,9 @@ pub struct DesktopServices {
     publishing: Option<Publishing>,
     /// The product evidence routes over the packaged host's owner seed (`crate::packaged_product`).
     product: Arc<dyn api::desktop::ProductRoutes>,
+    /// The packaged host's network and authority, for the status (`crate::packaged_network`).
+    network: Arc<crate::packaged_network::Network>,
+    authority: Option<Arc<Mutex<api::app_host::Authority>>>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -278,10 +281,34 @@ impl DesktopServices {
         source: crate::app_host::ModelSource,
         publisher: Arc<api::swarm::publisher::app::AppPublisher>,
     ) -> Self {
+        Self::packaged_with_network(
+            node,
+            capacity,
+            private,
+            source,
+            publisher,
+            crate::packaged_network::NetworkConfig::default(),
+        )
+    }
+    /// [`DesktopServices::packaged`] with the host's network over `network` (the relay's hooks and
+    /// the join seams, `PackagedHost::with_network`).
+    pub fn packaged_with_network(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+        publisher: Arc<api::swarm::publisher::app::AppPublisher>,
+        network: crate::packaged_network::NetworkConfig,
+    ) -> Self {
         let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
+            .with_network(network)
             .with_publisher(publisher);
         let qualification = development_source(&node);
         Self::with_host(node, capacity, private, host, qualification)
+    }
+    /// The packaged host's network (its relay, closed by the packaged Quit).
+    pub fn network(&self) -> Arc<crate::packaged_network::Network> {
+        self.network.clone()
     }
     /// The listing custody these services' host keeps (none outside the packaged executable).
     pub fn publishing(&self) -> Option<Publishing> {
@@ -308,12 +335,19 @@ impl DesktopServices {
         let publishing = host.publishing();
         let product =
             crate::packaged_product::routes(host.authority_handle(), node.clone(), serving.clone());
+        let (network, authority) = (host.network(), host.authority_handle());
+        let delegate = crate::packaged_network::PackagedActions::new(
+            ServingActions::new(node.clone(), serving.clone()),
+            network.clone(),
+            host.authority_result(),
+        );
+        let backend = PersistentBackend::new(private.to_owned(), host, delegate);
+        // `DemoApp._pending_windows`: the relay's Start materializes the backend's own list.
+        network.share_pending(backend.pending_windows());
         Self {
-            actions: Arc::new(Control::new(PersistentBackend::new(
-                private.to_owned(),
-                host,
-                ServingActions::new(node.clone(), serving.clone()),
-            ))),
+            actions: Arc::new(Control::new(backend)),
+            network,
+            authority,
             serving,
             fast_mode,
             loops,
@@ -387,6 +421,12 @@ impl DesktopServices {
                 // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
                 let mut status = self.node.published_status()?;
                 status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                // v0.1.4's network window, role, consent and join flow (`crate::packaged_network`).
+                crate::packaged_network::status_overlay(
+                    &mut status,
+                    self.authority.as_deref(),
+                    &self.network,
+                );
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {

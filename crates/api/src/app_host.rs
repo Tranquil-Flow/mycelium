@@ -738,6 +738,12 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
     }
     let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
     let dir = root.join("authority").join("member");
+    // `_resume` pins the owner's own member to the seed's current address (a relay origin attached
+    // since the last start, authority.py:578-604 @ f4e366e9).
+    if let Err(error) = crate::peer::repin_owner_seed_url(&dir, &runtime.seed_url) {
+        runtime.close();
+        return Err(error);
+    }
     let (signer, _, _) = identity(&root)?;
     let options = runtime.options();
     let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();

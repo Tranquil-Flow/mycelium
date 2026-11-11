@@ -1020,6 +1020,28 @@ fn resume(
     Ok(session)
 }
 
+/// The owner's own member re-pinned to the seed address its authority answers on now
+/// (`DemoAuthority._resume` pins its client to `self._coordinator.seed_url` and saves the
+/// membership with it, authority.py:578-604 @ f4e366e9): after `attach_public_endpoint` /
+/// `relocate_authority` reopened the seed on the relay's origin (endpoint_recovery.py:61-85, "the
+/// resume at restart re-pins its membership to the new seed address"). Nothing retained, or the
+/// same address: nothing is written.
+pub fn repin_owner_seed_url(root: &Path, seed_url: &str) -> Result<(), PublicError> {
+    let Some(mut membership) = load_membership_state(root)? else {
+        return Ok(());
+    };
+    if membership["seed_url"] == seed_url {
+        return Ok(());
+    }
+    membership.insert("seed_url".into(), Value::from(seed_url));
+    private_state::store(
+        &root.join(MEMBERSHIP_FILE),
+        &Value::Object(membership),
+        membership_limit()?,
+    )
+    .map_err(|_| durable("node_membership_state_write_failed"))
+}
+
 /// `RemoteMacMember.start()` (peer.py:327-380): load the identity and the retained state, refuse an
 /// inconsistent combination, finish the cleanup a crash left behind, and resume an accepted
 /// membership. `identity_present` is whether the durable key file exists (the host owns that file).

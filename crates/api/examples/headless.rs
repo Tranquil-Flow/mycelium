@@ -16,16 +16,16 @@ use api::{
     acquisition::{self, Acquisition, HttpTransport},
     actions::{Action, Backend, Control},
     app_host::{
-        self, Authority, HANDOFF_FILE, HostView, IDENTITY_FILE, NETWORK_FILE, PENDING_FILE,
-        SEED_IDENTITY_FILE, build_pair_request, cap, hex, identity, identity_in, now, random,
+        self, Authority, HostView, IDENTITY_FILE, NETWORK_FILE, SEED_IDENTITY_FILE,
+        build_pair_request, cap, hex, identity, identity_in, now, random,
     },
-    authority_view, capability,
+    authority_view,
     desktop::{Desktop, Session},
     handoff::{self, Coordinator, Entropy},
     http::serve_connection,
     installation_descriptor::{self, Failure, Member as DescriptorMember, Paths, Source},
     jobj,
-    join_client::JoinWindowClient,
+    joined_member::{self, NoSeedServer, SeedHop, observe_device, planning_caps},
     leave::{
         Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave, status_view,
     },
@@ -37,15 +37,11 @@ use api::{
     },
     owner_driver::{DemoRuns, DemoView, Timing, fresh_identity},
     pairing::SignedBackend,
-    pairing_windows::PAIRING_WINDOW_PREFIX,
     persistent::{Host, PersistentBackend, RelayState},
     preferences::{
         fast_mode, private_state, private_write, resource_policy, run_model, standing_consent,
     },
-    relay::{
-        BackendError, BackendReply, EndpointHost, Hooks, LocalAnswer, LocalHandler, OwnerRelay,
-        Probe, Proxy, SeedBackend,
-    },
+    relay::{EndpointHost, Hooks, LocalHandler, OwnerRelay, Probe, Proxy, SeedBackend},
     resources::{self, Observation, Observer, ProbeObserver},
     run_exchange::{Announce, RunExchange},
     schema::{PublicError, Raised, STATUS_FIELDS, Snapshot},
@@ -93,12 +89,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// `DemoApp._probe_times` (app.py:1062-1066): at most 64 link probes per 10 s. Registry ids: SE-L10-JOIN-BOUNDS (L1b).
-const PROBE_WINDOW: Duration = secs(10);
-const PROBE_LIMIT: usize = 64;
-const fn secs(seconds: u64) -> Duration {
-    Duration::from_secs(seconds)
-}
 const LABEL: &str = "macOS A13 hackathon demo";
 const LAUNCH_FILE: &str = "open-demo.html";
 const CONTROL_FILE: &str = "native-control.json";
@@ -219,96 +209,9 @@ struct ContributorState {
 }
 type Shared = Arc<Mutex<Core>>;
 
+/// `self.authority.status()` (`api::joined_member`, shared with the packaged host).
 fn authority_status(core: &Core) -> Json {
-    if core.target {
-        // `TargetApplication.status` = `peer.status()` plus the owner-shaped extras (peer.py:395-455,
-        // target_app.py:330-343), in that dict order.
-        let root = &core.root;
-        let pairing_state = if root.join("accepted.json").exists() {
-            "accepted"
-        } else if root.join(HANDOFF_FILE).exists() {
-            "handoff_retained"
-        } else if root.join(PENDING_FILE).exists() {
-            "pending"
-        } else {
-            "not_requested"
-        };
-        let consented = root.join(PENDING_FILE).exists() || root.join(HANDOFF_FILE).exists();
-        let (generation, lease) = core.session.as_ref().map_or_else(
-            || core.session_view.unwrap_or((None, None)),
-            |s| (s.generation(), s.lease_expires_at()),
-        );
-        let joined = lease.is_some_and(|lease| now() < lease);
-        return jobj! {
-            "protocol" => "mycelium.demo_authority_status.v1",
-            "started" => core.running,
-            "identity_state" => if root.join(IDENTITY_FILE).exists() { "present" } else { "absent" },
-            "pairing_state" => pairing_state,
-            "membership_state" => if joined { "current" } else { "absent" },
-            "membership_generation" => generation.map_or(Json::Null, Json::from),
-            "lease_state" => if joined { "fresh" } else { "none" },
-            "cooperative_peer_visibility_acknowledged" => consented,
-            "resource_use_acknowledged" => consented,
-            "contribution_enabled" => false,
-            "capability_state" => "not_reported",
-            "serving_state" => "not_yet_serving",
-            "route_ready" => false,
-            "swarm_created" => false,
-            "member_count" => 0u64,
-            "native_control" => jobj! {
-                "state" => "stopped", "model_load_authorized" => false, "work_admitted" => false,
-            },
-            "capability" => Json::Null,
-        };
-    }
-    // `authority.stop()`: the seed runtime is closed, the retained membership is all that is left.
-    if !core.running && core.legacy.is_none() && core.swarm.is_some() {
-        let dir = core.root.join("authority").join("member");
-        let generation = api::peer::load_membership_state(&dir)
-            .ok()
-            .flatten()
-            .and_then(|state| state.get("membership_generation").and_then(Value::as_u64));
-        return authority_view::retained_status(generation);
-    }
-    match core.owner_authority() {
-        Some(view) => {
-            let mut status = view.status(core.running, now());
-            if let (Some(seed), Some(Json::Arr(mut members))) =
-                (&core.seed, status.get("members").cloned())
-            {
-                for member in &mut members {
-                    let Some(Json::Str(node)) = member.get("node_id") else {
-                        continue;
-                    };
-                    let clock = seed.clock_offsets.view(node);
-                    if clock["samples"].as_u64().is_some_and(|n| n > 0) {
-                        // clock_offset.py snapshot insertion order; unknown peers retain the old null view.
-                        let fields = [
-                            "offset_seconds",
-                            "rtt_seconds",
-                            "samples",
-                            "age_seconds",
-                            "fresh",
-                            "tolerance_seconds",
-                            "exceeds_tolerance",
-                        ];
-                        member.set(
-                            "clock",
-                            Json::Obj(
-                                fields
-                                    .into_iter()
-                                    .map(|field| (field.to_owned(), Json::from(&clock[field])))
-                                    .collect(),
-                            ),
-                        );
-                    }
-                }
-                status.set("members", Json::Arr(members));
-            }
-            status
-        }
-        None => authority_view::no_swarm_status(core.running),
-    }
+    joined_member::authority_status(&core.authority)
 }
 /// The same pass for a joined TARGET (`authority.renew()` is `RemoteMacMember.renew()` there): the live
 /// membership session is taken out of the core while the heartbeat is on the wire. A failure is logged
@@ -806,372 +709,21 @@ impl AgentHost for AgentView<'_> {
     }
 }
 
-/// The relay's verified-TLS hop into the owner's seed: HTTPS to the local server, pinned to the local CA.
-struct SeedHop(Arc<SeedRuntime>);
-impl SeedBackend for SeedHop {
-    fn request(
-        &self,
-        method: &str,
-        path: &str,
-        content_type: &str,
-        body: &[u8],
-    ) -> Result<BackendReply, BackendError> {
-        use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
-        use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
-        let mut roots = RootCertStore::empty();
-        for cert in CertificateDer::pem_slice_iter(&self.0.ca_pem) {
-            roots
-                .add(cert.map_err(|_| BackendError::Unavailable)?)
-                .map_err(|_| BackendError::Unavailable)?;
-        }
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let config = ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|_| BackendError::Unavailable)?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        let timeout = span(BudgetId::PyMyceliumA13MacosPublicRelayRelayhandlerForwardTimeoutL115);
-        let tcp = TcpStream::connect_timeout(&self.0.address, timeout)
-            .map_err(|_| BackendError::Unavailable)?;
-        tcp.set_read_timeout(Some(timeout))
-            .and_then(|()| tcp.set_write_timeout(Some(timeout)))
-            .map_err(|_| BackendError::Unavailable)?;
-        let name =
-            ServerName::try_from("127.0.0.1".to_owned()).map_err(|_| BackendError::Unavailable)?;
-        let connection =
-            ClientConnection::new(Arc::new(config), name).map_err(|_| BackendError::Unavailable)?;
-        let mut stream = StreamOwned::new(connection, tcp);
-        let head = format!(
-            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            self.0.address.port(),
-            body.len()
-        );
-        let mut wire = head.into_bytes();
-        wire.extend_from_slice(body);
-        stream
-            .write_all(&wire)
-            .and_then(|()| stream.flush())
-            .map_err(|_| BackendError::CertificateRejected)?;
-        let mut reply = Vec::new();
-        let mut chunk = [0u8; 16 * 1024];
-        loop {
-            match stream.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => reply.extend_from_slice(&chunk[..n]),
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(_) => return Err(BackendError::Unavailable),
-            }
-        }
-        let split = reply
-            .windows(4)
-            .position(|w| w == b"\r\n\r\n")
-            .ok_or(BackendError::Unavailable)?;
-        let head = String::from_utf8_lossy(&reply[..split]).into_owned();
-        let status = head
-            .lines()
-            .next()
-            .and_then(|l| l.split(' ').nth(1))
-            .and_then(|c| c.parse::<u16>().ok())
-            .ok_or(BackendError::Unavailable)?;
-        let content_type = head
-            .lines()
-            .filter_map(|l| l.split_once(':'))
-            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-            .map(|(_, v)| v.trim().to_owned())
-            .unwrap_or_default();
-        Ok(BackendReply {
-            status,
-            content_type,
-            body: reply[split + 4..].to_vec(),
-        })
-    }
-}
-
-/// `DemoApp._public_route` for the pairing window, the link probe and the member-report inbox.
+/// `DemoApp._public_route` for the pairing window, the link probe and the member-report inbox
+/// (`api::joined_member`, shared with the packaged host) over this core's window store and seed.
 fn public_route(core: Shared) -> LocalHandler {
-    let probes: Arc<Mutex<Vec<std::time::Instant>>> = Arc::new(Mutex::new(Vec::new()));
-    let reply = |status: i64, value: Json| {
-        Ok(LocalAnswer {
-            status,
-            raw: value.dumps(api::wire::Text::Ascii),
-            kind: None,
-        })
-    };
-    Arc::new(move |method: &str, path: &str, body: &[u8]| {
-        let (windows, seed) = match core.lock() {
-            Ok(c) => (c.windows.clone(), c.seed.clone()),
-            Err(poisoned) => {
-                let c = poisoned.into_inner();
-                (c.windows.clone(), c.seed.clone())
-            }
-        };
-        if path.starts_with(PAIRING_WINDOW_PREFIX) {
-            let (status, raw) = windows.handle(method, path, body);
-            return Ok(LocalAnswer {
-                status: i64::from(status),
-                raw,
-                kind: None,
-            });
+    joined_member::public_route(Arc::new(move || match core.lock() {
+        Ok(c) => (c.windows.clone(), c.seed.clone()),
+        Err(poisoned) => {
+            let c = poisoned.into_inner();
+            (c.windows.clone(), c.seed.clone())
         }
-        if path == capability::MEMBER_REPORT_PATH {
-            if method != "POST" {
-                return reply(405, jobj! {"error" => "method_not_allowed"});
-            }
-            let report = serde_json::from_slice::<Value>(body)
-                .ok()
-                .filter(Value::is_object);
-            let Some(report) = report else {
-                return reply(400, jobj! {"error" => "capability_report_invalid"});
-            };
-            let outcome = member_report(seed.as_deref(), &report);
-            return match outcome {
-                Ok(node) => reply(200, jobj! {"state" => "accepted", "node_id" => node}),
-                Err(code) => {
-                    let status = if matches!(
-                        code,
-                        "capability_report_member_not_current"
-                            | "capability_report_expired"
-                            | "capability_report_capacity"
-                    ) {
-                        409
-                    } else {
-                        400
-                    };
-                    reply(status, jobj! {"error" => code})
-                }
-            };
-        }
-        if let Some(kib) = path.strip_prefix(&format!("{}/", capability::LINK_PROBE_PATH)) {
-            if method != "POST"
-                || kib.is_empty()
-                || kib.len() > 3
-                || !kib.bytes().all(|b| b.is_ascii_digit())
-            {
-                return reply(404, jobj! {"error" => "route_unknown"});
-            }
-            let now = std::time::Instant::now();
-            let mut times = probes.lock().map_err(|_| ())?;
-            let window = PROBE_WINDOW;
-            times.retain(|t| now.duration_since(*t) < window);
-            if times.len() >= PROBE_LIMIT {
-                return reply(429, jobj! {"error" => "link_probe_rate_limited"});
-            }
-            times.push(now);
-            return match capability::link_probe_response(
-                &json!(kib.parse::<u64>().unwrap_or(u64::MAX)),
-                body.len(),
-            ) {
-                Ok(raw) => Ok(LocalAnswer {
-                    status: 200,
-                    raw,
-                    kind: None,
-                }),
-                Err(_) => reply(400, jobj! {"error" => "link_probe_invalid"}),
-            };
-        }
-        reply(404, jobj! {"error" => "route_unknown"})
-    })
+    }))
 }
-/// `MemberReports.submit`: the owner inbox accepts the report of a CURRENT member only.
-fn member_report(seed: Option<&SeedRuntime>, report: &Value) -> Result<String, &'static str> {
-    let node = report["node_id"]
-        .as_str()
-        .ok_or("capability_report_invalid")?
-        .to_owned();
-    let member = seed
-        .and_then(|s| s.coordinator.member(&node).ok())
-        .ok_or("capability_report_member_not_current")?;
-    let digest = member["verification_key_digest"]
-        .as_str()
-        .unwrap_or_default();
-    let statement = capability::verify_report(
-        report,
-        now(),
-        digest,
-        &node,
-        &["join", "pre_run", "periodic"],
-    )
-    .map_err(|e| e.code)?;
-    let current = matches!(
-        member["lifecycle_state"].as_str(),
-        Some("NEW" | "CONFIGURED" | "RUNNING")
-    );
-    // `statement['generation'] != member['generation']`: a join report carries no generation yet.
-    if statement["generation"] != member["generation"] && !statement["generation"].is_null()
-        || !current
-    {
-        return Err("capability_report_member_not_current");
-    }
-    seed.ok_or("capability_report_member_not_current")?
-        .capability_reports
-        .lock()
-        .map_err(|_| "capability_report_invalid")?
-        .insert(node.clone(), statement);
-    Ok(node)
-}
-
-/// `shutil.disk_usage(root).free` (`f_bavail * f_frsize`).
-#[allow(unsafe_code)] // statvfs(3) into a zeroed struct for a valid path
-fn free_bytes(root: &Path) -> u64 {
-    let path = std::ffi::CString::new(root.to_string_lossy().as_bytes()).unwrap_or_default();
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    let status = unsafe { libc::statvfs(path.as_ptr(), &mut stat) };
-    if status == 0 {
-        u64::from(stat.f_bavail) * stat.f_frsize
-    } else {
-        0
-    }
-}
-/// `observe_device`: chip, RAM, free disk, OS version; MLX is not part of this build; power, thermal and
-/// network are `unknown` (never invented).
-fn observe_device(root: &Path) -> Value {
-    #[allow(unsafe_code)] // sysctlbyname(3): the buffer is sized by the first call
-    fn sysctl_text(name: &str) -> Option<String> {
-        let name = std::ffi::CString::new(name).ok()?;
-        let mut size = 0usize;
-        // SAFETY: querying the size, then reading into a buffer of exactly that size.
-        unsafe {
-            if libc::sysctlbyname(
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                &mut size,
-                std::ptr::null_mut(),
-                0,
-            ) != 0
-            {
-                return None;
-            }
-            let mut buffer = vec![0u8; size];
-            if libc::sysctlbyname(
-                name.as_ptr(),
-                buffer.as_mut_ptr().cast(),
-                &mut size,
-                std::ptr::null_mut(),
-                0,
-            ) != 0
-            {
-                return None;
-            }
-            buffer.truncate(size);
-            while buffer.last() == Some(&0) {
-                buffer.pop();
-            }
-            String::from_utf8(buffer).ok()
-        }
-    }
-    #[allow(unsafe_code)] // sysctlbyname(3) into a u64
-    fn sysctl_u64(name: &str) -> Option<u64> {
-        let name = std::ffi::CString::new(name).ok()?;
-        let mut value = 0u64;
-        let mut size = std::mem::size_of::<u64>();
-        // SAFETY: `value` is a u64 and `size` says so.
-        let status = unsafe {
-            libc::sysctlbyname(
-                name.as_ptr(),
-                (&raw mut value).cast(),
-                &mut size,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        (status == 0).then_some(value)
-    }
-    let free = free_bytes(root);
-    let printable = |t: Option<String>| {
-        t.filter(|t| (1..=96).contains(&t.len()) && t.bytes().all(|b| (0x20..=0x7e).contains(&b)))
-    };
-    json!({
-        "chip": printable(sysctl_text("machdep.cpu.brand_string")).unwrap_or_else(|| "unknown".into()),
-        "memory_bytes": sysctl_u64("hw.memsize").unwrap_or(0),
-        "available_storage_bytes": free,
-        "os_version": printable(sysctl_text("kern.osproductversion")).unwrap_or_else(|| "unknown".into()),
-        "mlx": {"available": false, "device": null},
-        "power": "unknown", "thermal": "unknown", "network": "unknown",
-    })
-}
-/// `planning_caps(root)`: known local limits for placement, never authorization.
-fn planning_caps(root: &Path) -> Option<Value> {
-    let mut caps = Map::new();
-    if let Ok(Some(grant)) = standing_consent::load(root) {
-        for key in ["storage_bytes", "max_memory_bytes", "max_wall_seconds"] {
-            if let Some(v) = grant.get("caps").and_then(|c| c.get(key)) {
-                caps.insert(key.to_owned(), v.clone());
-            }
-        }
-    }
-    if let Ok(Some(policy)) = resource_policy::read(root)
-        && let Some(storage) = policy.get("storage_bytes").and_then(Value::as_i64)
-    {
-        let stored = caps
-            .get("storage_bytes")
-            .and_then(Value::as_i64)
-            .unwrap_or(storage);
-        caps.insert("storage_bytes".into(), json!(stored.min(storage)));
-    }
-    (!caps.is_empty()).then_some(Value::Object(caps))
-}
-/// The member's `JoinWindowClient` (`_join_client`); `MYCELIUM_L10_TEST_JOIN_BASE` is the oracle's
-/// `_test_join_base_url` seam (this example is the test launcher, not the product).
-fn join_client(origin: &str) -> Result<JoinWindowClient, PublicError> {
-    let client = JoinWindowClient::new(origin, api::join_client::default_timeout())?;
-    match std::env::var("MYCELIUM_L10_TEST_JOIN_BASE") {
-        Ok(base) => client.with_test_base_url(&base),
-        Err(_) => Ok(client),
-    }
-}
-/// `_measure_and_sign(client, purpose)`.
-fn measure_and_sign(
-    root: &Path,
-    client: &mut JoinWindowClient,
-    purpose: &str,
-) -> Result<Value, PublicError> {
-    let started = std::time::Instant::now();
-    let mut clock = move || started.elapsed().as_secs_f64();
-    let link = capability::measure_link(
-        &mut |kib, upload| client.probe(kib, upload),
-        3,
-        256 * 1024,
-        &mut clock,
-    )?;
-    let device = observe_device(root);
-    let (signer, _, node) = identity(root)?;
-    let caps = planning_caps(root);
-    capability::signed_report(
-        &signer,
-        &node,
-        purpose,
-        None,
-        &device,
-        &link,
-        now(),
-        capability::report_ttl_seconds(),
-        caps.as_ref(),
-    )
-}
-/// `RemoteMacMember.owner_origin()`: the seed url of the retained membership.
-fn owner_origin(root: &Path) -> Option<String> {
-    private_state::load(&root.join("membership.state.json"), cap())
-        .ok()
-        .flatten()
-        .and_then(|m| m.get("seed_url").and_then(Value::as_str).map(str::to_owned))
-}
-/// `peer.handoff_seed_key_digest(handoff)`: decrypt locally and read the pinned seed key digest.
-fn handoff_seed_key_digest(root: &Path, handoff_value: &Value) -> Result<String, PublicError> {
-    let pending = private_state::load(&root.join(PENDING_FILE), cap())
-        .map_err(|e| PublicError::new(409, e.0))?
-        .ok_or_else(failure)?;
-    let request = pending.get("request").cloned().unwrap_or(Value::Null);
-    let key = pending
-        .get("recipient_private_key")
-        .and_then(Value::as_str)
-        .and_then(|k| URL_SAFE_NO_PAD.decode(k).ok())
-        .ok_or_else(failure)?;
-    let payload =
-        handoff::decrypt_invitation_handoff(&request, handoff_value, Some(&key), &json!(now()))?;
-    Ok(payload["seed_key_digest"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned())
+/// `MYCELIUM_L10_TEST_JOIN_BASE`: the oracle's `_test_join_base_url` seam (this example is the test
+/// launcher, not the product).
+fn test_join_base() -> Option<String> {
+    std::env::var("MYCELIUM_L10_TEST_JOIN_BASE").ok()
 }
 /// The seed options of a joining member: the public Web-PKI path, or - for the loopback test launcher -
 /// the owner's local seed directly (`MYCELIUM_L10_TEST_SEED_DIRECT=<host:port>|<ca.pem path>`).
@@ -1545,21 +1097,10 @@ impl Host for HeadlessHost {
         quota: &Value,
     ) -> Result<(Value, Vec<Value>), PublicError> {
         let root = self.with(|c| c.root.clone());
-        let mut client = join_client(&link.origin)?;
-        let report = measure_and_sign(&root, &mut client, "join")?;
-        let answer = client.submit(&link.window_id, &link.code, request, &report, quota)?;
-        Ok((answer, client.warnings().to_vec()))
+        joined_member::join_submit(&root, test_join_base().as_deref(), link, request, quota)
     }
     fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
-        let text = |k: &str| {
-            state
-                .get(k)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        };
-        let mut client = join_client(&text("origin"))?;
-        client.poll(&text("window_id"), &text("code"), &text("request_digest"))
+        joined_member::join_poll(state, test_join_base().as_deref())
     }
     /// The approved branch: seed pin check, `accept_pairing`, membership binding, `running = True`, the join report.
     fn join_accept(
@@ -1567,42 +1108,12 @@ impl Host for HeadlessHost {
         handoff_value: &Value,
         pin: Option<&str>,
     ) -> Result<api::persistent::JoinAccepted, PublicError> {
-        let root = self.with(|c| c.root.clone());
-        if let Some(pin) = pin
-            && handoff_seed_key_digest(&root, handoff_value)? != pin
-        {
-            return Err(PublicError::new(400, "join_seed_pin_mismatch"));
-        }
-        let joined = self.pair_accept(handoff_value)?;
-        let binding = self.membership_binding().map(|b| {
-            json!({"swarm_id": b.swarm_id, "node_id": b.node_id, "seed_key_digest": b.seed_key_digest})
-        });
-        self.with(|c| c.running = true);
-        let generation = self.with(|c| c.session.as_ref().and_then(|s| s.generation()));
-        let record = {
-            let mut state = "delivered";
-            let mut error = Value::Null;
-            let sent = (|| -> Result<(), PublicError> {
-                let origin =
-                    owner_origin(&root).ok_or(PublicError::new(400, "membership_required"))?;
-                let mut client = join_client(&origin)?;
-                let report = measure_and_sign(&root, &mut client, "join")?;
-                client.member_report(&report).map(drop)
-            })();
-            if let Err(e) = sent {
-                state = "failed";
-                error = json!(e.code);
-            }
-            json!({"purpose": "join", "at": now(), "state": state, "error": error, "seed_capability": "not_sent"})
-        };
-        Ok(api::persistent::JoinAccepted {
-            membership_state: joined
-                .get("membership_state")
-                .map_or(json!("current"), Json::to_value),
-            generation: generation.map_or(Value::Null, Value::from),
-            binding,
-            report: record,
-        })
+        joined_member::join_accept(
+            &self.cell(),
+            handoff_value,
+            pin,
+            test_join_base().as_deref(),
+        )
     }
     fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
         let (closed, owner, publisher) =
@@ -1634,15 +1145,6 @@ impl Host for HeadlessHost {
     }
 }
 
-/// The relay's verified-TLS hop into the owner's seed. This host has no seed server (SE-L10-SEED-COORD):
-/// the address `coordinator()` hands out is a loopback port nothing listens on, so a request through
-/// the relay is answered `502 relay_backend_unavailable`, exactly what the relay does when the seed is gone.
-struct NoSeedServer;
-impl SeedBackend for NoSeedServer {
-    fn request(&self, _: &str, _: &str, _: &str, _: &[u8]) -> Result<BackendReply, BackendError> {
-        Err(BackendError::Unavailable)
-    }
-}
 /// The authority seams of `_start_public_relay`: the owner's swarm record and the (absent) seed server.
 struct Endpoint {
     core: Shared,

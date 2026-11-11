@@ -17,6 +17,7 @@
 use crate::{
     app_host::{ModelSource, Publishing},
     desktop_host::{DesktopServices, ModelGate},
+    packaged_network::NetworkConfig,
     service::{Driver, Job, NodeService},
 };
 use api::{acquisition::Transport, resources::Observer, schema::PublicError};
@@ -163,6 +164,8 @@ pub struct WindowQuit {
     services_done: bool,
     swarm: Option<SwarmClose>,
     model: ModelClose,
+    /// `self.public_relay.close()` (app.py:1848-1850), started as Quit begins.
+    relay: crate::packaged_network::RelayClose,
     /// The first step that failed, reported once every step ran.
     failed: Option<CleanupError>,
 }
@@ -192,6 +195,7 @@ impl Cleanup for AppCleanup {
                     swarm.publishing.ticks.stop();
                 }
                 quit.model.begin();
+                quit.relay.begin();
                 Ok(())
             }
             Self::Nothing => Ok(()),
@@ -213,13 +217,18 @@ impl Cleanup for AppCleanup {
                 // Both close on their own threads at once; neither waits for the other.
                 let swarm = quit.swarm.as_mut().map_or(Some(Ok(())), SwarmClose::poll);
                 let model = quit.model.poll();
-                let Some(swarm) = swarm else {
+                let relay = quit.relay.poll();
+                let (Some(swarm), Some(relay)) = (swarm, relay) else {
                     return Ok(Poll::Pending);
                 };
                 if model == Ok(Poll::Pending) {
                     return Ok(Poll::Pending);
                 }
-                for step in [swarm.map(|()| Poll::Verified), model] {
+                for step in [
+                    swarm.map(|()| Poll::Verified),
+                    model,
+                    relay.map(|()| Poll::Verified),
+                ] {
                     if let Err(error) = step {
                         quit.keep(error);
                     }
@@ -418,16 +427,35 @@ pub fn core_with(
     transport: Arc<dyn Transport>,
     observer: Arc<dyn Observer>,
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    core_with_network(state_root, transport, observer, NetworkConfig::default())
+}
+/// [`core_with`] with the host's network over `network`: the relay's hooks and v0.1.4's join seams
+/// (`DemoApp(_test_join_base_url=...)`, a test's loopback relay and the owner's local seed).
+pub fn core_with_network(
+    state_root: &Path,
+    transport: Arc<dyn Transport>,
+    observer: Arc<dyn Observer>,
+    network: NetworkConfig,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     compose(
         state_root,
         ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
+        network,
     )
 }
 /// The core and cleanup for the window, from the state root.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
-    compose(state_root, ModelSource::hub(state_root.to_owned()))
+    compose(
+        state_root,
+        ModelSource::hub(state_root.to_owned()),
+        NetworkConfig::default(),
+    )
 }
-fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+fn compose(
+    state_root: &Path,
+    source: ModelSource,
+    network: NetworkConfig,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     let dirs = prepare_dirs(state_root)?;
     let private = dirs.private.clone();
     let native = Arc::new(NativeOnDemand {
@@ -453,9 +481,15 @@ fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, App
     );
     // `DemoApp.swarm_publisher`: the listing custody's state beside the owner's private state.
     let publisher = Arc::new(api::swarm::publisher::app::AppPublisher::new(&private));
-    let services =
-        DesktopServices::packaged(node, CALLBACK_CAPACITY, &private, source.clone(), publisher)
-            .gated(native);
+    let services = DesktopServices::packaged_with_network(
+        node,
+        CALLBACK_CAPACITY,
+        &private,
+        source.clone(),
+        publisher,
+        network,
+    )
+    .gated(native);
     Ok(assemble(services, source))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`
@@ -466,6 +500,7 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
         publishing,
         closing: SwarmClosing::NotStarted,
     });
+    let relay = crate::packaged_network::RelayClose::new(services.network());
     let (core, cleanup) = desktop::services::adapt(Arc::new(services), SERVICE_CAPACITY);
     (
         core,
@@ -474,6 +509,7 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
             services_done: false,
             swarm,
             model: ModelClose::new(source),
+            relay,
             failed: None,
         })),
     )

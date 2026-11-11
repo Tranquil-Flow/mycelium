@@ -445,6 +445,8 @@ pub struct PackagedHost {
     model: Option<ModelSource>,
     /// The owner's listing custody. `None`: the swarm routes keep the trait default.
     publishing: Option<Publishing>,
+    /// `DemoApp.public_relay`, the pending windows and the join seams (`crate::packaged_network`).
+    network: Arc<crate::packaged_network::Network>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -541,6 +543,7 @@ impl PackagedHost {
             Ok(authority)
         });
         let renewal = Renewal::start(authority.as_ref().ok(), &node, period);
+        let root_for_network = root.clone();
         let host = Self {
             node,
             root,
@@ -553,6 +556,10 @@ impl PackagedHost {
             authority,
             model: None,
             publishing: None,
+            network: crate::packaged_network::Network::new(
+                &root_for_network,
+                crate::packaged_network::NetworkConfig::default(),
+            ),
         };
         host.refresh_fast_mode();
         host
@@ -623,6 +630,20 @@ impl PackagedHost {
             Err(code) => eprintln!("swarm_publish_unavailable: {code}"),
         }
         self
+    }
+    /// This host with its network over `config` (the relay's hooks and the join seams) in place of
+    /// the app's own (`crate::packaged_network`); before the host is handed to its services.
+    pub fn with_network(mut self, config: crate::packaged_network::NetworkConfig) -> Self {
+        self.network = crate::packaged_network::Network::new(&self.root, config);
+        self
+    }
+    /// The host's network (relay, pending windows, join seams), for the action root and the Quit.
+    pub fn network(&self) -> Arc<crate::packaged_network::Network> {
+        self.network.clone()
+    }
+    /// The authority, or the code its state was refused with at bind (the relay's Start answers it).
+    pub fn authority_result(&self) -> Result<Arc<Mutex<Authority>>, &'static str> {
+        self.authority.clone()
     }
     /// The owner's listing custody, for the window's Quit to close.
     pub fn publishing(&self) -> Option<Publishing> {
@@ -808,13 +829,53 @@ impl Host for PackagedHost {
         app_host::pair_accept(self.authority()?, handoff)
     }
     /// The owner's window store. Without a relay origin the persistent backend answers `open`
-    /// itself (a pending window, `_open_pending_window`); list/approve/revoke are the store's.
+    /// itself (a pending window, `_open_pending_window`); list/approve/revoke are the store's,
+    /// and a code opened while the relay runs is a window on its origin.
     fn owner_window(
         &mut self,
         action: Action,
         body: &Map<String, Value>,
     ) -> Result<Json, PublicError> {
-        app_host::owner_window(self.authority()?, action, body)
+        app_host::owner_window(&self.network.cell(self.authority()?), action, body)
+    }
+    // ---- the network window and the join (lane PH3a, `crate::packaged_network`) ----
+    fn relay_state(&self) -> api::persistent::RelayState {
+        self.network.state()
+    }
+    fn close_stopped_relay(&mut self) {
+        self.network.close();
+    }
+    fn relay_origin(&self) -> Option<String> {
+        self.network.origin()
+    }
+    fn configured_public_origin(&self) -> Option<String> {
+        self.loaded().and_then(app_host::configured_public_origin)
+    }
+    /// `/api/create` with `{relay_acknowledged, max_seconds}`: the relay precedes the swarm.
+    fn start_public_relay(
+        &mut self,
+        relay_acknowledged: &Value,
+        max_seconds: &Value,
+    ) -> Result<(), PublicError> {
+        let body: Map<String, Value> = [
+            ("relay_acknowledged".to_owned(), relay_acknowledged.clone()),
+            ("max_seconds".to_owned(), max_seconds.clone()),
+        ]
+        .into_iter()
+        .collect();
+        let authority = self
+            .authority
+            .clone()
+            .map_err(|code| PublicError::new(409, code))?;
+        self.network.start(&authority, &body).map(drop)
+    }
+    fn abort_public_relay(&mut self) {
+        self.network.close();
+    }
+    fn bind_relay_seed(&mut self) {
+        if let Some(authority) = self.loaded() {
+            self.network.bind_seed(authority);
+        }
     }
     /// `POST /api/swarm/publish` (`swarm_publish.action`, app mode): the explicit opt-in.
     fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
