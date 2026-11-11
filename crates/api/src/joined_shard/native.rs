@@ -452,6 +452,17 @@ impl NativeShard {
         self.cleanup_proven = true;
         Ok(stats)
     }
+    /// Release one request's session state between requests of a multi-request
+    /// route epoch (worker `session_reset_v1`; lane EP0). It is one command
+    /// against the consent's `max_commands` and runs inside the consent wall
+    /// counted from the FIRST prepare, like a step; the worker's own cancel
+    /// flag governs it, so a route's request cancellation never interrupts it.
+    /// Weights and the worker process stay; a failure leaves the worker owned
+    /// for `close`/`abort`.
+    pub fn reset(&mut self, current: &dyn Fn() -> Result<Value>) -> Result<Value> {
+        let _ = current;
+        Err(fail("joined_native_reset_unimplemented"))
+    }
     /// After an interrupted step the socket framing is not reusable: kill and
     /// reap the exact owned child. Cleanup is proven only by the OS exit report;
     /// the evidence says `context_closed:false`, never a graceful close.

@@ -255,6 +255,16 @@ impl Worker {
     pub(crate) fn close(mut self) -> Result<Value> {
         self.close_in_place()
     }
+    /// Reset the prepared worker's stage session between requests of one
+    /// route epoch (private worker-link `session_reset_v1`, lane EP0). The
+    /// worker's OWN cancel flag governs this exchange, so a route's request
+    /// cancellation can never interrupt it. Returns the worker's session object
+    /// only when its reply has exactly the contract's shape and reports no
+    /// residue (active bytes back at or below the post-prepare baseline).
+    pub(crate) fn reset_session(&mut self, deadline: Instant) -> Result<Value> {
+        let _ = deadline;
+        Err(Error("native_session_reset_unimplemented"))
+    }
     /// Graceful close that leaves the worker owned on failure, so the caller can
     /// still kill and reap the exact child.
     pub(crate) fn close_in_place(&mut self) -> Result<Value> {

@@ -261,6 +261,48 @@ fn native_custody_refuses_changed_consent_caps_before_launch() {
     native.discard().unwrap();
 }
 
+/// EP0: a session reset between requests of one route epoch is one command
+/// against the member's consented `max_commands`, like a native step: with an
+/// allowance of one, the first reset consumes it (this custody has no worker,
+/// so it is refused `joined_native_not_prepared`) and the second is refused
+/// `joined_native_consent_exhausted` before anything else is looked at.
+#[test]
+fn a_session_reset_counts_against_the_consent_command_allowance() {
+    let p = Pair::new();
+    standing_consent::withdraw(&p.member_root, app_host::now()).unwrap();
+    let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
+    standing_consent::grant(&p.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1}}), &policy, app_host::now(), Some(16_000_000_000)).unwrap();
+    let binding = p.session.binding().unwrap();
+    standing_consent::bind(&p.member_root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).unwrap();
+    let offer = p.offer();
+    let shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let mut native = joined_shard::native::NativeShard::new(shard).unwrap();
+    let current = || {
+        p.session
+            .shard_identity(&p.signer, app_host::now())
+            .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+    };
+    let refused: Vec<&str> = (0..2)
+        .map(|_| native.reset(&current).unwrap_err().0)
+        .collect();
+    assert_eq!(
+        refused,
+        [
+            "joined_native_not_prepared",
+            "joined_native_consent_exhausted"
+        ]
+    );
+    native.discard().unwrap();
+}
+
 #[test]
 fn cancelled_native_prepare_refuses_before_scanning_partial_custody() {
     let p = Pair::new();
