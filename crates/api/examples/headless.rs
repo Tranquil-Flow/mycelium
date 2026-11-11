@@ -1737,7 +1737,12 @@ impl EndpointHost for Endpoint {
 /// endpoint seams (which lock the core) never meet the relay's own locks.
 fn start_relay(core: &Shared, body: &Map<String, Value>) -> Result<Json, PublicError> {
     let mut endpoint = Endpoint { core: core.clone() };
-    let probe: Probe = Arc::new(|| Ok(false));
+    // `_relay_is_serving` (app.py:769-776): the window renews while an owner run is active or a
+    // swarm listing is enabled (its listing points at this relay). Both are read from their own
+    // short-held cells (the run view installed at launch, the publisher's status snapshot), never
+    // the core lock, so a long action holding the core cannot starve the relay's renewal.
+    let (demo, publisher) = endpoint.with(|c| (c.demo.clone(), c.swarm_publisher.clone()));
+    let probe: Probe = Arc::new(move || Ok(demo.active() || publisher.listing_enabled()));
     let root = endpoint.with(|c| c.root.clone());
     let mut relay =
         endpoint.with(|c| std::mem::replace(&mut c.relay, OwnerRelay::new(&root, relay_hooks)));
@@ -2683,6 +2688,9 @@ mod chain_tests;
 #[cfg(test)]
 #[path = "headless/handoff_tests.rs"]
 mod handoff_tests;
+#[cfg(test)]
+#[path = "headless/relay_tests.rs"]
+mod relay_tests;
 
 fn run() -> Result<(), String> {
     let root = state_root()?;
@@ -2741,7 +2749,7 @@ fn run() -> Result<(), String> {
             published.clone(),
             session,
         )
-        .with_product(Arc::new(product::Routes::new(core.clone()))),
+        .with_product(Arc::new(product::routes(core.clone()))),
     );
     publish(&core, &published).map_err(|e| e.to_string())?;
     private_write(

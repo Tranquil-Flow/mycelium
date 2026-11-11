@@ -22,8 +22,31 @@ impl Driver for MustNotRun {
         panic!("refused desktop request started native work")
     }
 }
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
 /// A fresh private state root for the packaged action host (these chat paths never write it).
-fn private() -> std::path::PathBuf {
+fn private() -> TestRoot {
     use std::os::unix::fs::DirBuilderExt;
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "desktop-host-private-{}",
@@ -33,18 +56,20 @@ fn private() -> std::path::PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
-fn host() -> DesktopServices {
-    DesktopServices::new(
+fn host() -> (TestRoot, DesktopServices) {
+    let private = private();
+    let host = DesktopServices::new(
         NodeService::new(
             Arc::new(MustNotRun),
             "private-local-token".into(),
             node_service::native::development_qualification().unwrap(),
         ),
         NonZeroUsize::new(2).unwrap(),
-        &private(),
-    )
+        &private,
+    );
+    (private, host)
 }
 fn call(host: &DesktopServices, path: &str, body: Value) -> desktop::core::Reply {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
@@ -67,7 +92,7 @@ fn call(host: &DesktopServices, path: &str, body: Value) -> desktop::core::Reply
 }
 #[test]
 fn native_service_callback_validates_chat_without_fixture_inference() {
-    let host = host();
+    let (_private, host) = host();
     let state = call(&host, "/chat/api/state", json!({}));
     assert_eq!(state.status, 200);
     assert_eq!(
@@ -103,7 +128,7 @@ fn native_service_callback_validates_chat_without_fixture_inference() {
 }
 #[test]
 fn native_shutdown_fences_chat_before_callback_or_backend_effects() {
-    let host = host();
+    let (_private, host) = host();
     host.begin_shutdown(
         Instant::now()
             + Duration::from_millis(B::StageCleanup.span(Entries::ZERO).unwrap().millis()),
@@ -160,6 +185,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
     let fixture: Value = serde_json::from_str(TEMPLATE_FIXTURE).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let private = private();
         let host = DesktopServices::new(
             NodeService::new(
                 Arc::new(Capture(seen.clone())),
@@ -167,7 +193,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
                 node_service::native::development_qualification().unwrap(),
             ),
             NonZeroUsize::new(2).unwrap(),
-            &private(),
+            &private,
         );
         let user = case["user"].as_str().unwrap();
         let reply = call(
@@ -251,6 +277,7 @@ fn quit_after_a_failed_run_without_a_cleanup_proof_is_verified_like_v014_exit_ze
         fx["observations"]["q2_failed_run_cleanup_unproven"]["exit_code"],
         0
     );
+    let private = private();
     let host = DesktopServices::new(
         NodeService::new(
             Arc::new(DiesWithoutProof),
@@ -258,7 +285,7 @@ fn quit_after_a_failed_run_without_a_cleanup_proof_is_verified_like_v014_exit_ze
             node_service::native::development_qualification().unwrap(),
         ),
         NonZeroUsize::new(2).unwrap(),
-        &private(),
+        &private,
     );
     let sent = call(
         &host,
@@ -403,10 +430,11 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
         record: Arc::new(node_service::router_port::DevelopmentRecord::of(&node).unwrap()),
         probe: Arc::default(),
     };
+    let private = private();
     let host = DesktopServices::with_qualification(
         node,
         NonZeroUsize::new(4).unwrap(),
-        &private(),
+        &private,
         Arc::new(held.clone()),
     );
     let release = Release(held.clone());
@@ -487,6 +515,231 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     assert_eq!(verdict, Ok(Poll::Verified));
 }
 
+// ---- REVIEW-lanePH1 finding 3: a Stop answered while a send is still being admitted ----
+
+/// A run that ends only when it is cancelled (`request_cancelled`, as the native driver's token
+/// and receipt steps answer), when the test releases it (`driver_released`), or after the
+/// stage-cleanup budget (`driver_never_cancelled`). It counts its runs and whether it was cancelled.
+#[derive(Clone, Default)]
+struct UntilCancelled {
+    runs: Arc<std::sync::atomic::AtomicUsize>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    released: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Driver for UntilCancelled {
+    fn run(&self, job: &mut Job) -> Result<(), PublicError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.runs.fetch_add(1, SeqCst);
+        let deadline = Instant::now() + millis(B::StageCleanup);
+        while !job.cancelled() && !self.released.load(SeqCst) && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        if job.cancelled() {
+            self.cancelled.store(true, SeqCst);
+            return Err(PublicError::new(503, "request_cancelled"));
+        }
+        Err(PublicError::new(
+            503,
+            if self.released.load(SeqCst) {
+                "driver_released"
+            } else {
+                "driver_never_cancelled"
+            },
+        ))
+    }
+}
+/// When the page sends Stop relative to its chat send.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum StopAt {
+    /// While the send waits inside its admission (its qualification read held).
+    Admission,
+    /// Once the send answered with its request id (the request is registered).
+    Registered,
+    /// Before the send, with nothing in flight.
+    Idle,
+    /// Never.
+    Never,
+}
+/// What the page and the driver saw of one chat send.
+struct Seen {
+    /// The Stop's answer.
+    stop: Option<(u16, Value)>,
+    /// The request's `(terminal, error)` from `/chat/api/events`.
+    outcome: (Value, Value),
+    /// How many runs the driver started.
+    runs: usize,
+    /// Whether the driver's run was cancelled.
+    cancelled: bool,
+}
+/// What the page saw of one chat send with `route` (a Stop) sent at `at`: the Stop's answer, the
+/// request's `(terminal, error)` from `/chat/api/events`, how many runs the driver started and
+/// whether it was cancelled. A run that is not cancelled is released once the send answered.
+fn chat_with_stop(route: &str, at: StopAt) -> Seen {
+    use std::sync::atomic::Ordering::SeqCst;
+    let driver = UntilCancelled::default();
+    let node = NodeService::new(
+        Arc::new(driver.clone()),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let held = HeldRecord {
+        record: Arc::new(node_service::router_port::DevelopmentRecord::of(&node).unwrap()),
+        probe: Arc::default(),
+    };
+    let private = private();
+    let host = DesktopServices::with_qualification(
+        node,
+        NonZeroUsize::new(4).unwrap(),
+        &private,
+        Arc::new(held.clone()),
+    );
+    let release = Release(held.clone());
+    let stop = || {
+        let reply = answered_within(&host, "POST", route, json!({}))
+            .unwrap_or_else(|| panic!("{route} got no answer"));
+        (
+            reply.status,
+            serde_json::from_slice::<Value>(&reply.body).unwrap_or(Value::Null),
+        )
+    };
+    let mut stopped = None;
+    if at == StopAt::Idle {
+        stopped = Some(stop());
+    }
+    if at == StopAt::Admission {
+        held.hold();
+    }
+    let (sent_tx, sent) = std::sync::mpsc::channel();
+    host.submit(
+        ServiceRequest {
+            method: "POST".into(),
+            target: "/chat/api/send".into(),
+            headers: vec![
+                ("x-mycelium-chat".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(&json!({"prompt":"hello","max_new_tokens":1})).unwrap(),
+        },
+        Box::new(move |reply| sent_tx.send(reply).unwrap_or_default()),
+    );
+    if at == StopAt::Admission {
+        held.wait_inside();
+        stopped = Some(stop());
+        drop(release);
+    }
+    let sent = sent
+        .recv_timeout(millis(B::WorkerStartup))
+        .expect("the send never answered");
+    assert_eq!(sent.status, 200, "{}", String::from_utf8_lossy(&sent.body));
+    let id = serde_json::from_slice::<Value>(&sent.body).unwrap()["request_id"].clone();
+    match at {
+        StopAt::Registered => stopped = Some(stop()),
+        StopAt::Idle | StopAt::Never => driver.released.store(true, SeqCst),
+        StopAt::Admission => {}
+    }
+    let deadline = Instant::now() + millis(B::StageCleanup) + millis(B::WorkerStartup);
+    let mut after = 0;
+    let outcome = loop {
+        let events = call(
+            &host,
+            "/chat/api/events",
+            json!({"request_id": id, "after": after}),
+        );
+        assert_eq!(
+            events.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&events.body)
+        );
+        let events: Value = serde_json::from_slice(&events.body).unwrap();
+        if events["done"] == true {
+            break (events["terminal"].clone(), events["error"].clone());
+        }
+        after = events["next"].as_u64().unwrap();
+        assert!(Instant::now() < deadline, "the request never ended");
+    };
+    host.begin_shutdown(Instant::now() + millis(B::StageCleanup))
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    let verdict = loop {
+        match host.poll_shutdown() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert_eq!(verdict, Ok(Poll::Verified));
+    Seen {
+        stop: stopped,
+        outcome,
+        runs: driver.runs.load(SeqCst),
+        cancelled: driver.cancelled.load(SeqCst),
+    }
+}
+/// v0.1.4 registers the chat record before `send` returns and its Stop's `cancel_all` cancels
+/// every record not done, stickily: a record whose backend client does not exist yet is
+/// cancelled the moment it does (chat.py:319-333, 349-354, 418-452; demo_chain.py:1324-1336 @
+/// f4e366e9). So a Stop the page sends while its send is still being admitted
+/// (`Serving::submit`, before the request is live) cancels that request, exactly as the same
+/// Stop does once the send answered, for `/api/serving/stop` and `/api/demo/stop` alike.
+fn a_stop_during_the_send_admission_cancels_that_request(route: &str) {
+    let registered = chat_with_stop(route, StopAt::Registered);
+    assert_eq!(
+        registered.stop,
+        Some((200, json!({"stopped": true}))),
+        "{route}"
+    );
+    assert_eq!(
+        (registered.runs, registered.cancelled),
+        (1, true),
+        "{route}: Stop after registration"
+    );
+    let admission = chat_with_stop(route, StopAt::Admission);
+    assert_eq!(
+        admission.stop,
+        Some((200, json!({"stopped": true}))),
+        "{route}"
+    );
+    assert!(
+        admission.runs == 0 || admission.cancelled,
+        "{route}: a Stop answered while the send was admitted was lost: its run went on \
+         uncancelled ({:?})",
+        admission.outcome
+    );
+    assert_eq!(
+        admission.outcome, registered.outcome,
+        "{route}: the request did not end as a Stop after registration ends it"
+    );
+}
+#[test]
+fn a_serving_stop_during_the_send_admission_cancels_that_request() {
+    a_stop_during_the_send_admission_cancels_that_request("/api/serving/stop");
+}
+#[test]
+fn a_demo_stop_during_the_send_admission_cancels_that_request() {
+    a_stop_during_the_send_admission_cancels_that_request("/api/demo/stop");
+}
+/// The admission's Stop check never reaches a later request: a Stop with nothing in flight
+/// leaves the next send to run, as v0.1.4's `cancel_all` cancels only the records it finds.
+#[test]
+fn a_stop_with_no_send_in_flight_does_not_cancel_the_next_send() {
+    for route in ["/api/serving/stop", "/api/demo/stop"] {
+        let unstopped = chat_with_stop(route, StopAt::Never);
+        assert_eq!((unstopped.runs, unstopped.cancelled), (1, false), "{route}");
+        let after_stop = chat_with_stop(route, StopAt::Idle);
+        assert_eq!(
+            after_stop.stop,
+            Some((200, json!({"stopped": true}))),
+            "{route}"
+        );
+        assert_eq!(
+            (after_stop.runs, after_stop.cancelled),
+            (1, false),
+            "{route}: an earlier Stop cancelled a later send"
+        );
+        assert_eq!(after_stop.outcome, unstopped.outcome, "{route}");
+    }
+}
+
 // ---- laneB16f §5 / laneB18 FU1: admitted requests are capped, Stop and status stay servable ----
 
 /// The packaged window's callbacks (`packaged::assemble`: the `desktop::services` core over the
@@ -516,7 +769,7 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
         Arc::new(held.clone()),
     );
     let source = node_service::app_host::ModelSource::new(
-        private.clone(),
+        private.to_path_buf(),
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
     );
     let (core, mut cleanup) = node_service::packaged::assemble(services, source);
@@ -615,4 +868,160 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
         }
     };
     assert_eq!(verdict, Ok(Poll::Verified));
+}
+
+// ---- REVIEW-lanePH1 finding 4: the chat state's model gate never starves status and Stop ----
+
+/// The packaged model gate held by the test: every `/chat/*` request waits inside it, as one
+/// waits for a native compose under the gate's lock, until released.
+#[derive(Clone, Default)]
+struct HeldGate(Arc<(std::sync::Mutex<(bool, usize)>, std::sync::Condvar)>);
+impl HeldGate {
+    fn wait_inside(&self, count: usize) {
+        let deadline = Instant::now() + millis(B::WorkerStartup);
+        let mut gate = self.0.0.lock().unwrap();
+        while gate.1 < count {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !left.is_zero(),
+                "only {} requests reached the model gate",
+                gate.1
+            );
+            gate = self.0.1.wait_timeout(gate, left).unwrap().0;
+        }
+    }
+    fn release(&self) {
+        self.0.0.lock().unwrap().0 = true;
+        self.0.1.notify_all();
+    }
+}
+impl node_service::desktop_host::ModelGate for HeldGate {
+    fn ready(&self) -> Result<(), PublicError> {
+        let mut gate = self.0.0.lock().unwrap();
+        gate.1 += 1;
+        self.0.1.notify_all();
+        while !gate.0 {
+            gate = self.0.1.wait(gate).unwrap();
+        }
+        gate.1 -= 1;
+        Ok(())
+    }
+}
+/// Releases the held gate however the test ends.
+struct OpenGate(HeldGate);
+impl Drop for OpenGate {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+/// v0.1.4's page server (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9) has no admitted cap:
+/// the page's status and its Stop answer whatever the chat state's handlers are doing. On the
+/// packaged window the chat state first waits for the model gate (a native compose under the
+/// gate's lock); with the page's four callbacks waiting there, the status and Stop still answer,
+/// neither with a capacity refusal.
+#[test]
+fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
+    use desktop::{channel::Request, lifecycle::Cleanup};
+    let node = NodeService::new(
+        Arc::new(FailsAtOnce),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let private = private();
+    let gate = HeldGate::default();
+    let open = OpenGate(gate.clone());
+    let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
+        .gated(Arc::new(gate.clone()));
+    let source = node_service::app_host::ModelSource::new(
+        private.to_path_buf(),
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+    );
+    let (core, mut cleanup) = node_service::packaged::assemble(services, source);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let submit = |method: &str, path: &str| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        core.submit(
+            Request {
+                window: "main".into(),
+                method: method.into(),
+                uri: format!("{}{path}", desktop::channel::ORIGIN),
+                headers: vec![
+                    (
+                        if path.starts_with("/chat/") {
+                            "x-mycelium-chat"
+                        } else {
+                            "x-mycelium-action"
+                        }
+                        .into(),
+                        "1".into(),
+                    ),
+                    ("content-type".into(), "application/json".into()),
+                ],
+                body: b"{}".to_vec(),
+            },
+            Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+        );
+        rx
+    };
+    let answer = |rx: std::sync::mpsc::Receiver<desktop::core::Reply>, what: &str| {
+        let reply = rx
+            .recv_timeout(millis(B::ModelSelection))
+            .unwrap_or_else(|_| panic!("{what} got no answer"));
+        let body: Value = serde_json::from_slice(&reply.body).unwrap_or(Value::Null);
+        (reply.status, body)
+    };
+    let states: Vec<_> = (0..node_service::packaged::CALLBACK_CAPACITY.get())
+        .map(|_| submit("POST", "/chat/api/state"))
+        .collect();
+    gate.wait_inside(states.len());
+    for (method, path) in [("GET", "/api/status"), ("POST", "/api/serving/stop")] {
+        let reply = answer(submit(method, path), path);
+        assert!(
+            !(reply.0 == 503
+                && matches!(
+                    reply.1["error"].as_str(),
+                    Some("desktop_callback_capacity" | "native_service_capacity")
+                )),
+            "{path} refused for capacity while the chat state waits for the model: {reply:?}"
+        );
+    }
+    drop(open);
+    for state in states {
+        let state = answer(state, "a chat state");
+        assert_eq!(state.0, 200, "{state:?}");
+    }
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    let verdict = loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert_eq!(verdict, Ok(Poll::Verified));
+}
+
+/// The roots `private()` makes are removed with their contents when the test ends, also when it
+/// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
+#[test]
+fn a_test_root_is_removed_when_its_test_ends() {
+    let root = private();
+    let path = root.to_path_buf();
+    std::fs::write(path.join("left.json"), b"{}").unwrap();
+    drop(root);
+    assert!(!path.exists(), "{path:?} was left behind");
+    let mut failing = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let root = private();
+        failing = Some(root.to_path_buf());
+        panic!("a failing test");
+    }));
+    assert!(unwound.is_err());
+    let failing = failing.unwrap();
+    assert!(
+        !failing.exists(),
+        "{failing:?} was left behind by a failing test"
+    );
 }

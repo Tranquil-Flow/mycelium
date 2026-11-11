@@ -259,6 +259,21 @@ impl ModelSource {
             acquisition.close().map_err(|e| e.code().to_owned())
         })
     }
+    /// How long Quit's [`Self::close`] may block: `thread.join(timeout=float(timeout) + 2.0)`
+    /// (acquisition.py:1535-1541 @ f4e366e9), the transport's timeout and the join slack.
+    pub(crate) fn close_patience(&self) -> Duration {
+        let slack = BudgetId::AcquisitionCloseJoinSlack
+            .span(Entries::ZERO)
+            .map_or_else(
+                |_| {
+                    // Unknown: Quit starts the close at once.
+                    eprintln!("model source: acquisition_close_budget_invalid");
+                    Duration::MAX
+                },
+                |slack| Duration::from_millis(slack.millis()),
+            );
+        self.transport.timeout().saturating_add(slack)
+    }
     fn lock(&self) -> MutexGuard<'_, Acquisitions> {
         // Plain values and a cloneable handle: a panicked holder cannot leave them half-written.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -404,6 +419,16 @@ impl Drop for HostLoop {
 pub struct Publishing {
     pub publisher: Arc<AppPublisher>,
     pub ticks: Arc<HostLoop>,
+}
+/// The status's `swarm` field (`_swarm_status`, app.py:430-436, and `swarm_publish.status`,
+/// swarm_publish.py:524-530 @ f4e366e9) of this process, which is always the owner
+/// ([`PackagedHost`]'s `owner`): the custody's own status, or `{enabled: false, mode: null}` for a
+/// host without one. Never blocks on directory work.
+pub fn swarm_status(publishing: Option<&Publishing>) -> Value {
+    publishing.map_or_else(
+        || serde_json::json!({"enabled": false, "mode": null}),
+        |publishing| publishing.publisher.status_json(),
+    )
 }
 /// Whole seconds of wall time for the signed directory documents.
 pub fn unix_seconds() -> i64 {
@@ -617,6 +642,11 @@ impl PackagedHost {
     /// The owner's listing custody, for the window's Quit to close.
     pub fn publishing(&self) -> Option<Publishing> {
         self.publishing.clone()
+    }
+    /// The owner authority this host loaded (`None`: its state was refused at bind), for the
+    /// product routes to read the owner's seed (`crate::packaged_product`).
+    pub fn authority_handle(&self) -> Option<Arc<Mutex<Authority>>> {
+        self.authority.as_ref().ok().cloned()
     }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {

@@ -147,6 +147,8 @@ struct Gate {
     tasks: Vec<JoinHandle<()>>,
     /// Stop, status and the chat state: never refused for the admitted ones, bounded apart.
     servable: Vec<JoinHandle<()>>,
+    /// Status, the Stops and Quit: never refused for the chat state either, bounded apart.
+    control: Vec<JoinHandle<()>>,
     failed: bool,
 }
 /// The callbacks the page can always reach (v0.1.4's gateway serves Stop, status and health
@@ -165,6 +167,12 @@ fn always_servable(request: &ServiceRequest) -> bool {
                     | "/api/quit"
             )
     )
+}
+/// The always-servable callbacks the chat state cannot crowd out: its handler first waits for the
+/// packaged model gate (a native compose under the gate's lock), and v0.1.4's page server has no
+/// admitted cap at all (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9).
+fn control(request: &ServiceRequest) -> bool {
+    always_servable(request) && request.target != "/chat/api/state"
 }
 struct Chat {
     id: String,
@@ -208,6 +216,8 @@ pub struct DesktopServices {
     loops: Vec<Arc<HostLoop>>,
     /// The packaged host's listing custody, closed by the packaged Quit (not by these services).
     publishing: Option<Publishing>,
+    /// The product evidence routes over the packaged host's owner seed (`crate::packaged_product`).
+    product: Arc<dyn api::desktop::ProductRoutes>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -304,6 +314,8 @@ impl DesktopServices {
         let fast_mode = host.fast_mode_process();
         let loops = host.loops();
         let publishing = host.publishing();
+        let product =
+            crate::packaged_product::routes(host.authority_handle(), node.clone(), serving.clone());
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
@@ -314,12 +326,14 @@ impl DesktopServices {
             fast_mode,
             loops,
             publishing,
+            product,
             node,
             model: None,
             gate: Arc::new(Mutex::new(Gate {
                 closing: false,
                 tasks: Vec::new(),
                 servable: Vec::new(),
+                control: Vec::new(),
                 failed: false,
             })),
             chat: Arc::new(Mutex::new(None)),
@@ -374,8 +388,16 @@ impl DesktopServices {
             serde_json::from_slice(&request.body)
                 .map_err(|_| PublicError::new(400, "invalid_json"))?
         };
+        if let Some(reply) = crate::packaged_product::dispatch(&*self.product, &request, &body) {
+            return reply;
+        }
         match (request.method.as_str(), request.target.as_str()) {
-            ("GET", "/api/status") => Self::json(self.node.published_status()?),
+            ("GET", "/api/status") => {
+                // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
+                let mut status = self.node.published_status()?;
+                status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                Self::json(status)
+            }
             ("POST", "/chat/api/state") if body == json!({}) => {
                 let closed = self
                     .gate
@@ -649,10 +671,11 @@ impl Services for DesktopServices {
         let Gate {
             tasks,
             servable,
+            control: controls,
             failed,
             ..
         } = &mut *gate;
-        for slots in [&mut *tasks, &mut *servable] {
+        for slots in [&mut *tasks, &mut *servable, &mut *controls] {
             for task in std::mem::take(slots) {
                 if task.is_finished() {
                     if task.join().is_err() {
@@ -668,7 +691,9 @@ impl Services for DesktopServices {
             return;
         }
         // Stop and status never wait for a slot the admitted requests hold; they have their own.
-        let slots = if always_servable(&request) {
+        let slots = if control(&request) {
+            controls
+        } else if always_servable(&request) {
             servable
         } else {
             tasks
@@ -721,6 +746,7 @@ impl Services for DesktopServices {
             .tasks
             .iter()
             .chain(&gate.servable)
+            .chain(&gate.control)
             .any(|t| !t.is_finished())
         {
             return Ok(Poll::Pending);
@@ -728,6 +754,7 @@ impl Services for DesktopServices {
         let ended: Vec<_> = std::mem::take(&mut gate.tasks)
             .into_iter()
             .chain(std::mem::take(&mut gate.servable))
+            .chain(std::mem::take(&mut gate.control))
             .collect();
         for task in ended {
             if task.join().is_err() {

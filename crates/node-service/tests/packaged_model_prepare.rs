@@ -81,7 +81,30 @@ impl Driver for MustNotRun {
         panic!("a model action started native work")
     }
 }
-fn state_root() -> PathBuf {
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
+fn state_root() -> TestRoot {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "packaged-model-prepare-{}",
         node_service::service::random_id().unwrap()
@@ -90,7 +113,7 @@ fn state_root() -> PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
 fn identity() -> Value {
     api::acquisition::model_identity(&api::model_catalog::registered()[1])
@@ -757,7 +780,7 @@ fn packaged_model_prepare_download_reaches_prepared() {
     let exe = std::env::current_exe().unwrap();
     assert!(!exe.parent().unwrap().join("native/resource_probe").exists());
     let bare = state_root();
-    let bundled = ModelSource::new(bare.clone(), repository.transport());
+    let bundled = ModelSource::new(bare.to_path_buf(), repository.transport());
     let bare_host = action_root(&bare, &bundled);
     assert_created(&bare_host);
     assert_eq!(
@@ -1230,6 +1253,17 @@ fn assembled(
     source: &ModelSource,
     driver: Arc<dyn Driver>,
 ) -> (Arc<dyn Core>, AppCleanup) {
+    let (core, mut cleanup, _) = assembled_unbound(state, source, driver);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    (core, cleanup)
+}
+/// [`assembled`] before the shell bound its clock, with the window's services (a clone of what
+/// the core serves) for the test to call directly.
+fn assembled_unbound(
+    state: &Path,
+    source: &ModelSource,
+    driver: Arc<dyn Driver>,
+) -> (Arc<dyn Core>, AppCleanup, DesktopServices) {
     let dirs = packaged::prepare_dirs(state).unwrap();
     let node = NodeService::new(
         driver,
@@ -1242,9 +1276,8 @@ fn assembled(
         &dirs.private,
         source.clone(),
     );
-    let (core, mut cleanup) = packaged::assemble(services, source.clone());
-    cleanup.bind_clock(Instant::now()).unwrap();
-    (core, cleanup)
+    let (core, cleanup) = packaged::assemble(services.clone(), source.clone());
+    (core, cleanup, services)
 }
 /// Quit to its result: the cleanup's first non-pending answer within the quit allowance.
 fn quit_result(cleanup: &mut AppCleanup) -> Result<Poll, desktop::lifecycle::CleanupError> {
@@ -1372,6 +1405,253 @@ fn packaged_quit_reports_a_failed_close() {
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
+// ---- REVIEW-lanePH1 finding 1: Quit closes the download when the window's services hang ----
+
+/// A chat run that ignores cancellation and ends only when the test releases it (then failed, so
+/// the node service can settle it: `FX-SLICE1-quit-after-failure`); until then the window's
+/// services cannot finish their cleanup.
+#[derive(Clone, Default)]
+struct HeldRun(Arc<(Mutex<bool>, Condvar)>);
+impl HeldRun {
+    fn release(&self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+    }
+}
+impl Driver for HeldRun {
+    fn run(&self, _: &mut Job) -> Result<(), PublicError> {
+        let mut released = self.0.0.lock().unwrap();
+        while !*released {
+            released = self.0.1.wait(released).unwrap();
+        }
+        Err(PublicError::new(503, "worker_native_exited"))
+    }
+}
+/// Releases the held run however the test ends.
+struct ReleaseRun(HeldRun);
+impl Drop for ReleaseRun {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+/// Quit's first non-pending answer within the api model-route tests' patience (`None`: still
+/// pending then), and whether the acquisition's `closed` was on disk while Quit still answered
+/// pending.
+fn quit_watching_the_close(
+    cleanup: &mut AppCleanup,
+    state: &Path,
+) -> (Option<Result<Poll, desktop::lifecycle::CleanupError>>, bool) {
+    let deadline = Instant::now() + patience();
+    let mut closed_while_pending = false;
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => {
+                closed_while_pending |= acquisition_status(state)["state"] == "closed";
+                std::thread::sleep(poll());
+            }
+            Ok(Poll::Pending) => return (None, closed_while_pending),
+            other => return (Some(other), closed_while_pending),
+        }
+    }
+}
+/// The window with a chat run its services wait for, and its Quit begun as the shell begins it,
+/// with the shell's clock bound `elapsed` before now (how long the window has already waited).
+fn quit_with_hung_services(
+    state: &Path,
+    elapsed: Duration,
+) -> (Arc<dyn Core>, AppCleanup, ReleaseRun) {
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(state, repository.transport(), &observed);
+    let run = HeldRun::default();
+    let (core, mut cleanup, _) = assembled_unbound(state, &source, Arc::new(run.clone()));
+    assert_created(&core);
+    let sent = core.call(
+        "/chat/api/send",
+        json!({"prompt": "hello", "max_new_tokens": 1}),
+    );
+    assert_eq!(sent.0, 200, "send: {}", sent.1);
+    cleanup
+        .bind_clock(Instant::now().checked_sub(elapsed).unwrap())
+        .unwrap();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    (core, cleanup, ReleaseRun(run))
+}
+/// v0.1.4's `DemoApp.close` joins the run for at most its allowance (`run.join(60)`) and closes the
+/// acquisition whatever the join found (app.py:1835-1847 @ f4e366e9), so the next launch answers
+/// `closed`. Here the window's services stay pending (a chat run that never ends) and the shell's
+/// clock says the allowance is nearly spent (less than the closes' own budget left): Quit closes
+/// the download now, still within the allowance, and stays pending while the services do; once
+/// the allowance ran out it reports the services' deadline (exit 0, as v0.1.4 ignores the join),
+/// never `Verified`.
+#[test]
+fn packaged_quit_closes_the_download_in_time_when_the_window_services_hang() {
+    let state = state_root();
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let left = millis(B::AcquisitionCloseJoinSlack);
+    let (core, mut cleanup, release) = quit_with_hung_services(&state, allowance - left);
+    let (result, closed_while_pending) = quit_watching_the_close(&mut cleanup, &state);
+    assert!(
+        closed_while_pending,
+        "Quit did not close the download while the window's services hung ({result:?}): {}",
+        acquisition_status(&state)
+    );
+    assert_eq!(
+        result,
+        Some(Err(desktop::lifecycle::CleanupError::Deadline)),
+        "the services never finished: Quit reports their deadline"
+    );
+    assert_eq!(acquisition_status(&state), status_doc("closed", 0, 0, None));
+    drop(release);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+/// The same with the allowance already spent when the window polls its Quit: the closes still
+/// run, and the services' deadline is reported only once `closed` is written.
+#[test]
+fn packaged_quit_reports_the_window_deadline_after_the_closes_ran() {
+    let state = state_root();
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let (core, mut cleanup, release) =
+        quit_with_hung_services(&state, allowance + millis(B::AcquisitionCloseJoinSlack));
+    let (result, _) = quit_watching_the_close(&mut cleanup, &state);
+    assert_eq!(
+        (result, acquisition_status(&state)),
+        (
+            Some(Err(desktop::lifecycle::CleanupError::Deadline)),
+            status_doc("closed", 0, 0, None)
+        ),
+        "the window's deadline was not reported after the download was closed"
+    );
+    drop(release);
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+/// A run that waits for its cancellation (bounded by the stage-cleanup budget) and says whether
+/// it was cancelled.
+#[derive(Clone, Default)]
+struct EndsWhenCancelled(Arc<(Mutex<Option<bool>>, Condvar)>);
+impl Driver for EndsWhenCancelled {
+    fn run(&self, job: &mut Job) -> Result<(), PublicError> {
+        let deadline = Instant::now() + millis(B::StageCleanup);
+        while !job.cancelled() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        *self.0.0.lock().unwrap() = Some(job.cancelled());
+        self.0.1.notify_all();
+        Err(PublicError::new(503, "request_cancelled"))
+    }
+}
+/// REVIEW-lanePH1 finding 1b: when the window's services refuse Quit's begin (here the shell never
+/// bound its clock), v0.1.4 still runs every later step of `DemoApp.close` (app.py:1815-1847):
+/// the window stops admitting requests (`self.closed.set()`), its running chat is cancelled
+/// (`owner_run.stop()`), the download is closed, and the refusal is reported last.
+#[test]
+fn packaged_quit_fences_and_cancels_when_the_services_refuse_its_begin() {
+    let state = state_root();
+    let repository = Repository::start(tiny_snapshot(None));
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let run = EndsWhenCancelled::default();
+    let (core, mut cleanup, services) = assembled_unbound(&state, &source, Arc::new(run.clone()));
+    assert_created(&core);
+    let sent = core.call(
+        "/chat/api/send",
+        json!({"prompt": "hello", "max_new_tokens": 1}),
+    );
+    assert_eq!(sent.0, 200, "send: {}", sent.1);
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let cancelled = {
+        let (ended, changed) = &*run.0;
+        let ended = changed
+            .wait_timeout_while(ended.lock().unwrap(), millis(B::ModelSelection), |e| {
+                e.is_none()
+            })
+            .unwrap()
+            .0;
+        *ended
+    };
+    assert_eq!(
+        cancelled,
+        Some(true),
+        "Quit's begin was refused and the running chat was never cancelled"
+    );
+    let state_answer = services.call("/chat/api/state", json!({}));
+    assert_eq!(
+        refusal(&state_answer),
+        (503, "application_closed"),
+        "Quit's begin was refused and the window still admits requests"
+    );
+    assert_eq!(
+        quit_result(&mut cleanup),
+        Err(desktop::lifecycle::CleanupError::Clock)
+    );
+    assert_eq!(acquisition_status(&state), status_doc("closed", 0, 0, None));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// v0.1.4's `DemoApp.close` runs `swarm_publish.close` and then `acquisition.close()`, keeping the
+/// first failure (app.py:1824-1847 @ f4e366e9): a failed listing close is reported only once the
+/// download's close ended (REVIEW-lanePH1 finding 5, mutant Mss). The listing state cannot be read
+/// (its file is a directory), so the custody's close fails at once, while the download's close
+/// waits for the attempt its held response keeps: Quit stays pending until that close was
+/// written, then reports the failure (exit 3).
+#[test]
+fn packaged_quit_reports_a_failed_swarm_close_only_after_the_download_close_ended() {
+    let state = state_root();
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(
+            state
+                .join("v02-node/private")
+                .join(api::swarm::publisher::app::DB_FILE),
+        )
+        .unwrap();
+    let files = tiny_snapshot(None);
+    let repository = Repository::start(files.clone());
+    let observed = Observed::new(permissive());
+    let (core, mut cleanup) = packaged_core(&state, &repository, &observed);
+    assert_created(&core);
+    repository.hold("model.safetensors");
+    assert_started(&download(&core));
+    repository.wait_held();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    for _ in 0..6 {
+        assert_eq!(
+            cleanup.poll(),
+            Ok(Poll::Pending),
+            "Quit reported the listing's failed close while the download's close still ran"
+        );
+        assert_ne!(acquisition_status(&state)["state"], "closed");
+        std::thread::sleep(poll());
+    }
+    repository.release();
+    assert_eq!(
+        quit_result(&mut cleanup),
+        Err(desktop::lifecycle::CleanupError::Poll),
+        "a failed swarm close was reported as a clean Quit"
+    );
+    assert_eq!(
+        acquisition_status(&state),
+        status_doc(
+            "closed",
+            size_of(&files, "config.json"),
+            total(&files),
+            None
+        )
+    );
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 // ---- `_policy_loop`: a running download follows this Mac and the saved consent ----
 
 /// `DemoApp._policy_loop` (app.py:1007-1030 @ f4e366e9): every second, while an attempt is active,
@@ -1436,6 +1716,59 @@ fn packaged_policy_loop_cancels_a_download_when_this_mac_changes() {
         drop(host);
         std::fs::remove_dir_all(&state).unwrap_or_default();
     }
+}
+
+/// `_policy_loop`'s first gate (app.py:1018-1023 @ f4e366e9): an active attempt whose Mac is no
+/// longer a running, current member of its swarm is cancelled with `membership_required`, before
+/// this Mac is observed (REVIEW-lanePH1 finding 2, mutant Mmb). The packaged routes cannot lose
+/// the membership with a download running (`/api/stop` cancels the attempt itself; revocation is
+/// not ported), so the attempt is the run model's acquisition this Mac's state root keeps
+/// (`ModelSource` clones share it) and the loop judging it is that of a second packaged host over
+/// a private root whose owner never created a swarm (its authority is not running).
+#[test]
+fn packaged_policy_loop_cancels_a_download_when_the_membership_is_lost() {
+    let state = state_root();
+    let files = tiny_snapshot(None);
+    let repository = Repository::start(files.clone());
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let owner = action_root(&state, &source);
+    assert_created(&owner);
+    let unenrolled = state.join("unenrolled-private");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&unenrolled)
+        .unwrap();
+    let not_member = DesktopServices::with_model_source(
+        NodeService::new(
+            Arc::new(MustNotRun),
+            "private-local-token".into(),
+            node_service::native::development_qualification().unwrap(),
+        ),
+        NonZeroUsize::new(4).unwrap(),
+        &unenrolled,
+        source.clone(),
+    );
+    repository.hold("model.safetensors");
+    assert_started(&download(&owner));
+    repository.wait_held();
+    wait_for(
+        "the download of a Mac that is no member was never cancelled",
+        || source.policy_error() == Some("membership_required"),
+    );
+    repository.release();
+    assert_eq!(
+        settled(&state),
+        status_doc(
+            "cancelled",
+            size_of(&files, "config.json"),
+            total(&files),
+            None
+        )
+    );
+    drop(not_member);
+    drop(owner);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
 /// The policy loop ends with the window: Quit stops it and verifies only once it has ended and
@@ -1530,4 +1863,27 @@ fn packaged_run_model_choice_reopens_the_acquisition_and_answers_an_open_failure
     );
     drop(host);
     std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// The roots `state_root()` makes are removed with their contents when the test ends, also when it
+/// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
+#[test]
+fn a_test_root_is_removed_when_its_test_ends() {
+    let root = state_root();
+    let path = root.to_path_buf();
+    std::fs::write(path.join("left.json"), b"{}").unwrap();
+    drop(root);
+    assert!(!path.exists(), "{path:?} was left behind");
+    let mut failing = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let root = state_root();
+        failing = Some(root.to_path_buf());
+        panic!("a failing test");
+    }));
+    assert!(unwound.is_err());
+    let failing = failing.unwrap();
+    assert!(
+        !failing.exists(),
+        "{failing:?} was left behind by a failing test"
+    );
 }

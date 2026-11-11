@@ -39,9 +39,10 @@ use std::{
 /// the dedicated desktop callback capacity is still an open L1 request.
 pub const CALLBACK_CAPACITY: NonZeroUsize = NonZeroUsize::new(4).unwrap();
 /// The window core's own bound on callbacks in flight: the admitted ones ([`CALLBACK_CAPACITY`])
-/// plus as many always-servable Stop/status callbacks, which `DesktopServices` bounds apart.
+/// plus as many chat-state callbacks and as many status/Stop/Quit callbacks, which
+/// `DesktopServices` bounds apart.
 pub const SERVICE_CAPACITY: NonZeroUsize =
-    CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(2).unwrap());
+    CALLBACK_CAPACITY.saturating_mul(NonZeroUsize::new(3).unwrap());
 pub const MODEL_NOT_INSTALLED: &str = "model_not_installed";
 /// The prepared model is located but its native driver could not be composed (the cause is on
 /// stderr); the next chat request tries again.
@@ -156,9 +157,19 @@ pub enum AppCleanup {
 /// attempt is asked to stop and the listing's tick loop to end as Quit begins, whatever the
 /// services answered; once the services finished, verified or failed, the custody is closed
 /// (`swarm_publish.close`) and the acquisition is closed, each on its own thread; Quit then
-/// reports the first failure in that order (exit 3), else `Verified`.
+/// reports the first failure in that order (exit 3), else `Verified`. Services still running when
+/// only the closes' budget is left of the allowance (v0.1.4's `run.join(60)` ran out) do not hold
+/// the closes back: they run, a failed one is reported, else the services' deadline is.
 pub struct WindowQuit {
     services: ServiceCleanup<DesktopServices>,
+    /// The services that cleanup wraps: their own begin still runs when the cleanup refused it.
+    window: Arc<DesktopServices>,
+    /// The shell's clock origin and Quit's deadline on it (v0.1.4's `run.join(60)` allowance).
+    origin: Option<Instant>,
+    deadline: Option<Instant>,
+    /// How long the closes may take (the longer of the two): they start this long before the
+    /// deadline at the latest, whatever the services still do.
+    close_budget: Duration,
     /// The services' cleanup has its result (verified or failed): nothing polls them again.
     services_done: bool,
     swarm: Option<SwarmClose>,
@@ -170,23 +181,42 @@ impl WindowQuit {
     fn keep(&mut self, error: CleanupError) {
         self.failed.get_or_insert(error);
     }
+    /// The closes must start now to end within the allowance (also when it is unknown).
+    fn closes_due(&self) -> bool {
+        self.deadline
+            .and_then(|deadline| deadline.checked_sub(self.close_budget))
+            .is_none_or(|start| Instant::now() >= start)
+    }
 }
 impl Cleanup for AppCleanup {
     fn bind_clock(&mut self, origin: std::time::Instant) -> Result<(), CleanupError> {
         match self {
-            Self::Service(quit) => quit.services.bind_clock(origin),
+            Self::Service(quit) => {
+                quit.origin = Some(origin);
+                quit.services.bind_clock(origin)
+            }
             Self::Nothing => Ok(()),
         }
     }
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
             Self::Service(quit) => {
+                quit.deadline = quit.origin.and_then(|origin| {
+                    origin.checked_add(Duration::from_millis(deadline.millis()))
+                });
                 // A refused begin is kept, not returned: the shell stops polling a Quit whose
-                // begin failed, and the acquisition must still be closed.
+                // begin failed, and the acquisition must still be closed. The services' own steps
+                // (admission fence, loops, live request, node fence) still run.
                 if let Err(error) = quit.services.begin(deadline) {
                     eprintln!("window cleanup: begin failed: {error:?}");
                     quit.keep(error);
                     quit.services_done = true;
+                    if let Err(also) = desktop::services::Services::begin_shutdown(
+                        &*quit.window,
+                        quit.deadline.unwrap_or_else(Instant::now),
+                    ) {
+                        eprintln!("window cleanup: services begin failed: {also:?}");
+                    }
                 }
                 if let Some(swarm) = &quit.swarm {
                     swarm.publishing.ticks.stop();
@@ -202,7 +232,10 @@ impl Cleanup for AppCleanup {
             Self::Service(quit) => {
                 if !quit.services_done {
                     match quit.services.poll() {
-                        Ok(Poll::Pending) => return Ok(Poll::Pending),
+                        // v0.1.4 joins the run for its allowance, then closes whatever the join
+                        // found (app.py:1835-1847): the closes start in time to end within it.
+                        Ok(Poll::Pending) if !quit.closes_due() => return Ok(Poll::Pending),
+                        Ok(Poll::Pending) => {}
                         Ok(Poll::Verified) => quit.services_done = true,
                         Err(error) => {
                             quit.keep(error);
@@ -223,6 +256,17 @@ impl Cleanup for AppCleanup {
                     if let Err(error) = step {
                         quit.keep(error);
                     }
+                }
+                // The closes ran with the services still running: a failed close is reported now;
+                // else the services keep the rest of the allowance, then their deadline is reported.
+                if !quit.services_done && quit.failed.is_none() {
+                    if quit
+                        .deadline
+                        .is_some_and(|deadline| Instant::now() < deadline)
+                    {
+                        return Ok(Poll::Pending);
+                    }
+                    return Err(CleanupError::Deadline);
                 }
                 quit.failed.map_or(Ok(Poll::Verified), Err)
             }
@@ -466,11 +510,29 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
         publishing,
         closing: SwarmClosing::NotStarted,
     });
-    let (core, cleanup) = desktop::services::adapt(Arc::new(services), SERVICE_CAPACITY);
+    let swarm_budget = swarm.as_ref().map_or(Duration::ZERO, |_| {
+        BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453
+            .span(Entries::ZERO)
+            .map_or_else(
+                |_| {
+                    // Unknown: the closes start at once.
+                    eprintln!("window cleanup: swarm_close_budget_invalid");
+                    Duration::MAX
+                },
+                |budget| Duration::from_millis(budget.millis()),
+            )
+    });
+    let close_budget = swarm_budget.max(source.close_patience());
+    let window = Arc::new(services);
+    let (core, cleanup) = desktop::services::adapt(window.clone(), SERVICE_CAPACITY);
     (
         core,
         AppCleanup::Service(Box::new(WindowQuit {
             services: cleanup,
+            window,
+            origin: None,
+            deadline: None,
+            close_budget,
             services_done: false,
             swarm,
             model: ModelClose::new(source),
