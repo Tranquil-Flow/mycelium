@@ -5,7 +5,11 @@
 //! terminal disposition (`_translate`, peer.py:299-323: revoked / stale / unknown / expired) wins at
 //! once over a live session.
 use api::peer::status_membership;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 fn root(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
@@ -17,7 +21,7 @@ fn root(tag: &str) -> PathBuf {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     dir
 }
-fn dispose(root: &PathBuf, state: &str) {
+fn dispose(root: &Path, state: &str) {
     let path = root.join("membership.disposition.json");
     let record = serde_json::json!({
         "protocol": "mycelium.remote_mac_membership_disposition.v1",
