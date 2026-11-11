@@ -219,6 +219,8 @@ impl Drop for Forwarder {
 }
 struct Member {
     link: Box<dyn MemberLink + Send>,
+    /// The link's `cancel_operation` (the work port interrupts with it).
+    cancel: work::Cancel,
     registration: Value,
     node_id: String,
     pid: u64,
@@ -287,6 +289,7 @@ impl Owner {
             .to_owned();
         let pid = status["pid"].as_u64().ok_or("member_status_invalid")?;
         self.members.push(Member {
+            cancel: Arc::new(link.canceller()),
             link: Box::new(link),
             registration,
             node_id: node_id.clone(),
@@ -596,7 +599,7 @@ impl Owner {
                 node_id: m.node_id,
                 link: m.link,
                 registration: m.registration,
-                cancel: None,
+                cancel: Some(m.cancel),
             });
         }
         self.parked = parked;
@@ -681,6 +684,7 @@ impl Owner {
                 .ok_or("owner_work_member_lost")?;
             let m = back.remove(i);
             self.members.push(Member {
+                cancel: m.cancel.ok_or("owner_work_member_lost")?,
                 link: m.link,
                 registration: m.registration,
                 node_id,

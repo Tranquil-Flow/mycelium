@@ -279,6 +279,10 @@ const FAILED: &str = "failed";
 const STOPPED: &str = "stopped";
 /// Lease-expired participant (v0.1.4 `managed_control_member_stale`).
 const MEMBER_STALE: &str = "joined_route_member_stale";
+/// A member stage not proven released (v0.1.4 demo_chain.py:1392-1396).
+const CLEANUP_UNPROVEN: &str = "owner_target_cleanup_unproven";
+/// A link's `finish` that ran out of time: the reply may still arrive.
+const REPLY_TIMEOUT: &str = "member_reply_timeout";
 
 struct Flow {
     state: &'static str,
@@ -291,8 +295,11 @@ struct Flow {
     serve_reports: Vec<Value>,
     /// Every route of this run expires here: publish wall + worker wall.
     expires_at: Option<f64>,
-    /// The closing epoch's teardown refusal, if any (cleanup not proven).
+    /// The closing epoch's teardown refusal, or `owner_target_cleanup_unproven`
+    /// when a member's stage was not proven released (cleanup not proven).
     cleanup_error: Option<String>,
+    /// Per member: its stage release on the run's exit (`discard`).
+    member_cleanup: Vec<Value>,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -316,7 +323,7 @@ impl Shared {
         json!({"state":flow.state,"error_code":flow.error,"route_ready":false,
             "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
             "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
-            "cleanup_error":flow.cleanup_error})
+            "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup})
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -396,6 +403,7 @@ impl OwnerWork {
                     serve_reports: Vec::new(),
                     expires_at: None,
                     cleanup_error: None,
+                    member_cleanup: Vec::new(),
                 }),
                 changed: Condvar::new(),
             }),
@@ -570,11 +578,13 @@ impl WorkPort for OwnerWork {
         // the members' worker wall.
         let expires_at = (self.clocks.wall)() + wall as f64;
         let within = super::span(B::MemberChosenWall).map_err(|e| refused(e.code))?;
+        let stop_allowance = stop_allowance(wall, start.members.len())
+            .ok_or_else(|| refused("budget_unavailable"))?;
         let (commands, inbox) = mpsc::channel();
         let worker = Worker {
             shared: self.shared.clone(),
             coordinator: self.coordinator.clone(),
-            members: start.members,
+            members: start.members.into_iter().map(Member::from).collect(),
             plan: start.plan,
             network: start.network,
             codec: start.codec,
@@ -583,6 +593,7 @@ impl WorkPort for OwnerWork {
             expires_at,
             within,
             serve_within: Duration::from_secs(wall),
+            stop_allowance,
         };
         self.proposal = Some(proposal.clone());
         self.shared.update(|f| {
@@ -627,11 +638,78 @@ impl SlicesPort for OwnerWork {
     }
 }
 
+/// `_stop_deadline` (demo_chain.py:1240-1253): how long the owner waits for
+/// its members' cleanup, from the smallest worker wall and the member count.
+fn stop_allowance(wall: u64, members: usize) -> Option<Duration> {
+    let span = B::EffectiveStopAllowance
+        .wall_span(
+            Span::from_millis(wall.checked_mul(1000)?),
+            Entries::new(u64::try_from(members).ok()?),
+        )
+        .ok()?;
+    Some(Duration::from_millis(span.millis()))
+}
+/// A member link that counts operations begun and not yet answered, and
+/// whether a `receive` was begun (from then on the member may hold the stage:
+/// it takes custody before any carrier work).
+struct Counted {
+    inner: Box<dyn MemberLink + Send>,
+    outstanding: usize,
+    custody: bool,
+}
+impl MemberLink for Counted {
+    fn begin(&mut self, command: Value) -> Result<(), Refusal> {
+        let receive = command["command"] == "receive";
+        self.inner.begin(command)?;
+        self.outstanding += 1;
+        self.custody |= receive;
+        Ok(())
+    }
+    fn finish(&mut self, within: Duration) -> Result<Value, Refusal> {
+        let reply = self.inner.finish(within);
+        if !matches!(&reply, Err(Refusal(code)) if code == REPLY_TIMEOUT) {
+            self.outstanding = self.outstanding.saturating_sub(1);
+        }
+        reply
+    }
+}
+/// A participant inside the worker.
+struct Member {
+    node_id: String,
+    link: Counted,
+    registration: Value,
+    cancel: Option<Cancel>,
+}
+impl From<WorkMember> for Member {
+    fn from(m: WorkMember) -> Self {
+        Self {
+            node_id: m.node_id,
+            link: Counted {
+                inner: m.link,
+                outstanding: 0,
+                custody: false,
+            },
+            registration: m.registration,
+            cancel: m.cancel,
+        }
+    }
+}
+impl From<Member> for WorkMember {
+    fn from(m: Member) -> Self {
+        Self {
+            node_id: m.node_id,
+            link: m.link.inner,
+            registration: m.registration,
+            cancel: m.cancel,
+        }
+    }
+}
+
 /// The owned worker of one started run.
 struct Worker {
     shared: Arc<Shared>,
     coordinator: Arc<seed::Coordinator>,
-    members: Vec<WorkMember>,
+    members: Vec<Member>,
     plan: Plan,
     network: Network,
     codec: Arc<dyn Codec>,
@@ -642,6 +720,8 @@ struct Worker {
     within: Duration,
     /// The members' worker wall: how long a member may serve one route.
     serve_within: Duration,
+    /// How long the exit waits for the members' stage release.
+    stop_allowance: Duration,
 }
 impl Worker {
     fn run(mut self) -> Vec<WorkMember> {
@@ -651,8 +731,10 @@ impl Worker {
             Some(epoch) => self.retire(epoch),
             None => Ok(()),
         };
+        // R1: every exit releases what the members hold.
+        let discarded = self.release_members();
         // A teardown failure is kept on its own even when the work failed first.
-        let cleanup = released.as_ref().err().map(closed);
+        let cleanup = released.as_ref().err().map(closed).or(discarded);
         let failure = worked.err().or(released.err());
         self.shared.update(|f| {
             f.route = None;
@@ -666,7 +748,63 @@ impl Worker {
                 None => f.state = STOPPED,
             }
         });
-        self.members
+        self.members.into_iter().map(WorkMember::from).collect()
+    }
+    /// R1 (v0.1.4 teardown, demo_chain.py:1283-1320, 1380): on every exit,
+    /// cancel what members still run (`cancel_operation`) and drain those
+    /// replies, then ask every member that began a `receive` to `discard`
+    /// (closes its native worker and discards the stage bytes; the member's
+    /// own `discard`), all under ONE deadline: the run's stop allowance. A
+    /// refusal, a missing or unconfirmed answer leaves the cleanup unproven
+    /// (`owner_target_cleanup_unproven`), reported per member, never swallowed.
+    fn release_members(&mut self) -> Option<String> {
+        let end = Instant::now() + self.stop_allowance;
+        let left = || end.saturating_duration_since(Instant::now());
+        for m in &self.members {
+            if let (true, Some(cancel)) = (m.link.outstanding > 0, &m.cancel) {
+                cancel();
+            }
+        }
+        let mut rows = Vec::new();
+        let mut asked = Vec::new();
+        for (i, m) in self.members.iter_mut().enumerate() {
+            while m.link.outstanding > 0 {
+                if let Err(Refusal(code)) = m.link.finish(left())
+                    && code == REPLY_TIMEOUT
+                {
+                    break;
+                }
+            }
+            if !m.link.custody {
+                continue;
+            }
+            let begun = match m.link.outstanding {
+                0 => m.link.begin(json!({"command":"discard"})),
+                _ => Err(refusal(REPLY_TIMEOUT)),
+            };
+            match begun {
+                Ok(()) => asked.push(i),
+                Err(Refusal(code)) => {
+                    rows.push(json!({"node_id":m.node_id,"discarded":false,"code":code}))
+                }
+            }
+        }
+        for i in asked {
+            let m = &mut self.members[i];
+            rows.push(match m.link.finish(left()) {
+                Ok(r) if r["inert_bytes_discarded"] == true || r["nothing_owned"] == true => {
+                    m.link.custody = false;
+                    json!({"node_id":m.node_id,"discarded":true})
+                }
+                Ok(_) => {
+                    json!({"node_id":m.node_id,"discarded":false,"code":"member_discard_unconfirmed"})
+                }
+                Err(Refusal(code)) => json!({"node_id":m.node_id,"discarded":false,"code":code}),
+            });
+        }
+        let unproven = rows.iter().any(|r| r["discarded"] != true);
+        self.shared.update(|f| f.member_cleanup = rows);
+        unproven.then(|| CLEANUP_UNPROVEN.to_owned())
     }
     fn stopped(&self) -> Result<(), Refusal> {
         if self.stop.load(Ordering::SeqCst) {
@@ -708,7 +846,7 @@ impl Worker {
                 .zip(&offers)
                 .map(|(m, offer)| EpochStage {
                     node_id: &m.node_id,
-                    link: m.link.as_mut(),
+                    link: &mut m.link,
                     offer,
                 })
                 .collect();
@@ -747,7 +885,7 @@ impl Worker {
             let done = transfer_stage(
                 source,
                 &self.coordinator,
-                m.link.as_mut(),
+                &mut m.link,
                 &m.registration,
                 &m.node_id,
                 &self.plan.document,
@@ -774,7 +912,7 @@ impl Worker {
                     .ranges
                     .get(&m.node_id)
                     .ok_or_else(|| refusal("joined_route_range_invalid"))?,
-                member: m.link.as_mut(),
+                member: &mut m.link,
                 offer,
             });
         }
@@ -804,7 +942,7 @@ impl Worker {
                 .iter_mut()
                 .map(|m| SettleStage {
                     node_id: &m.node_id,
-                    link: m.link.as_mut(),
+                    link: &mut m.link,
                 })
                 .collect();
             reports = settle_members(&epoch, &mut stages, self.serve_within)?.0;
