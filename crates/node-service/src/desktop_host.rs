@@ -147,6 +147,8 @@ struct Gate {
     tasks: Vec<JoinHandle<()>>,
     /// Stop, status and the chat state: never refused for the admitted ones, bounded apart.
     servable: Vec<JoinHandle<()>>,
+    /// Status, the Stops and Quit: never refused for the chat state either, bounded apart.
+    control: Vec<JoinHandle<()>>,
     failed: bool,
 }
 /// The callbacks the page can always reach (v0.1.4's gateway serves Stop, status and health
@@ -165,6 +167,12 @@ fn always_servable(request: &ServiceRequest) -> bool {
                     | "/api/quit"
             )
     )
+}
+/// The always-servable callbacks the chat state cannot crowd out: its handler first waits for the
+/// packaged model gate (a native compose under the gate's lock), and v0.1.4's page server has no
+/// admitted cap at all (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9).
+fn control(request: &ServiceRequest) -> bool {
+    always_servable(request) && request.target != "/chat/api/state"
 }
 struct Chat {
     id: String,
@@ -325,6 +333,7 @@ impl DesktopServices {
                 closing: false,
                 tasks: Vec::new(),
                 servable: Vec::new(),
+                control: Vec::new(),
                 failed: false,
             })),
             chat: Arc::new(Mutex::new(None)),
@@ -662,10 +671,11 @@ impl Services for DesktopServices {
         let Gate {
             tasks,
             servable,
+            control: controls,
             failed,
             ..
         } = &mut *gate;
-        for slots in [&mut *tasks, &mut *servable] {
+        for slots in [&mut *tasks, &mut *servable, &mut *controls] {
             for task in std::mem::take(slots) {
                 if task.is_finished() {
                     if task.join().is_err() {
@@ -681,7 +691,9 @@ impl Services for DesktopServices {
             return;
         }
         // Stop and status never wait for a slot the admitted requests hold; they have their own.
-        let slots = if always_servable(&request) {
+        let slots = if control(&request) {
+            controls
+        } else if always_servable(&request) {
             servable
         } else {
             tasks
@@ -734,6 +746,7 @@ impl Services for DesktopServices {
             .tasks
             .iter()
             .chain(&gate.servable)
+            .chain(&gate.control)
             .any(|t| !t.is_finished())
         {
             return Ok(Poll::Pending);
@@ -741,6 +754,7 @@ impl Services for DesktopServices {
         let ended: Vec<_> = std::mem::take(&mut gate.tasks)
             .into_iter()
             .chain(std::mem::take(&mut gate.servable))
+            .chain(std::mem::take(&mut gate.control))
             .collect();
         for task in ended {
             if task.join().is_err() {

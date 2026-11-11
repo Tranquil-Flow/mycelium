@@ -37,7 +37,30 @@ const SOURCE: &str = "model-source-7ae557604adf";
 fn millis(id: B) -> Duration {
     Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
 }
-fn state_root() -> PathBuf {
+/// A test-owned directory, removed with its contents when the test ends, also when it fails
+/// (REVIEW-lanePH1 finding 8). Bind it before anything that uses it, so it is dropped last.
+struct TestRoot(std::path::PathBuf);
+impl std::ops::Deref for TestRoot {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl AsRef<std::path::Path> for TestRoot {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+impl Drop for TestRoot {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("test root {:?} not removed: {e}", self.0);
+        }
+    }
+}
+fn state_root() -> TestRoot {
     let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
         "packaged-publisher-{}",
         node_service::service::random_id().unwrap()
@@ -46,7 +69,7 @@ fn state_root() -> PathBuf {
         .mode(0o700)
         .create(&root)
         .unwrap();
-    root
+    TestRoot(root)
 }
 fn private(state: &Path) -> PathBuf {
     state.join("v02-node/private")
@@ -62,10 +85,12 @@ impl Observer for Permissive {
         }
     }
 }
-/// A loopback directory that accepts, counts and holds every connection without answering.
+/// A loopback directory that accepts, counts and holds every connection without answering, and
+/// counts the connections its clients closed.
 struct SilentDirectory {
     origin: String,
     accepted: Arc<AtomicUsize>,
+    closed: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     server: Option<JoinHandle<()>>,
 }
@@ -74,32 +99,56 @@ impl SilentDirectory {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        let (accepted, stop) = (
+        let (accepted, closed, stop) = (
+            Arc::new(AtomicUsize::new(0)),
             Arc::new(AtomicUsize::new(0)),
             Arc::new(AtomicBool::new(false)),
         );
-        let (counting, stopping) = (accepted.clone(), stop.clone());
+        let (counting, ending, stopping) = (accepted.clone(), closed.clone(), stop.clone());
         let server = std::thread::spawn(move || {
-            let mut held = Vec::new();
+            let mut held: Vec<std::net::TcpStream> = Vec::new();
             while !stopping.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        stream.set_nonblocking(true).unwrap();
                         counting.fetch_add(1, Ordering::SeqCst);
                         held.push(stream);
                     }
                     Err(_) => std::thread::sleep(millis(B::OwnerPoll) / 50),
                 }
+                // A request's bytes are read and dropped; end of stream is the client's close.
+                held.retain_mut(|stream| {
+                    let mut request = [0u8; 4096];
+                    match std::io::Read::read(stream, &mut request) {
+                        Ok(0) => {
+                            ending.fetch_add(1, Ordering::SeqCst);
+                            false
+                        }
+                        Ok(_) => true,
+                        Err(e) => {
+                            let open = e.kind() == std::io::ErrorKind::WouldBlock;
+                            if !open {
+                                ending.fetch_add(1, Ordering::SeqCst);
+                            }
+                            open
+                        }
+                    }
+                });
             }
         });
         Self {
             origin,
             accepted,
+            closed,
             stop,
             server: Some(server),
         }
     }
     fn accepted(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
+    }
+    fn closed(&self) -> usize {
+        self.closed.load(Ordering::SeqCst)
     }
 }
 impl Drop for SilentDirectory {
@@ -256,4 +305,95 @@ fn packaged_quit_closes_the_download_when_the_swarm_close_fails() {
     assert_eq!(acquisition_state(&state), "closed");
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// Quit while the custody's tick is inside a directory exchange (the directory never answers): the
+/// close waits for that pass only until its own deadline (`close(now, 5 s)`, `thread.join(5)`,
+/// swarm_publish.py:450-455 @ f4e366e9) and the tick is left to end on its own (its state is
+/// durable before the exchange), so Quit is verified within the close budget with the tick's
+/// connection still open (REVIEW-lanePH1 finding 5: the until-deadline bound).
+#[test]
+fn packaged_quit_leaves_a_tick_held_in_a_directory_exchange_at_the_close_deadline() {
+    let state = state_root();
+    let directory = SilentDirectory::start();
+    // The packaged process never makes a listing public (no owner run, no relay), so its custody
+    // only ever exchanges to withdraw one an earlier process listed: here this owner's state from
+    // a process whose listing attempt got no answer (it may be listed) and whose Quit could not
+    // withdraw it, which leaves withdrawal debt.
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(private(&state))
+        .unwrap();
+    {
+        let earlier = api::swarm::publisher::app::AppPublisher::new(&private(&state));
+        let body = json!({"directory": directory.origin, "name": "Packaged swarm",
+                          "access_mode": "request", "description": "A packaged owner"});
+        earlier.publish(true, body.as_object().unwrap()).unwrap();
+        let serving = json!({"state": "serving", "route_ready": true,
+                             "registry_origin": "http://127.0.0.1:9", "participants": [{}]});
+        let facts = api::swarm::publisher::app::OwnerFacts::from_owner_run(
+            true,
+            Some(&serving),
+            Some("Qwen/Qwen2.5-0.5B-Instruct"),
+            Some("https://entry.example.org"),
+        );
+        earlier
+            .tick(node_service::app_host::unix_seconds(), &facts)
+            .unwrap();
+        earlier
+            .close(node_service::app_host::unix_seconds(), Duration::ZERO)
+            .unwrap();
+        assert!(earlier.withdrawal_pending(), "no withdrawal debt was left");
+    }
+    let accepted = directory.accepted();
+    let (core, mut cleanup) = packaged_core(&state);
+    // The custody's first pass opens its withdrawal exchange with the directory, which never
+    // answers; Quit begins while that exchange has most of its own budget left.
+    let deadline = Instant::now() + millis(B::WorkerStartup);
+    while directory.accepted() == accepted {
+        assert!(
+            Instant::now() < deadline,
+            "the custody's tick never reached the directory"
+        );
+        std::thread::sleep(millis(B::OwnerPoll) / 50);
+    }
+    let (result, took) = quit(&mut cleanup);
+    assert_eq!(result, Ok(Poll::Verified));
+    assert_eq!(
+        directory.accepted() - directory.closed(),
+        1,
+        "Quit waited for the tick's directory exchange to end (took {took:?})"
+    );
+    assert!(
+        took < millis(B::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453) * 2,
+        "Quit took {took:?}"
+    );
+    assert_eq!(acquisition_state(&state), "closed");
+    drop(core);
+    drop(directory);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// The roots `state_root()` makes are removed with their contents when the test ends, also when it
+/// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
+#[test]
+fn a_test_root_is_removed_when_its_test_ends() {
+    let root = state_root();
+    let path = root.to_path_buf();
+    std::fs::write(path.join("left.json"), b"{}").unwrap();
+    drop(root);
+    assert!(!path.exists(), "{path:?} was left behind");
+    let mut failing = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let root = state_root();
+        failing = Some(root.to_path_buf());
+        panic!("a failing test");
+    }));
+    assert!(unwound.is_err());
+    let failing = failing.unwrap();
+    assert!(
+        !failing.exists(),
+        "{failing:?} was left behind by a failing test"
+    );
 }

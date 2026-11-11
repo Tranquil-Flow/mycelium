@@ -566,6 +566,8 @@ pub struct Serving {
     source: Arc<dyn QualificationSource>,
     live: Mutex<Option<Live>>,
     admitting: Mutex<()>,
+    /// Stops this root answered ([`Serving::stop_live`]), counted under the `live` lock.
+    stops: std::sync::atomic::AtomicU64,
 }
 impl Serving {
     pub fn new(
@@ -588,6 +590,7 @@ impl Serving {
             source,
             live: Mutex::new(None),
             admitting: Mutex::new(()),
+            stops: std::sync::atomic::AtomicU64::new(0),
         })
     }
     pub fn ledger(&self) -> Ledger {
@@ -604,6 +607,11 @@ impl Serving {
     /// node service's active run when the page gets its id, as before.
     pub fn submit(&self, prompt: &str, max_new_tokens: u64) -> Result<Admitted, PublicError> {
         let _one = lock(&self.admitting);
+        // v0.1.4 registers the chat record before `send` returns, and its Stop's `cancel_all` is
+        // sticky (chat.py:319-333, 349-354, 418-452 @ f4e366e9): a Stop answered from here on,
+        // while this request is not live yet, is this request's Stop. It never waits for this.
+        let stops = self.stops.load(Ordering::SeqCst);
+        let node_stops = self.port.node.stops()?;
         self.port.prune(&self.gateway);
         let binding = match self.source.current(None) {
             Ok(Some(current)) if current.route_ready => current.binding,
@@ -630,10 +638,18 @@ impl Serving {
             .gateway
             .subscribe(&request_id, None, Some(&token))
             .map_err(|AdmissionError(code)| conflict(code))?;
-        *lock(&self.live) = Some(Live {
-            id: request_id.clone(),
-            token,
-        });
+        let stopped = {
+            let mut live = lock(&self.live);
+            *live = Some(Live {
+                id: request_id.clone(),
+                token,
+            });
+            self.stops.load(Ordering::SeqCst) != stops
+        };
+        // `/api/serving/stop` found nothing live: it cancels this request as it cancels a live one.
+        if stopped {
+            self.cancel_live();
+        }
         let may_hold_run = match self.port.await_start(&request_id, &self.gateway) {
             Ok(start) => !matches!(start, Start::Unstarted),
             Err(refused) => {
@@ -641,6 +657,19 @@ impl Serving {
                 return Err(refused);
             }
         };
+        // The node service's Stop (`/api/demo/stop`, and `/api/serving/stop` after the gateway's)
+        // found no run of this request: its job is cancelled as that Stop cancels an active run
+        // (sticky at the port until the job exists).
+        let node_stopped = match self.port.node.stops() {
+            Ok(now) => now != node_stops,
+            Err(e) => {
+                eprintln!("serving: stop count unreadable: {}", e.code);
+                true
+            }
+        };
+        if may_hold_run && node_stopped {
+            self.port.dispatch_cancel(&request_id);
+        }
         Ok(Admitted {
             request_id,
             subscription,
@@ -672,6 +701,11 @@ impl Serving {
     /// (demo_chain.py:1324-1336, `chat.cancel_all` -> the gateway's cancel), then waits, within
     /// the stage-cleanup budget, for the gateway to publish the request's terminal.
     pub fn stop_live(&self) {
+        // Counted under the `live` lock: a send still being admitted sees it once it is live.
+        {
+            let _live = lock(&self.live);
+            self.stops.fetch_add(1, Ordering::SeqCst);
+        }
         let Some(id) = self.cancel_live() else {
             return;
         };

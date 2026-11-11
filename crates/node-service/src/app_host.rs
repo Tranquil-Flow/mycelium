@@ -259,6 +259,21 @@ impl ModelSource {
             acquisition.close().map_err(|e| e.code().to_owned())
         })
     }
+    /// How long Quit's [`Self::close`] may block: `thread.join(timeout=float(timeout) + 2.0)`
+    /// (acquisition.py:1535-1541 @ f4e366e9), the transport's timeout and the join slack.
+    pub(crate) fn close_patience(&self) -> Duration {
+        let slack = BudgetId::AcquisitionCloseJoinSlack
+            .span(Entries::ZERO)
+            .map_or_else(
+                |_| {
+                    // Unknown: Quit starts the close at once.
+                    eprintln!("model source: acquisition_close_budget_invalid");
+                    Duration::MAX
+                },
+                |slack| Duration::from_millis(slack.millis()),
+            );
+        self.transport.timeout().saturating_add(slack)
+    }
     fn lock(&self) -> MutexGuard<'_, Acquisitions> {
         // Plain values and a cloneable handle: a panicked holder cannot leave them half-written.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
