@@ -8,7 +8,7 @@
 mod fake_route_gateway;
 use api::chat_service::{
     ChatService, ChatTeardown, Clock, GatewayError, HttpRouteGateway, MonotonicClock, Prompt,
-    RequestCancel, RouteGateway, RunChats, RunRoute, Streamed, Teardown,
+    RequestCancel, RouteGateway, RunChats, RunRoute, Streamed, Teardown, TimingFile,
 };
 use budgets::{BudgetId as B, Entries};
 use fake_route_gateway::{End, FakeGateway, Script};
@@ -78,8 +78,17 @@ fn run_over(gateway: Arc<dyn RouteGateway>, status: Option<Value>) -> Arc<FakeRu
 fn http(fake: &FakeGateway) -> Arc<dyn RouteGateway> {
     Arc::new(HttpRouteGateway::new(fake.addr(), fake.bearer()))
 }
+/// The timing file `path`, admitted under its own folder as the state root.
+fn timing_file(path: &std::path::Path) -> TimingFile {
+    TimingFile::under(path.parent().unwrap(), path).unwrap()
+}
 fn service(run: Arc<FakeRun>, timing: Option<PathBuf>) -> ChatService {
-    ChatService::new(run, Arc::new(MonotonicClock::default()), timing).unwrap()
+    ChatService::new(
+        run,
+        Arc::new(MonotonicClock::default()),
+        timing.as_deref().map(timing_file),
+    )
+    .unwrap()
 }
 fn prompt(text: &str, max_new_tokens: u64) -> Prompt {
     Prompt {
@@ -508,7 +517,7 @@ fn the_timing_record_is_the_shipped_arithmetic() {
     let chat = ChatService::new(
         run_over(gateway, Some(serving("run-7"))),
         clock,
-        Some(timing.clone()),
+        Some(timing_file(&timing)),
     )
     .unwrap();
     let sent = chat.send("local", prompt("hi", 3)).unwrap();
@@ -524,15 +533,12 @@ fn the_timing_record_is_the_shipped_arithmetic() {
 #[test]
 fn the_timing_file_is_refused_under_the_v014_app_folder() {
     let root = root();
-    let fake = FakeGateway::start(Script::completed(&["x"]));
-    let refused = ChatService::new(
-        run_over(http(&fake), Some(serving("run-1"))),
-        Arc::new(MonotonicClock::default()),
-        Some(
-            root.0
-                .join("Mycelium A13 macOS Demo")
-                .join("chat-timing.jsonl"),
-        ),
+    let refused = TimingFile::under(
+        &root.0,
+        &root
+            .0
+            .join("Mycelium A13 macOS Demo")
+            .join("chat-timing.jsonl"),
     )
     .err()
     .map(|e| e.code);
@@ -632,4 +638,95 @@ fn the_runs_handle_keeps_its_runs_facts_and_forgets_them_with_a_fresh_run() {
             Teardown::CeilingReached,
         ]
     );
+}
+
+/// REVIEW-lanePH3B-S5 F4 (rulings 20/25): the timing file is admitted by its CANONICAL path (the
+/// deepest existing ancestor resolved, symlinks followed) and compared case-insensitively, as the
+/// default (case-insensitive) macOS volume does: nothing under v0.1.4's folders
+/// (`Mycelium A13 macOS Demo`, __main__.py:67, installer.py:121; `Mycelium/programs`,
+/// installer.py:117, launch_location.py:30), and nothing outside the state root the host was built
+/// with. The reviewer's three cases: a lower-case variant, a symlinked parent, `Mycelium/programs`.
+#[test]
+fn the_timing_file_is_refused_by_its_canonical_path_and_outside_the_state_root() {
+    let root = root();
+    let state = root.0.join("state");
+    std::fs::create_dir(&state).unwrap();
+    let refused = |path: PathBuf| {
+        TimingFile::under(&state, &path)
+            .err()
+            .map(|e| (e.status, e.code))
+    };
+    let refusal = Some((500, "chat_timing_path_refused"));
+    // A lower-case variant of v0.1.4's state folder (the same folder on the default volume).
+    let lower = state.join("lc").join("mycelium a13 macos demo");
+    std::fs::create_dir_all(&lower).unwrap();
+    assert_eq!(refused(lower.join("chat-timing.jsonl")), refusal, "lower-case");
+    // A symlinked parent whose target is v0.1.4's folder: lexically harmless.
+    let demo = state.join("v014").join("Mycelium A13 macOS Demo");
+    std::fs::create_dir_all(&demo).unwrap();
+    std::os::unix::fs::symlink(&demo, state.join("evidence")).unwrap();
+    assert_eq!(
+        refused(state.join("evidence").join("chat-timing.jsonl")),
+        refusal,
+        "symlinked parent"
+    );
+    // v0.1.4's program folder, existing or not yet.
+    assert_eq!(
+        refused(state.join("Mycelium").join("programs").join("t.jsonl")),
+        refusal,
+        "Mycelium/programs"
+    );
+    // Outside the state root, also through `..` below a missing folder.
+    assert_eq!(
+        refused(root.0.join("elsewhere.jsonl")),
+        refusal,
+        "outside"
+    );
+    assert_eq!(
+        refused(state.join("missing").join("..").join("..").join("x.jsonl")),
+        refusal,
+        "dot-dot"
+    );
+    // A final component that is a symlink (an append would follow it).
+    let target = state.join("target.jsonl");
+    std::fs::write(&target, b"").unwrap();
+    std::os::unix::fs::symlink(&target, state.join("link.jsonl")).unwrap();
+    assert_eq!(refused(state.join("link.jsonl")), refusal, "symlink file");
+    // Accepted: a plain file under the state root, also spelled through a symlinked ANCESTOR of the
+    // root (`/var` -> `/private/var` on macOS: the default temp dir, not canonicalized).
+    let real = state.join("real");
+    std::fs::create_dir(&real).unwrap();
+    assert_eq!(refused(real.join("chat-timing.jsonl")), None, "plain");
+    let spelled = std::env::temp_dir().join(root.0.file_name().unwrap()).join("state");
+    assert_eq!(
+        TimingFile::under(&spelled, &spelled.join("real").join("chat-timing.jsonl"))
+            .err()
+            .map(|e| e.code),
+        None,
+        "symlinked ancestor of the root"
+    );
+}
+
+/// A timing file swapped for a symlink after it was admitted is not followed (O_NOFOLLOW): the
+/// completed chat's line is not written through it (REVIEW-lanePH3B-S5 F4, `append`).
+#[test]
+fn a_timing_file_swapped_for_a_symlink_is_not_followed() {
+    let root = root();
+    let timing = root.0.join("chat-timing.jsonl");
+    let file = TimingFile::under(&root.0, &timing).unwrap();
+    let target = root.0.join("target.jsonl");
+    std::fs::write(&target, b"").unwrap();
+    std::os::unix::fs::symlink(&target, &timing).unwrap();
+    let clock = Arc::new(ManualClock::default());
+    let gateway = Arc::new(Scripted {
+        clock: clock.clone(),
+        at: vec![(100, "a")],
+        end: 200,
+    });
+    let chat = ChatService::new(run_over(gateway, Some(serving("run-1"))), clock, Some(file))
+        .unwrap();
+    let sent = chat.send("local", prompt("hi", 1)).unwrap();
+    let (_, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(last["terminal"], "completed");
+    assert_eq!(std::fs::read(&target).unwrap(), b"", "the symlink was followed");
 }

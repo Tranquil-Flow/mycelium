@@ -233,6 +233,10 @@ pub struct DesktopServices {
     chat_run: Option<api::chat_service::ChatService>,
     /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
     run_chats: Option<api::chat_service::RunChats>,
+    /// The node's state root these services were built with: `private`'s parent (`<state
+    /// root>/v02-node` in the packaged composition, packaged.rs:76-89). The chat timing file must
+    /// lie under it (lane S5F).
+    node_root: Option<std::path::PathBuf>,
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
@@ -377,6 +381,12 @@ impl DesktopServices {
         run: Arc<dyn api::chat_service::RunRoute>,
         timing: Option<std::path::PathBuf>,
     ) -> Result<Self, PublicError> {
+        let refused = PublicError::new(500, "chat_timing_path_refused");
+        let timing = match (timing, &self.node_root) {
+            (None, _) => None,
+            (Some(path), Some(root)) => Some(api::chat_service::TimingFile::under(root, &path)?),
+            (Some(_), None) => return Err(refused),
+        };
         let chat = api::chat_service::ChatService::new(
             run,
             Arc::new(api::chat_service::MonotonicClock::default()),
@@ -476,6 +486,7 @@ impl DesktopServices {
             rate: Arc::default(),
             chat_run: None,
             run_chats: None,
+            node_root: private.parent().map(Path::to_path_buf),
             started: std::time::Instant::now(),
             capacity,
         }

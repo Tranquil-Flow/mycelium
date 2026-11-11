@@ -398,7 +398,7 @@ struct State {
 struct Inner {
     run: Arc<dyn RunRoute>,
     clock: Arc<dyn Clock>,
-    timing: Option<PathBuf>,
+    timing: Option<TimingFile>,
     state: Mutex<State>,
     workers: Mutex<Vec<JoinHandle<()>>>,
 }
@@ -471,16 +471,43 @@ fn v014_folder(path: &Path) -> bool {
     path.components()
         .any(|c| c.as_os_str().to_string_lossy().starts_with("Mycelium A13"))
 }
+/// The owner's per-chat timing file (JSONL, appended), admitted under the state root the host was
+/// built with and never under v0.1.4's folders (rulings 20/25).
+#[derive(Clone, Debug)]
+pub struct TimingFile {
+    path: PathBuf,
+}
+impl TimingFile {
+    /// `path` as the timing file of a host whose state root is `root`.
+    pub fn under(_root: &Path, path: &Path) -> Result<Self, PublicError> {
+        if v014_folder(path) {
+            return Err(PublicError::new(500, "chat_timing_path_refused"));
+        }
+        Ok(Self {
+            path: path.to_owned(),
+        })
+    }
+    /// Append one JSON line (a failure is reported on stderr; it never fails the chat).
+    fn append(&self, line: &Value) {
+        use std::os::unix::fs::OpenOptionsExt;
+        let written = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(&self.path)
+            .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()));
+        if let Err(e) = written {
+            eprintln!("chat: timing record not written: {:?}", e.kind());
+        }
+    }
+}
 impl ChatService {
-    /// `timing`: the owner's per-chat timing file (JSONL, appended); refused under v0.1.4's folder.
+    /// `timing`: the owner's per-chat timing file ([`TimingFile::under`]).
     pub fn new(
         run: Arc<dyn RunRoute>,
         clock: Arc<dyn Clock>,
-        timing: Option<PathBuf>,
+        timing: Option<TimingFile>,
     ) -> Result<Self, PublicError> {
-        if timing.as_deref().is_some_and(v014_folder) {
-            return Err(PublicError::new(500, "chat_timing_path_refused"));
-        }
         Ok(Self {
             inner: Arc::new(Inner {
                 run,
@@ -724,8 +751,8 @@ impl ChatService {
         }
         drop(state);
         // The record is complete (`finally`, chat.py:383-398) once its timing line is written.
-        if let (Some(line), Some(path)) = (timing, &self.inner.timing) {
-            Self::append(path, &line);
+        if let (Some(line), Some(file)) = (timing, &self.inner.timing) {
+            file.append(&line);
         }
         let mut state = self.state_lock();
         if let Some(record) = state.requests.get_mut(id) {
@@ -752,19 +779,6 @@ impl ChatService {
         json!({"ttft_ms":ttft,"decode_millitokens_s":rate,
             "request_ms":milliseconds(seconds(finished) - seconds(record.started)),
             "run_id":record.run_id})
-    }
-    /// Append one JSON line (a failure is reported on stderr; it never fails the chat).
-    fn append(path: &Path, line: &Value) {
-        use std::os::unix::fs::OpenOptionsExt;
-        let written = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600)
-            .open(path)
-            .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()));
-        if let Err(e) = written {
-            eprintln!("chat: timing record not written: {:?}", e.kind());
-        }
     }
     /// `_run_ended_by_ceiling` (chat.py:400-416).
     fn ended_by_ceiling(&self, run_id: Option<&str>) -> Option<&'static str> {
