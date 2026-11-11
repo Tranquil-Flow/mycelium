@@ -698,3 +698,47 @@ fn the_packaged_qualification_source_is_the_serving_roots_qualifier() {
     quit(host);
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
+
+/// A qualifier whose current record has its public document: the oracle's synthetic
+/// `incidents_and_conflict` record (`synthetic_test_fixture`, `route_ready: false`).
+struct Recorded(Value);
+impl QualificationSource for Recorded {
+    fn current(&self, _: Option<&str>) -> Result<Option<Qualification>, Unavailable> {
+        Ok(None)
+    }
+    fn record(&self) -> Result<Option<Value>, Unavailable> {
+        Ok(Some(self.0.clone()))
+    }
+}
+
+/// A record the serving root's source has is published as it is: with no live route to bind it to
+/// it is `conflict` / `qualification_binding_conflict`, the oracle's `incidents_and_conflict` row.
+#[test]
+fn the_serving_roots_qualification_record_reaches_the_snapshot() {
+    let fixture: Value = serde_json::from_str(ORACLE).unwrap();
+    let record = fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["case"] == "incidents_and_conflict")
+        .unwrap()["steps"][0]["qualification"]
+        .clone();
+    assert_eq!(record["protocol"], "mycelium.route_qualification.v1");
+    let root = state_root("qualification-record");
+    let host = DesktopServices::with_qualification(
+        node(),
+        NonZeroUsize::new(4).unwrap(),
+        &root,
+        Arc::new(Recorded(record)),
+    );
+    create(&host);
+    let snapshot = json_of(&get(&host, SNAPSHOT));
+    assert_source_as_oracle(
+        &snapshot,
+        "qualification-source",
+        "incidents_and_conflict",
+        0,
+    );
+    quit(host);
+    std::fs::remove_dir_all(&root).unwrap_or_default();
+}

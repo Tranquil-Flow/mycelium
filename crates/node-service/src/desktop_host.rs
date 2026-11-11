@@ -306,7 +306,8 @@ impl DesktopServices {
         let fast_mode = host.fast_mode_process();
         let loops = host.loops();
         let publishing = host.publishing();
-        let product = crate::packaged_product::routes(host.authority_handle(), node.clone());
+        let product =
+            crate::packaged_product::routes(host.authority_handle(), node.clone(), serving.clone());
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),

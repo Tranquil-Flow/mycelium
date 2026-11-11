@@ -21,7 +21,11 @@
 //!   the read is v0.1.4's `RouteUnavailableError('route_not_open')`, which `_follow` does not type:
 //!   `route_source_failed`. Only a cold-restart code (`ColdRouteRestartError`) would publish its own
 //!   reason; this process has no cold restart.
-use crate::service::NodeService;
+//! - qualification: the serving root's qualification source (`Serving::qualification_record`), as
+//!   `route_qualification_to_dict(qualification_source.current())` (supervisor.py:2166-2168): the
+//!   development record has no `mycelium.route_qualification.v1` document (`missing`); a source that
+//!   cannot be read (or a serving root that could not be built) publishes `qualification_source_failed`.
+use crate::{router_port::Serving, service::NodeService};
 use api::{
     app_host::Authority,
     desktop::ProductRoutes,
@@ -39,6 +43,8 @@ struct PackagedOwner {
     /// The packaged host's authority (`None`: its state was refused at bind, no owner seed).
     authority: Option<Arc<Mutex<Authority>>>,
     node: NodeService,
+    /// The serving root (its construction failure is kept as the services keep it).
+    serving: Result<Arc<Serving>, PublicError>,
 }
 impl Owner for PackagedOwner {
     /// The running owner seed, `None` while there is none, for a target, or once Quit fenced the
@@ -60,6 +66,13 @@ impl Owner for PackagedOwner {
     fn route_status(&self) -> Result<Option<Value>, SourceError> {
         Err(route_not_open())
     }
+    /// `route_qualification_to_dict(qualification_source.current())` over the serving root's source.
+    fn qualification(&self) -> Result<Option<Value>, SourceError> {
+        let serving = self.serving.as_ref().map_err(|_| SourceError::Failed)?;
+        serving
+            .qualification_record()
+            .map_err(|_| SourceError::Failed)
+    }
 }
 
 /// v0.1.4's read of a route that is not open (`RouteUnavailableError('route_not_open')`, supervisor.py:
@@ -68,12 +81,17 @@ fn route_not_open() -> SourceError {
     SourceError::Failed
 }
 
-/// The product routes of the packaged host over its authority and node service.
+/// The product routes of the packaged host over its authority, node service and serving root.
 pub fn routes(
     authority: Option<Arc<Mutex<Authority>>>,
     node: NodeService,
+    serving: Result<Arc<Serving>, PublicError>,
 ) -> Arc<dyn ProductRoutes> {
-    Arc::new(Routes::new(Arc::new(PackagedOwner { authority, node })))
+    Arc::new(Routes::new(Arc::new(PackagedOwner {
+        authority,
+        node,
+        serving,
+    })))
 }
 
 /// The window's reply for a product answer: its status, type and body.
