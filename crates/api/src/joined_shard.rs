@@ -210,7 +210,7 @@ pub fn issue_with_source_addrs(
 ) -> Result<Value> {
     let source_digest = identity::key_record_digest(source_key)
         .map_err(|_| fail("joined_shard_identity_mismatch"))?;
-    let (row, lease) = registered(coordinator, registration)?;
+    let (row, _lease) = registered(coordinator, registration)?;
     let reg = &registration["message"];
     let node = text(&reg["member"], "node_id")?;
     if recipe["node_id"] != node {
@@ -219,8 +219,19 @@ pub fn issue_with_source_addrs(
     let now = crate::app_host::now();
     let limits = grant_limits().map_err(|_| fail("budget_unavailable"))?;
     let now_ms = (now * 1000.0).floor() as u64;
-    let expires =
-        ((lease * 1000.0).floor() as u64).min(now_ms.saturating_add(limits.max_grant_ttl_ms));
+    // v0.1.4 sizes an artifact grant once, `min(DEFAULT_GRANT_TTL_MS, assignment expiry)`
+    // (`mycelium_seed/route_assignment.py:826-827`; `mycelium_live/member_transport.py:1016-1022`
+    // issues it after the slow source work so the recipient gets the whole window), and never
+    // renews it mid-transfer. Liveness is not the grant's job: both ends re-check the member's
+    // CURRENT row (generation, key, endpoint, RUNNING, unexpired lease) for every chunk, as the A13
+    // peer source does (`peer_model_source.py:256-262`). Clamping the grant to the lease current at
+    // issue failed every transfer that outlived it although the member kept renewing.
+    let ttl = budgets::BudgetId::PyMyceliumMobileArtifactGrantDefaultGrantTtlMsL37
+        .span(budgets::Entries::ZERO)
+        .map_err(|_| fail("budget_unavailable"))?
+        .millis()
+        .min(limits.max_grant_ttl_ms);
+    let expires = now_ms.saturating_add(ttl);
     let bytes = transfer["size_bytes"]
         .as_u64()
         .ok_or(fail("joined_shard_invalid"))?;
