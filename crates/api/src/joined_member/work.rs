@@ -27,6 +27,7 @@ use crate::{
     member_control,
     preferences::{resource_policy, standing_consent},
     process_identity::{Incarnation, Liveness},
+    run_exchange::owner_pin::{OwnerPin, PinRefusal, VerifiedAnnouncement},
 };
 use budgets::{BudgetId as B, Entries, MonoInstant};
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
@@ -303,35 +304,94 @@ impl Live {
         }
     }
 }
+/// Whom the member's control endpoint obeys.
+pub enum OwnerTrust {
+    /// The operator's out-of-band pin (`shard_member --owner-control`), like a join link.
+    Operator(iroh::EndpointId),
+    /// The pin of the latest owner-signed run announcement this member verified.
+    Announced(Pins),
+}
+/// The member's current announced owner pin, shared between its announcement reader and its
+/// control endpoint.
+#[derive(Clone, Default)]
+pub struct Pins(Arc<Mutex<Option<OwnerPin>>>);
+impl Pins {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Take the pin of a newly verified announcement; a verified announcement without a valid pin
+    /// clears the held one (fail closed) and names why.
+    pub fn repin(
+        &self,
+        verified: &VerifiedAnnouncement,
+    ) -> std::result::Result<OwnerPin, PinRefusal> {
+        let _ = verified;
+        Err(PinRefusal("owner_pin_unimplemented"))
+    }
+    /// The pin held now, if any.
+    pub fn current(&self) -> Option<OwnerPin> {
+        self.0.lock().ok().and_then(|held| held.clone())
+    }
+}
+impl OwnerTrust {
+    /// The owner control key obeyed now; `owner_pin_missing` when no announced pin is held.
+    pub fn owner(&self) -> Result<iroh::EndpointId> {
+        match self {
+            Self::Operator(owner) => Ok(*owner),
+            Self::Announced(_) => Err("owner_pin_unimplemented".into()),
+        }
+    }
+}
+/// Admission of one signed command that arrived on a control connection from `remote`: the
+/// connection's TLS-pinned key and the command's signing key must both be the owner key obeyed
+/// now (`member_control::verify_command`'s codes; `owner_pin_missing` without a pin).
+pub fn admit_command(
+    trust: &OwnerTrust,
+    remote: iroh::EndpointId,
+    envelope: &Value,
+    me: &iroh::EndpointId,
+    last: u64,
+    now: f64,
+) -> Result<(u64, Value)> {
+    let owner = trust.owner()?;
+    if remote != owner {
+        return Err("member_control_owner_unpinned".into());
+    }
+    member_control::verify_command(envelope, &owner, me, last, now).map_err(|e| e.code.to_owned())
+}
 /// The accept/verify/dispatch loop of the member's control endpoint, on a host the caller bound
-/// (and, in direct-LAN mode, admitted the owner key on). Runs until `stop` is set.
+/// (and, in direct-LAN mode, admitted the operator's owner key on). Runs until `stop` is set.
 #[allow(clippy::too_many_arguments)]
 pub fn control_loop(
     rt: &tokio::runtime::Runtime,
     clock: &HostClock,
     host: &mut LoopbackHost<'_>,
-    owner: iroh::EndpointId,
+    trust: &OwnerTrust,
     me: iroh::EndpointId,
     dispatcher: &Dispatcher,
     signer: &Identity,
     status: &Status,
     stop: &AtomicBool,
 ) -> Result<()> {
-    let fence = ConnectionFence {
-        endpoint_id: *owner.as_bytes(),
-        local_generation: 0,
-        remote_generation: 0,
-    };
     let mut last = 0u64;
     while !stop.load(Ordering::SeqCst) {
         // Bounded accept so the stop flag is observed within one owner poll.
         let Ok(connection) = host.accept(clock, until(clock, B::OwnerPoll)?) else {
             continue;
         };
+        let Ok(owner) = trust.owner() else {
+            connection.close(2u32.into(), b"no owner pin");
+            continue;
+        };
         if connection.remote_id() != owner {
             connection.close(2u32.into(), b"unpinned control owner");
             continue;
         }
+        let fence = ConnectionFence {
+            endpoint_id: *owner.as_bytes(),
+            local_generation: 0,
+            remote_generation: 0,
+        };
         let Ok(mut receiver) =
             NodeControlReceiver::new(connection.clone(), rt, clock, fence, || fence)
         else {
@@ -341,9 +401,10 @@ pub fn control_loop(
         // The owner client makes one connection per call.
         if let Ok(delivery) = receiver.receive(until(clock, B::RouterClose)?) {
             let command: Value = serde_json::from_slice(delivery.bytes()).unwrap_or(Value::Null);
-            let answer = match member_control::verify_command(
+            let answer = match admit_command(
+                trust,
+                connection.remote_id(),
                 &command,
-                &owner,
                 &me,
                 last,
                 app_host::now(),
@@ -352,7 +413,7 @@ pub fn control_loop(
                     last = sequence;
                     handle(dispatcher, status, request)
                 }
-                Err(e) => json!({"ok":false,"code":e.code}),
+                Err(code) => json!({"ok":false,"code":code}),
             };
             match member_control::sign_reply(signer, &command, answer)
                 .ok()

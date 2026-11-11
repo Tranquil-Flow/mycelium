@@ -134,7 +134,7 @@ fn serve(
         &rt,
         &clock,
         &mut host,
-        owner,
+        &work::OwnerTrust::Operator(owner),
         me,
         &dispatcher,
         &signer,
