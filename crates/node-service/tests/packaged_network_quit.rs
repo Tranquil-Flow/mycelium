@@ -43,7 +43,9 @@ struct FakeTunnel {
     launches: PathBuf,
 }
 impl FakeTunnel {
-    fn new(base: &Path) -> Self {
+    /// `held`: the script reports its pid on `started` and waits for [`FakeTunnel::release`]
+    /// before it prints its origin; otherwise it prints its origin at once.
+    fn new(base: &Path, held: bool) -> Self {
         let dir = base.join("fake-tunnel");
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
         let fake = Self {
@@ -63,13 +65,17 @@ impl FakeTunnel {
         }
         // fd 3 holds the release FIFO open read-write: the script never blocks opening it, and a
         // writer finds a reader for as long as the script lives.
+        let hold = if held {
+            format!("echo $$ > '{}'\nread _ <&3\n", fake.started.display())
+        } else {
+            String::new()
+        };
         std::fs::write(
             &fake.script,
             format!(
-                "#!/bin/sh\nexec 3<>'{release}'\necho $$ >> '{launches}'\necho $$ > '{started}'\nread _ <&3\necho 'INF |  https://b3f-quit-inflight.trycloudflare.com  |'\nread _ <&3\n",
+                "#!/bin/sh\nexec 3<>'{release}'\necho $$ >> '{launches}'\n{hold}echo 'INF |  https://b3f-quit-inflight.trycloudflare.com  |'\nread _ <&3\n",
                 release = fake.release.display(),
                 launches = fake.launches.display(),
-                started = fake.started.display(),
             ),
         )
         .unwrap();
@@ -78,12 +84,17 @@ impl FakeTunnel {
     }
     /// The production hooks with this script as the relay client and a minimal environment.
     fn hooks(&self) -> RelayHooks {
+        self.hooks_with(|_| {})
+    }
+    /// [`FakeTunnel::hooks`], then `edit` (a test's clock or release observer).
+    fn hooks_with(&self, edit: impl Fn(&mut api::relay::Hooks) + Send + Sync + 'static) -> RelayHooks {
         let script = self.script.clone();
         Arc::new(move || {
             let mut hooks = api::relay::Hooks::production(None);
             let script = script.clone();
             hooks.binary = Arc::new(move || Some(script.clone()));
             hooks.env = vec![("PATH".into(), "/usr/bin:/bin".into())];
+            edit(&mut hooks);
             hooks
         })
     }
@@ -181,7 +192,7 @@ fn finish_quit(mac: &mut Mac, began: Instant) -> Result<Poll, CleanupError> {
 #[test]
 fn quit_closes_a_relay_whose_start_is_still_waiting_for_its_tunnel() {
     let base = state_root("quit-inflight");
-    let fake = FakeTunnel::new(&base);
+    let fake = FakeTunnel::new(&base, true);
     let state = base.join("owner");
     std::fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
     let mut mac = Mac::launch(
@@ -259,4 +270,112 @@ fn a_test_mac_cannot_start_a_real_cloudflared() {
         started.1
     );
     assert_ne!(network["state"], "relay_process_running", "{network}");
+}
+
+/// Quit while a Start waits for an old relay's release (relay `close`: a Start that finds the
+/// relay still closing waits for its child and listener to be released, then brings up a new
+/// one). The old relay's window runs out on the relay's injected clock and its close is held
+/// between "stopped" and the release; a Start arrives and waits for that release; Quit begins;
+/// then the release completes. No new relay child may start, none may outlive Quit, Quit must
+/// not be `Verified` while one runs, and a Start after Quit began is refused.
+#[test]
+fn quit_while_a_start_waits_for_the_old_relays_release_starts_no_new_relay() {
+    use api::relay::ReleaseEvent;
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
+    };
+    let base = state_root("quit-release");
+    let fake = FakeTunnel::new(&base, false);
+    let state = base.join("owner");
+    std::fs::DirBuilder::new().mode(0o700).create(&state).unwrap();
+    // The relays' clock in seconds, moved by the test only.
+    let now = Arc::new(AtomicU64::new(0f64.to_bits()));
+    let (events, seen) = mpsc::channel::<ReleaseEvent>();
+    let events = Arc::new(Mutex::new(events));
+    let (open, gate) = mpsc::channel::<()>();
+    let gate = Arc::new(Mutex::new(gate));
+    let held = Arc::new(AtomicBool::new(false));
+    let hooks = {
+        let (now, events, gate, held) = (now.clone(), events.clone(), gate.clone(), held.clone());
+        fake.hooks_with(move |hooks| {
+            let now = now.clone();
+            hooks.clock = Arc::new(move || f64::from_bits(now.load(Ordering::SeqCst)));
+            let (events, gate, held) = (events.clone(), gate.clone(), held.clone());
+            hooks.release_observer = Some(Arc::new(move |event| {
+                events.lock().unwrap().send(event).unwrap_or(());
+                // The first close is held between "stopped" and its release until the test opens it.
+                if event == ReleaseEvent::Stopping && !held.swap(true, Ordering::SeqCst) {
+                    gate.lock()
+                        .unwrap()
+                        .recv_timeout(millis(B::WorkerStartup))
+                        .unwrap_or(());
+                }
+            }));
+        })
+    };
+    let mut mac = Mac::launch(
+        &state,
+        NetworkConfig {
+            hooks,
+            ..NetworkConfig::default()
+        },
+    );
+    let body = json!({"relay_acknowledged": true, "max_seconds": 1800});
+    let first = mac.post("/api/network/start", body.clone());
+    assert_eq!(first.0, 200, "the first Start: {}", first.1);
+    let old = fake.launches();
+    assert_eq!(old.len(), 1, "{old:?}");
+    let next = |what: &str| {
+        seen.recv_timeout(millis(B::WorkerStartup))
+            .unwrap_or_else(|_| panic!("no release event: {what}"))
+    };
+    // The window runs out: the relay's lifetime thread closes it and is held before the release.
+    now.store(3600f64.to_bits(), Ordering::SeqCst);
+    assert_eq!(next("the old relay's close"), ReleaseEvent::Stopping);
+    // A Start finds the relay stopped and waits for its release.
+    let core = mac.core.clone();
+    let start_body = body.clone();
+    let start = std::thread::spawn(move || post(&core, "/api/network/start", &start_body));
+    assert_eq!(
+        next("the Start waiting for the release"),
+        ReleaseEvent::AwaitingRelease
+    );
+    // Quit begins while that Start waits; Quit's own close of that relay waits for it too.
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let began = Instant::now();
+    mac.cleanup.begin(allowance).unwrap();
+    let later = post(&mac.core, "/api/network/start", &body);
+    assert_eq!(
+        next("Quit's close of the started relay"),
+        ReleaseEvent::AwaitingRelease
+    );
+    // The release completes: the waiting Start goes on.
+    open.send(()).unwrap();
+    let quit = finish_quit(&mut mac, began);
+    let answered = start.join().unwrap();
+    let launches = fake.launches();
+    let running: Vec<i32> = launches.iter().copied().filter(|p| alive(*p)).collect();
+    for pid in &running {
+        kill(*pid);
+    }
+    drop(mac);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    assert!(
+        running.is_empty(),
+        "Quit answered {quit:?} with relay children {running:?} still running (launches \
+         {launches:?}; the waiting Start answered {answered:?})"
+    );
+    assert_eq!(quit, Ok(Poll::Verified), "Quit's result");
+    assert_ne!(answered.0, 200, "the waiting Start: {answered:?}");
+    assert!(
+        later.0 != 200
+            && matches!(
+                later.1["error"].as_str(),
+                Some("application_stopping" | "application_closed")
+            ),
+        "a Start after Quit began: {later:?}"
+    );
+    assert_eq!(launches, old, "a Start after Quit began launched a tunnel");
 }
