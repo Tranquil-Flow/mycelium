@@ -151,7 +151,8 @@ impl StageCompute for Controlled {
     }
     fn reset(&mut self, current: serve::Current<'_>) -> Result<Value, Error> {
         current()?;
-        if let Some((entered, open)) = &self.script.reset_gate {
+        // Only the first reset is held.
+        if let Some((entered, open)) = self.script.reset_gate.take() {
             entered.send(()).unwrap();
             open.recv_timeout(span(B::WorkerStartup)).unwrap();
         }

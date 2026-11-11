@@ -193,10 +193,7 @@ fn issue_as(
         "expires_at":expires_at,"route_ready":false,"scope":SCOPE}),
     )
 }
-fn checked(route: &Value, key_digest: &str, now: f64) -> Result<Value> {
-    checked_as(route, key_digest, now, &[ROUTE])
-}
-/// [`checked`] accepting any of `protocols`. A message naming another protocol
+/// Open and check a route envelope as one of `protocols`. A message naming another protocol
 /// is opened as the FIRST one, so it fails exactly as the v1-only check does.
 fn checked_as(route: &Value, key_digest: &str, now: f64, protocols: &[&str]) -> Result<Value> {
     let protocol = match route["message"]["protocol"].as_str() {
