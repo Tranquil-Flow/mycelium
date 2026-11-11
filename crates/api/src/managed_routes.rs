@@ -112,7 +112,7 @@ impl RouteExtension for MailboxRoutes {
         body: &Value,
     ) -> Option<Result<Value, SeedError>> {
         let (_, protocol) = TARGET_ROUTES.iter().find(|(p, _)| *p == path)?;
-        // The seed's error envelope carries the code; its status map answers 400 (v0.1.4: 503).
+        // The seed's error envelope carries the code; its status map answers 503 as v0.1.4 (ruling 16).
         let Some(_admitted) = self.0.admit() else {
             return Some(Err(SeedError::new("managed_control_capacity_exhausted")));
         };

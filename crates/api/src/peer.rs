@@ -1020,6 +1020,65 @@ fn resume(
     Ok(session)
 }
 
+/// `RemoteMacMember.status()`'s membership projection (peer.py:395-455 @ f4e366e9): a retained
+/// credential is `retained` (lease `unknown`), a live session `current` (`fresh`) or `expired`, and a
+/// recorded terminal disposition wins (`expired` also expires the lease). `live` is the session's
+/// `(generation, lease_expires_at)`; a credential or disposition that cannot be read counts as absent
+/// here (the status never fails on it). Returns `(membership_state, generation, lease_state)`.
+pub fn status_membership(
+    root: &Path,
+    live: Option<(Option<u64>, Option<f64>)>,
+    now: f64,
+) -> (String, Option<u64>, &'static str) {
+    let mut state = "absent".to_owned();
+    let mut generation = None;
+    let mut lease_state = "none";
+    if let Ok(Some(membership)) = load_membership_state(root) {
+        generation = membership["membership_generation"].as_u64();
+        state = "retained".into();
+        lease_state = "unknown";
+    }
+    if let Some((live_generation, lease)) = live {
+        generation = live_generation;
+        if lease.is_some_and(|lease| now >= lease) {
+            state = "expired".into();
+            lease_state = "expired";
+        } else {
+            state = "current".into();
+            lease_state = "fresh";
+        }
+    }
+    if let Ok(Some(disposition)) = load_disposition(root) {
+        if disposition == "expired" {
+            lease_state = "expired";
+        }
+        state = disposition;
+    }
+    (state, generation, lease_state)
+}
+
+/// The owner's own member re-pinned to the seed address its authority answers on now
+/// (`DemoAuthority._resume` pins its client to `self._coordinator.seed_url` and saves the
+/// membership with it, authority.py:578-604 @ f4e366e9): after `attach_public_endpoint` /
+/// `relocate_authority` reopened the seed on the relay's origin (endpoint_recovery.py:61-85, "the
+/// resume at restart re-pins its membership to the new seed address"). Nothing retained, or the
+/// same address: nothing is written.
+pub fn repin_owner_seed_url(root: &Path, seed_url: &str) -> Result<(), PublicError> {
+    let Some(mut membership) = load_membership_state(root)? else {
+        return Ok(());
+    };
+    if membership["seed_url"] == seed_url {
+        return Ok(());
+    }
+    membership.insert("seed_url".into(), Value::from(seed_url));
+    private_state::store(
+        &root.join(MEMBERSHIP_FILE),
+        &Value::Object(membership),
+        membership_limit()?,
+    )
+    .map_err(|_| durable("node_membership_state_write_failed"))
+}
+
 /// `RemoteMacMember.start()` (peer.py:327-380): load the identity and the retained state, refuse an
 /// inconsistent combination, finish the cleanup a crash left behind, and resume an accepted
 /// membership. `identity_present` is whether the durable key file exists (the host owns that file).
