@@ -1699,3 +1699,134 @@ fn a_package_with_a_valid_digest_but_a_bad_signature_is_refused_before_any_write
         }
     }
 }
+
+// ---- ruling 20/25: v0.2 sits beside an installed v0.1.4 and never touches it ------------
+
+/// A HOME holding a complete v0.1.4 install, laid out by v0.1.4 itself (@ f4e366e9):
+/// `~/Applications/Mycelium A13.app` -> `Application Support/Mycelium/programs/<v>/Mycelium A13
+/// Demo.app` (installer.py:117,121), `programs/versions.json` + `.install.lock`, its state
+/// `Application Support/Mycelium A13 macOS Demo` (__main__.py:67), its service package
+/// `Application Support/Mycelium/service` (finalize_a13_macos.py:135) and the operator folder
+/// `Application Support/Mycelium A13 Demo`. Marker bytes only.
+fn seed_v014_install(home: &Path, apps: &Path) {
+    let support = home.join("Library/Application Support");
+    let programs = support.join("Mycelium/programs");
+    let app = programs.join("0.1.4/Mycelium A13 Demo.app");
+    put(
+        &app.join("Contents/MacOS/Mycelium A13 Demo"),
+        b"v0.1.4 exe marker",
+        0o755,
+    );
+    put(
+        &app.join("Contents/Info.plist"),
+        b"<plist>org.mycelium.a13-macos-demo</plist>",
+        0o644,
+    );
+    put(
+        &programs.join("versions.json"),
+        b"{\"current\":{\"version\":\"0.1.4\"}}",
+        0o600,
+    );
+    put(&programs.join(".install.lock"), b"", 0o600);
+    put(
+        &support.join("Mycelium/service/marker"),
+        b"v0.1.4 service marker",
+        0o600,
+    );
+    put(
+        &support.join("Mycelium A13 Demo/qualification-marker"),
+        b"v0.1.4 operator marker",
+        0o600,
+    );
+    seed_state(&support.join("Mycelium A13 macOS Demo"));
+    fs::create_dir_all(apps).unwrap();
+    symlink(&app, apps.join("Mycelium A13.app")).unwrap();
+}
+
+#[test]
+fn ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path() {
+    let tree = Tree::new();
+    let (home, apps) = (tree.path("home"), tree.path("apps"));
+    seed_v014_install(&home, &apps);
+    let v014_paths = [
+        "home/Library/Application Support/Mycelium",
+        "home/Library/Application Support/Mycelium A13 macOS Demo",
+        "home/Library/Application Support/Mycelium A13 Demo",
+        "apps/Mycelium A13.app",
+    ];
+    let snap = |tree: &Tree| -> BTreeMap<String, BTreeMap<String, String>> {
+        v014_paths
+            .iter()
+            .map(|p| {
+                let path = tree.path(p);
+                let meta = fs::symlink_metadata(&path).unwrap();
+                let mut facts = if meta.is_dir() {
+                    snapshot(&path)
+                } else {
+                    BTreeMap::new()
+                };
+                facts.insert(
+                    ".".into(),
+                    format!(
+                        "{:?} {:o} mtime={}.{}",
+                        meta.file_type(),
+                        meta.mode(),
+                        meta.mtime(),
+                        meta.mtime_nsec()
+                    ),
+                );
+                ((*p).to_string(), facts)
+            })
+            .collect()
+    };
+    let before = snap(&tree);
+    let names_before: Vec<_> = fs::read_dir(home.join("Library/Application Support"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+
+    // Install v0.2, then its model-free launch path: the route of the installed executable and
+    // the state the packaged core creates first (`node_service::packaged::prepare_dirs` makes
+    // `<Roots::state()>/v02-node/{private,evidence}`).
+    let bundle = make(&tree, &Pkg::new("b020", "0.2.0"));
+    let roots = tree.roots();
+    install::install(&bundle, &roots, &ok().seams).unwrap();
+    let installed = roots.version_dir("0.2.0").join(install::PAYLOAD_DIRECTORY);
+    assert_eq!(fs::read_link(roots.application_entry()).unwrap(), installed);
+    let exe = installed.join("Contents/MacOS/mycelium");
+    assert!(matches!(
+        desktop::entry::route(&["mycelium".to_string()], &exe, &home),
+        desktop::entry::Route::Run
+    ));
+    for dir in ["v02-node/private", "v02-node/evidence"] {
+        fs::create_dir_all(roots.state().join(dir)).unwrap();
+    }
+
+    assert_eq!(snap(&tree), before, "a v0.1.4 path changed");
+    // v0.2 created exactly one new Application Support entry and one Applications entry.
+    let mut created: Vec<_> = fs::read_dir(home.join("Library/Application Support"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .filter(|n| !names_before.contains(n))
+        .collect();
+    created.sort();
+    assert_eq!(created, [install::SUPPORT_FOLDER]);
+    assert!(
+        roots.programs().starts_with(
+            home.join("Library/Application Support")
+                .join(install::SUPPORT_FOLDER)
+        )
+    );
+    assert!(
+        roots.state().starts_with(
+            home.join("Library/Application Support")
+                .join(install::SUPPORT_FOLDER)
+        )
+    );
+    let mut entries: Vec<_> = fs::read_dir(&apps)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    entries.sort();
+    assert_eq!(entries, ["Mycelium A13.app", "Mycelium.app"]);
+}

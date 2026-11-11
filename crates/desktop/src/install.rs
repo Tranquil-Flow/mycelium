@@ -27,6 +27,8 @@ use std::{
 pub const PROTOCOL: &str = "mycelium.a13_macos_installer.v1";
 pub const PAYLOAD_DIRECTORY: &str = "Mycelium A13 Demo.app";
 pub const APPLICATIONS_ENTRY: &str = "Mycelium A13.app";
+/// RED stub (ruling 25): v0.2's own folder under `~/Library/Application Support`.
+pub const SUPPORT_FOLDER: &str = "Mycelium";
 pub const FIRST_USE_PIN: &str = docs::FIRST_USE_PIN;
 /// v0.1.4 (PyInstaller) and v0.2 executables; the only names an installed payload may carry.
 const EXECUTABLES: [&str; 2] = ["Mycelium A13 Demo", "mycelium"];
