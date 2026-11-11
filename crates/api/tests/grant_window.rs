@@ -36,6 +36,11 @@ use std::{
 };
 use transport::{Channel, Clock};
 
+/// The B7 joined member's renewal loop, exactly as `shard_member` runs it.
+#[path = "../examples/shard_member/membership.rs"]
+#[allow(dead_code)]
+mod membership;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const SWARM: &str = "gr-grant-window";
 
@@ -53,6 +58,11 @@ impl Time {
     }
     fn ms(&self) -> u64 {
         self.0.load(Ordering::SeqCst)
+    }
+    /// Catch up with the host wall clock (for a party that reads it, as `shard_member` does).
+    fn sync(&self) {
+        self.0
+            .fetch_max((app_host::now() * 1000.0).floor() as u64, Ordering::SeqCst);
     }
     fn advance(&self, seconds: u64) {
         self.0.fetch_add(seconds * 1000, Ordering::SeqCst);
@@ -78,6 +88,8 @@ struct Rig {
     time: Time,
     coordinator: Arc<seed::Coordinator>,
     server: Option<seed::server::Server>,
+    material: seed::tls::Material,
+    port: u16,
     options: SeedOptions,
     signer: Identity,
     session: Session,
@@ -121,6 +133,7 @@ impl Rig {
             .unwrap(),
         );
         let server = seed::server::Server::bind_tls(coordinator.clone(), &material, None).unwrap();
+        let port = server.address().port();
         let options = SeedOptions {
             ca_pem: Some(fs::read(&material.ca_certificate).unwrap()),
             connect_to: Some(server.address()),
@@ -155,6 +168,8 @@ impl Rig {
             time,
             coordinator,
             server: Some(server),
+            material,
+            port,
             options,
             signer,
             session: accepted.session.unwrap(),
@@ -185,6 +200,24 @@ impl Rig {
                 .unwrap()
         });
         self.renew().unwrap();
+    }
+    /// The owner's seed goes away (the member's renewals fail at the transport).
+    fn seed_down(&mut self) {
+        if let Some(server) = self.server.take() {
+            drop(server);
+        }
+    }
+    /// The owner's seed is back at the same address.
+    fn seed_up(&mut self) {
+        self.server = Some(
+            seed::server::Server::bind_tls_on(
+                self.coordinator.clone(),
+                &self.material,
+                None,
+                Some(i64::from(self.port)),
+            )
+            .unwrap(),
+        );
     }
     fn lease(&self) -> f64 {
         self.session.lease_expires_at().unwrap()
@@ -587,4 +620,79 @@ fn outliving_the_sized_grant_window_refuses_and_keeps_the_debt() {
     assert_eq!(refused, Err("joined_shard_grant_invalid".to_owned()));
     assert_eq!(rig.debt(), 1, "a refused transfer keeps its byte debt");
     drop(shard);
+}
+
+/// RED (GR b): a joined member's renewal keeps its schedule through a transient failure (owner
+/// seed briefly unreachable), as v0.1.4's `_renew_loop` does (`app.py:917-927`: a failed pass only
+/// records `renewal_unavailable`; the next pass renews). Until the lease runs out the member stays
+/// current, and the next pass renews it again.
+#[test]
+fn a_transient_renewal_failure_keeps_the_member_current_and_renewing() {
+    let mut rig = Rig::new();
+    let member = membership::Membership::new(
+        rig.session.clone(),
+        rig.member_root.clone(),
+        &rig.signer,
+        rig.options.clone(),
+    )
+    .unwrap();
+    let before = member
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .lease_expires_at()
+        .unwrap();
+    rig.seed_down();
+    rig.time.sync();
+    assert_eq!(
+        member.renew_once(),
+        Err("peer_transport_unreachable".to_owned()),
+        "no seed: this pass fails at the transport"
+    );
+    assert!(
+        member.current(&rig.signer).is_ok(),
+        "a transient renewal failure must not end a member whose lease is fresh: {:?}",
+        member.current(&rig.signer)
+    );
+    rig.seed_up();
+    rig.time.sync();
+    member.renew_once().expect("the next pass renews");
+    let after = member
+        .session
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .lease_expires_at()
+        .unwrap();
+    assert!(after > before, "renewed lease {after} > {before}");
+    assert!(member.current(&rig.signer).is_ok());
+}
+
+/// Guard: a refusal that is not a transport failure (the member's generation moved on at the seed)
+/// still fences the member at once; v0.1.4 retries only transport/availability failures
+/// (`mycelium_node/reconnect.py:118-129`).
+#[test]
+fn a_stale_generation_renewal_refusal_still_fences_the_member() {
+    let mut rig = Rig::new();
+    let member = membership::Membership::new(
+        rig.session.clone(),
+        rig.member_root.clone(),
+        &rig.signer,
+        rig.options.clone(),
+    )
+    .unwrap();
+    // The same member resumed elsewhere: the seed advanced its generation.
+    rig.time.sync();
+    rig.resume();
+    rig.time.sync();
+    // The seed no longer answers this generation's heartbeat as its own: a refusal, not transport.
+    let refused = member.renew_once().unwrap_err();
+    assert_eq!(refused, "seed_message_mismatch");
+    assert_eq!(
+        member.current(&rig.signer).unwrap_err().0,
+        "member_renewal_failed"
+    );
 }
