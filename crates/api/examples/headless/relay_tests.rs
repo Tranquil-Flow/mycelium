@@ -190,3 +190,112 @@ fn an_idle_relay_is_not_renewed_and_closes_at_its_deadline() {
     assert_eq!(lifetime.status().to_value()["state"], "stopped");
     core.lock().unwrap().relay.close();
 }
+
+/// An owner run whose first step is held until the test releases it, then fails (the run ends).
+struct HeldRun {
+    entered: mpsc::Sender<()>,
+    release: mpsc::Receiver<()>,
+}
+impl owner_run::runner::Chain for HeldRun {
+    fn new_run(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: owner_run::machine::Reason,
+        _: Option<&Value>,
+        _: Option<&Value>,
+    ) {
+    }
+    fn run_step(
+        &mut self,
+        _: &str,
+        _: &mut dyn api::owner_driver::StepEnv,
+    ) -> Result<(), api::owner_driver::StepError> {
+        self.entered.send(()).unwrap();
+        self.release.recv_timeout(allowance()).unwrap();
+        Err(api::owner_driver::StepError::Exception {
+            class: "RuntimeError".into(),
+        })
+    }
+    fn teardown(&mut self, _: bool, _: &mut dyn api::owner_driver::StepEnv) -> Result<(), String> {
+        Ok(())
+    }
+}
+/// The admission facts of an owner with a swarm (`demo_app.action`'s ladder passes).
+struct OwnerFacts;
+impl owner_run::action::DemoFacts for OwnerFacts {
+    fn owner(&self) -> bool {
+        true
+    }
+    fn ensure_exchange(&mut self) -> bool {
+        true
+    }
+    fn members_joined_without_relay(&self) -> Option<u64> {
+        Some(0)
+    }
+}
+
+/// GRF 4 (kills mutant M7): with the swarm listing OFF, an active owner run alone keeps the relay
+/// window renewing (`_relay_is_serving`: `owner_run.active()` OR listing, app.py:769-776); once the
+/// run has ended the window is no longer extended and the relay closes at its deadline.
+#[test]
+fn an_active_owner_run_keeps_its_relay_window_renewing_until_the_run_ends() {
+    let root = Root::new("run");
+    let core = core_with_listing(&root.0, false);
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, held) = mpsc::channel();
+    let mut chain = Some(HeldRun {
+        entered: entered_tx,
+        release: held,
+    });
+    let mut runs = DemoRuns::new(
+        Box::new(move || Box::new(chain.take().expect("one run"))),
+        Box::new(|| fresh_identity(now()).expect("identity")),
+        Timing::registered(),
+    );
+    // As the launcher does before serving: the core keeps the run's view.
+    core.lock().unwrap().demo = runs.view();
+    let clock = Arc::new(AtomicU64::new(1_000_000));
+    let lifetime = start(&core, &root.0, &clock, None);
+    runs.demo_action(Action::DemoStart, &Map::new(), &mut OwnerFacts)
+        .expect("the run is admitted");
+    entered
+        .recv_timeout(allowance())
+        .expect("the run is in its first step");
+    assert!(runs.view().active(), "the owner run is active");
+    advance(&clock, WINDOW - 5);
+    lifetime.step();
+    let status = lifetime.status().to_value();
+    assert_eq!(
+        (
+            status["renewals"].clone(),
+            status["expires_in_seconds"].clone()
+        ),
+        (json!(1), json!(WINDOW)),
+        "an active owner run keeps the relay window renewing: {status}"
+    );
+    // The run ends.
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + allowance();
+    while runs.view().active() || !runs.quiescent() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the run never ended: {:?}",
+            runs.status().map(|s| s.to_value())
+        );
+        std::thread::yield_now();
+    }
+    advance(&clock, WINDOW - 5);
+    lifetime.step();
+    let status = lifetime.status().to_value();
+    assert_eq!(
+        (status["renewals"].clone(), status["state"].clone()),
+        (json!(1), json!("relay_process_running")),
+        "no renewal once the run has ended: {status}"
+    );
+    advance(&clock, 5);
+    lifetime.step();
+    assert_eq!(lifetime.status().to_value()["state"], "stopped");
+    runs.close();
+    core.lock().unwrap().relay.close();
+}
