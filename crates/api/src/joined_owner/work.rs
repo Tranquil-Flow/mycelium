@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     net::IpAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -125,6 +125,21 @@ pub fn open_epoch(
             now,
         ),
     }?;
+    deliver(coordinator, envelope, owner, stages, network, codec, within)
+}
+
+/// Ask each member for its carrier address, deliver the signed route
+/// (`serve`: the member serves until the epoch ends) and open the owner's
+/// epoch on the caller's network with the route's `owner` key.
+fn deliver(
+    coordinator: &Arc<seed::Coordinator>,
+    envelope: Value,
+    owner: iroh::SecretKey,
+    stages: &mut [EpochStage<'_>],
+    network: &Network,
+    codec: Arc<dyn Codec>,
+    within: Duration,
+) -> Result<Epoch, Refusal> {
     let mut addresses = Vec::new();
     for s in stages.iter_mut() {
         addresses.push(s.link.call(json!({"command":"carrier_address"}), within)?);
@@ -154,6 +169,86 @@ pub fn open_epoch(
         carriers,
         codec,
     )?)
+}
+
+/// What the owner asks the run's [`Admission`] to sign: a route of `protocol`
+/// over the stages it admitted, for the epoch's `owner_endpoint_id`.
+pub struct RouteOrder<'a> {
+    pub protocol: &'a str,
+    pub model: &'a Value,
+    pub deployment_id: &'a str,
+    pub epoch: u64,
+    pub owner_endpoint_id: &'a str,
+    pub now: f64,
+    pub expires_at: f64,
+}
+/// The run's native stage admission: prepare every stage (one single-use
+/// challenge each, all loading in parallel) and issue the seed-signed route over
+/// the stages it admitted. Production: [`Proven`]. The composer that holds the
+/// seed coordinator chooses it; a member still serves only a route naming its
+/// OWN resident proof (`route::verify_member_epoch`).
+pub trait Admission: Send {
+    fn prepare(
+        &mut self,
+        stages: &mut [Stage<'_>],
+        tokens: usize,
+        forbidden_source: &Path,
+        within: Duration,
+    ) -> Result<(), Refusal>;
+    fn issue(&mut self, order: &RouteOrder<'_>) -> Result<Value, Refusal>;
+}
+/// Admission by verified resident proofs: `link::prepare` (single-use
+/// challenges, each proof checked against the seed and the native reference)
+/// and `route::issue_*` over exactly those admitted stages.
+pub struct Proven {
+    coordinator: Arc<seed::Coordinator>,
+    challenges: native::Challenges,
+    admitted: Vec<native::Admitted>,
+}
+impl Proven {
+    pub fn new(coordinator: Arc<seed::Coordinator>) -> Self {
+        Self {
+            coordinator,
+            challenges: native::Challenges::new(),
+            admitted: Vec::new(),
+        }
+    }
+}
+impl Admission for Proven {
+    fn prepare(
+        &mut self,
+        stages: &mut [Stage<'_>],
+        tokens: usize,
+        forbidden_source: &Path,
+        within: Duration,
+    ) -> Result<(), Refusal> {
+        self.admitted = super::link::prepare(
+            &self.challenges,
+            &self.coordinator,
+            stages,
+            tokens,
+            forbidden_source,
+            within,
+        )?;
+        Ok(())
+    }
+    fn issue(&mut self, o: &RouteOrder<'_>) -> Result<Value, Refusal> {
+        let issue = if o.protocol == route::ROUTE_V2 {
+            route::issue_epoch_until
+        } else {
+            route::issue_until
+        };
+        Ok(issue(
+            &self.coordinator,
+            o.model,
+            o.deployment_id,
+            o.epoch,
+            o.owner_endpoint_id,
+            &self.admitted,
+            o.now,
+            o.expires_at,
+        )?)
+    }
 }
 
 /// Wait (bounded) until the epoch's request settled (teardown finished).
@@ -373,6 +468,8 @@ pub struct OwnerWork {
     thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
     /// Member links handed back by teardown.
     returned: Vec<WorkMember>,
+    /// The run's stage admission (taken by the worker at start).
+    admission: Option<Box<dyn Admission>>,
 }
 impl OwnerWork {
     /// The port for `members` (in stage order) and `plan`; nothing starts until
@@ -396,6 +493,7 @@ impl OwnerWork {
             .collect::<Result<Vec<_>, _>>()?;
         let skew = super::span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31)?;
         let cancels = members.iter().filter_map(|m| m.cancel.clone()).collect();
+        let admission: Box<dyn Admission> = Box::new(Proven::new(coordinator.clone()));
         Ok(Self {
             seed: epoch::seed_members(&coordinator),
             coordinator,
@@ -434,7 +532,13 @@ impl OwnerWork {
             exiting: Arc::new(AtomicBool::new(false)),
             thread: None,
             returned: Vec::new(),
+            admission: Some(admission),
         })
+    }
+    /// Admit the run's stages through `admission` instead of [`Proven`].
+    pub fn with_admission(mut self, admission: Box<dyn Admission>) -> Self {
+        self.admission = Some(admission);
+        self
     }
     /// Read member leases from `seed` (an injected view) instead of the
     /// coordinator's own rows at its clock.
@@ -602,6 +706,10 @@ impl OwnerWork {
             self.start = Some(start);
             return Err(refusal("member_wall_limit_invalid"));
         };
+        let Some(admission) = self.admission.take() else {
+            self.start = Some(start);
+            return Err(refusal("managed_workflow_not_startable"));
+        };
         let within = super::span(B::MemberChosenWall)?;
         let stop_allowance = stop_allowance(wall, start.members.len())
             .ok_or_else(|| refusal("budget_unavailable"))?;
@@ -613,6 +721,7 @@ impl OwnerWork {
             plan: start.plan,
             network: start.network,
             codec: start.codec,
+            admission,
             stop: self.stop.clone(),
             exiting: self.exiting.clone(),
             inbox,
@@ -827,6 +936,7 @@ struct Worker {
     plan: Plan,
     network: Network,
     codec: Arc<dyn Codec>,
+    admission: Box<dyn Admission>,
     stop: Arc<AtomicBool>,
     exiting: Arc<AtomicBool>,
     inbox: mpsc::Receiver<Command>,
@@ -953,9 +1063,9 @@ impl Worker {
             Err(_) => return Ok(()),
         };
         self.stopped()?;
-        let challenges = native::Challenges::new();
         self.shared.set(STAGING);
-        let mut admitted = self.prepare(&challenges, &offers)?;
+        self.prepare(&offers)?;
+        let mut prepared = true;
         self.shared.set(AWAITING);
         let mut number = 0;
         while let Ok(command) = self.inbox.recv() {
@@ -966,13 +1076,25 @@ impl Worker {
             if let Some(spent) = open.take() {
                 self.retire(spent, self.serve_within)?;
             }
-            if admitted.is_empty() {
+            if !prepared {
                 self.shared.set(STAGING);
-                admitted = self.prepare(&challenges, &offers)?;
+                self.prepare(&offers)?;
             }
             self.stopped()?;
             self.shared.set(STARTING);
             number += 1;
+            let owner = iroh::SecretKey::generate();
+            let envelope = self.admission.issue(&RouteOrder {
+                protocol: route::ROUTE,
+                model: &self.plan.model,
+                deployment_id: &self.plan.deployment_id,
+                epoch: number,
+                owner_endpoint_id: &owner.public().to_string(),
+                now: app_host::now(),
+                expires_at,
+            })?;
+            // Single-use: the next epoch re-prepares (U5).
+            prepared = false;
             let mut stages: Vec<EpochStage<'_>> = self
                 .members
                 .iter_mut()
@@ -983,17 +1105,14 @@ impl Worker {
                     offer,
                 })
                 .collect();
-            let epoch = open_epoch(
+            let epoch = deliver(
                 &self.coordinator,
-                &self.plan.model,
-                &self.plan.deployment_id,
-                number,
-                &std::mem::take(&mut admitted),
+                envelope,
+                owner,
                 &mut stages,
                 &self.network,
                 self.codec.clone(),
                 self.within,
-                Some(expires_at),
             )?;
             let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
                 "qualification":epoch.qualification().ok(),
@@ -1032,11 +1151,7 @@ impl Worker {
         Ok(offers)
     }
     /// One single-use challenge per stage; both stages load in parallel.
-    fn prepare(
-        &mut self,
-        challenges: &native::Challenges,
-        offers: &[Value],
-    ) -> Result<Vec<native::Admitted>, Refusal> {
+    fn prepare(&mut self, offers: &[Value]) -> Result<(), Refusal> {
         let mut stages = Vec::new();
         for (m, offer) in self.members.iter_mut().zip(offers) {
             stages.push(Stage {
@@ -1049,9 +1164,7 @@ impl Worker {
                 offer,
             });
         }
-        super::link::prepare(
-            challenges,
-            &self.coordinator,
+        self.admission.prepare(
             &mut stages,
             self.plan.tokens,
             &self.plan.forbidden_source,
