@@ -12,14 +12,21 @@
 //! type and body only (the shell adds `cache-control: no-store` and `nosniff`), so the gateway's
 //! `Allow: GET` on a 405 is not sent (class D).
 //!
-//! Sources: the members come from the owner's seed (shared with the headless launcher); the live
-//! sources keep the application's default (not composed) for now.
+//! Sources (`ProductEvidenceApplication`, `app.py:206-281`), as v0.1.4 publishes them for what this
+//! process really has:
+//! - members: the owner's seed (shared with the headless launcher).
+//! - route status: read through the live route (`_follow`, supervisor.py:2153-2164). This process
+//!   never opens a qualified live route (its serving status is `route_ready: false`,
+//!   `development_unqualified`; the native slice has no `mycelium.live_route_status.v1` producer), so
+//!   the read is v0.1.4's `RouteUnavailableError('route_not_open')`, which `_follow` does not type:
+//!   `route_source_failed`. Only a cold-restart code (`ColdRouteRestartError`) would publish its own
+//!   reason; this process has no cold restart.
 use crate::service::NodeService;
 use api::{
     app_host::Authority,
     desktop::ProductRoutes,
     http,
-    product_app::{PATHS, RESET_PATH},
+    product_app::{PATHS, RESET_PATH, SourceError},
     product_routes::{Owner, OwnerSeed, Routes},
     schema::PublicError,
 };
@@ -49,6 +56,16 @@ impl Owner for PackagedOwner {
             root: authority.root.clone(),
         })
     }
+    /// `route_source = _follow('public_status')`: no qualified live route in this process.
+    fn route_status(&self) -> Result<Option<Value>, SourceError> {
+        Err(route_not_open())
+    }
+}
+
+/// v0.1.4's read of a route that is not open (`RouteUnavailableError('route_not_open')`, supervisor.py:
+/// 590-600): `_follow` re-raises it untyped, so the source publishes its generic `<source>_failed`.
+fn route_not_open() -> SourceError {
+    SourceError::Failed
 }
 
 /// The product routes of the packaged host over its authority and node service.
