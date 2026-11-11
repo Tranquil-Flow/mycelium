@@ -147,7 +147,9 @@ pub struct Membership {
     pub session: Arc<Mutex<Option<Session>>>,
     shared: Arc<Shared>,
     stop: Stop,
-    thread: Option<JoinHandle<()>>,
+    /// The renewal thread; it hands its schedule back when the schedule ends (a final refusal), so a
+    /// resume can run the same schedule again.
+    thread: Mutex<Option<JoinHandle<Box<dyn Schedule>>>>,
 }
 impl Membership {
     /// The binary's member: wall clock, renewal thread on the keepalive schedule.
@@ -231,16 +233,19 @@ impl Membership {
                 session,
                 shared,
                 stop,
-                thread: None,
+                thread: Mutex::new(None),
             });
         };
         let s = shared.clone();
-        let thread = std::thread::spawn(move || run_schedule(&s, schedule.as_mut()));
+        let thread = std::thread::spawn(move || {
+            run_schedule(&s, schedule.as_mut());
+            schedule
+        });
         Ok(Self {
             session,
             shared,
             stop,
-            thread: Some(thread),
+            thread: Mutex::new(Some(thread)),
         })
     }
     /// One renewal pass now, exactly as the renewal thread runs it (`tests/grant_window.rs` drives
@@ -262,12 +267,44 @@ impl Membership {
             random_hex: &random,
             seed: &self.shared.options,
         };
-        let mut held = self.session.lock().map_err(|_| "member_renewal_poisoned")?;
-        // No renewal can race the actual seed generation transition.
-        *held = peer::start(&self.shared.root, signer, true, &env)
-            .map_err(|e| e.error.code.to_owned())?
-            .session;
-        peer::renew(&self.shared.root, true, held.as_mut(), &env).map_err(|e| e.code.to_owned())?;
+        let renewed = {
+            let mut held = self.session.lock().map_err(|_| "member_renewal_poisoned")?;
+            // No renewal can race the actual seed generation transition.
+            *held = peer::start(&self.shared.root, signer, true, &env)
+                .map_err(|e| e.error.code.to_owned())?
+                .session;
+            peer::renew(&self.shared.root, true, held.as_mut(), &env)
+                .map(drop)
+                .map_err(|e| e.code.to_owned())
+        };
+        // A new generation: the refusal that fenced the old one no longer applies (v0.1.4
+        // `_resume` clears the recorded disposition, peer.py:1018) and the renewal schedule runs
+        // again (`_renew_loop` never ends, app.py:911-927).
+        self.rearm()?;
+        renewed
+    }
+    /// Clear a final refusal and restart the schedule it ended.
+    fn rearm(&self) -> Result<(), String> {
+        let fenced = self
+            .shared
+            .error
+            .lock()
+            .map_err(|_| "member_renewal_poisoned")?
+            .take()
+            .is_some();
+        if !fenced {
+            return Ok(());
+        }
+        let mut slot = self.thread.lock().map_err(|_| "member_renewal_poisoned")?;
+        if let Some(ended) = slot.take() {
+            // A final refusal ends the loop right after it is recorded: this join is that end.
+            let mut schedule = ended.join().map_err(|_| "member_renewal_join_failed")?;
+            let s = self.shared.clone();
+            *slot = Some(std::thread::spawn(move || {
+                run_schedule(&s, schedule.as_mut());
+                schedule
+            }));
+        }
         Ok(())
     }
     pub fn current(
@@ -296,7 +333,11 @@ impl Drop for Membership {
     fn drop(&mut self) {
         *self.stop.0.lock().unwrap() = true;
         self.stop.1.notify_all();
-        if let Some(thread) = self.thread.take()
+        let thread = match self.thread.get_mut() {
+            Ok(slot) => slot.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some(thread) = thread
             && thread.join().is_err()
         {
             eprintln!("member_renewal_join_failed");
