@@ -8,7 +8,7 @@
 mod fake_route_gateway;
 use api::chat_service::{
     ChatService, ChatTeardown, Clock, GatewayError, HttpRouteGateway, MonotonicClock, Prompt,
-    RequestCancel, RouteGateway, RunRoute, Streamed, Teardown,
+    RequestCancel, RouteGateway, RunChats, RunRoute, Streamed, Teardown,
 };
 use budgets::{BudgetId as B, Entries};
 use fake_route_gateway::{End, FakeGateway, Script};
@@ -584,5 +584,52 @@ fn events_refuse_a_malformed_body_and_an_unknown_request() {
     assert_eq!(
         code(json!({"request_id":"AAAAAAAAAAAAAAAAAAAAAAAA","after":0})),
         Some((404, "chat_request_unknown"))
+    );
+}
+
+/// Records every teardown reason the run's handle passes on.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<Teardown>>);
+impl ChatTeardown for Recorder {
+    fn cancel_all(&self, reason: &Teardown) -> usize {
+        self.0.lock().unwrap().push(reason.clone());
+        1
+    }
+}
+/// The run's handle keeps the `ctx.state` facts the shipped teardown reads and forgets them with a
+/// fresh run (owner_run.py:392-399 copies only `execution_ceiling` and `rollover_binding`):
+/// `rollover_requested` (owner_run.py:256) wins over a failure, the dead-member code
+/// (demo_chain.py:1181) names a failed run, the ceiling cancels once per run
+/// (`execution_ceiling_cancelled`, demo_chain.py:1159-1163) and is finished before the teardown's own
+/// `cancel_all` (demo_chain.py:1329-1335).
+#[test]
+fn the_runs_handle_keeps_its_runs_facts_and_forgets_them_with_a_fresh_run() {
+    let recorder = Arc::new(Recorder::default());
+    let chats = RunChats::new(recorder.clone());
+    chats.rollover_requested();
+    assert_eq!(chats.teardown(true), 1);
+    chats.new_run();
+    assert_eq!(chats.teardown(false), 1);
+    chats.dead_member("joined_route_member_stale");
+    assert_eq!(chats.teardown(true), 1);
+    chats.new_run();
+    assert_eq!(chats.teardown(true), 1);
+    assert!(chats.ceiling_reached());
+    assert!(!chats.ceiling_reached(), "the ceiling cancels once per run");
+    assert_eq!(chats.teardown(true), 1);
+    chats.new_run();
+    assert!(chats.ceiling_reached(), "a fresh run may cancel at its own ceiling");
+    chats.new_run();
+    assert_eq!(
+        recorder.0.lock().unwrap().as_slice(),
+        [
+            Teardown::SwitchingRuns,
+            Teardown::Stopped,
+            Teardown::Failed("joined_route_member_stale".into()),
+            Teardown::Failed("owner_run_failed".into()),
+            Teardown::CeilingReached,
+            Teardown::Failed("owner_run_failed".into()),
+            Teardown::CeilingReached,
+        ]
     );
 }

@@ -878,3 +878,56 @@ impl ChatTeardown for ChatService {
         ChatService::cancel_all(self, reason.code())
     }
 }
+
+/// The run's side of `ctx.state` that its chat teardown reads (demo_chain.py:1157-1181, 1332-1335).
+#[derive(Default)]
+struct RunFacts {
+    /// `ctx.state['rollover_requested']` (owner_run.py:252-257).
+    rollover_requested: bool,
+    /// `ctx.state['monitor_error_code']`, set only by the dead-member check (demo_chain.py:1179-1181).
+    monitor_error_code: Option<String>,
+    /// `ctx.state['execution_ceiling_cancelled']` (demo_chain.py:1159-1160).
+    ceiling_cancelled: bool,
+    /// The ceiling's `a13-ceiling-cancel` thread (demo_chain.py:1161-1163), kept and joined.
+    ceiling_thread: Option<JoinHandle<usize>>,
+}
+/// The handle the owner run's ports hold to cancel the page's chats (lane S5F; REVIEW-lanePH3B-S5
+/// F2): built once, by `DesktopServices::with_chat_run` over the host's one [`ChatService`]. It
+/// keeps the per-run facts the shipped teardown reads from `ctx.state`, so the ports need not
+/// reach the owner-run machine's private context.
+#[derive(Clone)]
+pub struct RunChats {
+    chat: Arc<dyn ChatTeardown>,
+    run: Arc<Mutex<RunFacts>>,
+}
+impl RunChats {
+    pub fn new(chat: Arc<dyn ChatTeardown>) -> Self {
+        Self {
+            chat,
+            run: Arc::default(),
+        }
+    }
+    /// A fresh `RunContext` (owner_run.py:392-399): no per-run fact survives into the next run.
+    pub fn new_run(&self) {}
+    /// `rollover_due` answered true: `ctx.state['rollover_requested'] = True` (owner_run.py:256).
+    pub fn rollover_requested(&self) {}
+    /// The monitor's dead-member check: `ctx.state['monitor_error_code'] = dead` (demo_chain.py:1181).
+    pub fn dead_member(&self, _code: &str) {}
+    /// `ceiling_reached` returned the code: the first time per run, cancel every chat
+    /// `execution_ceiling_reached` off the caller's thread (demo_chain.py:1157-1163). `true` when
+    /// this call started that cancel.
+    pub fn ceiling_reached(&self) -> bool {
+        false
+    }
+    /// `chain.teardown(ctx, failed=)` (demo_chain.py:1322-1335), FIRST, while the route still takes
+    /// `DELETE`: every chat not done is cancelled with the shipped expression's code. Returns how
+    /// many were cancelled.
+    pub fn teardown(&self, _failed: bool) -> usize {
+        0
+    }
+}
+impl ChatTeardown for RunChats {
+    fn cancel_all(&self, reason: &Teardown) -> usize {
+        self.chat.cancel_all(reason)
+    }
+}

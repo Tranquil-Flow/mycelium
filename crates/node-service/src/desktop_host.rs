@@ -230,6 +230,8 @@ pub struct DesktopServices {
     /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): `/chat/*` uses
     /// it while the run serves; otherwise the SLICE-1 native path above answers.
     chat_run: Option<api::chat_service::ChatService>,
+    /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
+    run_chats: Option<api::chat_service::RunChats>,
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
@@ -372,12 +374,20 @@ impl DesktopServices {
         run: Arc<dyn api::chat_service::RunRoute>,
         timing: Option<std::path::PathBuf>,
     ) -> Result<Self, PublicError> {
-        self.chat_run = Some(api::chat_service::ChatService::new(
+        let chat = api::chat_service::ChatService::new(
             run,
             Arc::new(api::chat_service::MonotonicClock::default()),
             timing,
-        )?);
+        )?;
+        self.run_chats = Some(api::chat_service::RunChats::new(Arc::new(chat.clone())));
+        self.chat_run = Some(chat);
         Ok(self)
+    }
+    /// The handle the owner run's ports hold (lane S5F): its teardown, ceiling, rollover and
+    /// dead-member facts cancel the page's route chats with the shipped codes. `None` without
+    /// [`DesktopServices::with_chat_run`].
+    pub fn run_chats(&self) -> Option<api::chat_service::RunChats> {
+        self.run_chats.clone()
     }
     /// The route chat service while the owner run serves (S5); `None`: the native path answers.
     fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
@@ -471,6 +481,7 @@ impl DesktopServices {
             chat: Arc::new(Mutex::new(None)),
             rate: Arc::default(),
             chat_run: None,
+            run_chats: None,
             started: std::time::Instant::now(),
             capacity,
         }

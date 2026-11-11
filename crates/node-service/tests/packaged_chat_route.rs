@@ -567,3 +567,72 @@ fn a_native_chat_and_a_route_chat_are_never_admitted_together() {
     driver.release();
     quit(&host.services);
 }
+
+/// F2/F5 (lane S5F item 4): the one handle the owner run's ports hold (`DesktopServices::run_chats`)
+/// ends the page's route chat with the shipped code for every teardown, driven against a serving
+/// fake run: Quit (`DemoApp.close` app.py:1818-1823 -> `demo_app.close` -> `OwnerRun.stop`
+/// owner_run.py:275-282 -> `chain.teardown(failed=False)` :450), Stop (`/api/demo/stop`, the host's
+/// own `cancel_all`, then the same teardown), rollover (owner_run.py:256 `rollover_requested`),
+/// the ceiling (demo_chain.py:1157-1164, its own cancel off the caller's thread) and a failed run
+/// (the monitor's dead-member code demo_chain.py:1179-1181, else `owner_run_failed`); the code is
+/// demo_chain.py:1332-1335 -> chat.py:418-451 -> :366-369 -> chat.js:37-41.
+#[test]
+fn the_runs_handle_ends_the_route_chat_with_the_shipped_code_for_every_teardown() {
+    for (case, page) in [
+        ("quit", "chat_cancelled"),
+        ("stop", "chat_cancelled"),
+        ("rollover", "chat_switching_runs"),
+        ("ceiling", "execution_ceiling_reached"),
+        ("dead member", "joined_route_member_stale"),
+        ("failed run", "owner_run_failed"),
+    ] {
+        let fake = FakeGateway::start(Script::ending(&["a", "b"], End::Hold));
+        let host = host(&fake);
+        let chats = host
+            .services
+            .run_chats()
+            .expect("with_chat_run builds the run's handle");
+        chats.new_run();
+        let (status, sent) = call(
+            &host.services,
+            "/chat/api/send",
+            json!({"prompt":"hi","max_new_tokens":8}),
+        );
+        assert_eq!(status, 200, "{case}: {sent}");
+        fake.wait("both tokens sent", |s| s.tokens_sent == 2);
+        match case {
+            "quit" => assert_eq!(chats.teardown(false), 1, "{case}"),
+            "stop" => {
+                let (status, stopped) = call(&host.services, "/api/demo/stop", json!({}));
+                assert_eq!(status, 200, "{stopped}");
+                assert_eq!(chats.teardown(false), 0, "the host's Stop cancelled it first");
+            }
+            "rollover" => {
+                chats.rollover_requested();
+                assert_eq!(chats.teardown(false), 1, "{case}");
+            }
+            "ceiling" => {
+                assert!(chats.ceiling_reached(), "the first ceiling probe cancels");
+                assert!(!chats.ceiling_reached(), "once per run");
+            }
+            "dead member" => {
+                chats.dead_member("joined_route_member_stale");
+                assert_eq!(chats.teardown(true), 1, "{case}");
+            }
+            _ => assert_eq!(chats.teardown(true), 1, "{case}"),
+        }
+        let (text, last) = until_done(&host.services, &sent["request_id"]);
+        assert_eq!(text, "ab", "{case}");
+        assert_eq!(
+            (&last["terminal"], &last["error"]),
+            (&json!("cancelled"), &json!(page)),
+            "{case}"
+        );
+        if case == "ceiling" {
+            assert_eq!(chats.teardown(true), 0, "the ceiling cancelled it first");
+        }
+        assert_eq!(fake.seen(|s| s.deletes), 1, "{case}");
+        assert_eq!(timing_lines(&host.timing), Vec::<Value>::new(), "{case}");
+        quit(&host.services);
+    }
+}
