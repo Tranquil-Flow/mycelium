@@ -224,7 +224,12 @@ fn bundle_has_the_documented_layout_modes_and_verifies_against_its_own_manifest(
     assert_eq!(mode("Contents/Frameworks/libmlx.dylib"), 0o755);
     assert_eq!(mode("Contents/Frameworks/mlx.metallib"), 0o644);
     let census = bundle::census(&built.app).unwrap();
-    assert!(census.symlinks.is_empty());
+    // The one link is v0.1.4's signable Metal layout: bytes in Resources, linked beside libmlx.
+    assert_eq!(census.symlinks, ["Contents/Frameworks/mlx.metallib"]);
+    assert_eq!(
+        fs::read_link(built.app.join("Contents/Frameworks/mlx.metallib")).unwrap(),
+        std::path::Path::new(package::METAL_LINK_TARGET)
+    );
     assert_eq!(
         census.files.len(),
         built.manifest.entries.len(),
@@ -271,7 +276,7 @@ fn content_manifest_reports_sizes_sources_trust_level_and_unqualified_minimum_os
             .contains("exceeds LSMinimumSystemVersion 15.6.1")
     }));
     assert_eq!(content["totals"]["regular_files"], 9);
-    assert_eq!(content["totals"]["symlinks"], 0);
+    assert_eq!(content["totals"]["symlinks"], 1, "the Metal link");
     let total: u64 = built.manifest.entries.iter().map(|e| e.bytes).sum();
     assert_eq!(content["totals"]["content_bytes"], total);
     let mlx = content["entries"]

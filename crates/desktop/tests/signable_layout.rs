@@ -79,7 +79,10 @@ fn the_metallib_is_stored_in_resources_and_linked_beside_libmlx_like_v014() {
     let built = built(&tree);
     let link = built.app.join("Contents/Frameworks/mlx.metallib");
     assert!(
-        fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
         "Frameworks holds only code and links"
     );
     assert_eq!(
@@ -88,7 +91,11 @@ fn the_metallib_is_stored_in_resources_and_linked_beside_libmlx_like_v014() {
     );
     let stored = built.app.join("Contents/Resources/mlx.metallib");
     assert!(fs::symlink_metadata(&stored).unwrap().is_file());
-    assert_eq!(fs::read(&link).unwrap(), b"metal bytes", "MLX reads it through the link");
+    assert_eq!(
+        fs::read(&link).unwrap(),
+        b"metal bytes",
+        "MLX reads it through the link"
+    );
     // The pinned entry is still the path MLX loads, admitted by the stored bytes.
     let metal = built
         .manifest
@@ -97,7 +104,10 @@ fn the_metallib_is_stored_in_resources_and_linked_beside_libmlx_like_v014() {
         .find(|e| e.kind == package::Kind::Metal)
         .unwrap();
     assert_eq!(metal.path, "Contents/Frameworks/mlx.metallib");
-    assert_eq!(metal.sha256, format!("{:x}", Sha256::digest(b"metal bytes")));
+    assert_eq!(
+        metal.sha256,
+        format!("{:x}", Sha256::digest(b"metal bytes"))
+    );
     assert_eq!(package::verify(&built.app, &built.manifest), Ok(()));
 }
 

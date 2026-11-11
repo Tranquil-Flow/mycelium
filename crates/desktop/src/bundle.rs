@@ -205,7 +205,8 @@ fn destination(file: &SourceFile) -> Result<(String, Kind, u32), BundleError> {
         )),
         // MLX resolves its default library beside `libmlx.dylib` (`Frameworks/mlx.metallib`) and
         // nowhere under `Resources/`; a bundle laid out per the older plan made every worker trap in
-        // `mlx::core::metal::Device::Device()` (L11 round 7, `06-member-crash-*.ips.txt`).
+        // `mlx::core::metal::Device::Device()` (L11 round 7, `06-member-crash-*.ips.txt`). `build`
+        // stores the bytes at `package::METAL_STORE_PATH` and links this path to them (signable).
         "runtime_metal_library" if file_name(file)? == "mlx.metallib" => Ok((
             "Contents/Frameworks/mlx.metallib".to_string(),
             Kind::Metal,
@@ -367,8 +368,18 @@ pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Bu
         }
         let mut entries = Vec::new();
         for (from, relative, kind, mode) in &plan {
-            copy_file(from, &app, relative, *mode)?;
-            let (bytes, sha256) = measure(&app.join(relative))?;
+            let stored = if *kind == Kind::Metal {
+                // v0.1.4's signable layout: bytes in Resources, a relative link beside libmlx.
+                copy_file(from, &app, crate::package::METAL_STORE_PATH, *mode)?;
+                let link = app.join(relative);
+                std::fs::create_dir_all(link.parent().ok_or(PackageError::Layout)?).map_err(io)?;
+                std::os::unix::fs::symlink(crate::package::METAL_LINK_TARGET, &link).map_err(io)?;
+                crate::package::METAL_STORE_PATH
+            } else {
+                copy_file(from, &app, relative, *mode)?;
+                relative.as_str()
+            };
+            let (bytes, sha256) = measure(&app.join(stored))?;
             entries.push(Entry {
                 path: relative.clone(),
                 kind: kind.clone(),

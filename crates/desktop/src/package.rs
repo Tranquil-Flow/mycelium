@@ -189,6 +189,30 @@ fn regular_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, Packa
     }
     Ok(path)
 }
+/// Where the Metal library's bytes are stored: `codesign` treats every file in
+/// `Contents/Frameworks` as nested code, so a non-Mach-O file there makes the bundle unsignable.
+/// As v0.1.4 does (`Frameworks/mlx/lib/mlx.metallib -> ../../../Resources/mlx/lib/mlx.metallib`),
+/// the bytes live in `Resources` and the pinned `Frameworks/mlx.metallib` (where MLX looks, beside
+/// `libmlx.dylib`) is a relative link to them.
+pub const METAL_STORE_PATH: &str = "Contents/Resources/mlx.metallib";
+/// The exact target of the `Contents/Frameworks/mlx.metallib` link.
+pub const METAL_LINK_TARGET: &str = "../Resources/mlx.metallib";
+/// The file holding a Metal entry's bytes: the entry itself when it is a regular file, or the
+/// stored file when the entry is exactly the in-bundle link; any other link is refused.
+fn metal_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, PackageError> {
+    let entry = root.join(relative);
+    if std::fs::symlink_metadata(&entry)
+        .map_err(io)?
+        .file_type()
+        .is_symlink()
+    {
+        if std::fs::read_link(&entry).map_err(io)? != Path::new(METAL_LINK_TARGET) {
+            return Err(PackageError::Symlink);
+        }
+        return regular_path(root, METAL_STORE_PATH);
+    }
+    regular_path(root, relative)
+}
 /// Verify streamed bytes before native loading. L8/L12 provide trusted release
 /// metadata, never unauthenticated metadata from the mutable bundle itself.
 /// Do not embed a self-referential executable hash in that same executable.
@@ -199,7 +223,11 @@ pub fn verify(root: &Path, manifest: &Manifest) -> Result<(), PackageError> {
     use std::io::Read;
     layout(manifest)?;
     for entry in &manifest.entries {
-        let path = regular_path(root, &entry.path)?;
+        let path = if entry.kind == Kind::Metal {
+            metal_path(root, &entry.path)?
+        } else {
+            regular_path(root, &entry.path)?
+        };
         let mut file = std::fs::File::open(path).map_err(io)?;
         if file.metadata().map_err(io)?.len() != entry.bytes {
             return Err(PackageError::Identity);
