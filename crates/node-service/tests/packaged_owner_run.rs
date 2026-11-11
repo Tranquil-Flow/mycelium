@@ -542,3 +542,32 @@ fn quit_during_a_run_stops_it_and_joins_it_within_the_allowance() {
     let after = view.status().map(|s| s.to_value()).unwrap_or(Value::Null);
     assert_eq!(after["state"], "stopped", "{after}");
 }
+
+/// S4c-a item 6 (REVIEW-lanePH3B-S3 F6, mutant Mactive): while the owner's run owns its driver,
+/// the run model and fast mode cannot change. v0.1.4 @ f4e366e9: `_action` (app.py:1343) ->
+/// `/api/run-model` -> `run_model.choose` refuses `owner_run_active` while `app.owner_run.active()`
+/// (run_model.py), `/api/fast-mode` -> `fast_mode.choose` refuses `fast_mode_run_active` while
+/// `fast_mode.run_active(app)` (fast_mode.py). After Stop both are accepted again.
+#[test]
+fn run_model_and_fast_mode_are_refused_while_the_run_is_active() {
+    let repository = Repository::start();
+    let (mac, _) = start_a_waiting_run("run-active-prefs", &repository);
+    let (code, refused) = mac.post("/api/run-model", json!({"choice": "qwen3-0.6b"}));
+    assert_eq!(
+        (code, refused["error"].clone()),
+        (400, json!("owner_run_active")),
+        "{refused}"
+    );
+    let (code, refused) = mac.post("/api/fast-mode", json!({"enabled": true}));
+    assert_eq!(
+        (code, refused["error"].clone()),
+        (400, json!("fast_mode_run_active")),
+        "{refused}"
+    );
+    let (code, stopping) = mac.post("/api/demo/stop", json!({}));
+    assert_eq!(code, 200, "{stopping}");
+    mac.until("the run stopped", owner_run, |r| r["state"] == "stopped");
+    let (code, saved) = mac.post("/api/fast-mode", json!({"enabled": true}));
+    assert_eq!(code, 200, "{saved}");
+    assert_eq!(mac.quit(), Ok(Poll::Verified));
+}
