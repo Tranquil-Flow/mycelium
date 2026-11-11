@@ -125,7 +125,9 @@ impl FakeTunnel {
             .open(&self.release)
         {
             Ok(mut fifo) => fifo.write_all(b"go\n").unwrap(),
-            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NXIO.raw_os_error()) => {}
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NXIO.raw_os_error()) => {
+                eprintln!("release: the fake tunnel already ended (no reader)");
+            }
             Err(e) => panic!("release: {e}"),
         }
     }
