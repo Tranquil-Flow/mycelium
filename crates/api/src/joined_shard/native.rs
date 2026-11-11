@@ -172,6 +172,10 @@ pub struct NativeShard {
     remaining: u64,
     cleanup_proven: bool,
     consent: serde_json::Map<String, Value>,
+    /// A tighter owner share for the worker guard (lane MG); never above consent.
+    memory_share: Option<u64>,
+    /// The last worker's guard verdict, kept after its cleanup.
+    guard_failure: Option<Value>,
 }
 impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
@@ -206,6 +210,8 @@ impl NativeShard {
             remaining,
             cleanup_proven: true,
             consent,
+            memory_share: None,
+            guard_failure: None,
         })
     }
     fn check(&self, current: &dyn Fn() -> Result<Value>) -> Result<()> {
@@ -326,6 +332,7 @@ impl NativeShard {
             .as_u64()
             .filter(|n| *n > 0)
             .ok_or(fail("joined_native_consent_invalid"))?;
+        let memory = self.memory_share.map_or(memory, |share| share.min(memory));
         let request_id = digest(&self.received.offer)?;
         let prepare = json!({"command":shard::COMMAND,"checkpoint":self.received.path(),
             "start":range[0],"end":range[1],"total":28,"memory":memory,"tokens":tokens,
@@ -485,6 +492,9 @@ impl NativeShard {
             .worker
             .take()
             .ok_or(fail("joined_native_not_prepared"))?;
+        if let Some(failure) = worker.guard_failure() {
+            self.guard_failure = Some(failure.document());
+        }
         let evidence = worker.kill_and_reap().map_err(native)?;
         self.cleanup_proven = true;
         Ok(evidence)
@@ -495,18 +505,39 @@ impl NativeShard {
     /// The memory the worker's guard holds it to (lane MG): the member's own
     /// consent `max_memory_bytes`, or a tighter share set by `limit_memory_to`.
     pub fn memory_limit(&self) -> Result<u64> {
-        Ok(u64::MAX)
+        let cap = self.consent_memory()?;
+        Ok(self.memory_share.map_or(cap, |share| share.min(cap)))
+    }
+    fn consent_memory(&self) -> Result<u64> {
+        self.consent["caps"]["max_memory_bytes"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(fail("joined_native_consent_invalid"))
     }
     /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-259):
     /// an owner's announced share may only TIGHTEN the guard; a share above the
     /// member's cap is refused `member_memory_cap_below_share`, loosening nothing.
     pub fn limit_memory_to(&mut self, share_rss_bytes: u64) -> Result<u64> {
-        Ok(share_rss_bytes)
+        if share_rss_bytes == 0 {
+            return Err(fail("member_resources_invalid"));
+        }
+        if share_rss_bytes > self.consent_memory()? {
+            return Err(fail("member_memory_cap_below_share"));
+        }
+        self.memory_share = Some(
+            self.memory_share
+                .map_or(share_rss_bytes, |held| held.min(share_rss_bytes)),
+        );
+        self.memory_limit()
     }
     /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
     /// guard stopped the worker; the later errors carry the code only.
     pub fn worker_failure(&self) -> Option<Value> {
-        None
+        self.worker
+            .as_ref()
+            .and_then(Worker::guard_failure)
+            .map(|failure| failure.document())
+            .or_else(|| self.guard_failure.clone())
     }
     /// The offer this compute custody serves, for route binding checks.
     pub fn offer(&self) -> &Value {
