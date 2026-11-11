@@ -1088,13 +1088,15 @@ impl Worker {
                 match command.as_str() {
                     "serve" => reports.push(match reply {
                         Ok(r) => json!({"node_id":m.node_id,"teardown":r["teardown"],
-                            "failure":r["failure"],"requests_served":r["requests_served"]}),
+                            "failure":r["failure"],"requests_served":r["requests_served"],
+                            "requests":r["requests"],"worker_pid":r["worker_pid"]}),
                         Err(Refusal(code)) => json!({"node_id":m.node_id,"serve_error":code}),
                     }),
                     "discard" => {
                         rows[i] = Some(match reply {
-                            Ok(r) if r["inert_bytes_discarded"] == true
-                                || r["nothing_owned"] == true =>
+                            Ok(r)
+                                if r["inert_bytes_discarded"] == true
+                                    || r["nothing_owned"] == true =>
                             {
                                 m.link.custody = false;
                                 json!({"node_id":m.node_id,"discarded":true})
