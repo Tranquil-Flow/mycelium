@@ -1716,8 +1716,17 @@ fn seed_v014_install(home: &Path, apps: &Path) {
     symlink(&app, apps.join("Mycelium A13.app")).unwrap();
 }
 
+/// Ruling 20/25, what this test proves (and only that): the real `install::install` (fresh, then an
+/// upgrade), `install::rollback`, `install::uninstall` (state kept, then `--delete-identity-and-state`)
+/// and the launch ROUTING of the installed executable (`entry::route`, a pure function) leave every
+/// v0.1.4 path byte-, mode- and mtime-identical. It runs no launch code and no Quit: the state the
+/// packaged core creates first (`node_service::packaged::prepare_dirs`,
+/// `<Roots::state()>/v02-node/{private,evidence}`) is SIMULATED by the test making those folders.
+/// The real model-free launch and Quit beside a seeded v0.1.4 tree is the smoke receipt
+/// (`qualification/laneRELF-*/smoke/`, ruling 17), not this test.
 #[test]
-fn ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path() {
+fn ruling20_v02_install_upgrade_rollback_uninstall_and_launch_routing_beside_v014_touch_no_v014_path()
+ {
     let tree = Tree::new();
     let (home, apps) = (tree.path("home"), tree.path("apps"));
     seed_v014_install(&home, &apps);
@@ -1757,13 +1766,29 @@ fn ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path() {
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
+    let created_support_entries = || {
+        let mut created: Vec<_> = fs::read_dir(home.join("Library/Application Support"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| !names_before.contains(n))
+            .collect();
+        created.sort();
+        created
+    };
+    let applications = || {
+        let mut entries: Vec<_> = fs::read_dir(&apps)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        entries.sort();
+        entries
+    };
 
-    // Install v0.2, then its model-free launch path: the route of the installed executable and
-    // the state the packaged core creates first (`node_service::packaged::prepare_dirs` makes
-    // `<Roots::state()>/v02-node/{private,evidence}`).
-    let bundle = make(&tree, &Pkg::new("b020", "0.2.0"));
+    // Install v0.2, then the launch ROUTE of the installed executable; the first launch writes are
+    // simulated (see the doc comment).
     let roots = tree.roots();
-    install::install(&bundle, &roots, &ok().seams).unwrap();
+    let h = ok();
+    install::install(&make(&tree, &Pkg::new("b020", "0.2.0")), &roots, &h.seams).unwrap();
     let installed = roots.version_dir("0.2.0").join(install::PAYLOAD_DIRECTORY);
     assert_eq!(fs::read_link(roots.application_entry()).unwrap(), installed);
     let exe = installed.join("Contents/MacOS/mycelium");
@@ -1774,32 +1799,38 @@ fn ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path() {
     for dir in ["v02-node/private", "v02-node/evidence"] {
         fs::create_dir_all(roots.state().join(dir)).unwrap();
     }
-
-    assert_eq!(snap(&tree), before, "a v0.1.4 path changed");
+    assert_eq!(snap(&tree), before, "install: a v0.1.4 path changed");
     // v0.2 created exactly one new Application Support entry and one Applications entry.
-    let mut created: Vec<_> = fs::read_dir(home.join("Library/Application Support"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name())
-        .filter(|n| !names_before.contains(n))
-        .collect();
-    created.sort();
-    assert_eq!(created, [install::SUPPORT_FOLDER]);
-    assert!(
-        roots.programs().starts_with(
-            home.join("Library/Application Support")
-                .join(install::SUPPORT_FOLDER)
-        )
+    assert_eq!(created_support_entries(), [install::SUPPORT_FOLDER]);
+    let own = home
+        .join("Library/Application Support")
+        .join(install::SUPPORT_FOLDER);
+    assert!(roots.programs().starts_with(&own));
+    assert!(roots.state().starts_with(&own));
+    assert_eq!(applications(), ["Mycelium A13.app", "Mycelium.app"]);
+
+    // Upgrade to a second v0.2 build, then roll back to the first.
+    install::install(&make(&tree, &Pkg::new("b021", "0.2.1")), &roots, &h.seams).unwrap();
+    assert_eq!(snap(&tree), before, "upgrade: a v0.1.4 path changed");
+    let rolled = install::rollback(&roots, &h.seams).unwrap();
+    assert_eq!(rolled["version"], "0.2.0");
+    assert_eq!(fs::read_link(roots.application_entry()).unwrap(), installed);
+    assert_eq!(snap(&tree), before, "rollback: a v0.1.4 path changed");
+    assert_eq!(created_support_entries(), [install::SUPPORT_FOLDER]);
+
+    // Uninstall keeping state, then uninstall deleting identity and state.
+    let kept = install::uninstall(&roots, &h.seams, false).unwrap();
+    assert_eq!(kept["state"], "retained");
+    assert_eq!(snap(&tree), before, "uninstall: a v0.1.4 path changed");
+    assert!(roots.state().is_dir());
+    assert_eq!(applications(), ["Mycelium A13.app"]);
+    let deleted = install::uninstall(&roots, &h.seams, true).unwrap();
+    assert_eq!(deleted["state"], "deleted");
+    assert!(!roots.state().exists());
+    assert_eq!(
+        snap(&tree),
+        before,
+        "uninstall --delete-identity-and-state: a v0.1.4 path changed"
     );
-    assert!(
-        roots.state().starts_with(
-            home.join("Library/Application Support")
-                .join(install::SUPPORT_FOLDER)
-        )
-    );
-    let mut entries: Vec<_> = fs::read_dir(&apps)
-        .unwrap()
-        .map(|e| e.unwrap().file_name())
-        .collect();
-    entries.sort();
-    assert_eq!(entries, ["Mycelium A13.app", "Mycelium.app"]);
+    assert_eq!(applications(), ["Mycelium A13.app"]);
 }

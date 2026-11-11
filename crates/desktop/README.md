@@ -316,7 +316,10 @@ mycelium (--install [--bundle DIR] | --uninstall [--delete-identity-and-state] |
   `Library/Application Support/org.mycelium.app/programs/<version>` (+ `versions.json`,
   `.install.lock`), link `APPLICATIONS/Mycelium.app`, state `Library/Application
   Support/org.mycelium.app/state` (v0.1.4: `Mycelium/programs`, `Mycelium A13.app`, `Mycelium A13
-  macOS Demo`; test `ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path`); the record is v0.1.4's, kept as JSON so unknown
+  macOS Demo`; test `ruling20_v02_install_upgrade_rollback_uninstall_and_launch_routing_beside_v014_touch_no_v014_path`:
+  install, upgrade, rollback and both uninstalls are real, the launch is routing only and its first
+  writes are simulated; a real model-free launch + Quit beside a seeded v0.1.4 tree is the lane-RELF
+  smoke receipt, not a test); the record is v0.1.4's, kept as JSON so unknown
   fields survive; owner-only checks are v0.1.4's (directory exactly 0700, record exactly 0600, one link,
   no link on the path; missing parents are made 0700).
 - **Order (v0.1.4's):** verify before any write; lock; `<version>.partial` staging by `/usr/bin/ditto`;
