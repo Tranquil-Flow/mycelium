@@ -199,7 +199,7 @@ fn packaged_member_relaunch_resumes_its_own_membership() {
     let config = node_service::packaged_network::NetworkConfig {
         seams: owner.seams.clone(),
         renewal: budgets::BudgetId::OwnerPoll,
-        ..Default::default()
+        ..macs::test_network()
     };
     assert_eq!(member.quit(), Ok(Poll::Verified));
     let member = Mac::launch(&state, config);
@@ -228,6 +228,108 @@ fn packaged_member_relaunch_resumes_its_own_membership() {
         );
         std::thread::sleep(millis(budgets::BudgetId::OwnerPoll));
     }
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
+/// `base64.urlsafe_b64decode`/`b64encode` without padding, for the link the test alters.
+fn b64url(text: &str) -> Vec<u8> {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let (mut out, mut bits, mut acc) = (Vec::new(), 0u32, 0u32);
+    for c in text.bytes() {
+        let v = ALPHABET.iter().position(|a| *a == c).unwrap() as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    out
+}
+fn b64url_encode(raw: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let (mut out, mut bits, mut acc) = (String::new(), 0u32, 0u32);
+    for b in raw {
+        acc = (acc << 8) | u32::from(*b);
+        bits += 8;
+        while bits >= 6 {
+            bits -= 6;
+            out.push(ALPHABET[((acc >> bits) & 63) as usize] as char);
+        }
+        acc &= (1 << bits) - 1;
+    }
+    if bits > 0 {
+        out.push(ALPHABET[((acc << (6 - bits)) & 63) as usize] as char);
+    }
+    out
+}
+/// The owner's join link with another seed key digest pinned (same window, code and origin).
+fn with_other_pin(link: &str) -> (String, Value) {
+    let encoded = link.strip_prefix("mycelium-join:").unwrap();
+    let mut document: Value = serde_json::from_slice(&b64url(encoded)).unwrap();
+    let pinned = document["seed_key_digest"].clone();
+    let other = format!("sha256:{}", "ab".repeat(32));
+    assert_ne!(pinned, json!(other), "{document}");
+    document["seed_key_digest"] = json!(other);
+    let altered = format!(
+        "mycelium-join:{}",
+        b64url_encode(&serde_json::to_vec(&document).unwrap())
+    );
+    (altered, pinned)
+}
+
+/// A join link that pins another seed than the one the owner's approved handoff names is refused
+/// `join_seed_pin_mismatch` when the handoff arrives (`/api/join/window/poll`, app.py:1796-1801 @
+/// f4e366e9; Rust `joined_member::join_accept`): no membership is accepted, the owner's seed never
+/// sees the member, and the next poll is refused again (the pending join is kept, as v0.1.4 keeps
+/// its join state on that refusal).
+#[test]
+fn packaged_join_refuses_a_handoff_whose_seed_is_not_the_links_pin() {
+    let base = state_root("seed-pin");
+    let owner = owner(&base);
+    let member = member(&base, &owner);
+    let (link, _pinned) = with_other_pin(&owner.link);
+    let waiting = member.post("/api/join/window", join_body(&member, &link, 600));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    assert_eq!(waiting.1["pinned"], true, "{}", waiting.1);
+    let claimed = owner.mac.until(
+        "owner sees the claim",
+        |o| o.post("/api/pair/window/list", json!({})).1,
+        |v| v["windows"][0]["state"] == "claimed",
+    );
+    let digest = claimed["windows"][0]["pending"]["request_digest"].clone();
+    let approved = owner.mac.post(
+        "/api/pair/window/approve",
+        json!({"window_id": owner.window_id, "request_digest": digest}),
+    );
+    assert_eq!(approved.0, 200, "approve: {}", approved.1);
+    let poll = |m: &Mac| {
+        let (code, body) = m.post("/api/join/window/poll", json!({}));
+        json!({"code": code, "body": body})
+    };
+    let answered = member.until("the handoff arrives", poll, |v| {
+        v["body"]["state"] != "waiting_for_owner"
+    });
+    assert_eq!(
+        (answered["code"].clone(), answered["body"]["error"].clone()),
+        (json!(400), json!("join_seed_pin_mismatch")),
+        "{answered}"
+    );
+    let status = member.status();
+    assert_ne!(
+        status["authority"]["membership_state"], "current",
+        "{status}"
+    );
+    let again = poll(&member);
+    assert_eq!(again["body"]["error"], "join_seed_pin_mismatch", "{again}");
+    assert_eq!(
+        owner.mac.status()["authority"]["member_count"],
+        1,
+        "the owner's seed admitted the member"
+    );
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();

@@ -18,7 +18,10 @@ use desktop::{
     core::Core,
     lifecycle::{Cleanup, CleanupError, Poll},
 };
-use node_service::packaged::{self, AppCleanup};
+use node_service::{
+    packaged::{self, AppCleanup},
+    packaged_network::NetworkConfig,
+};
 use serde_json::{Value, json};
 use std::{
     net::{TcpListener, TcpStream},
@@ -61,11 +64,25 @@ impl Observer for Permissive {
         }
     }
 }
+/// The app's network, but its relay client lookup finds nothing: a Start here that forgot
+/// `provider: external` fails closed instead of running a `cloudflared` on this Mac's `PATH`.
+fn test_network() -> NetworkConfig {
+    let production = NetworkConfig::default().hooks;
+    NetworkConfig {
+        hooks: Arc::new(move || {
+            let mut hooks = production();
+            hooks.binary = Arc::new(|| None);
+            hooks
+        }),
+        ..NetworkConfig::default()
+    }
+}
 fn packaged_core(state: &Path) -> (Arc<dyn Core>, AppCleanup) {
-    let (core, mut cleanup) = packaged::core_with(
+    let (core, mut cleanup) = packaged::core_with_network(
         state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();

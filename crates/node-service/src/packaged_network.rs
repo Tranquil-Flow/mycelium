@@ -22,7 +22,7 @@ use api::{
     joined_member,
     persistent::RelayState,
     preferences::private_state,
-    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend},
+    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend, StartGuard},
     schema::{PublicError, Raised},
     seed::SeedOptions,
     windows::PendingWindows,
@@ -88,6 +88,12 @@ pub struct Network {
     seams: JoinSeams,
     fenced: AtomicBool,
     left: AtomicBool,
+    /// Quit's hold on a relay a Start is still bringing up (`self.guard`, app.py:1344, 1831).
+    start_guard: StartGuard,
+    /// A member renewal pass is on the wire (`RemoteMacMember.renew` holds the peer lock across
+    /// it, peer.py:1037-1060); the leave's `disconnect` waits for it.
+    renewing: Mutex<bool>,
+    renewed: std::sync::Condvar,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -110,6 +116,9 @@ impl Network {
             seams: config.seams,
             fenced: AtomicBool::new(false),
             left: AtomicBool::new(false),
+            start_guard: StartGuard::default(),
+            renewing: Mutex::new(false),
+            renewed: std::sync::Condvar::new(),
         })
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
@@ -148,6 +157,13 @@ impl Network {
         );
         relay.close();
     }
+    /// Quit's relay step (`DemoApp.close`, app.py:1831, 1848-1850): a relay a Start is still
+    /// bringing up is closed at once and no later Start brings one up (`application_closed`),
+    /// then the relay this host keeps is closed.
+    pub fn quit(&self) {
+        self.start_guard.close();
+        self.close();
+    }
     /// `_leave_fence`: no new work once a leave began.
     pub fn fenced(&self) -> bool {
         self.fenced.load(Ordering::SeqCst)
@@ -176,7 +192,31 @@ impl Network {
     /// One pass of `_renew_loop` for a joined target (`authority.renew()` = `RemoteMacMember.renew`)
     /// over this host's member cell (its seed path, `_left`).
     pub fn renew_member(&self, authority: &Mutex<Authority>) {
+        // Marked before the pass reads `_left`: a leave that set it either sees this pass and
+        // waits for it, or this pass sees `_left` and does not start.
+        *lock(&self.renewing) = true;
         app_host::renew_member(&self.cell(authority));
+        *lock(&self.renewing) = false;
+        self.renewed.notify_all();
+    }
+    /// The leave's `disconnect` after `_left` (member_leave.py:237-252 @ f4e366e9: its
+    /// `peer.set_contribution_enabled` takes the lock a renewal holds across its seed round
+    /// trip): a pass already on the wire ends first, so no lease moves once the leave answered.
+    /// Bounded by the member seed's request budget (peer.py:117), its heartbeat and answer.
+    fn await_renewal_pass(&self) {
+        let bound = budgets::BudgetId::PyMyceliumA13MacosPeerRemotemacmemberInitTimeoutL117
+            .span(budgets::Entries::ZERO)
+            .map_or(std::time::Duration::ZERO, |span| {
+                std::time::Duration::from_millis(span.millis()) * 2
+            });
+        let renewing = lock(&self.renewing);
+        let (renewing, _) = self
+            .renewed
+            .wait_timeout_while(renewing, bound, |renewing| *renewing)
+            .unwrap_or_else(PoisonError::into_inner);
+        if *renewing {
+            eprintln!("member_leave_renewal_still_running");
+        }
     }
     /// `_start_public_relay` after the persistent backend's closed/role/shape checks: the relay is
     /// taken out of this host while it starts, so the endpoint seams (which lock the authority)
@@ -190,6 +230,7 @@ impl Network {
             &mut *lock(&self.relay),
             Self::fresh(&self.root, &self.hooks),
         );
+        relay.set_start_guard(self.start_guard.clone());
         // `_relay_is_serving`: the packaged host has no owner run, so the relay never extends
         // itself; it closes at the end of the granted window.
         let probe: Probe = Arc::new(|| Ok(false));
@@ -373,7 +414,10 @@ impl api::leave::LeaveWorker for PackagedLeave {
         }
         match name {
             "fence" => self.network.mark(true, false),
-            "disconnect" => self.network.mark(false, true),
+            "disconnect" => {
+                self.network.mark(false, true);
+                self.network.await_renewal_pass();
+            }
             "cancel_work" => {
                 if let Some(model) = &self.model {
                     model.cancel();
@@ -474,6 +518,9 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
     let pending = lock(&network.pending).clone();
     status["network"] = network.status().to_value();
     let Some(authority) = authority else {
+        // The authority's state was refused at bind (an unreadable or invalid role file among
+        // them, app.py:595-611): no role is claimed for it.
+        status["installation_role"] = Value::Null;
         return;
     };
     let a = lock(authority);
@@ -603,7 +650,7 @@ impl RelayClose {
         let network = self.network.clone();
         self.closing = match std::thread::Builder::new()
             .name("packaged-relay-close".into())
-            .spawn(move || network.close())
+            .spawn(move || network.quit())
         {
             Ok(worker) => RelayClosing::Running {
                 worker,

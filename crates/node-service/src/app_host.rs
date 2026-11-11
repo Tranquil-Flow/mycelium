@@ -741,10 +741,11 @@ impl Host for PackagedHost {
     /// `installation_role == 'owner'`. v0.1.4 starts as owner (app.py:537) unless
     /// `installation-role.json` selects a target (app.py:595-611), as the joined Mac's does once it
     /// joined (`_become_target`, app.py:1106-1116; `crate::packaged_network`). A state refused at
-    /// bind has no role file read: it answers as the owner it starts as.
+    /// bind has no role file read: it answers as the owner it starts as (each authority action
+    /// then answers the refusal's code). A poisoned authority is no owner (fail closed).
     fn owner(&self) -> bool {
         self.loaded()
-            .is_none_or(|authority| !authority.lock().is_ok_and(|a| a.target))
+            .is_none_or(|authority| authority.lock().is_ok_and(|a| !a.target))
     }
     /// `os.environ.get(name)`. A value that is not UTF-8 stays set (Python decodes it with
     /// `surrogateescape`), so it is never mistaken for an unset variable.
