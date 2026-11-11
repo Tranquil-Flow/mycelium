@@ -481,6 +481,8 @@ pub struct OwnerWork {
     /// Set while the worker serves the run's open epoch: the members' only operations are their
     /// `serve`s, which the epoch's close ends (a Stop never cancels them first).
     serving: Arc<AtomicBool>,
+    /// When the run's Stop was first signalled: the exit's ONE deadline is counted from it.
+    stop_at: Arc<Mutex<Option<Instant>>>,
     thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
     /// Member links handed back by teardown.
     returned: Vec<WorkMember>,
@@ -547,6 +549,7 @@ impl OwnerWork {
             cancels,
             exiting: Arc::new(AtomicBool::new(false)),
             serving: Arc::new(AtomicBool::new(false)),
+            stop_at: Arc::new(Mutex::new(None)),
             thread: None,
             returned: Vec::new(),
             admission: Some(admission),
@@ -662,7 +665,7 @@ impl OwnerWork {
     /// tail), close the open epoch and the shard source, release the members'
     /// stage (R1, bounded by the stop allowance) and join the worker. Idempotent.
     pub fn teardown(&mut self) -> Result<(), String> {
-        self.stop.store(true, Ordering::SeqCst);
+        signal_stop(&self.stop, &self.stop_at);
         self.commands.take();
         if let Some(start) = self.start.take() {
             self.returned.extend(start.members);
@@ -694,14 +697,15 @@ impl OwnerWork {
     /// flight; the step then ends `Stopped` and `teardown` follows. Callable
     /// from any thread (the owner run's Stop, owner_run.py:275-283).
     pub fn stopper(&self) -> impl Fn() + Send + Sync + 'static {
-        let (stop, cancels, shared, serving) = (
+        let (stop, cancels, shared, serving, stop_at) = (
             self.stop.clone(),
             self.cancels.clone(),
             self.shared.clone(),
             self.serving.clone(),
+            self.stop_at.clone(),
         );
         move || {
-            stop.store(true, Ordering::SeqCst);
+            signal_stop(&stop, &stop_at);
             // While serving, the epoch's close (teardown) ends the members' serves.
             if !serving.load(Ordering::SeqCst) {
                 for cancel in &cancels {
@@ -726,13 +730,18 @@ impl OwnerWork {
             return Err(refusal("managed_workflow_not_startable"));
         };
         let within = super::span(B::MemberChosenWall)?;
+        let poll = super::span(B::OwnerPoll)?;
         let stop_allowance = stop_allowance(wall, start.members.len())
             .ok_or_else(|| refusal("budget_unavailable"))?;
         let (commands, inbox) = mpsc::channel();
         let worker = Worker {
             shared: self.shared.clone(),
             coordinator: self.coordinator.clone(),
-            members: start.members.into_iter().map(Member::from).collect(),
+            members: start
+                .members
+                .into_iter()
+                .map(|m| Member::new(m, self.stop.clone(), poll))
+                .collect(),
             plan: start.plan,
             network: start.network,
             codec: start.codec,
@@ -740,6 +749,7 @@ impl OwnerWork {
             stop: self.stop.clone(),
             exiting: self.exiting.clone(),
             serving: self.serving.clone(),
+            stop_at: self.stop_at.clone(),
             inbox,
             within,
             stop_allowance,
@@ -797,6 +807,13 @@ impl Drop for OwnerWork {
             eprintln!("owner work teardown: {e}");
         }
     }
+}
+/// The run's Stop: set the flag every wait polls and remember when (the exit's ONE deadline).
+fn signal_stop(stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
+    at.lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_or_insert_with(Instant::now);
+    stop.store(true, Ordering::SeqCst);
 }
 fn refused(code: &str) -> PortError {
     PortError::Refused(OwnerRunError::new(code))
@@ -894,21 +911,46 @@ struct Counted {
     inner: Box<dyn MemberLink + Send>,
     outstanding: usize,
     custody: bool,
+    /// Commands begun and not yet answered, in order (member replies are FIFO).
+    begun: std::collections::VecDeque<String>,
+    /// The run's Stop: the worker's own member waits end at once (F2); the exit drains.
+    stop: Arc<AtomicBool>,
+    poll: Duration,
+}
+impl Counted {
+    /// One reply within `within` (no Stop check): the command it answers and the reply, or
+    /// `None` when none arrived in time (it may still arrive).
+    fn take(&mut self, within: Duration) -> Option<(String, Result<Value, Refusal>)> {
+        let reply = self.inner.finish(within);
+        if matches!(&reply, Err(Refusal(code)) if code == REPLY_TIMEOUT) {
+            return None;
+        }
+        self.outstanding = self.outstanding.saturating_sub(1);
+        Some((self.begun.pop_front().unwrap_or_default(), reply))
+    }
 }
 impl MemberLink for Counted {
     fn begin(&mut self, command: Value) -> Result<(), Refusal> {
-        let receive = command["command"] == "receive";
+        let name = command["command"].as_str().unwrap_or_default().to_owned();
         self.inner.begin(command)?;
         self.outstanding += 1;
-        self.custody |= receive;
+        self.custody |= name == "receive";
+        self.begun.push_back(name);
         Ok(())
     }
+    /// The worker's member wait: in OwnerPoll slices, ended by the run's Stop (the reply then
+    /// stays outstanding for the exit's cancel and drain).
     fn finish(&mut self, within: Duration) -> Result<Value, Refusal> {
-        let reply = self.inner.finish(within);
-        if !matches!(&reply, Err(Refusal(code)) if code == REPLY_TIMEOUT) {
-            self.outstanding = self.outstanding.saturating_sub(1);
+        let end = Instant::now() + within;
+        loop {
+            let left = end.saturating_duration_since(Instant::now());
+            if let Some((_, reply)) = self.take(left.min(self.poll)) {
+                return reply;
+            }
+            if left.is_zero() || self.stop.load(Ordering::SeqCst) {
+                return Err(refusal(REPLY_TIMEOUT));
+            }
         }
-        reply
     }
 }
 /// A participant inside the worker.
@@ -918,14 +960,17 @@ struct Member {
     registration: Value,
     cancel: Option<Cancel>,
 }
-impl From<WorkMember> for Member {
-    fn from(m: WorkMember) -> Self {
+impl Member {
+    fn new(m: WorkMember, stop: Arc<AtomicBool>, poll: Duration) -> Self {
         Self {
             node_id: m.node_id,
             link: Counted {
                 inner: m.link,
                 outstanding: 0,
                 custody: false,
+                begun: std::collections::VecDeque::new(),
+                stop,
+                poll,
             },
             registration: m.registration,
             cancel: m.cancel,
@@ -955,6 +1000,7 @@ struct Worker {
     stop: Arc<AtomicBool>,
     exiting: Arc<AtomicBool>,
     serving: Arc<AtomicBool>,
+    stop_at: Arc<Mutex<Option<Instant>>>,
     inbox: mpsc::Receiver<Command>,
     /// Member operation wait (transfer, prepare, control calls).
     within: Duration,
@@ -969,13 +1015,13 @@ impl Worker {
         // (whatever the interrupted member operation answered).
         let stopping = self.stop.load(Ordering::SeqCst);
         self.exiting.store(true, Ordering::SeqCst);
-        // EP2: an open epoch is closed FIRST (a v2 member serves until the owner closes it),
-        // then each member's serve reply is collected; then R1's release.
-        if let Some(epoch) = open.take() {
-            self.close_epoch(epoch);
-        }
-        // R1: every exit releases what the members hold.
-        let cleanup = self.release_members();
+        // F4: ONE deadline for the whole exit, from the Stop (or from now on a failure).
+        let from = match *self.stop_at.lock().unwrap_or_else(|p| p.into_inner()) {
+            Some(at) if stopping => at,
+            _ => Instant::now(),
+        };
+        // EP2 + R1: close an open epoch FIRST, then release every member.
+        let cleanup = self.exit(open.take(), from + self.stop_allowance);
         let failure = match stopping {
             true => None,
             false => worked.err(),
@@ -994,60 +1040,96 @@ impl Worker {
         });
         self.members.into_iter().map(WorkMember::from).collect()
     }
-    /// R1 (v0.1.4 teardown, demo_chain.py:1283-1320, 1380): on every exit,
-    /// cancel what members still run (`cancel_operation`) and drain those
-    /// replies, then ask every member that began a `receive` to `discard`
-    /// (closes its native worker and discards the stage bytes; the member's
-    /// own `discard`), all under ONE deadline: the run's stop allowance. A
-    /// refusal, a missing or unconfirmed answer leaves the cleanup unproven
-    /// (`owner_target_cleanup_unproven`), reported per member, never swallowed.
-    fn release_members(&mut self) -> Option<String> {
-        let end = Instant::now() + self.stop_allowance;
-        let left = || end.saturating_duration_since(Instant::now());
+    /// The exit (v0.1.4 teardown demo_chain.py:1322-1335, cleanup :1283-1320, 1380), all under
+    /// ONE deadline `end` (`_stop_deadline`, :1240-1253; REVIEW-lanePH3B-S4AF F2-F4):
+    /// 1. an open epoch is closed FIRST (EP2: a v2 member serves until the owner closes it; its
+    ///    `serve` then ends with its compute closed and is never cancelled);
+    /// 2. every other operation a member still runs is cancelled (`cancel_operation`);
+    /// 3. every member's replies are collected round-robin, and each member that began a
+    ///    `receive` is asked to `discard` as soon as nothing of it is outstanding, so a silent
+    ///    member never delays another's discard (F3);
+    /// 4. at `end`, a member whose discard is not confirmed (`inert_bytes_discarded` or
+    ///    `nothing_owned`) is `owner_target_cleanup_unproven` (:1392-1396), per member, never
+    ///    swallowed.
+    fn exit(&mut self, open: Option<Epoch>, end: Instant) -> Option<String> {
+        let closed = open.is_some();
+        let refusals = open.map(Epoch::close);
         for m in &self.members {
-            if let (true, Some(cancel)) = (m.link.outstanding > 0, &m.cancel) {
+            let serving = closed && m.link.begun.front().is_some_and(|c| c == "serve");
+            if let (true, false, Some(cancel)) = (m.link.outstanding > 0, serving, &m.cancel) {
                 cancel();
             }
         }
-        let mut rows = Vec::new();
-        let mut asked = Vec::new();
-        for (i, m) in self.members.iter_mut().enumerate() {
-            while m.link.outstanding > 0 {
-                if let Err(Refusal(code)) = m.link.finish(left())
-                    && code == REPLY_TIMEOUT
-                {
-                    break;
+        let n = self.members.len();
+        let (mut rows, mut asked) = (vec![None; n], vec![false; n]);
+        let mut reports = Vec::new();
+        loop {
+            for (i, m) in self.members.iter_mut().enumerate() {
+                if m.link.outstanding == 0 && m.link.custody && !asked[i] {
+                    asked[i] = true;
+                    if let Err(Refusal(code)) = m.link.begin(json!({"command":"discard"})) {
+                        rows[i] = Some(json!({"node_id":m.node_id,"discarded":false,"code":code}));
+                    }
                 }
             }
-            if !m.link.custody {
-                continue;
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() || self.members.iter().all(|m| m.link.outstanding == 0) {
+                break;
             }
-            let begun = match m.link.outstanding {
-                0 => m.link.begin(json!({"command":"discard"})),
-                _ => Err(refusal(REPLY_TIMEOUT)),
-            };
-            match begun {
-                Ok(()) => asked.push(i),
-                Err(Refusal(code)) => {
-                    rows.push(json!({"node_id":m.node_id,"discarded":false,"code":code}))
+            for (i, m) in self.members.iter_mut().enumerate() {
+                if m.link.outstanding == 0 {
+                    continue;
+                }
+                let left = end.saturating_duration_since(Instant::now());
+                let Some((command, reply)) = m.link.take(left.min(m.link.poll)) else {
+                    continue;
+                };
+                match command.as_str() {
+                    "serve" => reports.push(match reply {
+                        Ok(r) => json!({"node_id":m.node_id,"teardown":r["teardown"],
+                            "failure":r["failure"],"requests_served":r["requests_served"]}),
+                        Err(Refusal(code)) => json!({"node_id":m.node_id,"serve_error":code}),
+                    }),
+                    "discard" => {
+                        rows[i] = Some(match reply {
+                            Ok(r) if r["inert_bytes_discarded"] == true
+                                || r["nothing_owned"] == true =>
+                            {
+                                m.link.custody = false;
+                                json!({"node_id":m.node_id,"discarded":true})
+                            }
+                            Ok(_) => json!({"node_id":m.node_id,"discarded":false,
+                                "code":"member_discard_unconfirmed"}),
+                            Err(Refusal(code)) => {
+                                json!({"node_id":m.node_id,"discarded":false,"code":code})
+                            }
+                        })
+                    }
+                    // A cancelled or late operation's reply: drained, nothing to prove.
+                    _ => {}
                 }
             }
         }
-        for i in asked {
-            let m = &mut self.members[i];
-            rows.push(match m.link.finish(left()) {
-                Ok(r) if r["inert_bytes_discarded"] == true || r["nothing_owned"] == true => {
-                    m.link.custody = false;
-                    json!({"node_id":m.node_id,"discarded":true})
-                }
-                Ok(_) => {
-                    json!({"node_id":m.node_id,"discarded":false,"code":"member_discard_unconfirmed"})
-                }
-                Err(Refusal(code)) => json!({"node_id":m.node_id,"discarded":false,"code":code}),
-            });
-        }
+        let rows: Vec<Value> = self
+            .members
+            .iter()
+            .zip(rows)
+            .filter(|(m, row)| row.is_some() || m.link.custody)
+            .map(|(m, row)| {
+                row.unwrap_or_else(
+                    || json!({"node_id":m.node_id,"discarded":false,"code":REPLY_TIMEOUT}),
+                )
+            })
+            .collect();
         let unproven = rows.iter().any(|r| r["discarded"] != true);
-        self.shared.update(|f| f.member_cleanup = rows);
+        self.shared.update(|f| {
+            f.member_cleanup = rows;
+            if let Some(refusals) = refusals {
+                f.serve_reports = reports;
+                f.serve_reports
+                    .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
+            }
+        });
         unproven.then(|| CLEANUP_UNPROVEN.to_owned())
     }
     fn stopped(&self) -> Result<(), Refusal> {
@@ -1183,30 +1265,6 @@ impl Worker {
             &self.plan.forbidden_source,
             self.within,
         )
-    }
-    /// Close the run's epoch on the exit, FIRST: the carrier closes (each member's serve ends with
-    /// its compute closed: `owner_closed`, or the retirement teardown of a request still open),
-    /// then each member's serve reply is collected within the stop allowance. A member that does
-    /// not answer keeps its `serve` outstanding: the release step cancels and drains it.
-    fn close_epoch(&mut self, epoch: Epoch) {
-        let end = Instant::now() + self.stop_allowance;
-        let refusals = epoch.close();
-        let mut reports = Vec::new();
-        for m in self.members.iter_mut().filter(|m| m.link.outstanding > 0) {
-            let left = end.saturating_duration_since(Instant::now());
-            reports.push(match m.link.finish(left) {
-                Ok(report) => json!({"node_id":m.node_id,"teardown":report["teardown"],
-                    "failure":report["failure"],"requests_served":report["requests_served"]}),
-                Err(Refusal(code)) => json!({"node_id":m.node_id,"serve_error":code}),
-            });
-        }
-        self.shared.update(|f| {
-            f.route = None;
-            f.gateway = None;
-            f.serve_reports = reports;
-            f.serve_reports
-                .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
-        });
     }
 }
 
