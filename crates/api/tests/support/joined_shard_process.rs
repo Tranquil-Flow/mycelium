@@ -397,8 +397,8 @@ fn member_control_channel_is_pinned_signed_and_replay_safe() {
 fn product_member_process_pairs_receives_verifies_and_refunds() {
     process_transfer(false, false);
 }
-/// Owner ruling 11: grant renewal during long transfers is deferred, so an
-/// expired grant must fail the transfer clearly (typed code), never silently.
+/// A grant past its window (sized as v0.1.4 sizes it, 15 min, lane GR; there is no mid-transfer
+/// renewal in v0.1.4) must fail the transfer clearly (typed code), never silently.
 #[test]
 #[ignore = "requires explicitly built B7_MEMBER_BINARY; real product node process"]
 fn product_member_transfer_fails_clearly_when_the_grant_expires() {

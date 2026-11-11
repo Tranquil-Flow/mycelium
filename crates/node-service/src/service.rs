@@ -367,6 +367,8 @@ struct Host {
     generation: u64,
     active: Option<Active>,
     closed: bool,
+    /// Stops answered so far ([`NodeService::stops`]).
+    stops: u64,
 }
 #[derive(Clone)]
 pub struct NodeService {
@@ -386,6 +388,7 @@ impl NodeService {
                 generation: 1,
                 active: None,
                 closed: false,
+                stops: 0,
             })),
             driver,
             bearer: Arc::new(bearer),
@@ -482,7 +485,10 @@ impl NodeService {
     }
     pub fn stop(&self) -> Result<(), PublicError> {
         let shared = {
-            let host = self.host.lock().map_err(|_| error("host_poisoned"))?;
+            let mut host = self.host.lock().map_err(|_| error("host_poisoned"))?;
+            // Counted with the run it finds, under one lock: a run whose job registers after
+            // this Stop sees it counted ([`Self::stops`]).
+            host.stops = host.stops.wrapping_add(1);
             host.active.as_ref().map(|a| a.shared.clone())
         };
         if let Some(shared) = shared {
@@ -542,6 +548,11 @@ impl NodeService {
             .lock()
             .map_err(|_| error("host_poisoned"))?
             .generation)
+    }
+    /// How many Stops ([`Self::stop`]) were answered: a request admitted meanwhile, whose job did
+    /// not exist yet when one ran, is cancelled by its admission as that Stop cancels a run.
+    pub fn stops(&self) -> Result<u64, PublicError> {
+        Ok(self.host.lock().map_err(|_| error("host_poisoned"))?.stops)
     }
     /// Shutdown was requested ([`Self::request_shutdown`]); never cleared.
     pub fn closed(&self) -> Result<bool, PublicError> {

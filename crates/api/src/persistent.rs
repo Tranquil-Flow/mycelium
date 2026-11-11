@@ -102,8 +102,11 @@ pub trait Host: Send {
     fn owner_run_active(&self) -> bool;
     /// `app._refresh_fast_mode_process()`, after the file is written.
     fn fast_mode_changed(&mut self) {}
-    /// `acquisition_policy_error = None; _open_acquisition()`, after the choice is saved.
-    fn run_model_saved(&mut self) {}
+    /// `acquisition_policy_error = None; _open_acquisition()`, after the choice is saved; a failed
+    /// open is the choice's answer.
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
+        Ok(())
+    }
     /// `time.time()` for consent timestamps.
     fn now_seconds(&self) -> f64 {
         std::time::SystemTime::now()
@@ -1193,7 +1196,23 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 Ok(self.host.status_document())
             }
             // Revocation is the authority's: only the closed/role gate and the shape live here.
-            Action::Revoke | Action::RevokeSelf => self.inner.execute_json(action, body),
+            // Once it succeeded for this Mac, `self._cancel_acquisition()` (app.py:1645-1660 @
+            // f4e366e9): `/api/revoke-self` always, `/api/revoke` when it names this Mac's member.
+            Action::RevokeSelf => {
+                let revoked = self.inner.execute_json(action, body)?;
+                self.host.cancel_acquisition();
+                Ok(revoked)
+            }
+            Action::Revoke => {
+                let revoked = self.inner.execute_json(action, body)?;
+                let this_mac = self.host.membership_binding().is_some_and(|member| {
+                    body.get("node_id") == Some(&Value::from(member.node_id))
+                });
+                if this_mac {
+                    self.host.cancel_acquisition();
+                }
+                Ok(revoked)
+            }
             _ => self.inner.execute_json(action, body),
         }
     }

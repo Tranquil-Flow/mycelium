@@ -24,6 +24,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
+pub mod acquisition;
 mod materialize;
 mod startup;
 mod unique;

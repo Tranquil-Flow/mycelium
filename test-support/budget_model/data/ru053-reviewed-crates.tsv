@@ -2,4 +2,4 @@ crate	path	line	sha256	text
 crates/protocol	crates/protocol/Cargo.toml	3	ad6585e565ae400c08e778e847eb0c03fc0b3945e670fde8e41805c53e053433	name = "protocol"
 crates/protocol	crates/protocol/src/lib.rs	4	2e64bcc70abe0d420b571012329c68ef1593d01628afe96298d240e4774b18c4	pub mod artifact_grant;
 crates/runtime	crates/runtime/Cargo.toml	12	32e260d65f6d65e2adb5f45b66952418c17b8f8b9edc598b3144120157bfa692	protocol = { path = "../protocol" }
-crates/runtime	crates/runtime/src/lib.rs	11	90ca6fc518b05c46dcc455155a9a8e16610bf472bcda56612ce279c270d2c075	pub mod iroh_artifact;
+crates/runtime	crates/runtime/src/lib.rs	11	dcf50cf313e32e85b36c0528ddac939c2b4169102bcc9e5f7d365ad9ec3109e5	pub mod iroh_artifact;

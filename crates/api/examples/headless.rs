@@ -1397,9 +1397,10 @@ impl Host for HeadlessHost {
         let mut runs = runs.lock().map_err(|_| failure())?;
         runs.demo_action(action, body, &mut facts)
     }
-    fn run_model_saved(&mut self) {
-        // acquisition_policy_error = None; _open_acquisition(): selection never starts a download.
-        self.with(|c| with_acquisition(c, app_host::run_model_saved));
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
+        // acquisition_policy_error = None; _open_acquisition(): selection never starts a download;
+        // a failed open is the choice's answer (app.py:866-867).
+        self.with(|c| with_acquisition(c, app_host::run_model_saved))
     }
     fn resource_check(&mut self) -> Option<&'static str> {
         resource_check(&self.core)
@@ -1736,7 +1737,12 @@ impl EndpointHost for Endpoint {
 /// endpoint seams (which lock the core) never meet the relay's own locks.
 fn start_relay(core: &Shared, body: &Map<String, Value>) -> Result<Json, PublicError> {
     let mut endpoint = Endpoint { core: core.clone() };
-    let probe: Probe = Arc::new(|| Ok(false));
+    // `_relay_is_serving` (app.py:769-776): the window renews while an owner run is active or a
+    // swarm listing is enabled (its listing points at this relay). Both are read from their own
+    // short-held cells (the run view installed at launch, the publisher's status snapshot), never
+    // the core lock, so a long action holding the core cannot starve the relay's renewal.
+    let (demo, publisher) = endpoint.with(|c| (c.demo.clone(), c.swarm_publisher.clone()));
+    let probe: Probe = Arc::new(move || Ok(demo.active() || publisher.listing_enabled()));
     let root = endpoint.with(|c| c.root.clone());
     let mut relay =
         endpoint.with(|c| std::mem::replace(&mut c.relay, OwnerRelay::new(&root, relay_hooks)));
@@ -2464,30 +2470,28 @@ fn acquisition_policy_tick(core: &Shared) {
     let Some(acquisition) = acquisition.filter(|_| active) else {
         return;
     };
-    if matches!(
-        acquisition.status().state.as_str(),
-        "prepared" | "cancelled" | "failed"
-    ) {
-        if let Ok(mut c) = core.lock() {
-            c.acquisition_active = false;
-        }
-        return;
-    }
     let host = HeadlessHost {
         core: core.clone(),
         runs: None,
     };
-    let membership_lost = !host.running() || host.membership_state().as_deref() != Some("current");
-    let reason = if membership_lost {
-        Some("membership_required")
-    } else {
-        resource_check(core)
-    };
-    if let Some(reason) = reason {
-        acquisition.cancel();
-        if let Ok(mut c) = core.lock() {
-            c.acquisition_policy_error = Some(reason);
-            c.acquisition_active = false;
+    // The verdict shared with the packaged executable (`app_host::acquisition_policy_verdict`).
+    match app_host::acquisition_policy_verdict(
+        &acquisition.status().state,
+        || host.running() && host.membership_state().as_deref() == Some("current"),
+        || resource_check(core),
+    ) {
+        app_host::PolicyVerdict::Keep => {}
+        app_host::PolicyVerdict::Finished => {
+            if let Ok(mut c) = core.lock() {
+                c.acquisition_active = false;
+            }
+        }
+        app_host::PolicyVerdict::Cancel(reason) => {
+            acquisition.cancel();
+            if let Ok(mut c) = core.lock() {
+                c.acquisition_policy_error = Some(reason);
+                c.acquisition_active = false;
+            }
         }
     }
 }
@@ -2684,6 +2688,9 @@ mod chain_tests;
 #[cfg(test)]
 #[path = "headless/handoff_tests.rs"]
 mod handoff_tests;
+#[cfg(test)]
+#[path = "headless/relay_tests.rs"]
+mod relay_tests;
 
 fn run() -> Result<(), String> {
     let root = state_root()?;
@@ -2742,7 +2749,7 @@ fn run() -> Result<(), String> {
             published.clone(),
             session,
         )
-        .with_product(Arc::new(product::Routes::new(core.clone()))),
+        .with_product(Arc::new(product::routes(core.clone()))),
     );
     publish(&core, &published).map_err(|e| e.to_string())?;
     private_write(
