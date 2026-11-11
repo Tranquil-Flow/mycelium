@@ -137,7 +137,10 @@ fn adhoc_signing_keeps_pinned_code_bytes_signs_the_executable_and_seals_the_bund
     let mut sorted = lines.clone();
     sorted.sort_unstable();
     assert_eq!(lines, sorted, "verify transcript in canonical order");
-    assert!(lines.iter().any(|l| l.ends_with(": valid on disk")), "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l.ends_with(": valid on disk")),
+        "{lines:?}"
+    );
     assert_eq!(receipt["trust_level"], sign::TRUST_LEVEL);
     let text = receipt.to_string();
     assert!(

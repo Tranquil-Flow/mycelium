@@ -60,6 +60,15 @@ pub fn is_adhoc_display(stderr: &str) -> bool {
     stderr.lines().any(|l| l.trim() == "Signature=adhoc")
 }
 
+/// `codesign --verify --deep` validates nested code concurrently, so its `--prepared:` and
+/// `--validated:` lines arrive in another order on each run; the receipt keeps the transcript
+/// sorted, so two builds of the same bytes write the same receipt (lane RELF, two-build check).
+fn canonical_order(lines: &mut Value) {
+    if let Some(lines) = lines.as_array_mut() {
+        lines.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+}
+
 /// Sign `app` ad-hoc. `pinned` = the code entries admitted by pin (dylibs and helpers); every one
 /// must exist in the bundle with its pinned bytes before and after.
 pub fn adhoc(app: &Path, pinned: &[Entry]) -> Result<Value, SignError> {
@@ -124,8 +133,9 @@ pub fn adhoc(app: &Path, pinned: &[Entry]) -> Result<Value, SignError> {
             ));
         }
     }
-    let (verified, verify_record) =
+    let (verified, mut verify_record) =
         run(&["--verify", "--deep", "--strict", "-vvv", &app_text], app)?;
+    canonical_order(&mut verify_record["stderr"]);
     steps.push(verify_record.clone());
     if !verified.status.success() {
         return Err(refuse(
