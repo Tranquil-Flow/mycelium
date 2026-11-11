@@ -730,3 +730,33 @@ fn a_timing_file_swapped_for_a_symlink_is_not_followed() {
     assert_eq!(last["terminal"], "completed");
     assert_eq!(std::fs::read(&target).unwrap(), b"", "the symlink was followed");
 }
+
+/// A gateway that panics inside `stream` (a defect in a later `RouteGateway`).
+struct Panics;
+impl RouteGateway for Panics {
+    fn stream(
+        &self,
+        _: &str,
+        _: u64,
+        _: &RequestCancel,
+        _: &mut dyn FnMut(&str),
+    ) -> Result<Streamed, GatewayError> {
+        panic!("test gateway panics inside stream")
+    }
+}
+/// REVIEW-lanePH3B-S5 F6: a panic inside the gateway call ends that chat (`failed`,
+/// `chat_generation_failed_panic`, as `failure_code` names an unexpected exception,
+/// chat.py:202-207, 376-381) and the `finally` of `_work` (chat.py:383-398) still clears `busy`:
+/// the next send is admitted, not `chat_busy`.
+#[test]
+fn a_gateway_that_panics_does_not_leave_the_service_busy() {
+    let chat = service(run_over(Arc::new(Panics), Some(serving("run-1"))), None);
+    let sent = chat.send("local", prompt("one", 1)).unwrap();
+    let (_, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("failed"), &json!("chat_generation_failed_panic"))
+    );
+    let next = chat.send("local", prompt("two", 1)).err().map(|e| e.error.code);
+    assert_eq!(next, None, "the service stayed busy after a panic");
+}
