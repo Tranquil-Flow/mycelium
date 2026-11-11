@@ -907,23 +907,71 @@ impl RunChats {
             run: Arc::default(),
         }
     }
+    fn facts(&self) -> MutexGuard<'_, RunFacts> {
+        self.run.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    /// Wait for a started ceiling cancel (an HTTP round trip bounded by the gateway's idle budget).
+    fn join(ceiling: Option<JoinHandle<usize>>) {
+        if let Some(thread) = ceiling
+            && thread.join().is_err()
+        {
+            eprintln!("chat: the ceiling's cancel panicked");
+        }
+    }
     /// A fresh `RunContext` (owner_run.py:392-399): no per-run fact survives into the next run.
-    pub fn new_run(&self) {}
+    pub fn new_run(&self) {
+        let previous = std::mem::take(&mut *self.facts());
+        Self::join(previous.ceiling_thread);
+    }
     /// `rollover_due` answered true: `ctx.state['rollover_requested'] = True` (owner_run.py:256).
-    pub fn rollover_requested(&self) {}
+    pub fn rollover_requested(&self) {
+        self.facts().rollover_requested = true;
+    }
     /// The monitor's dead-member check: `ctx.state['monitor_error_code'] = dead` (demo_chain.py:1181).
-    pub fn dead_member(&self, _code: &str) {}
+    pub fn dead_member(&self, code: &str) {
+        self.facts().monitor_error_code = Some(code.to_owned());
+    }
     /// `ceiling_reached` returned the code: the first time per run, cancel every chat
     /// `execution_ceiling_reached` off the caller's thread (demo_chain.py:1157-1163). `true` when
     /// this call started that cancel.
     pub fn ceiling_reached(&self) -> bool {
-        false
+        let mut facts = self.facts();
+        if facts.ceiling_cancelled {
+            return false;
+        }
+        facts.ceiling_cancelled = true;
+        let chat = self.chat.clone();
+        match std::thread::Builder::new()
+            .name("a13-ceiling-cancel".into())
+            .spawn(move || chat.cancel_all(&Teardown::CeilingReached))
+        {
+            Ok(thread) => facts.ceiling_thread = Some(thread),
+            Err(e) => {
+                // No thread: cancel on the caller's thread rather than not at all.
+                eprintln!("chat: ceiling cancel thread not started: {:?}", e.kind());
+                drop(facts);
+                self.chat.cancel_all(&Teardown::CeilingReached);
+            }
+        }
+        true
     }
     /// `chain.teardown(ctx, failed=)` (demo_chain.py:1322-1335), FIRST, while the route still takes
-    /// `DELETE`: every chat not done is cancelled with the shipped expression's code. Returns how
-    /// many were cancelled.
-    pub fn teardown(&self, _failed: bool) -> usize {
-        0
+    /// `DELETE`: every chat not done is cancelled with the shipped expression's code (a started
+    /// ceiling cancel is finished first). Returns how many were cancelled.
+    pub fn teardown(&self, failed: bool) -> usize {
+        let (reason, ceiling) = {
+            let mut facts = self.facts();
+            (
+                Teardown::of(
+                    facts.rollover_requested,
+                    failed,
+                    facts.monitor_error_code.as_deref(),
+                ),
+                facts.ceiling_thread.take(),
+            )
+        };
+        Self::join(ceiling);
+        self.chat.cancel_all(&reason)
     }
 }
 impl ChatTeardown for RunChats {
