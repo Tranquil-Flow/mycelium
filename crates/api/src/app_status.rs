@@ -33,6 +33,30 @@ pub struct Recorded {
     pub standing_last: Option<Value>,
     pub last_report: Option<Value>,
 }
+/// `_renew_loop`'s code for a pass that failed while the app was running (app.py:925-927).
+pub const RENEWAL_UNAVAILABLE: &str = "renewal_unavailable";
+/// One pass of `_renew_loop` as it ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenewalPass {
+    /// `continue`: closed, not running, left, or no authority; nothing changes.
+    Skipped,
+    /// `authority.renew()` returned: `renew_error = None`.
+    Renewed,
+    /// It raised: `renew_error = 'renewal_unavailable'` if the app is still running and open.
+    Failed,
+}
+impl Recorded {
+    /// Record a pass of `_renew_loop`; `running_open` is `self.running and not
+    /// self.closed.is_set()` read after the pass (app.py:926).
+    pub fn renewal(&mut self, pass: RenewalPass, running_open: bool) {
+        match pass {
+            RenewalPass::Skipped => {}
+            RenewalPass::Renewed => self.renewal_error = None,
+            RenewalPass::Failed if running_open => self.renewal_error = Some(RENEWAL_UNAVAILABLE),
+            RenewalPass::Failed => {}
+        }
+    }
+}
 
 /// The facts a host reads beside its authority: the run-model and token-path environment
 /// overrides and this Mac's RAM (`host_memory_bytes()`, app.py:267-273, or v0.1.4's test seam).
