@@ -300,6 +300,8 @@ struct Flow {
     cleanup_error: Option<String>,
     /// Per member: its stage release on the run's exit (`discard`).
     member_cleanup: Vec<Value>,
+    /// Every stage shard is on its member (verified there).
+    transferred_all: bool,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -323,7 +325,8 @@ impl Shared {
         json!({"state":flow.state,"error_code":flow.error,"route_ready":false,
             "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
             "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
-            "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup})
+            "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup,
+            "shards_transferred":flow.transferred_all})
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -336,6 +339,8 @@ fn closed(r: &Refusal) -> String {
     }
 }
 enum Command {
+    /// Publish: prepare the transferred stages; routes expire at `expires_at`.
+    Prepare { expires_at: f64 },
     /// Open the next epoch (activation, and again after each spent request).
     Open,
 }
@@ -354,6 +359,8 @@ pub struct OwnerWork {
     /// Participants in stage order with the generation their registration signed.
     stages: Vec<(String, u64)>,
     owner_root: PathBuf,
+    /// `Plan::worker_walls` (route expiry at publish).
+    walls: BTreeMap<String, u64>,
     shared: Arc<Shared>,
     start: Option<Start>,
     proposal: Option<Value>,
@@ -396,6 +403,7 @@ impl OwnerWork {
             skew: skew.as_secs_f64(),
             stages,
             owner_root: plan.owner_root.clone(),
+            walls: plan.worker_walls.clone(),
             shared: Arc::new(Shared {
                 flow: Mutex::new(Flow {
                     state: PREPARED,
@@ -409,6 +417,7 @@ impl OwnerWork {
                     expires_at: None,
                     cleanup_error: None,
                     member_cleanup: Vec::new(),
+                    transferred_all: false,
                 }),
                 changed: Condvar::new(),
             }),
@@ -568,10 +577,89 @@ impl OwnerWork {
         }
         Ok(())
     }
-    /// A Stop handle for the host while a step blocks in this port (S4aF F5
-    /// seam; not yet wired).
+    /// The Stop the host signals while a step blocks in this port (the slices
+    /// step's push, F5): stops the work and cancels the member operation in
+    /// flight; the step then ends `Stopped` and `teardown` follows. Callable
+    /// from any thread (the owner run's Stop, owner_run.py:275-283).
     pub fn stopper(&self) -> impl Fn() + Send + Sync + 'static {
-        || {}
+        let (stop, cancels, shared) =
+            (self.stop.clone(), self.cancels.clone(), self.shared.clone());
+        move || {
+            stop.store(true, Ordering::SeqCst);
+            for cancel in &cancels {
+                cancel();
+            }
+            shared.changed.notify_all();
+        }
+    }
+    /// Start the owned worker: consent and shard push per participant, then
+    /// it waits for publish (`Command::Prepare`).
+    fn spawn(&mut self) -> Result<(), Refusal> {
+        let Some(start) = self.start.take() else {
+            return Err(refusal("managed_workflow_not_startable"));
+        };
+        let Some(wall) = start.plan.worker_walls.values().copied().min() else {
+            self.start = Some(start);
+            return Err(refusal("member_wall_limit_invalid"));
+        };
+        let within = super::span(B::MemberChosenWall)?;
+        let stop_allowance = stop_allowance(wall, start.members.len())
+            .ok_or_else(|| refusal("budget_unavailable"))?;
+        let (commands, inbox) = mpsc::channel();
+        let worker = Worker {
+            shared: self.shared.clone(),
+            coordinator: self.coordinator.clone(),
+            members: start.members.into_iter().map(Member::from).collect(),
+            plan: start.plan,
+            network: start.network,
+            codec: start.codec,
+            stop: self.stop.clone(),
+            exiting: self.exiting.clone(),
+            inbox,
+            within,
+            serve_within: Duration::from_secs(wall),
+            stop_allowance,
+        };
+        let thread = std::thread::Builder::new()
+            .name("joined-owner-work".into())
+            .spawn(move || worker.run())
+            .map_err(|_| refusal("managed_workflow_failed"))?;
+        self.thread = Some(thread);
+        self.commands = Some(commands);
+        Ok(())
+    }
+    /// Wait until every shard is pushed, the work ended, a Stop was signalled
+    /// or `within` ran out; re-sends the cancels while stopping.
+    fn wait_transferred(&self, within: Duration) -> Result<(), StepError> {
+        let poll = super::span(B::OwnerPoll).map_err(|e| step_refusal(e.code))?;
+        let end = Instant::now() + within;
+        loop {
+            if self.stop.load(Ordering::SeqCst) {
+                return Err(StepError::Stopped);
+            }
+            let state = self.wait_state(
+                |s| {
+                    s["shards_transferred"] == true || s["state"] == FAILED || s["state"] == STOPPED
+                },
+                poll.min(end.saturating_duration_since(Instant::now())),
+            );
+            if state["shards_transferred"] == true {
+                return Ok(());
+            }
+            if self.stop.load(Ordering::SeqCst) || state["state"] == STOPPED {
+                return Err(StepError::Stopped);
+            }
+            if state["state"] == FAILED {
+                return Err(step_refusal(
+                    state["error_code"]
+                        .as_str()
+                        .unwrap_or("managed_workflow_stopped"),
+                ));
+            }
+            if Instant::now() >= end {
+                return Err(step_refusal("member_slice_timeout"));
+            }
+        }
     }
     /// The member links, handed back after [`OwnerWork::teardown`] (the run
     /// never closes them: members stay joined).
@@ -589,6 +677,9 @@ impl Drop for OwnerWork {
 fn refused(code: &str) -> PortError {
     PortError::Refused(OwnerRunError::new(code))
 }
+fn step_refusal(code: &str) -> StepError {
+    StepError::Refused(OwnerRunError::new(code))
+}
 impl WorkPort for OwnerWork {
     /// The joined route has no local cleanup tick: members own their cleanup.
     fn install_cleanup_progress(&mut self) -> Result<(), StepError> {
@@ -598,45 +689,28 @@ impl WorkPort for OwnerWork {
     /// per participant, then native prepare) and return at once; the route's
     /// gateway exists only after activation, so `registry_origin` is null.
     fn start_serving(&mut self, proposal: &Value) -> Result<Value, PortError> {
-        let Some(start) = self.start.take() else {
+        if self.proposal.is_some() {
             return Err(refused("managed_workflow_not_startable"));
-        };
-        let Some(wall) = start.plan.worker_walls.values().copied().min() else {
+        }
+        // Not pushed in the slices step (a caller without that step): push now.
+        if self.thread.is_none() {
+            self.spawn().map_err(|e| refused(&e.0))?;
+        }
+        let Some(wall) = self.walls.values().copied().min() else {
             return Err(refused("member_wall_limit_invalid"));
         };
         // Counted from the publish step (demo_chain.py:896): no route outlives
         // the members' worker wall.
         let expires_at = (self.clocks.wall)() + wall as f64;
-        let within = super::span(B::MemberChosenWall).map_err(|e| refused(e.code))?;
-        let stop_allowance = stop_allowance(wall, start.members.len())
-            .ok_or_else(|| refused("budget_unavailable"))?;
-        let (commands, inbox) = mpsc::channel();
-        let worker = Worker {
-            shared: self.shared.clone(),
-            coordinator: self.coordinator.clone(),
-            members: start.members.into_iter().map(Member::from).collect(),
-            plan: start.plan,
-            network: start.network,
-            codec: start.codec,
-            stop: self.stop.clone(),
-            exiting: self.exiting.clone(),
-            inbox,
-            expires_at,
-            within,
-            serve_within: Duration::from_secs(wall),
-            stop_allowance,
-        };
         self.proposal = Some(proposal.clone());
         self.shared.update(|f| {
-            f.state = PUBLISHING;
+            if f.state == PREPARED {
+                f.state = PUBLISHING;
+            }
             f.expires_at = Some(expires_at);
         });
-        let thread = std::thread::Builder::new()
-            .name("joined-owner-work".into())
-            .spawn(move || worker.run())
-            .map_err(|_| refused("managed_workflow_failed"))?;
-        self.thread = Some(thread);
-        self.commands = Some(commands);
+        self.send(Command::Prepare { expires_at })
+            .map_err(|e| refused(&e.0))?;
         Ok(json!({"registry_origin":null}))
     }
     fn workflow_state(&mut self) -> Result<Value, StepError> {
@@ -654,9 +728,18 @@ impl ActivationPort for OwnerWork {
     }
 }
 impl SlicesPort for OwnerWork {
-    /// No slice fetch on the joined route: every member receives its stage
-    /// shard pushed by the owner in the work phase (U1).
+    /// No slice plan is announced on the joined route: every member receives
+    /// its stage shard pushed by the owner (U1). The push happens HERE, in the
+    /// slices step, before publish starts the run's execution clock (F5; as
+    /// v0.1.4 members download before publish, demo_chain.py:562-725 vs :896),
+    /// bounded by the slices budget (`member_slice_timeout`, :888) and ended by
+    /// [`OwnerWork::stopper`]. A refused push fails the step with its code.
     fn node_slice_plans(&mut self) -> Result<Option<BTreeMap<String, Value>>, StepError> {
+        if self.thread.is_none() {
+            self.spawn().map_err(|e| step_refusal(&e.0))?;
+        }
+        let budget = super::span(B::Slices).map_err(|e| step_refusal(e.code))?;
+        self.wait_transferred(budget)?;
         Ok(None)
     }
     fn storage_policy(&mut self) -> Result<Option<Value>, StepError> {
@@ -747,7 +830,6 @@ struct Worker {
     stop: Arc<AtomicBool>,
     exiting: Arc<AtomicBool>,
     inbox: mpsc::Receiver<Command>,
-    expires_at: f64,
     /// Member operation wait (transfer, prepare, control calls).
     within: Duration,
     /// The members' worker wall: how long a member may serve one route.
@@ -863,12 +945,23 @@ impl Worker {
         let released = source.close();
         let offers = offers?;
         released?;
+        self.shared.update(|f| f.transferred_all = true);
+        // F5: the native prepare starts at publish (the run's clock).
+        let expires_at = match self.inbox.recv() {
+            Ok(Command::Prepare { expires_at }) => expires_at,
+            Ok(Command::Open) => return Err(refusal("activation_failed")),
+            Err(_) => return Ok(()),
+        };
+        self.stopped()?;
         let challenges = native::Challenges::new();
         self.shared.set(STAGING);
         let mut admitted = self.prepare(&challenges, &offers)?;
         self.shared.set(AWAITING);
         let mut number = 0;
-        while let Ok(Command::Open) = self.inbox.recv() {
+        while let Ok(command) = self.inbox.recv() {
+            if !matches!(command, Command::Open) {
+                return Err(refusal("managed_workflow_not_startable"));
+            }
             self.stopped()?;
             if let Some(spent) = open.take() {
                 self.retire(spent, self.serve_within)?;
@@ -900,7 +993,7 @@ impl Worker {
                 &self.network,
                 self.codec.clone(),
                 self.within,
-                Some(self.expires_at),
+                Some(expires_at),
             )?;
             let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
                 "qualification":epoch.qualification().ok(),
