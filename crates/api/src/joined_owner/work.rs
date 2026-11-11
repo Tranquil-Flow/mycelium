@@ -234,11 +234,16 @@ pub struct Clocks {
     pub mono: Seconds,
     pub wall: Seconds,
 }
-/// One admitted participant: its member link and seed-verified registration.
+/// Asks a member to cancel the operation it is running (member_control
+/// `cancel_operation`); callable from any thread while the link is in use.
+pub type Cancel = Arc<dyn Fn() + Send + Sync>;
+/// One admitted participant: its member link, seed-verified registration and
+/// the link's canceller.
 pub struct WorkMember {
     pub node_id: String,
     pub link: Box<dyn MemberLink + Send>,
     pub registration: Value,
+    pub cancel: Option<Cancel>,
 }
 /// What the compile step produced for this run (copied from its `RunState`
 /// and its `source-shards.private.json`); the port never re-plans.

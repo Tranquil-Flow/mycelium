@@ -596,6 +596,7 @@ impl Owner {
                 node_id: m.node_id,
                 link: m.link,
                 registration: m.registration,
+                cancel: None,
             });
         }
         self.parked = parked;

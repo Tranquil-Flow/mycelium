@@ -26,7 +26,7 @@ use api::{
     preferences::{resource_policy, standing_consent},
     schema::PublicError,
 };
-use budgets::{BudgetId as B, Entries};
+use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
     Clock, Identity as RunIdentity, OwnerRun, Reason, StepOutcome,
     machine::{CeilingProbe, MonitorProbe},
@@ -39,13 +39,15 @@ use runtime::{
 };
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     fs,
     path::PathBuf,
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use transport::{Channel, Clock as _};
 
@@ -63,19 +65,105 @@ fn seconds(id: B) -> f64 {
 struct Seen {
     commands: Vec<String>,
     received: Option<Vec<u8>>,
+    /// Owner cancel requests that found an admitted operation.
+    cancels: usize,
+    /// When the member was asked to discard its stage.
+    discard_at: Option<Instant>,
+}
+/// A scripted answer of a test member to one command (by name).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Act {
+    /// Wait (custody already taken for `receive`) until the owner cancels or the test releases.
+    Hold,
+    /// Never answer (a wedged member).
+    Silent,
+}
+/// The member dispatcher's rules (examples/shard_member/control.rs): at most one admitted
+/// operation, each with its own cancel flag set only while it is admitted; `holding` names the
+/// held command; `released` ends every hold (the test's guard on any exit).
+#[derive(Default)]
+struct Ops {
+    active: Option<Arc<AtomicBool>>,
+    holding: Option<String>,
+    released: bool,
+}
+#[derive(Default)]
+struct Control {
+    ops: Mutex<Ops>,
+    changed: Condvar,
+}
+impl Control {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Ops> {
+        self.ops.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    /// `cancel_operation` of the admitted operation (none admitted: nothing happens).
+    fn cancel(&self, seen: &Mutex<Seen>) {
+        let ops = self.lock();
+        if let Some(flag) = &ops.active {
+            flag.store(true, Ordering::SeqCst);
+            seen.lock().unwrap_or_else(|p| p.into_inner()).cancels += 1;
+        }
+        drop(ops);
+        self.changed.notify_all();
+    }
+    fn release(&self) {
+        self.lock().released = true;
+        self.changed.notify_all();
+    }
+    /// Hold `name` until cancelled (true) or released (false).
+    fn hold(&self, name: &str, cancelled: &AtomicBool) -> bool {
+        let mut ops = self.lock();
+        ops.holding = Some(name.to_owned());
+        self.changed.notify_all();
+        loop {
+            if cancelled.load(Ordering::SeqCst) || ops.released {
+                ops.holding = None;
+                return cancelled.load(Ordering::SeqCst);
+            }
+            ops = self.changed.wait(ops).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+    /// Wait (bounded) until the member holds `name`.
+    fn holding(&self, name: &str, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        let mut ops = self.lock();
+        while ops.holding.as_deref() != Some(name) {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            ops = self
+                .changed
+                .wait_timeout(ops, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        true
+    }
+}
+/// Releases every hold of a member when the test ends (also on an assertion failure).
+struct Release(Arc<Control>);
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.release();
+    }
 }
 /// TEST MEMBER (test double, not product code): a joined member behind the owner's link that
-/// answers `consent_status` with its own consent and policy and runs the member's real shard
-/// receive; it has no native worker, so `prepare_native` is refused by name.
+/// answers `consent_status` with its own consent and policy, runs the member's real shard
+/// receive (custody first, as the member) and discards what it holds; it has no native worker, so
+/// `prepare_native` is refused by name. Its own thread answers in order, like the member process.
 struct TestMember {
     root: PathBuf,
     signer: Identity,
     secret: iroh::SecretKey,
     session: Session,
     seen: Arc<Mutex<Seen>>,
-    reply: Option<Result<Value, Refusal>>,
+    shard: Option<JoinedShard>,
+    script: BTreeMap<&'static str, Act>,
+    control: Arc<Control>,
 }
 const NO_NATIVE: &str = "test_member_native_unavailable";
+const CANCELLED: &str = "member_operation_cancelled";
 impl TestMember {
     fn carrier(&self) -> Identity {
         Identity::from_secret(
@@ -84,19 +172,46 @@ impl TestMember {
         )
         .unwrap()
     }
-    fn answer(&mut self, command: &Value) -> Result<Value, Refusal> {
+    /// A scripted hold at this point of `name`: Err(cancelled) when the owner cancelled it.
+    fn pause(&self, name: &str, cancelled: &AtomicBool) -> Result<(), String> {
+        if self.script.get(name) == Some(&Act::Hold) && self.control.hold(name, cancelled) {
+            return Err(CANCELLED.into());
+        }
+        Ok(())
+    }
+    fn answer(&mut self, command: &Value, cancelled: &AtomicBool) -> Result<Value, Refusal> {
         let refused = |code: &str| Refusal(code.into());
         match command["command"].as_str() {
             Some("consent_status") => Ok(json!({
                 "consent": standing_consent::load(&self.root).map_err(|e| refused(e.0))?,
                 "policy": resource_policy::read(&self.root).map_err(|e| refused(e.code))?})),
-            Some("receive") => self.receive(command).map_err(|e| refused(&e)),
-            Some("prepare_native") => Err(refused(NO_NATIVE)),
+            Some("receive") => self.receive(command, cancelled).map_err(|e| refused(&e)),
+            Some("prepare_native") => {
+                self.pause("prepare_native", cancelled)
+                    .map_err(|e| refused(&e))?;
+                Err(refused(NO_NATIVE))
+            }
+            Some("discard") => {
+                self.seen.lock().unwrap().discard_at = Some(Instant::now());
+                Ok(match self.shard.take() {
+                    Some(mut shard) => {
+                        shard.discard().map_err(|e| refused(e.0))?;
+                        json!({"inert_bytes_discarded":true,"route_ready":false})
+                    }
+                    None => {
+                        json!({"inert_bytes_discarded":false,"nothing_owned":true,"route_ready":false})
+                    }
+                })
+            }
             _ => Err(refused("test_member_command_unexpected")),
         }
     }
-    /// The member's real receive: custody first, then every chunk over the carrier, then verify.
-    fn receive(&mut self, command: &Value) -> Result<Value, String> {
+    /// The member's real receive: custody first (kept on any failure), then every chunk over
+    /// the carrier, then verify.
+    fn receive(&mut self, command: &Value, cancelled: &AtomicBool) -> Result<Value, String> {
+        if self.shard.is_some() {
+            return Err("shard_already_owned".into());
+        }
         let offer = &command["offer"];
         let carrier = self.carrier();
         let mut shard = JoinedShard::begin(
@@ -108,6 +223,19 @@ impl TestMember {
             app_host::now(),
         )
         .map_err(|e| e.0.to_owned())?;
+        let received = self
+            .pause("receive", cancelled)
+            .and_then(|()| self.fetch(command, &mut shard, &carrier));
+        self.shard = Some(shard);
+        received
+    }
+    fn fetch(
+        &self,
+        command: &Value,
+        shard: &mut JoinedShard,
+        carrier: &Identity,
+    ) -> Result<Value, String> {
+        let offer = &command["offer"];
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -161,7 +289,7 @@ impl TestMember {
                     &request,
                     &self.session,
                     &self.signer,
-                    &carrier,
+                    carrier,
                     &app_host::now,
                     deadline(),
                     &|| Ok(()),
@@ -171,7 +299,7 @@ impl TestMember {
         }
         link.finish();
         shard
-            .verify(&self.session, &self.signer, &carrier, &app_host::now)
+            .verify(&self.session, &self.signer, carrier, &app_host::now)
             .map_err(|e| e.0.to_owned())?;
         self.seen.lock().unwrap().received = Some(fs::read(shard.path()).unwrap());
         host.close(&clock, deadline())
@@ -179,21 +307,96 @@ impl TestMember {
         drop(host);
         Ok(json!({"received_bytes":size,"route_ready":false}))
     }
+    /// The member process: one admitted operation at a time, answered in order.
+    fn serve(
+        mut self,
+        inbox: mpsc::Receiver<(Value, Arc<AtomicBool>)>,
+        replies: mpsc::Sender<Result<Value, Refusal>>,
+    ) {
+        while let Ok((command, cancelled)) = inbox.recv() {
+            let name = command["command"].as_str().unwrap_or_default().to_owned();
+            let reply = self.answer(&command, &cancelled);
+            if self.script.get(name.as_str()) == Some(&Act::Silent) {
+                continue;
+            }
+            self.control.lock().active = None;
+            if replies.send(reply).is_err() {
+                break;
+            }
+        }
+    }
 }
-impl MemberLink for TestMember {
+/// The owner's link to a test member (as `RemoteMember`: a busy member refuses at once, a reply
+/// not in time is `member_reply_timeout`).
+struct TestLink {
+    commands: Option<mpsc::Sender<(Value, Arc<AtomicBool>)>>,
+    busy: mpsc::Sender<Result<Value, Refusal>>,
+    replies: mpsc::Receiver<Result<Value, Refusal>>,
+    control: Arc<Control>,
+    seen: Arc<Mutex<Seen>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl TestLink {
+    fn start(member: TestMember) -> Self {
+        let (commands, inbox) = mpsc::channel();
+        let (busy, replies) = mpsc::channel();
+        let answers = busy.clone();
+        let (control, seen) = (member.control.clone(), member.seen.clone());
+        let thread = std::thread::spawn(move || member.serve(inbox, answers));
+        Self {
+            commands: Some(commands),
+            busy,
+            replies,
+            control,
+            seen,
+            thread: Some(thread),
+        }
+    }
+    /// The owner's `cancel_operation` for whatever operation is admitted.
+    fn canceller(&self) -> work::Cancel {
+        let (control, seen) = (self.control.clone(), self.seen.clone());
+        Arc::new(move || control.cancel(&seen))
+    }
+}
+impl MemberLink for TestLink {
     fn begin(&mut self, command: Value) -> Result<(), Refusal> {
         self.seen
             .lock()
             .unwrap()
             .commands
             .push(command["command"].as_str().unwrap_or_default().to_owned());
-        self.reply = Some(self.answer(&command));
-        Ok(())
+        let mut ops = self.control.lock();
+        if ops.active.is_some() {
+            drop(ops);
+            return self
+                .busy
+                .send(Err(Refusal("operator_busy".into())))
+                .map_err(|_| Refusal("member_control_closed".into()));
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        ops.active = Some(cancelled.clone());
+        drop(ops);
+        self.commands
+            .as_ref()
+            .ok_or_else(|| Refusal("member_control_closed".into()))?
+            .send((command, cancelled))
+            .map_err(|_| Refusal("member_control_closed".into()))
     }
-    fn finish(&mut self, _: Duration) -> Result<Value, Refusal> {
-        self.reply
-            .take()
-            .unwrap_or_else(|| Err(Refusal("test_member_no_command".into())))
+    fn finish(&mut self, within: Duration) -> Result<Value, Refusal> {
+        self.replies
+            .recv_timeout(within)
+            .map_err(|_| Refusal("member_reply_timeout".into()))?
+    }
+}
+impl Drop for TestLink {
+    fn drop(&mut self) {
+        self.control.release();
+        self.commands.take();
+        if let Some(t) = self.thread.take()
+            && t.join().is_err()
+        {
+            eprintln!("test member thread panicked");
+        }
     }
 }
 
@@ -208,8 +411,8 @@ impl Codec for NoCodec {
     }
 }
 
-/// What the test keeps of a handed-over member: what it saw, and its expected bytes.
-type Watched = (Arc<Mutex<Seen>>, Vec<u8>);
+/// What the test keeps of a handed-over member: what it saw, its expected bytes, its dispatcher.
+type Watched = (Arc<Mutex<Seen>>, Vec<u8>, Arc<Control>);
 struct Joined {
     node_id: String,
     member: TestMember,
@@ -295,7 +498,9 @@ fn swarm(n: usize) -> Swarm {
             secret: iroh::SecretKey::generate(),
             session: session.clone(),
             seen: seen.clone(),
-            reply: None,
+            shard: None,
+            script: BTreeMap::new(),
+            control: Arc::new(Control::default()),
         };
         let registration =
             joined_shard::register(&session, &member.signer, &member.carrier(), app_host::now())
@@ -367,13 +572,18 @@ impl Swarm {
     /// Hand the members to an owner work port (in stage order).
     fn work(&mut self, clocks: Clocks) -> (OwnerWork, Vec<Watched>) {
         let plan = self.plan(600);
+        self.work_with(clocks, plan)
+    }
+    fn work_with(&mut self, clocks: Clocks, plan: Plan) -> (OwnerWork, Vec<Watched>) {
         let mut taken = Vec::new();
         let mut members = Vec::new();
         for j in self.members.drain(..) {
-            taken.push((j.seen.clone(), j.expected.clone()));
+            taken.push((j.seen.clone(), j.expected.clone(), j.member.control.clone()));
+            let link = TestLink::start(j.member);
             members.push(WorkMember {
                 node_id: j.node_id,
-                link: Box::new(j.member),
+                cancel: Some(link.canceller()),
+                link: Box::new(link),
                 registration: j.registration,
             });
         }
@@ -418,12 +628,12 @@ fn the_work_port_transfers_every_stage_then_asks_each_member_for_its_native_prep
     let state = work.wait_state(settled, span(B::WorkerStartup));
     assert_eq!(state["state"], "failed", "{state}");
     assert_eq!(state["error_code"], NO_NATIVE, "{state}");
-    for (seen, expected) in &members {
+    for (seen, expected, _) in &members {
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.commands,
-            ["consent_status", "receive", "prepare_native"],
-            "consent, transfer, then native prepare"
+            ["consent_status", "receive", "prepare_native", "discard"],
+            "consent, transfer, native prepare, then (R1) the stage released on the failure"
         );
         assert_eq!(seen.received.as_deref(), Some(expected.as_slice()));
     }
@@ -434,10 +644,15 @@ fn the_work_port_transfers_every_stage_then_asks_each_member_for_its_native_prep
         Some(
             members
                 .iter()
-                .map(|(_, e)| json!(e.len()))
+                .map(|(_, e, _)| json!(e.len()))
                 .collect::<Vec<_>>()
         ),
         "{state}"
+    );
+    assert_eq!(
+        state["cleanup_error"],
+        Value::Null,
+        "every discard answered"
     );
     work.teardown().unwrap();
 }
@@ -455,12 +670,96 @@ fn a_member_without_its_own_bound_consent_is_refused_before_any_offer() {
     assert_eq!(state["state"], "failed", "{state}");
     assert_eq!(state["error_code"], "member_consent_required", "{state}");
     let first = members[0].0.lock().unwrap();
-    assert_eq!(first.commands, ["consent_status", "receive"]);
+    assert_eq!(
+        first.commands,
+        ["consent_status", "receive", "discard"],
+        "R1: the transferred member releases its stage"
+    );
     assert_eq!(first.received.as_deref(), Some(members[0].1.as_slice()));
     let second = members[1].0.lock().unwrap();
     assert_eq!(second.commands, ["consent_status"], "never offered");
     assert!(second.received.is_none());
     drop((first, second));
+    work.teardown().unwrap();
+}
+
+/// `_stop_deadline` (demo_chain.py:1240-1253): the owner's cleanup wait for a run whose smallest
+/// worker wall is `wall` seconds, over `members` peers.
+fn stop_allowance(wall: u64, members: u64) -> Duration {
+    Duration::from_millis(
+        B::EffectiveStopAllowance
+            .wall_span(Span::from_millis(wall * 1000), Entries::new(members))
+            .unwrap()
+            .millis(),
+    )
+}
+
+/// R1 (REVIEW-lanePH3B-S4A F1): one stage refuses its native prepare while the other stage's
+/// prepare is still running (both begin before either is awaited). Every exit releases what
+/// members hold, as v0.1.4 teardown requests stage cleanup per offer (demo_chain.py:1283-1320,
+/// 1380; DemoApp -> owner_run teardown -> `AppDemoChain.teardown` :1322): the running prepare is
+/// cancelled (`cancel_operation`), its reply drained, then EVERY transferred member gets
+/// `discard` and answers it; the run reports no unproven cleanup.
+#[test]
+fn a_prepare_refused_by_one_stage_cancels_the_other_and_every_member_discards_its_stage() {
+    let mut s = swarm(2);
+    s.members[1]
+        .member
+        .script
+        .insert("prepare_native", Act::Hold);
+    let (mut work, members) = s.work(host_clocks());
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let started = work.start_serving(&json!({"max_wall_seconds":600}));
+    assert!(started.is_ok(), "{started:?}");
+    let state = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(state["state"], "failed", "{state}");
+    assert_eq!(state["error_code"], NO_NATIVE, "{state}");
+    for (seen, _, _) in &members {
+        assert_eq!(
+            seen.lock().unwrap().commands,
+            ["consent_status", "receive", "prepare_native", "discard"]
+        );
+    }
+    assert!(
+        members[1].0.lock().unwrap().cancels >= 1,
+        "the other stage's running prepare is cancelled"
+    );
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
+    work.teardown().unwrap();
+}
+
+/// R1: a member that never answers its `discard` leaves the run's cleanup unproven
+/// (`owner_target_cleanup_unproven`, demo_chain.py:1392-1396), recorded, never swallowed, and the
+/// owner stops waiting at its stop allowance (demo_chain.py:1240-1253, here a 60 s worker wall).
+#[test]
+fn a_member_that_never_answers_its_discard_leaves_cleanup_unproven_within_the_stop_allowance() {
+    let mut s = swarm(2);
+    s.members[1].member.script.insert("discard", Act::Silent);
+    let plan = s.plan(60);
+    let (mut work, members) = s.work_with(host_clocks(), plan);
+    let started = work.start_serving(&json!({"max_wall_seconds":60}));
+    assert!(started.is_ok(), "{started:?}");
+    let bound = stop_allowance(60, 2);
+    let state = work.wait_state(settled, span(B::WorkerStartup) + bound);
+    let ended = Instant::now();
+    assert_eq!(state["state"], "failed", "{state}");
+    assert_eq!(state["error_code"], NO_NATIVE, "{state}");
+    assert_eq!(
+        state["cleanup_error"], "owner_target_cleanup_unproven",
+        "{state}"
+    );
+    for (seen, _, _) in &members {
+        assert_eq!(
+            seen.lock().unwrap().commands.last().map(String::as_str),
+            Some("discard")
+        );
+    }
+    let asked = members[1].0.lock().unwrap().discard_at.unwrap();
+    assert!(
+        ended.duration_since(asked) <= bound + span(B::OwnerPoll),
+        "gave up within the stop allowance: {:?} > {bound:?}",
+        ended.duration_since(asked)
+    );
     work.teardown().unwrap();
 }
 
