@@ -569,7 +569,10 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
             )),
         "Stop refused for capacity: {stop:?}"
     );
-    assert_eq!(answer(submit("GET", "/api/status", json!({})), "status"), idle);
+    // Stop published the node service's status, so the page's status now answers it.
+    let status = answer(submit("GET", "/api/status", json!({})), "status");
+    assert_eq!((idle.0, status.0), (503, 200), "{status:?}");
+    assert_eq!(status.1["owner_run"]["publisher_generation"], 1);
     let state = answer(submit("POST", "/chat/api/state", json!({})), "chat state");
     assert_eq!((state.0, &state.1["busy"]), (200, &json!(true)));
     // Past the admitted slots: refused at once with the existing capacity code.

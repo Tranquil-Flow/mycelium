@@ -143,8 +143,28 @@ fn err(code: &'static str) -> PublicError {
 }
 struct Gate {
     closing: bool,
+    /// Admitted callbacks (chat send and events, actions): at most `capacity` at once.
     tasks: Vec<JoinHandle<()>>,
+    /// Stop, status and the chat state: never refused for the admitted ones, bounded apart.
+    servable: Vec<JoinHandle<()>>,
     failed: bool,
+}
+/// The callbacks the page can always reach (v0.1.4's gateway serves Stop, status and health
+/// whatever its admitted requests hold, laneB18 FU1): the page's and the owner's status, the chat
+/// state, and every Stop (`/api/serving/stop`, `/api/demo/stop`, `/api/stop`) and the web Quit.
+fn always_servable(request: &ServiceRequest) -> bool {
+    matches!(
+        (request.method.as_str(), request.target.as_str()),
+        ("GET", "/api/status")
+            | (
+                "POST",
+                "/chat/api/state"
+                    | "/api/serving/stop"
+                    | "/api/demo/stop"
+                    | "/api/stop"
+                    | "/api/quit"
+            )
+    )
 }
 struct Chat {
     id: String,
@@ -277,6 +297,7 @@ impl DesktopServices {
             gate: Arc::new(Mutex::new(Gate {
                 closing: false,
                 tasks: Vec::new(),
+                servable: Vec::new(),
                 failed: false,
             })),
             chat: Arc::new(Mutex::new(None)),
@@ -598,20 +619,34 @@ impl Services for DesktopServices {
             Self::complete_error(complete, err("application_closed"));
             return;
         }
-        for task in std::mem::take(&mut gate.tasks) {
-            if task.is_finished() {
-                if task.join().is_err() {
-                    gate.failed = true;
+        let Gate {
+            tasks,
+            servable,
+            failed,
+            ..
+        } = &mut *gate;
+        for slots in [&mut *tasks, &mut *servable] {
+            for task in std::mem::take(slots) {
+                if task.is_finished() {
+                    if task.join().is_err() {
+                        *failed = true;
+                    }
+                } else {
+                    slots.push(task);
                 }
-            } else {
-                gate.tasks.push(task);
             }
         }
-        if gate.failed {
+        if *failed {
             Self::complete_error(complete, err("desktop_callback_panicked"));
             return;
         }
-        if gate.tasks.len() >= self.capacity.get() {
+        // Stop and status never wait for a slot the admitted requests hold; they have their own.
+        let slots = if always_servable(&request) {
+            servable
+        } else {
+            tasks
+        };
+        if slots.len() >= self.capacity.get() {
             crate::phase::mark("callback_capacity", "refused");
             Self::complete_error(complete, err("desktop_callback_capacity"));
             return;
@@ -628,7 +663,7 @@ impl Services for DesktopServices {
                     this.work(request, callback);
                 }
             }) {
-            Ok(task) => gate.tasks.push(task),
+            Ok(task) => slots.push(task),
             Err(_) => {
                 if let Ok(mut callback) = callback.lock()
                     && let Some(callback) = callback.take()
@@ -655,10 +690,19 @@ impl Services for DesktopServices {
         if !gate.closing {
             return Err(CleanupError::Poll);
         }
-        if gate.tasks.iter().any(|t| !t.is_finished()) {
+        if gate
+            .tasks
+            .iter()
+            .chain(&gate.servable)
+            .any(|t| !t.is_finished())
+        {
             return Ok(Poll::Pending);
         }
-        for task in std::mem::take(&mut gate.tasks) {
+        let ended: Vec<_> = std::mem::take(&mut gate.tasks)
+            .into_iter()
+            .chain(std::mem::take(&mut gate.servable))
+            .collect();
+        for task in ended {
             if task.join().is_err() {
                 gate.failed = true;
             }
