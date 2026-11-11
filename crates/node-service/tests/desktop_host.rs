@@ -349,7 +349,7 @@ fn answered_within(
 ) -> Option<desktop::core::Reply> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (host, method, path) = (host.clone(), method.to_owned(), path.to_owned());
-    std::thread::spawn(move || {
+    let submitter = std::thread::spawn(move || {
         let reply = tx.clone();
         host.submit(
             ServiceRequest {
@@ -372,7 +372,12 @@ fn answered_within(
             Box::new(move |answer| reply.send(Some(answer)).unwrap_or_default()),
         );
     });
-    rx.recv_timeout(millis(B::ModelSelection)).ok().flatten()
+    let reply = rx.recv_timeout(millis(B::ModelSelection)).ok().flatten();
+    // Answered: the submission returned (a blocked one is left to the failing test's end).
+    if reply.is_some() {
+        submitter.join().unwrap();
+    }
+    reply
 }
 /// A run the node service can always settle: it fails at once (v0.1.4: a failed run is left
 /// alone at Quit, `FX-SLICE1-quit-after-failure`).
@@ -457,7 +462,7 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     // Quit's begin is the window's own call: it must return at once too.
     let (began_tx, began) = std::sync::mpsc::channel();
     let quitting = host.clone();
-    std::thread::spawn(move || {
+    let quit = std::thread::spawn(move || {
         began_tx
             .send(quitting.begin_shutdown(Instant::now() + millis(B::StageCleanup)))
             .unwrap_or_default();
@@ -468,6 +473,7 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
             .expect("Quit's begin blocked behind a send waiting for its start"),
         Ok(())
     );
+    quit.join().unwrap();
     drop(release);
     sent.recv_timeout(millis(B::WorkerStartup))
         .expect("the held send never answered");
