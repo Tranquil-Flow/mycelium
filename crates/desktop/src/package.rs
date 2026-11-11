@@ -13,8 +13,37 @@ pub enum Kind {
 }
 /// Where `api::resources::ProbeObserver::beside_executable` looks for the resource probe.
 pub const RESOURCE_PROBE_PATH: &str = "Contents/MacOS/native/resource_probe";
-/// Compile-time pins of the helpers this source tree builds (the release `resource_probe`); the
-/// native payload pins stay in `package-pins.json`, taken from the genuine native-input manifest.
+/// Where `api::relay::installed_relay_binary` looks for the bundled relay client
+/// (`<exe dir>/native/cloudflared`; v0.1.4 `public_relay.py:250-255`, bundled by
+/// `scripts/build_a13_macos.py:285-288,318` @ f4e366e9).
+pub const RELAY_CLIENT_PATH: &str = "Contents/MacOS/native/cloudflared";
+/// Where the relay client's licence ships (v0.1.4: `Resources/third_party/cloudflared-LICENSE`,
+/// `build_a13_macos.py:325`; v0.2 keeps every notice under `Resources/licenses/`).
+pub const RELAY_LICENSE_PATH: &str = "Contents/Resources/licenses/cloudflared-LICENSE";
+/// The relay client's licence: Apache-2.0 text of cloudflared 2026.10.2, byte-identical to v0.1.4's
+/// `third_party/cloudflared-LICENSE` (its release `APP-FILES.sha256`) and Homebrew's
+/// `Cellar/cloudflared/2026.10.2/LICENSE`.
+pub const RELAY_LICENSE_SHA256: &str =
+    "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd";
+pub const RELAY_LICENSE_BYTES: u64 = 11_357;
+/// Provenance of the pinned relay client, recorded in `CONTENT-MANIFEST.json` (`helper-pins.json`
+/// holds its bytes and sha256).
+pub const RELAY_CLIENT_SOURCE: &str = "pinned third-party binary: cloudflared 2026.10.2 arm64, the exact bytes v0.1.4 bundles (its release APP-FILES.sha256: Contents/Frameworks/mycelium_a13_macos/native/cloudflared); Homebrew bottle 2026.10.2 arm64_tahoe re-signed ad-hoc (identical once both signatures are removed, except the __LINKEDIT vmsize field)";
+/// `LC_BUILD_VERSION` of the pinned relay client (`otool -l`): above `LSMinimumSystemVersion`.
+pub const RELAY_CLIENT_BUILD_VERSION: &str = "minos 26.0 sdk 26.5";
+/// The licence pin, a `Kind::Resource` entry for assembly (not part of startup admission: it is
+/// never executed; the bundle seal covers it).
+pub fn relay_license_pin() -> Entry {
+    Entry {
+        path: RELAY_LICENSE_PATH.into(),
+        kind: Kind::Resource,
+        bytes: RELAY_LICENSE_BYTES,
+        sha256: RELAY_LICENSE_SHA256.into(),
+    }
+}
+/// Compile-time pins of the helper executables: the release `resource_probe` this source tree
+/// builds and the pinned third-party relay client (`cloudflared`); the native payload pins stay in
+/// `package-pins.json`, taken from the genuine native-input manifest.
 pub const HELPER_PINS: &str = include_str!("../helper-pins.json");
 /// The helper pins, parsed (a malformed table is a layout error, never an empty list).
 pub fn helper_pins() -> Result<Vec<Entry>, PackageError> {
@@ -46,6 +75,9 @@ pub enum PackageError {
     Symlink,
     DestinationExists,
     Io(std::io::ErrorKind),
+    /// A file or link beside the executable or in `Frameworks` that the manifest does not pin
+    /// (bundle-relative path): admission refuses code it has not checked.
+    Unpinned(String),
 }
 #[derive(Debug, Eq, PartialEq)]
 pub enum AdmissionError {
@@ -95,7 +127,7 @@ pub(crate) fn admit_native_payload(
     if executable != root.join("Contents/MacOS/mycelium") {
         return Err(AdmissionError::ExecutableLayout);
     }
-    verify(root, manifest).map_err(AdmissionError::Package)?;
+    verify_closed(root, manifest).map_err(AdmissionError::Package)?;
     Ok(VerifiedBundle { root: root.into() })
 }
 fn io(error: std::io::Error) -> PackageError {
@@ -143,7 +175,7 @@ fn layout(manifest: &Manifest) -> Result<(), PackageError> {
                     || entry.path.starts_with("Contents/Resources/licenses/")
                     || entry.path == CODE_RESOURCES_PATH
             }
-            Kind::Helper => entry.path == RESOURCE_PROBE_PATH,
+            Kind::Helper => entry.path == RESOURCE_PROBE_PATH || entry.path == RELAY_CLIENT_PATH,
         };
         if !kind_ok {
             return Err(PackageError::Layout);
@@ -246,6 +278,63 @@ pub fn verify(root: &Path, manifest: &Manifest) -> Result<(), PackageError> {
         }
     }
     Ok(())
+}
+/// The code directories admission closes: everything in them must be pinned by the manifest.
+pub const CODE_DIRECTORIES: [&str; 2] = ["Contents/MacOS", "Contents/Frameworks"];
+/// [`verify`] plus closure: every file or link under [`CODE_DIRECTORIES`] is a manifest entry (the
+/// Metal entry is the one link, already checked by `verify`). Startup admission and `admit` use
+/// this, so a planted helper (`native/cloudflared`) or an extra dylib is refused before anything
+/// can execute it. Directories are walked, never followed.
+pub fn verify_closed(root: &Path, manifest: &Manifest) -> Result<(), PackageError> {
+    verify(root, manifest)?;
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        manifest: &Manifest,
+        found: &mut Vec<String>,
+    ) -> Result<(), PackageError> {
+        let mut children: Vec<_> = std::fs::read_dir(dir)
+            .map_err(io)?
+            .collect::<Result<_, _>>()
+            .map_err(io)?;
+        children.sort_by_key(std::fs::DirEntry::file_name);
+        for child in children {
+            let path = child.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| PackageError::Layout)?
+                .to_str()
+                .ok_or(PackageError::Layout)?
+                .to_string();
+            let kind = child.file_type().map_err(io)?;
+            if kind.is_dir() {
+                walk(root, &path, manifest, found)?;
+                continue;
+            }
+            let pinned = manifest.entries.iter().find(|e| e.path == relative);
+            match pinned {
+                Some(entry) if !kind.is_symlink() || entry.kind == Kind::Metal => {}
+                _ => found.push(relative),
+            }
+        }
+        Ok(())
+    }
+    let mut found = Vec::new();
+    for directory in CODE_DIRECTORIES {
+        let path = root.join(directory);
+        if std::fs::symlink_metadata(&path)
+            .map_err(io)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(PackageError::Symlink);
+        }
+        walk(root, &path, manifest, &mut found)?;
+    }
+    match found.into_iter().next() {
+        Some(first) => Err(PackageError::Unpinned(first)),
+        None => Ok(()),
+    }
 }
 /// Assembly into an exclusively created staging directory only. Never install,
 /// upgrade, replace an existing target, mutate user state or sign implicitly.

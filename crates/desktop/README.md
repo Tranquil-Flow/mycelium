@@ -258,6 +258,25 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
   SLICE-1's operator fixture and the qualification identity is the development one; there is no
   pairing UI. Its own entry in the admission manifest is self-measured (layout only; the real
   seal is the v0.3 signature), and the dylibs are loaded by dyld before the admission runs.
+- **Relay client (cloudflared), lane RELF:** v0.1.4 bundles `cloudflared` beside its code and its
+  licence in `third_party/` (`scripts/build_a13_macos.py:285-288,318,325`: whatever `cloudflared`
+  was on the builder's PATH, unpinned). v0.2 pins ONE binary in `helper-pins.json`: the exact bytes
+  v0.1.4's release ships (cloudflared 2026.10.2 arm64, 25972048 B, sha256 `41423e7c…342c7f`; the
+  Homebrew 2026.10.2 bottle re-signed ad-hoc: with both signatures removed it equals Homebrew's
+  `eeb8f9bd…` binary except the 3-byte `__LINKEDIT` vmsize field). It ships at
+  `Contents/MacOS/native/cloudflared` (where `api::relay::installed_relay_binary` looks) with its
+  existing ad-hoc signature kept, and its Apache-2.0 licence at
+  `Contents/Resources/licenses/cloudflared-LICENSE` (`58d1e17f…`). `repro/build-bundle.sh` needs
+  `MYCELIUM_RELAY_CLIENT` / `MYCELIUM_RELAY_LICENSE` pointing at local copies (on m4pro: the
+  unpacked v0.1.4 release under `mycelium-m4-program/incident/deepcheck-v014-20261107T180822Z/unpacked/`
+  and `/opt/homebrew/Cellar/cloudflared/2026.10.2/LICENSE`); nothing is downloaded and other bytes
+  are refused. Its `LC_BUILD_VERSION` minos is **26.0**, above `LSMinimumSystemVersion` 15.6.1, as in
+  v0.1.4: `CONTENT-MANIFEST.json` lists it as a minimum-OS finding (the relay is the owner's; a
+  15.6.1 owner cannot start it).
+- **Admission is closed over the code directories:** startup admission (and `desktop-package admit`)
+  refuses any file or link in `Contents/MacOS` or `Contents/Frameworks` that the manifest does not
+  pin (`PackageError::Unpinned`), so a planted `native/cloudflared` or an extra dylib is refused
+  before anything can execute it. Dylibs are still loaded by dyld before admission (F8).
 - **Outputs next to the app:** `CONTENT-MANIFEST.json` (entries, sizes, sources, trust level,
   minimum-OS findings) and `APP-FILES.sha256` (`shasum -c` compatible).
 - **No Python:** `bundle::audit_no_python` (names, shebangs, marker bytes across read boundaries,

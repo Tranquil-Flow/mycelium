@@ -260,13 +260,49 @@ fn copy_file(from: &Path, root: &Path, relative: &str, mode: u32) -> Result<(), 
     std::fs::copy(from, &to).map_err(io)?;
     std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode)).map_err(io)
 }
+const LICENSE_DIRECTORY: &str = "Contents/Resources/licenses/";
+/// The content-manifest source row of a pinned extra file. Where a local file was taken from (a
+/// CARGO_TARGET_DIR, a scratch copy) is never recorded: its pinned bytes are (two-path repro).
+fn helper_source(source: &Path, pin: &Entry) -> (String, String, String, Option<String>) {
+    use crate::package::{RELAY_CLIENT_BUILD_VERSION, RELAY_CLIENT_PATH, RELAY_CLIENT_SOURCE};
+    if pin.path == RELAY_CLIENT_PATH {
+        return (
+            pin.path.clone(),
+            RELAY_CLIENT_SOURCE.into(),
+            "pinned_relay_client".into(),
+            Some(RELAY_CLIENT_BUILD_VERSION.into()),
+        );
+    }
+    if pin.kind == Kind::Resource {
+        return (
+            pin.path.clone(),
+            "pinned licence notice of a pinned helper (cloudflared 2026.10.2, Apache-2.0; v0.1.4 third_party/cloudflared-LICENSE)".into(),
+            "license_notice".into(),
+            None,
+        );
+    }
+    // A helper built by the recipe like the executable (the resource probe).
+    (
+        pin.path.clone(),
+        format!(
+            "built by the recipe: {}",
+            source
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+        ),
+        "pinned_helper".into(),
+        None,
+    )
+}
 /// Build `<out_dir>/<DISPLAY_NAME>.app` exclusively; remove it again on failure.
 pub fn build(spec: &Spec) -> Result<Built, BundleError> {
     build_with_helpers(spec, &[])
 }
-/// [`build`] plus pinned helper executables (`(source file, pinned entry)`, the resource probe):
-/// each source must have exactly its pinned bytes and only system/bundle links; it is copied to
-/// the pinned path with mode 0755 and listed in the manifest as `Kind::Helper`.
+/// [`build`] plus pinned extra files (`(source file, pinned entry)`): helper executables
+/// (`Kind::Helper`: the resource probe, the relay client) and their licence notices
+/// (`Kind::Resource` under `Contents/Resources/licenses/`: the relay client's). Each source must
+/// have exactly its pinned bytes; a helper must also have only system/bundle links. Helpers are
+/// copied to the pinned path with mode 0755, notices with 0644.
 pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Built, BundleError> {
     let mut limited = Vec::new();
     std::fs::File::open(spec.native_inputs)
@@ -303,10 +339,13 @@ pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Bu
     }
     for (source, pin) in helpers {
         let (bytes, sha) = measure(source)?;
-        if pin.kind != Kind::Helper || bytes != pin.bytes || sha != pin.sha256 {
+        let notice = pin.kind == Kind::Resource && pin.path.starts_with(LICENSE_DIRECTORY);
+        if !(pin.kind == Kind::Helper || notice) || bytes != pin.bytes || sha != pin.sha256 {
             return Err(BundleError::SourceIdentity(source.display().to_string()));
         }
-        check_executable_links(source)?;
+        if !notice {
+            check_executable_links(source)?;
+        }
     }
     let (icon_bytes, icon_sha) = measure(spec.icon)?;
     if icon_sha != ICON_SHA256 {
@@ -359,20 +398,18 @@ pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Bu
             0o644,
         ));
         for (source, pin) in helpers {
-            // A helper is built by the recipe like the executable: where it was built (the
-            // CARGO_TARGET_DIR) is not part of the bundle, its pinned bytes are (two-path repro).
-            sources.push((
+            sources.push(helper_source(source, pin));
+            let mode = if pin.kind == Kind::Helper {
+                0o755
+            } else {
+                0o644
+            };
+            plan.push((
+                source.to_path_buf(),
                 pin.path.clone(),
-                format!(
-                    "built by the recipe: {}",
-                    source
-                        .file_name()
-                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-                ),
-                "pinned_helper".into(),
-                None,
+                pin.kind.clone(),
+                mode,
             ));
-            plan.push((source.to_path_buf(), pin.path.clone(), Kind::Helper, 0o755));
         }
         let mut entries = Vec::new();
         for (from, relative, kind, mode) in &plan {

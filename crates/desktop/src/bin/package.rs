@@ -6,7 +6,7 @@ use desktop::{
     package::{self, Manifest},
 };
 use std::{path::Path, process::ExitCode};
-const USAGE: &str = "usage: desktop-package <verify|stage|sign-plan> MANIFEST [SOURCE] [DESTINATION] | pins NATIVE_INPUTS | bundle EXECUTABLE NATIVE_INPUTS ICON OUT_DIR [NATIVE_INPUTS_SHA256] [--resource-probe FILE] [--sign-adhoc] | admit APP | audit-no-python APP | finalize BUNDLE_DIR VERSION ROLLBACK_FLOOR SOURCE_REVISION SIGNING_KEY_FILE | install HOME APPLICATIONS BUNDLE_DIR | rollback HOME APPLICATIONS | uninstall HOME APPLICATIONS [--delete-identity-and-state] | status HOME APPLICATIONS";
+const USAGE: &str = "usage: desktop-package <verify|stage|sign-plan> MANIFEST [SOURCE] [DESTINATION] | pins NATIVE_INPUTS | bundle EXECUTABLE NATIVE_INPUTS ICON OUT_DIR [NATIVE_INPUTS_SHA256] [--resource-probe FILE] [--relay-client FILE --relay-license FILE] [--sign-adhoc] | admit APP | audit-no-python APP | finalize BUNDLE_DIR VERSION ROLLBACK_FLOOR SOURCE_REVISION SIGNING_KEY_FILE | install HOME APPLICATIONS BUNDLE_DIR | rollback HOME APPLICATIONS | uninstall HOME APPLICATIONS [--delete-identity-and-state] | status HOME APPLICATIONS";
 fn read_manifest(path: &str) -> Result<Manifest, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("manifest_read:{:?}", e.kind()))?;
     serde_json::from_slice(&bytes).map_err(|_| "manifest_invalid".to_string())
@@ -18,11 +18,16 @@ fn read_manifest(path: &str) -> Result<Manifest, String> {
 fn bundle_command(args: &[String]) -> Result<(), String> {
     let mut positional = Vec::new();
     let mut probe = None;
+    let (mut relay, mut relay_license) = (None, None);
     let mut sign = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--resource-probe" if probe.is_none() => probe = Some(rest.next().ok_or(USAGE)?),
+            "--relay-client" if relay.is_none() => relay = Some(rest.next().ok_or(USAGE)?),
+            "--relay-license" if relay_license.is_none() => {
+                relay_license = Some(rest.next().ok_or(USAGE)?);
+            }
             "--sign-adhoc" if !sign => sign = true,
             flag if flag.starts_with("--") => {
                 return Err(format!("{USAGE}\nunknown or repeated {flag}"));
@@ -36,7 +41,7 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
         _ => return Err(USAGE.into()),
     };
     let helper_pins = package::helper_pins().map_err(|e| format!("helper_pins:{e:?}"))?;
-    let helpers: Vec<(&Path, &package::Entry)> = match probe {
+    let mut helpers: Vec<(&Path, &package::Entry)> = match probe {
         Some(probe) => helper_pins
             .iter()
             .filter(|p| p.path == package::RESOURCE_PROBE_PATH)
@@ -46,6 +51,21 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
     };
     if probe.is_some() && helpers.len() != 1 {
         return Err("helper_pins:resource_probe_pin_missing".into());
+    }
+    // The relay client and its licence travel together (v0.1.4 refuses to build without both:
+    // `cloudflared_build_dependency_and_license_required`, build_a13_macos.py:287-288).
+    let license_pin = package::relay_license_pin();
+    match (relay, relay_license) {
+        (Some(client), Some(license)) => {
+            let pin = helper_pins
+                .iter()
+                .find(|p| p.path == package::RELAY_CLIENT_PATH)
+                .ok_or("helper_pins:relay_client_pin_missing")?;
+            helpers.push((Path::new(client.as_str()), pin));
+            helpers.push((Path::new(license.as_str()), &license_pin));
+        }
+        (None, None) => {}
+        _ => return Err("cloudflared_build_dependency_and_license_required".into()),
     }
     let mut built = bundle::build_with_helpers(
         &bundle::Spec {
@@ -123,7 +143,7 @@ fn admit_command(app: &str) -> Result<(), String> {
     let app = Path::new(app);
     let manifest = package::with_measured_executable(pins, &app.join("Contents/MacOS/mycelium"))
         .map_err(|e| format!("admit:{e:?}"))?;
-    package::verify(app, &manifest).map_err(|e| format!("admit:{e:?}"))?;
+    package::verify_closed(app, &manifest).map_err(|e| format!("admit:{e:?}"))?;
     println!(
         "{}",
         serde_json::json!({"admitted": true, "entries": manifest.entries.len(),

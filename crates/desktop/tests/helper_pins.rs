@@ -73,13 +73,18 @@ fn bundle_with_probe(root: &Path, probe_path: &str) -> Manifest {
 #[test]
 fn the_shipped_helper_pin_is_the_resource_probe_where_the_observer_looks() {
     let pins = package::helper_pins().unwrap();
-    assert_eq!(pins.len(), 1, "{pins:?}");
-    assert_eq!(pins[0].kind, Kind::Helper);
+    // RELF item 3: the pinned relay client (`native/cloudflared`) is the second helper.
+    assert_eq!(pins.len(), 2, "{pins:?}");
+    assert!(pins.iter().all(|p| p.kind == Kind::Helper));
     // `ProbeObserver::beside_executable`: `<dir of Contents/MacOS/mycelium>/native/resource_probe`.
     assert_eq!(RESOURCE_PROBE_PATH, "Contents/MacOS/native/resource_probe");
-    assert_eq!(pins[0].path, RESOURCE_PROBE_PATH);
-    assert!(pins[0].bytes > 0);
-    assert_eq!(pins[0].sha256.len(), 64);
+    let probe: Vec<_> = pins
+        .iter()
+        .filter(|p| p.path == RESOURCE_PROBE_PATH)
+        .collect();
+    assert_eq!(probe.len(), 1, "{pins:?}");
+    assert!(probe[0].bytes > 0);
+    assert_eq!(probe[0].sha256.len(), 64);
 }
 
 #[test]

@@ -4,5 +4,11 @@
     "kind": "Helper",
     "bytes": 675232,
     "sha256": "563b9206c56e9cd4988b55ed1660c72a8ed62f12b985005afbee462174a7726d"
+  },
+  {
+    "path": "Contents/MacOS/native/cloudflared",
+    "kind": "Helper",
+    "bytes": 25972048,
+    "sha256": "41423e7c363eed5ec73087cd21b04590e454bd0dc9284f5bd77eada147342c7f"
   }
 ]
