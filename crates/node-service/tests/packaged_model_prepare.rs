@@ -1638,6 +1638,59 @@ fn packaged_policy_loop_cancels_a_download_when_this_mac_changes() {
     }
 }
 
+/// `_policy_loop`'s first gate (app.py:1018-1023 @ f4e366e9): an active attempt whose Mac is no
+/// longer a running, current member of its swarm is cancelled with `membership_required`, before
+/// this Mac is observed (REVIEW-lanePH1 finding 2, mutant Mmb). The packaged routes cannot lose
+/// the membership with a download running (`/api/stop` cancels the attempt itself; revocation is
+/// not ported), so the attempt is the run model's acquisition this Mac's state root keeps
+/// (`ModelSource` clones share it) and the loop judging it is that of a second packaged host over
+/// a private root whose owner never created a swarm (its authority is not running).
+#[test]
+fn packaged_policy_loop_cancels_a_download_when_the_membership_is_lost() {
+    let state = state_root();
+    let files = tiny_snapshot(None);
+    let repository = Repository::start(files.clone());
+    let observed = Observed::new(permissive());
+    let source = model_source(&state, repository.transport(), &observed);
+    let owner = action_root(&state, &source);
+    assert_created(&owner);
+    let unenrolled = state.join("unenrolled-private");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&unenrolled)
+        .unwrap();
+    let not_member = DesktopServices::with_model_source(
+        NodeService::new(
+            Arc::new(MustNotRun),
+            "private-local-token".into(),
+            node_service::native::development_qualification().unwrap(),
+        ),
+        NonZeroUsize::new(4).unwrap(),
+        &unenrolled,
+        source.clone(),
+    );
+    repository.hold("model.safetensors");
+    assert_started(&download(&owner));
+    repository.wait_held();
+    wait_for(
+        "the download of a Mac that is no member was never cancelled",
+        || source.policy_error() == Some("membership_required"),
+    );
+    repository.release();
+    assert_eq!(
+        settled(&state),
+        status_doc(
+            "cancelled",
+            size_of(&files, "config.json"),
+            total(&files),
+            None
+        )
+    );
+    drop(not_member);
+    drop(owner);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 /// The policy loop ends with the window: Quit stops it and verifies only once it has ended and
 /// was joined (bounded by its one observation), never leaving it running past the process's
 /// cleanup proof. Here the loop is inside a held probe when Quit begins.
