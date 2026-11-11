@@ -566,7 +566,7 @@ pub fn start<H: ChainHost>(
         viewed(core, |c| {
             if c.closed
                 || !c.running
-                || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
+                || !Arc::ptr_eq(c.bootstrap_incarnation, &incarnation)
                 || !c
                     .run
                     .contributor
@@ -634,7 +634,7 @@ pub fn start<H: ChainHost>(
         if c.bootstrap.is_some()
             || c.closed
             || !c.running
-            || !Arc::ptr_eq(&c.bootstrap_incarnation, &incarnation)
+            || !Arc::ptr_eq(c.bootstrap_incarnation, &incarnation)
             || !c
                 .run
                 .contributor
