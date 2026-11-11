@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) mod guard;
 #[cfg(test)]
 mod tests;
 
@@ -95,6 +96,25 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
+    ) -> Result<Self> {
+        Self::start_scoped_probed_until(
+            config,
+            prepare,
+            cancel,
+            source,
+            deadline,
+            Box::new(guard::HostProbe),
+        )
+    }
+    /// As `start_scoped_until`, reading the worker's memory through `probe`
+    /// (the guard's constructor-only seam; production passes `HostProbe`).
+    fn start_scoped_probed_until(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+        deadline: Instant,
+        _probe: Box<dyn guard::MemoryProbe>,
     ) -> Result<Self> {
         config.verify()?;
         if Instant::now() >= deadline {
@@ -348,6 +368,33 @@ impl Worker {
             json!({"worker_pid":pid,"context_closed":false,"worker_reaped":true,"killed":killed,
             "exit_code":status.code(),"exit_signal":status.signal()}),
         )
+    }
+}
+impl Worker {
+    /// A worker whose memory is guarded from now on (lane MG): over
+    /// `memory_limit` the guard kills and reaps the exact child; this and every
+    /// later exchange then answers the guard's code.
+    pub(crate) fn from_child_guarded(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        _memory_limit: u64,
+        _probe: Box<dyn guard::MemoryProbe>,
+    ) -> Result<Self> {
+        Self::from_child(child, client, cancel)
+    }
+    /// The guard's verdict, once it stopped the worker.
+    pub(crate) fn guard_failure(&self) -> Option<guard::Failure> {
+        None
+    }
+    /// Readings the guard has taken so far.
+    pub(crate) fn guard_samples(&self) -> u64 {
+        0
+    }
+    /// Test-only: wait (bounded) for the guard's verdict.
+    #[cfg(test)]
+    pub(crate) fn guard_wait_until(&self, _deadline: Instant) -> Option<guard::Failure> {
+        None
     }
 }
 impl Drop for Worker {

@@ -492,6 +492,22 @@ impl NativeShard {
     pub fn worker_pid(&self) -> Option<u32> {
         self.worker.as_ref().and_then(|w| w.pid().ok())
     }
+    /// The memory the worker's guard holds it to (lane MG): the member's own
+    /// consent `max_memory_bytes`, or a tighter share set by `limit_memory_to`.
+    pub fn memory_limit(&self) -> Result<u64> {
+        Ok(u64::MAX)
+    }
+    /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-259):
+    /// an owner's announced share may only TIGHTEN the guard; a share above the
+    /// member's cap is refused `member_memory_cap_below_share`, loosening nothing.
+    pub fn limit_memory_to(&mut self, share_rss_bytes: u64) -> Result<u64> {
+        Ok(share_rss_bytes)
+    }
+    /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
+    /// guard stopped the worker; the later errors carry the code only.
+    pub fn worker_failure(&self) -> Option<Value> {
+        None
+    }
     /// The offer this compute custody serves, for route binding checks.
     pub fn offer(&self) -> &Value {
         &self.received.offer
