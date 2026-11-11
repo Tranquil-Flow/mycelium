@@ -485,6 +485,9 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
     let pending = lock(&network.pending).clone();
     status["network"] = network.status().to_value();
     let Some(authority) = authority else {
+        // The authority's state was refused at bind (an unreadable or invalid role file among
+        // them, app.py:595-611): no role is claimed for it.
+        status["installation_role"] = Value::Null;
         return;
     };
     let a = lock(authority);

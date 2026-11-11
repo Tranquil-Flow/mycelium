@@ -131,16 +131,9 @@ fn a_target_role_over_an_owners_swarm_conflicts() {
             .to_string()
             .as_bytes(),
     );
-    let mac = Mac::launch(&state, test_network());
-    let role = mac.status()["installation_role"].clone();
-    let open = mac.post("/api/pair/window/open", json!({"ttl_seconds": 600}));
-    assert_eq!(mac.quit(), Ok(Poll::Verified));
+    let (role, created, _) = launch_and_create(&state);
     std::fs::remove_dir_all(&state).unwrap_or_default();
-    assert_eq!(
-        open.1["error"], "installation_role_conflict",
-        "{}",
-        open.1
-    );
+    refused(&created, "installation_role_conflict");
     assert_eq!(role, Value::Null);
 }
 

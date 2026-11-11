@@ -319,6 +319,47 @@ pub struct PreparedSeed {
     material: ::seed::tls::Material,
     coordinator: Arc<::seed::Coordinator>,
 }
+/// `DemoApp.start`'s role selection (app.py:595-611 @ f4e366e9): `true` for a target. A role file
+/// must be exactly `{"protocol": "mycelium.a13_installation_role.v1", "role": "target"}`
+/// (`installation_role_invalid`); a target must not sit over an owner's authority state (v0.1.4
+/// `root/authority` non-empty; here also the owner's swarm record and seed,
+/// `installation_role_conflict`) and needs its saved resource consent (`target_consent_missing`).
+/// Without a role file, a target's own state (v0.1.4 `root/target`; here the joined member's peer
+/// files, which this layout keeps in the private root) is `installation_role_missing`.
+fn installation_role(
+    root: &Path,
+    selection: Option<Map<String, Value>>,
+) -> Result<bool, &'static str> {
+    let Some(selection) = selection else {
+        let target_state = ["accepted.json", "membership.state.json"]
+            .iter()
+            .any(|name| fs::symlink_metadata(root.join(name)).is_ok());
+        if target_state {
+            return Err("installation_role_missing");
+        }
+        return Ok(false);
+    };
+    if Value::Object(selection)
+        != json!({"protocol": "mycelium.a13_installation_role.v1", "role": "target"})
+    {
+        return Err("installation_role_invalid");
+    }
+    let owner_root = root.join("authority");
+    let owner_state = fs::read_dir(&owner_root).is_ok_and(|mut entries| entries.next().is_some())
+        || fs::symlink_metadata(&owner_root).is_ok_and(|m| !m.is_dir())
+        || fs::symlink_metadata(root.join(SWARM_FILE)).is_ok()
+        || prepared_state(root);
+    if owner_state {
+        return Err("installation_role_conflict");
+    }
+    if crate::preferences::resource_policy::read(root)
+        .map_err(|e| e.code)?
+        .is_none()
+    {
+        return Err("target_consent_missing");
+    }
+    Ok(true)
+}
 /// Whether that prepared state is there (`any(p.name != 'network.json' for p in
 /// state_root.iterdir())` without metadata, authority.py:390,410): the seed's directory (made
 /// first, so a failure at the seed key leaves it alone), the seed's key or its database.
@@ -536,7 +577,7 @@ impl<M: ManagedSlot> Authority<M> {
         let root = root.canonicalize().map_err(|_| "state_root_invalid")?;
         let role =
             private_state::load(&root.join("installation-role.json"), 4096).map_err(|e| e.0)?;
-        let target = role.is_some_and(|m| m.get("role") == Some(&json!("target")));
+        let target = installation_role(&root, role)?;
         let swarm = private_state::load(&root.join(SWARM_FILE), cap())
             .map_err(|e| e.0)?
             .map(Value::Object);
