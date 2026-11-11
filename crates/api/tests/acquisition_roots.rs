@@ -82,3 +82,45 @@ fn acquisition_refuses_root_and_below_root_symlinks_without_touching_foreign_byt
     );
     assert_eq!(fs::read(&foreign).unwrap(), b"foreign sentinel");
 }
+/// `app_host::reopen_acquisition_if_needed` (`if acquisition is None or its state_root differs:
+/// self._open_acquisition()`) on a host root below a legitimate symlinked ancestor: the open
+/// acquisition keeps its physical root (above), so the same root spelled through the alias is
+/// the same root and the open acquisition (and any attempt it runs) is kept, not closed and
+/// reopened.
+#[test]
+fn app_host_reopen_keeps_the_open_acquisition_below_a_symlinked_ancestor() {
+    use api::app_host::{self, AcquisitionSite, AcquisitionView};
+    let f = Fixture::new("reopen");
+    fs::create_dir(f.0.join("physical")).unwrap();
+    symlink(f.0.join("physical"), f.0.join("alias")).unwrap();
+    let root = f.0.join("alias/state");
+    fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+    let transport =
+        || -> Arc<dyn api::acquisition::Transport> { Arc::new(HttpTransport::hugging_face(true)) };
+    let site = AcquisitionSite {
+        root: &root,
+        sources: &root,
+        target: false,
+        run_model_env: None,
+        transport: &transport,
+    };
+    let (mut acquisition, mut active, mut policy_error) = (None, false, None);
+    let mut view = AcquisitionView {
+        acquisition: &mut acquisition,
+        active: &mut active,
+        policy_error: &mut policy_error,
+    };
+    app_host::open_acquisition(&mut view, &site).expect("the run model's acquisition opens");
+    let opened = view.acquisition.clone().expect("opened");
+    assert_ne!(
+        opened.state_root(),
+        app_host::acquisition_root(&site).unwrap()
+    );
+    app_host::reopen_acquisition_if_needed(&mut view, &site);
+    assert_eq!(
+        opened.status().state,
+        "idle",
+        "the same root must not be closed and reopened"
+    );
+    view.acquisition.take().expect("kept").close().unwrap();
+}
