@@ -24,7 +24,7 @@ use api::{
     owner_chain::{
         self, ModelAdapter, SharedHostChain, acquisition_exception, prepared_source_from,
     },
-    owner_compiler::{Compiler, Observation, SharedCompiler},
+    owner_compiler::{Compiler, Observation, ObservedSource, SharedCompiler},
     owner_driver::{DemoRuns, DemoView, Timing, fresh_identity},
     owner_observation::{self, ChainHost, ChainView, target},
     owner_ports::{self, OwnerPorts, RunFields, RunHost, RunView},
@@ -35,7 +35,11 @@ use api::{
 };
 use budgets::{BudgetId, Entries};
 use desktop::lifecycle::CleanupError;
-use owner_run::{chain::StepError, steps::model::Reverify};
+use owner_run::{
+    chain::{PortError, StepError},
+    steps::{model::Reverify, observe::ObservePort},
+};
+use runtime::observe::ObservationContext;
 use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -62,7 +66,23 @@ pub struct RunConfig {
     pub sidecar: Option<PathBuf>,
     /// Filled by the host once it installed the run.
     pub installed: RunSlot,
+    /// TEST ONLY (decision U4, PH3B-COMMON; ruling 14): replaces the run's OBSERVE PORT with a test
+    /// double built over this host's real observation backend, to exercise the chain past observe
+    /// on one machine. The compile port then reads the double's context. The product composition
+    /// always leaves this `None`: the packaged app has no host-identity seam.
+    pub observe_test_double: Option<ObserveTestDouble>,
 }
+/// An observe port a TEST supplies in place of the real one (see [`RunConfig::observe_test_double`]).
+pub trait ObserveDouble: ObservePort + Send {
+    /// The context its `prepare` / `collect` produced, which the compile port reads.
+    fn context(&self) -> Option<&ObservationContext>;
+    /// `chain.teardown`'s observation half (the offers' cleanup and retirement).
+    fn teardown(&mut self) -> Result<(), String>;
+}
+/// Builds a test's [`ObserveDouble`] over the run's real observation backend.
+pub type ObserveTestDouble = Arc<
+    dyn Fn(owner_observation::Backend<PackagedRun>) -> Box<dyn ObserveDouble> + Send + Sync,
+>;
 /// The composed run's shared handle (opaque).
 #[derive(Clone, Default)]
 pub struct RunSlot(Arc<Mutex<Option<Installed>>>);
@@ -329,6 +349,55 @@ impl owner_chain::ChainPorts for ModelPorts {
     }
 }
 
+/// A test's observe port shared by the observe step and the compile port.
+#[derive(Clone)]
+struct DoubleObservation(Arc<Mutex<Box<dyn ObserveDouble>>>);
+impl ObservePort for DoubleObservation {
+    fn prepare(&mut self, run: &str, deployment: &str, cards: &[Value]) -> Result<(), PortError> {
+        lock(&self.0).prepare(run, deployment, cards)
+    }
+    fn rebuild(
+        &mut self,
+        run: &str,
+        deployment: &str,
+        cards: &[Value],
+    ) -> Result<String, PortError> {
+        lock(&self.0).rebuild(run, deployment, cards)
+    }
+    fn facts_nodes(&mut self) -> Vec<String> {
+        lock(&self.0).facts_nodes()
+    }
+    fn offers(&mut self) -> Vec<(String, String)> {
+        lock(&self.0).offers()
+    }
+    fn collect(&mut self) -> Result<(), PortError> {
+        lock(&self.0).collect()
+    }
+    fn observed_hosts(&mut self) -> Vec<Option<String>> {
+        lock(&self.0).observed_hosts()
+    }
+    fn retire_bootstrap(&mut self) -> Result<(), PortError> {
+        lock(&self.0).retire_bootstrap()
+    }
+}
+impl ObservedSource for DoubleObservation {
+    fn with_context(
+        &self,
+        f: &mut dyn FnMut(Option<&ObservationContext>),
+    ) -> Result<(), PortError> {
+        f(lock(&self.0).context());
+        Ok(())
+    }
+    fn retire_bootstrap(&mut self) -> Result<(), PortError> {
+        ObservePort::retire_bootstrap(self)
+    }
+}
+/// The run's observe port: the real one, or a test's double ([`RunConfig::observe_test_double`]).
+enum Observe {
+    Real(Observation<PackagedRun>),
+    TestDouble(DoubleObservation),
+}
+
 /// The chain's ports for one run: model, contributor, descriptors, observe and compile (each
 /// temporary borrow uses adapters over the host's own state, as the headless launcher's); the
 /// work phase stays absent (PH3b S4c).
@@ -336,18 +405,32 @@ struct PackagedChainPorts {
     model: ModelAdapter<ModelPorts>,
     contributor: OwnerPorts<PackagedRun>,
     reports: OwnerPorts<PackagedRun>,
-    observation: Observation<PackagedRun>,
+    observation: Observe,
     compiler: SharedCompiler<PackagedRun>,
 }
 impl PackagedChainPorts {
-    fn new(host: &PackagedRun) -> Self {
-        let observation = Observation(Arc::new(Mutex::new(owner_observation::adapter(
-            host.downgrade(),
-        ))));
-        let compiler = Arc::new(Mutex::new(Compiler::new(
-            host.downgrade(),
-            observation.clone(),
-        )));
+    fn new(host: &PackagedRun, double: Option<&ObserveTestDouble>) -> Self {
+        let (observation, compiler) = match double {
+            None => {
+                let observation = Observation(Arc::new(Mutex::new(owner_observation::adapter(
+                    host.downgrade(),
+                ))));
+                let compiler = Compiler::new(host.downgrade(), observation.clone());
+                (Observe::Real(observation), compiler)
+            }
+            Some(double) => {
+                let observation = DoubleObservation(Arc::new(Mutex::new(double(
+                    owner_observation::Backend {
+                        core: host.downgrade(),
+                        published: std::collections::BTreeMap::new(),
+                    },
+                ))));
+                let compiler =
+                    Compiler::observing(host.downgrade(), Box::new(observation.clone()));
+                (Observe::TestDouble(observation), compiler)
+            }
+        };
+        let compiler = Arc::new(Mutex::new(compiler));
         lock(&host.custody).compiler = Some(Arc::downgrade(&compiler));
         let ports = OwnerPorts::new(host.clone());
         Self {
@@ -369,14 +452,20 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
             .lock()
             .map_err(|_| "compiler_state_unavailable".to_owned())?
             .teardown();
-        let observation = self
-            .observation
-            .0
-            .lock()
-            .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
-            .host_mut()
-            .backend
-            .teardown();
+        let observation = match &self.observation {
+            Observe::Real(observation) => observation
+                .0
+                .lock()
+                .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
+                .host_mut()
+                .backend
+                .teardown(),
+            Observe::TestDouble(double) => double
+                .0
+                .lock()
+                .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
+                .teardown(),
+        };
         compilation.and(observation)
     }
     fn ports(&mut self) -> owner_run::owner_chain::Ports<'_> {
@@ -384,7 +473,10 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
             model: &mut self.model,
             contributor: Some(&mut self.contributor),
             reports: Some(&mut self.reports),
-            observe: Some(&mut self.observation),
+            observe: Some(match &mut self.observation {
+                Observe::Real(observation) => observation as &mut dyn ObservePort,
+                Observe::TestDouble(double) => double,
+            }),
             compile: Some(&mut self.compiler),
         }
     }
@@ -400,9 +492,13 @@ impl OwnerRun {
     /// lease loop (`DemoApp._renew_loop`'s `contributor.renew()`), stopped by Quit.
     pub fn install(host: PackagedRun, config: &RunConfig, renewal: Option<Arc<HostLoop>>) -> Self {
         let chain_host = host.clone();
+        let double = config.observe_test_double.clone();
         let runs = DemoRuns::new(
             Box::new(move || {
-                Box::new(SharedHostChain::new(PackagedChainPorts::new(&chain_host)))
+                Box::new(SharedHostChain::new(PackagedChainPorts::new(
+                    &chain_host,
+                    double.as_ref(),
+                )))
             }),
             Box::new(|| {
                 fresh_identity(api::app_host::now()).unwrap_or_else(|_| {

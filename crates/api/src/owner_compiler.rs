@@ -120,6 +120,33 @@ impl<H: ChainHost> ObservePort for Observation<H> {
     }
 }
 
+/// The observe step's outcome as the compile port reads it: the exact context that completed
+/// native hello (`context.facts`, `context.observations`) and its bootstrap retirement. The
+/// production source is the run's own [`Observation`]; a host may give the compiler another
+/// observe port's context (the packaged host's test double, decision U4) through
+/// [`Compiler::observing`].
+pub trait ObservedSource: Send {
+    /// `f` over the run's observation context (`None` before the observe step prepared one).
+    fn with_context(
+        &self,
+        f: &mut dyn FnMut(Option<&runtime::observe::ObservationContext>),
+    ) -> Result<(), PortError>;
+    /// `context.retire_bootstrap()`.
+    fn retire_bootstrap(&mut self) -> Result<(), PortError>;
+}
+impl<H: ChainHost> ObservedSource for Observation<H> {
+    fn with_context(
+        &self,
+        f: &mut dyn FnMut(Option<&runtime::observe::ObservationContext>),
+    ) -> Result<(), PortError> {
+        f(lock(&self.0)?.context());
+        Ok(())
+    }
+    fn retire_bootstrap(&mut self) -> Result<(), PortError> {
+        ObservePort::retire_bootstrap(self)
+    }
+}
+
 /// Private material retained across the actual planner/worker boundary. This is
 /// compiler INPUT, not the missing compiled operator/Controller/Launch output.
 struct PreparedBuild {
@@ -139,7 +166,7 @@ type FinishedBuild = (
 
 pub struct Compiler<H: ChainHost> {
     core: H::Weak,
-    observation: Observation<H>,
+    observation: Box<dyn ObservedSource>,
     prepared: Option<PreparedBuild>,
     metadata: Option<CompileContext>,
     failure: Option<PortError>,
@@ -152,6 +179,10 @@ pub struct Compiler<H: ChainHost> {
 }
 impl<H: ChainHost> Compiler<H> {
     pub fn new(core: H::Weak, observation: Observation<H>) -> Self {
+        Self::observing(core, Box::new(observation))
+    }
+    /// The compiler over another observe port's context (see [`ObservedSource`]).
+    pub fn observing(core: H::Weak, observation: Box<dyn ObservedSource>) -> Self {
         Self {
             core,
             observation,
@@ -180,11 +211,11 @@ impl<H: ChainHost> Compiler<H> {
                 c.run.contributor.as_ref().map(|m| m.node.clone()),
             )
         })?;
-        let facts = lock(&self.observation.0)?
-            .context()
-            .ok_or_else(|| failed("two_distinct_hosts_required"))?
-            .compiler_facts
-            .clone();
+        let mut facts = None;
+        self.observation.with_context(&mut |context| {
+            facts = context.map(|c| c.compiler_facts.clone());
+        })?;
+        let facts = facts.ok_or_else(|| failed("two_distinct_hosts_required"))?;
         let local = local_device(&root, seed.as_deref(), local_node.as_deref())?;
         let joined_reports = match seed {
             Some(seed) => json!(*lock(&seed.capability_reports)?),
@@ -213,23 +244,29 @@ impl<H: ChainHost> Compiler<H> {
             Ok((c.acquisition.clone(), c.seed.clone()))
         })??;
         let (run, deployment, members, cards, facts, observations) = {
-            let observation = lock(&self.observation.0)?;
-            let context = observation
-                .context()
-                .ok_or_else(|| failed("two_distinct_hosts_required"))?;
-            let document = context
-                .observations
-                .as_ref()
-                .ok_or_else(|| failed("two_distinct_hosts_required"))?;
-            crate::compiler_inputs::validate_hosts(&document.to_value(), context.facts.len())?;
-            (
-                context.run_id.clone(),
-                context.deployment_id.clone(),
-                context.members.clone(),
-                context.descriptors.clone(),
-                context.compiler_facts.clone(),
-                document.clone(),
-            )
+            let mut read = Err(failed("two_distinct_hosts_required"));
+            self.observation.with_context(&mut |context| {
+                read = (|| {
+                    let context = context.ok_or_else(|| failed("two_distinct_hosts_required"))?;
+                    let document = context
+                        .observations
+                        .as_ref()
+                        .ok_or_else(|| failed("two_distinct_hosts_required"))?;
+                    crate::compiler_inputs::validate_hosts(
+                        &document.to_value(),
+                        context.facts.len(),
+                    )?;
+                    Ok((
+                        context.run_id.clone(),
+                        context.deployment_id.clone(),
+                        context.members.clone(),
+                        context.descriptors.clone(),
+                        context.compiler_facts.clone(),
+                        document.clone(),
+                    ))
+                })();
+            })?;
+            read?
         };
         if self.retired && self.identity.as_ref() != Some(&(run.clone(), deployment.clone())) {
             self.prepared = None;
