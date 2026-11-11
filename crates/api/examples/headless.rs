@@ -2684,6 +2684,9 @@ mod chain_tests;
 #[cfg(test)]
 #[path = "headless/handoff_tests.rs"]
 mod handoff_tests;
+#[cfg(test)]
+#[path = "headless/relay_tests.rs"]
+mod relay_tests;
 
 fn run() -> Result<(), String> {
     let root = state_root()?;
