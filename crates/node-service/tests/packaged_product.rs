@@ -578,3 +578,57 @@ fn a_window_of_another_swarm_is_set_aside_and_old_set_asides_are_pruned() {
     quit(host);
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
+
+fn source_notice<'a>(snapshot: &'a Value, source: &str) -> Option<&'a Value> {
+    snapshot["notices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["notice_id"] == format!("source-{source}-missing").as_str())
+}
+/// v0.1.4's sorted UTF-8 JSON bytes of `value` (`dumps_sorted`), as text for a readable diff.
+fn sorted(value: &Value) -> String {
+    String::from_utf8(api::wire::dumps_sorted(value, api::wire::Text::Utf8)).unwrap()
+}
+/// An owner whose seed runs, and its first snapshot.
+fn served(name: &str) -> (PathBuf, DesktopServices, Value) {
+    let root = state_root(name);
+    let host = compose(&root);
+    create(&host);
+    let reply = get(&host, SNAPSHOT);
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    let snapshot = json_of(&reply);
+    (root, host, snapshot)
+}
+
+/// `route_source` is `route.public_status` read through the live route (`_follow`,
+/// supervisor.py:2153-2164 @ f4e366e9). The packaged process never opens a qualified live route
+/// (`serving.route_ready: false`), so the read is v0.1.4's `RouteUnavailableError('route_not_open')`,
+/// which `_follow` leaves untyped: `route_source_failed`, never a route invented from the
+/// development slice.
+#[test]
+fn the_packaged_route_source_reads_the_live_route_it_does_not_have() {
+    let (root, host, snapshot) = served("route");
+    let row = source_state(&snapshot, "route-source");
+    assert_eq!(
+        sorted(row),
+        sorted(
+            &json!({"authority": "live_router_status", "generation": null,
+                       "observed_at_unix_ms": null, "reason_code": "route_source_failed",
+                       "source_id": "route-source", "status": "missing",
+                       "valid_until_unix_ms": null})
+        ),
+        "{row}"
+    );
+    assert_eq!(
+        source_notice(&snapshot, "route-source").unwrap()["code"],
+        "route_source_failed"
+    );
+    quit(host);
+    std::fs::remove_dir_all(&root).unwrap_or_default();
+}
