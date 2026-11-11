@@ -51,6 +51,8 @@ pub struct ChainView<'a, H: ChainHost> {
     pub bootstrap: &'a mut Option<target::Worker>,
     /// A bootstrap whose cleanup is still unproven.
     pub bootstrap_failure: &'a mut Option<CleanupFailure>,
+    /// The run's compiler as the public compile route and the serving status reach it.
+    pub compiler: &'a Option<Weak<Mutex<crate::owner_compiler::Compiler<H>>>>,
 }
 impl<H: ChainHost> std::ops::Deref for ChainView<'_, H> {
     type Target = Authority<Managed<H>>;

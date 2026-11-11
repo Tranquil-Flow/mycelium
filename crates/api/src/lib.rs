@@ -41,6 +41,7 @@ pub mod native_session;
 pub mod native_worker_link;
 pub mod observation_host;
 pub mod owner_chain;
+pub mod owner_compiler;
 pub mod owner_driver;
 pub mod owner_observation;
 pub mod owner_ports;

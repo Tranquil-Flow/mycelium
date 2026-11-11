@@ -46,6 +46,7 @@ impl ChainHost for HeadlessRun {
             bootstrap_incarnation,
             bootstrap,
             bootstrap_failure,
+            compiler,
             ..
         } = &mut *guard;
         Some(f(&mut ChainView {
@@ -57,6 +58,7 @@ impl ChainHost for HeadlessRun {
             bootstrap_incarnation,
             bootstrap,
             bootstrap_failure,
+            compiler,
         }))
     }
     fn exchange_resource_check(&self) -> Option<&'static str> {

@@ -23,7 +23,7 @@ use api::{
     http::serve_connection,
     installation_descriptor::{self, Failure, Member as DescriptorMember, Paths, Source},
     jobj,
-    joined_member::{self, NoSeedServer, SeedHop, observe_device},
+    joined_member::{self, NoSeedServer, SeedHop},
     leave::{
         Clock, LeaveWorker, Limits, MemberLeave, Steps, SystemClock, resume_leave, status_view,
     },
@@ -67,8 +67,9 @@ use budgets::{BudgetId, Entries};
 use owner_run::{chain::StepError, steps::model::Reverify};
 use protocol::identity::Identity;
 use serde_json::{Map, Value, json};
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::{
-    collections::BTreeMap,
     fs,
     io::{Read, Write},
     net::{Ipv4Addr, TcpListener, TcpStream},
@@ -147,6 +148,7 @@ impl std::ops::DerefMut for Core {
     }
 }
 /// The owner's seed runtime, with the observation mount's managed owner.
+#[cfg(test)]
 type SeedRuntime = app_host::SeedRuntime<observation::Managed>;
 /// The core as the library authority's cell: the authority is the core's own state; the relay,
 /// `closed`, `left` and the loopback test seed path of a joining member are this launcher's.
@@ -822,8 +824,8 @@ struct HeadlessChainPorts {
     model: ModelAdapter<HeadlessPorts>,
     contributor: OwnerPorts<HeadlessRun>,
     reports: OwnerPorts<HeadlessRun>,
-    observation: compiler::Observation,
-    compiler: compiler::SharedCompiler,
+    observation: compiler::Observation<HeadlessRun>,
+    compiler: compiler::SharedCompiler<HeadlessRun>,
 }
 impl HeadlessChainPorts {
     fn new(core: Shared) -> Self {
