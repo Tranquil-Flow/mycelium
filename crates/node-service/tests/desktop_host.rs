@@ -560,10 +560,21 @@ enum StopAt {
     /// Never.
     Never,
 }
+/// What the page and the driver saw of one chat send.
+struct Seen {
+    /// The Stop's answer.
+    stop: Option<(u16, Value)>,
+    /// The request's `(terminal, error)` from `/chat/api/events`.
+    outcome: (Value, Value),
+    /// How many runs the driver started.
+    runs: usize,
+    /// Whether the driver's run was cancelled.
+    cancelled: bool,
+}
 /// What the page saw of one chat send with `route` (a Stop) sent at `at`: the Stop's answer, the
 /// request's `(terminal, error)` from `/chat/api/events`, how many runs the driver started and
 /// whether it was cancelled. A run that is not cancelled is released once the send answered.
-fn chat_with_stop(route: &str, at: StopAt) -> (Option<(u16, Value)>, (Value, Value), usize, bool) {
+fn chat_with_stop(route: &str, at: StopAt) -> Seen {
     use std::sync::atomic::Ordering::SeqCst;
     let driver = UntilCancelled::default();
     let node = NodeService::new(
@@ -657,12 +668,12 @@ fn chat_with_stop(route: &str, at: StopAt) -> (Option<(u16, Value)>, (Value, Val
         }
     };
     assert_eq!(verdict, Ok(Poll::Verified));
-    (
-        stopped,
+    Seen {
+        stop: stopped,
         outcome,
-        driver.runs.load(SeqCst),
-        driver.cancelled.load(SeqCst),
-    )
+        runs: driver.runs.load(SeqCst),
+        cancelled: driver.cancelled.load(SeqCst),
+    }
 }
 /// v0.1.4 registers the chat record before `send` returns and its Stop's `cancel_all` cancels
 /// every record not done, stickily: a record whose backend client does not exist yet is
@@ -671,22 +682,31 @@ fn chat_with_stop(route: &str, at: StopAt) -> (Option<(u16, Value)>, (Value, Val
 /// (`Serving::submit`, before the request is live) cancels that request, exactly as the same
 /// Stop does once the send answered, for `/api/serving/stop` and `/api/demo/stop` alike.
 fn a_stop_during_the_send_admission_cancels_that_request(route: &str) {
-    let (stop, registered, runs, cancelled) = chat_with_stop(route, StopAt::Registered);
-    assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+    let registered = chat_with_stop(route, StopAt::Registered);
     assert_eq!(
-        (runs, cancelled),
+        registered.stop,
+        Some((200, json!({"stopped": true}))),
+        "{route}"
+    );
+    assert_eq!(
+        (registered.runs, registered.cancelled),
         (1, true),
         "{route}: Stop after registration"
     );
-    let (stop, admission, runs, cancelled) = chat_with_stop(route, StopAt::Admission);
-    assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+    let admission = chat_with_stop(route, StopAt::Admission);
+    assert_eq!(
+        admission.stop,
+        Some((200, json!({"stopped": true}))),
+        "{route}"
+    );
     assert!(
-        runs == 0 || cancelled,
+        admission.runs == 0 || admission.cancelled,
         "{route}: a Stop answered while the send was admitted was lost: its run went on \
-         uncancelled ({admission:?})"
+         uncancelled ({:?})",
+        admission.outcome
     );
     assert_eq!(
-        admission, registered,
+        admission.outcome, registered.outcome,
         "{route}: the request did not end as a Stop after registration ends it"
     );
 }
@@ -703,16 +723,20 @@ fn a_demo_stop_during_the_send_admission_cancels_that_request() {
 #[test]
 fn a_stop_with_no_send_in_flight_does_not_cancel_the_next_send() {
     for route in ["/api/serving/stop", "/api/demo/stop"] {
-        let (_, unstopped, runs, cancelled) = chat_with_stop(route, StopAt::Never);
-        assert_eq!((runs, cancelled), (1, false), "{route}");
-        let (stop, after_stop, runs, cancelled) = chat_with_stop(route, StopAt::Idle);
-        assert_eq!(stop, Some((200, json!({"stopped": true}))), "{route}");
+        let unstopped = chat_with_stop(route, StopAt::Never);
+        assert_eq!((unstopped.runs, unstopped.cancelled), (1, false), "{route}");
+        let after_stop = chat_with_stop(route, StopAt::Idle);
         assert_eq!(
-            (runs, cancelled),
+            after_stop.stop,
+            Some((200, json!({"stopped": true}))),
+            "{route}"
+        );
+        assert_eq!(
+            (after_stop.runs, after_stop.cancelled),
             (1, false),
             "{route}: an earlier Stop cancelled a later send"
         );
-        assert_eq!(after_stop, unstopped, "{route}");
+        assert_eq!(after_stop.outcome, unstopped.outcome, "{route}");
     }
 }
 
