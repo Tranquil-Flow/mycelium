@@ -60,6 +60,10 @@ pub struct NetworkConfig {
     /// `_renew_loop`'s period for a joined target (`self.closed.wait(20)`, app.py:917): the app's
     /// `RenewLoopSelfClosedWait`; a test runs the same loop on a shorter budget.
     pub renewal: budgets::BudgetId,
+    /// The installed native sidecar a joined Mac names in its own descriptors (`installed_sidecar`,
+    /// native_runtime.py:8-22 @ f4e366e9): `None` is the app's own, beside the executable
+    /// (`native/mycelium-iroh-sidecar`); a test names an owned executable file it never starts.
+    pub sidecar: Option<PathBuf>,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -74,6 +78,7 @@ impl Default for NetworkConfig {
                 )
             }),
             seams: JoinSeams::default(),
+            sidecar: None,
         }
     }
 }
@@ -90,6 +95,8 @@ pub struct Network {
     left: AtomicBool,
     /// `DemoApp.demo_target`'s last card (`status_snapshot`), written by the standing loop.
     demo_target: Mutex<Option<Value>>,
+    /// [`NetworkConfig::sidecar`].
+    sidecar: Option<PathBuf>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -113,6 +120,7 @@ impl Network {
             fenced: AtomicBool::new(false),
             left: AtomicBool::new(false),
             demo_target: Mutex::default(),
+            sidecar: config.sidecar,
         })
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
@@ -740,7 +748,7 @@ impl api::member_agent::MemberHost for PackagedMember {
         self.network.seams.member_seed.clone()
     }
     fn installed_sidecar(&self) -> Result<PathBuf, api::installation_descriptor::Failure> {
-        api::member_agent::installed_sidecar()
+        api::owner_ports::installed_sidecar(self.network.sidecar.clone())
     }
     fn lifecycle(&self) -> api::member_agent::OResult<Arc<Mutex<()>>> {
         Ok(self.lifecycle.clone())
