@@ -349,12 +349,27 @@ fn a_silent_gateway_fails_the_chat_after_the_idle_timeout() {
 /// The run's teardown cancels the chat with the reason the page shows (chat.js:37-41):
 /// Stop `chat_cancelled`, rollover `chat_switching_runs`, ceiling `execution_ceiling_reached`
 /// (demo_chain.py:1322-1335 -> chat.py:442-445 -> :418-440 -> gateway DELETE; :367-369).
+/// The page's code is pinned LITERALLY per reason (REVIEW-lanePH3B-S5 R1), from the shipped
+/// expression `cancel_all('chat_switching_runs' if ctx.state.get('rollover_requested') else
+/// (ctx.state.get('monitor_error_code') or 'owner_run_failed') if failed else 'chat_cancelled')`
+/// (demo_chain.py:1332-1335 @ f4e366e9) and the ceiling's own `cancel_all(EXECUTION_CEILING_CODE)`
+/// (demo_chain.py:1157-1164, `EXECUTION_CEILING_CODE = 'execution_ceiling_reached'` owner_run.py:44).
 #[test]
 fn the_runs_teardown_cancels_the_chat_with_the_reason_the_page_shows() {
-    for reason in [
-        Teardown::Stopped,
-        Teardown::SwitchingRuns,
-        Teardown::CeilingReached,
+    for (reason, page) in [
+        // Plain Stop / Quit: `... if failed else 'chat_cancelled'` (demo_chain.py:1335).
+        (Teardown::of(false, false, None), "chat_cancelled"),
+        // Rollover: `'chat_switching_runs' if ctx.state.get('rollover_requested')` (:1333).
+        (Teardown::of(true, false, None), "chat_switching_runs"),
+        // Failed run, the monitor's dead-member code (:1334, set only at :1179-1181).
+        (
+            Teardown::of(false, true, Some("joined_route_member_stale")),
+            "joined_route_member_stale",
+        ),
+        // Failed run without a monitor code: `or 'owner_run_failed'` (:1334).
+        (Teardown::of(false, true, None), "owner_run_failed"),
+        // The ceiling cancels its chats itself (demo_chain.py:1157-1164, owner_run.py:44).
+        (Teardown::CeilingReached, "execution_ceiling_reached"),
     ] {
         let root = root();
         let timing = root.0.join("chat-timing.jsonl");
@@ -371,7 +386,7 @@ fn the_runs_teardown_cancels_the_chat_with_the_reason_the_page_shows() {
         assert_eq!(tokens, ["a", "b"], "{reason:?}");
         assert_eq!(
             (&last["terminal"], &last["error"]),
-            (&json!("cancelled"), &json!(reason.code())),
+            (&json!("cancelled"), &json!(page)),
             "{reason:?}"
         );
         assert_eq!(fake.seen(|s| s.deletes), 1, "{reason:?}");
