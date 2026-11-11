@@ -29,9 +29,10 @@ use api::{
 use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
     Clock, Identity as RunIdentity, OwnerRun, Reason, StepOutcome,
+    chain::StepError,
     machine::{CeilingProbe, MonitorProbe},
     state::RunState,
-    steps::publish::WorkPort,
+    steps::{publish::WorkPort, slices::SlicesPort},
 };
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
 use runtime::{
@@ -850,6 +851,85 @@ fn a_stop_during_held_native_prepares_cancels_both_and_every_member_discards() {
             ["consent_status", "receive", "prepare_native", "discard"]
         );
     }
+}
+
+/// F5 (REVIEW-lanePH3B-S4A): the owner pushes the stage shards in the slices step, BEFORE publish
+/// starts the run's execution clock, as v0.1.4 members download before publish (descriptors step
+/// demo_chain.py:562-725, the clock set only at publish :896; DemoApp app.py:505 -> _action start
+/// app.py:1362 -> demo_app.py:109-133 -> OwnerRun steps owner_run.py:30-40). So the members' worker
+/// wall (rollover, ceiling, route expiry) is not eaten by the transfer: after `node_slice_plans`
+/// every member holds its verified stage and nothing was prepared; `start_serving` (publish) only
+/// asks for the native prepare. Whole mode: no slice plan is announced (U1).
+#[test]
+fn the_slices_step_pushes_every_stage_before_publish_and_start_serving_only_prepares() {
+    let mut s = swarm(2);
+    let (mut work, members) = s.work(host_clocks());
+    let plans = SlicesPort::node_slice_plans(&mut work);
+    assert_eq!(plans, Ok(None));
+    for (seen, expected, _) in &members {
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen.commands,
+            ["consent_status", "receive"],
+            "pushed in the slices step"
+        );
+        assert_eq!(seen.received.as_deref(), Some(expected.as_slice()));
+    }
+    assert_eq!(
+        work.state()["state"],
+        "prepared",
+        "the workflow starts at publish"
+    );
+    let started = work.start_serving(&json!({"max_wall_seconds":600}));
+    assert!(started.is_ok(), "{started:?}");
+    let state = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(state["state"], "failed", "{state}");
+    assert_eq!(state["error_code"], NO_NATIVE, "{state}");
+    for (seen, _, _) in &members {
+        assert_eq!(
+            seen.lock().unwrap().commands,
+            ["consent_status", "receive", "prepare_native", "discard"],
+            "publish only prepares: no second transfer"
+        );
+    }
+    work.teardown().unwrap();
+}
+
+/// F5 + F4: a Stop while the slices step pushes a shard (the step blocks in the port) is prompt:
+/// the host's stopper interrupts the member's receive, the step ends `Stopped` within the stop
+/// allowance, and the teardown that follows releases the member's stage (R1).
+#[test]
+fn a_stop_while_the_slices_step_pushes_ends_the_step_within_the_stop_allowance() {
+    let mut s = swarm(2);
+    s.members[0].member.script.insert("receive", Act::Hold);
+    let plan = s.plan(60);
+    let (work, members) = s.work_with(host_clocks(), plan);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let stopper = work.stopper();
+    let (done, ended) = mpsc::channel();
+    let step = std::thread::spawn(move || {
+        let mut work = work;
+        let plans = SlicesPort::node_slice_plans(&mut work);
+        if done.send(plans).is_err() {
+            eprintln!("slices waiter gone");
+        }
+        work
+    });
+    assert!(
+        members[0].2.holding("receive", span(B::WorkerStartup)),
+        "the slices step pushes the shard"
+    );
+    stopper();
+    let bound = stop_allowance(60, 2);
+    assert_eq!(ended.recv_timeout(bound), Ok(Err(StepError::Stopped)));
+    let (ended, _stopper) = stop(step.join().unwrap());
+    let (result, state) = ended.recv_timeout(bound).unwrap();
+    assert_eq!(result, Ok(()));
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(
+        members[0].0.lock().unwrap().commands,
+        ["consent_status", "receive", "discard"]
+    );
 }
 
 fn walled(walls: &[(&str, u64)], started: Option<f64>) -> RunState {

@@ -568,6 +568,11 @@ impl OwnerWork {
         }
         Ok(())
     }
+    /// A Stop handle for the host while a step blocks in this port (S4aF F5
+    /// seam; not yet wired).
+    pub fn stopper(&self) -> impl Fn() + Send + Sync + 'static {
+        || {}
+    }
     /// The member links, handed back after [`OwnerWork::teardown`] (the run
     /// never closes them: members stay joined).
     pub fn take_members(&mut self) -> Vec<WorkMember> {
