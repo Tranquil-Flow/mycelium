@@ -7,18 +7,13 @@
 //! `--lan-allow <ip>`). No route_ready claim.
 use api::{
     app_host,
-    joined_shard::native::NativeShard,
-    joined_shard::{self, JoinedShard},
-    peer,
-    preferences::{resource_policy, standing_consent},
+    joined_member::work::{self, Work},
+    joined_shard, peer,
     seed::SeedOptions,
 };
 use budgets::{BudgetId as B, Entries};
-use protocol::{artifact_grant::ChunkRequest, identity::Identity};
-use runtime::{
-    iroh_host::{LanPolicy, LoopbackHost},
-    sidecar_artifact::serve_limits,
-};
+use protocol::identity::Identity;
+use runtime::iroh_host::{LanPolicy, LoopbackHost};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use transport::{Channel, Clock};
@@ -27,12 +22,8 @@ mod membership;
 use membership::Membership;
 #[path = "shard_member/control.rs"]
 mod control;
-#[path = "shard_member/leave.rs"]
-mod leave;
 #[path = "shard_member/remote.rs"]
 mod remote;
-#[path = "shard_member/serve.rs"]
-mod serve;
 type Result<T> = std::result::Result<T, String>;
 fn main() {
     if let Err(code) = run() {
@@ -96,66 +87,21 @@ fn operator_consent(path: &str) -> Result<Value> {
     // v0.1.4 order (`app.py:1742-1757`): the policy and the standing grant's
     // limits are checked before this member pairs or joins anything; a
     // decision it cannot honour ends it here, not after a seed join.
-    usable_decision(&body)?;
+    work::usable_decision(&body)?;
     Ok(body)
 }
-/// The device memory bounding the per-run memory cap: the decision's stated
-/// value, else this Mac's measured physical memory (v0.1.4 always measures,
-/// `app.py:1754` `host_memory_bytes`); `None` only when it cannot be read.
-fn device_memory(body: &Value) -> Option<u64> {
-    body["device_memory_bytes"].as_u64().or_else(|| {
-        let out = std::process::Command::new("/usr/sbin/sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-            .ok()?;
-        String::from_utf8(out.stdout)
-            .ok()?
-            .trim()
-            .parse()
-            .ok()
-            .filter(|m| *m > 0)
-    })
-}
-/// The member-side decision is one this Mac can honour: an offered resource
-/// policy (`consent_valid`, else `consent_required`) and grant caps within
-/// that policy and the device memory. Nothing is written.
-fn usable_decision(body: &Value) -> Result<()> {
-    if !resource_policy::consent_valid(&body["policy"]) {
-        return Err("consent_required".into());
+/// The library work service reaches this process's membership (its renewal loop is this
+/// example's own `membership.rs`).
+impl work::Member for Membership {
+    fn session(&self) -> &std::sync::Arc<std::sync::Mutex<Option<api::member::Session>>> {
+        &self.session
     }
-    standing_consent::decision_caps(&body["consent"], &body["policy"], device_memory(body))
-        .map(|_| ())
-        .map_err(|e| e.0.to_owned())
-}
-/// Record a member-side decision (local stdin operator or `--consent-file`):
-/// its resource policy and the unbound standing grant. v0.1.4 grants before
-/// the pair request and binds after the accept.
-fn grant_decision(root: &std::path::Path, body: &Value) -> Result<()> {
-    usable_decision(body)?;
-    resource_policy::write(root, &body["policy"]).map_err(|e| e.code.to_owned())?;
-    standing_consent::grant(
-        root,
-        &body["consent"],
-        &body["policy"],
-        app_host::now(),
-        device_memory(body),
-    )
-    .map(|_| ())
-    .map_err(|e| e.0.to_owned())
-}
-/// Grant and bind standing consent from a member-side decision to the swarm
-/// this member joined.
-fn grant_consent(root: &std::path::Path, membership: &Membership, body: &Value) -> Result<Value> {
-    grant_decision(root, body)?;
-    bind_consent(root, membership)
-}
-/// Bind the granted standing consent to the swarm this member joined.
-fn bind_consent(root: &std::path::Path, membership: &Membership) -> Result<Value> {
-    let held = membership.session.lock().map_err(|_| "session_poisoned")?;
-    let session = held.as_ref().ok_or("not_joined")?;
-    let binding = session.binding().ok_or("not_joined")?;
-    standing_consent::bind(root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).map_err(|e| e.0.to_owned())?;
-    Ok(json!({"consent":"granted"}))
+    fn current(
+        &self,
+        signer: &Identity,
+    ) -> std::result::Result<Value, api::compiler_inputs::Error> {
+        Membership::current(self, signer)
+    }
 }
 fn run() -> Result<()> {
     let Args {
@@ -213,15 +159,10 @@ fn run() -> Result<()> {
     let carrier = Identity::from_secret(&addr.id.to_string(), &signer.secret_bytes())
         .map_err(|_| "identity_failed")?;
     let mut session: Option<Membership> = None;
-    let mut native: Option<NativeShard> = None;
-    let mut shard: Option<JoinedShard> = None;
-    // Digest of the last signed resident proof THIS process produced.
-    let mut proof_digest: Option<String> = None;
-    let mut left = false;
+    let mut owned = Work::new(root.clone());
     let input = control::Input::start(owner_control.is_some())?;
-    let status: remote::Status = remote::Live::new(
-        json!({"joined":false,"left":false,"worker_pid":null,"route_ready":false}),
-    );
+    let status: work::Status =
+        work::Live::new(json!({"joined":false,"left":false,"worker_pid":null,"route_ready":false}));
     let control_channel = match owner_control {
         Some(owner) => {
             let channel = remote::start(
@@ -255,7 +196,7 @@ fn run() -> Result<()> {
             .as_str()
             .ok_or("operator_command_invalid")?;
         let reply: Result<Value> = (|| match command {
-            _ if left
+            _ if owned.left
                 && matches!(
                     command,
                     "receive" | "prepare_native" | "serve" | "accept" | "resume"
@@ -287,16 +228,16 @@ fn run() -> Result<()> {
                     "sockets":sockets,"advert":advert}))
             }
             "serve" => {
-                let member = session.as_ref().ok_or("not_joined")?;
-                let served = serve::serve(
-                    &host,
-                    &rt,
-                    &clock,
-                    native.as_mut().ok_or("native_required")?,
-                    member,
+                let served = owned.serve(
+                    session.as_ref(),
+                    &work::Carrier {
+                        host: &host,
+                        runtime: &rt,
+                        clock: &clock,
+                        endpoint: addr.id,
+                        lan: policy.as_ref(),
+                    },
                     &signer,
-                    &request["route"],
-                    proof_digest.as_deref().ok_or("native_proof_required")?,
                     &operation,
                 );
                 // B11 (gap row 19): the epoch is over. A direct-LAN carrier is
@@ -327,34 +268,7 @@ fn run() -> Result<()> {
                     (Err(code), Err(e)) => Err(format!("{code};carrier_recycle_failed:{e}")),
                 }
             }
-            "leave" => {
-                let mode = request["mode"]
-                    .as_str()
-                    .ok_or("leave_mode_invalid")?
-                    .to_owned();
-                let began = std::time::Instant::now();
-                let mut steps = leave::Leave {
-                    root: root.clone(),
-                    signer: &signer,
-                    native: &mut native,
-                    shard: &mut shard,
-                    session: &mut session,
-                    fenced: &mut left,
-                    began,
-                    withdrawal: None,
-                    unload: json!(null),
-                    timings: Vec::new(),
-                    refunded: false,
-                };
-                let record = api::leave::MemberLeave::new(&root, api::leave::Limits::default())
-                    .run(&mode, &mut steps, &mut api::leave::SystemClock::default())
-                    .map_err(|e| e.code.to_owned())?;
-                Ok(
-                    json!({"record":record,"withdrawal":steps.withdrawal,"unload":steps.unload,
-                    "steps":steps.timings,"refunded":steps.refunded,
-                    "elapsed_ms":began.elapsed().as_secs_f64()*1000.0,"route_ready":false}),
-                )
-            }
+            "leave" => owned.leave(&mut session, &signer, &operation),
             "pair_request" => app_host::build_pair_request(&root, &root)
                 .map(|v| v.to_value())
                 .map_err(|e| e.code.to_owned()),
@@ -398,7 +312,7 @@ fn run() -> Result<()> {
                 // The operator's `--consent-file` decision is granted before
                 // the join (unbound) and bound to the swarm joined below.
                 if let Some(body) = &operator_decision {
-                    grant_decision(&root, body)?;
+                    work::grant_decision(&root, body)?;
                 }
                 let mut accepted = peer::accept_handoff(&root, true, &request["handoff"], &env)
                     .map_err(|e| e.code.to_owned())?;
@@ -413,7 +327,7 @@ fn run() -> Result<()> {
                 // The operator's `--consent-file` decision binds to the swarm
                 // this member just joined (member-side, before any offer).
                 if operator_decision.is_some() {
-                    bind_consent(&root, session.as_ref().ok_or("session_missing")?)?;
+                    work::bind_consent(&root, session.as_ref().ok_or("session_missing")?)?;
                 }
                 let held = session
                     .as_ref()
@@ -436,269 +350,30 @@ fn run() -> Result<()> {
             }
             // C1: consent stays member-side. Only this member's own operator
             // (private stdin) writes it; the pinned owner may only request it.
-            "consent" if operation.origin == control::Origin::Remote => {
+            "consent" if operation.origin == work::Origin::Remote => {
                 Err("member_consent_member_side".into())
             }
-            "consent" => grant_consent(&root, session.as_ref().ok_or("not_joined")?, request),
+            "consent" => work::grant_consent(&root, session.as_ref().ok_or("not_joined")?, request),
             // The member's own standing consent and resource policy, for the
             // owner to check before any offer (signed on the remote channel).
-            "consent_status" => Ok(json!({
-                "consent": standing_consent::load(&root).map_err(|e| e.0.to_owned())?,
-                "policy": resource_policy::read(&root).map_err(|e| e.code.to_owned())?,
-                "route_ready": false})),
-            "receive" => {
-                operation.check()?;
-                let remaining = operation
-                    .deadline
-                    .saturating_duration_since(std::time::Instant::now());
-                let end = clock
-                    .monotonic()
-                    .checked_add(budgets::Span::from_millis(
-                        remaining
-                            .as_millis()
-                            .try_into()
-                            .map_err(|_| "deadline_invalid")?,
-                    ))
-                    .map_err(|_| "deadline_invalid")?;
-                if shard.is_some() || native.is_some() {
-                    return Err("shard_already_owned".into());
-                }
-                let session = session.as_ref().ok_or("not_joined")?;
-                let offer = &request["offer"];
-                let source: iroh::EndpointId = request["source_id"]
-                    .as_str()
-                    .ok_or("source_id_missing")?
-                    .parse()
-                    .map_err(|_| "source_id_invalid")?;
-                let socket: Option<std::net::SocketAddr> =
-                    serde_json::from_value(request["source_socket"].clone())
-                        .map_err(|_| "source_socket_invalid")?;
-                if policy.is_none() && socket.is_none_or(|s| !s.ip().is_loopback()) {
-                    return Err("source_not_loopback".into());
-                }
-                // Retain custody BEFORE any fallible carrier work; failures keep debt.
-                shard = Some(
-                    JoinedShard::begin(
-                        &root,
-                        session
-                            .session
-                            .lock()
-                            .map_err(|_| "session_poisoned")?
-                            .as_ref()
-                            .ok_or("not_joined")?,
-                        &signer,
-                        &carrier,
-                        offer,
-                        app_host::now(),
-                    )
-                    .map_err(|e| e.0.to_owned())?,
-                );
-                let receive = shard.as_mut().unwrap();
-                // LAN: dial the source ONLY at the seed-signed grant hints of the
-                // admitted offer; an operator-supplied address must be one of them.
-                let dial: Vec<std::net::SocketAddr> = match &policy {
-                    Some(policy) => {
-                        let signed = joined_shard::carrier::signed_source_addrs(
-                            offer,
-                            &source.to_string(),
-                            policy,
-                        );
-                        if signed.is_empty() {
-                            return Err("source_address_unsigned".into());
-                        }
-                        if socket.is_some_and(|s| !signed.contains(&s)) {
-                            return Err("source_address_unexpected".into());
-                        }
-                        signed
-                    }
-                    None => socket.into_iter().collect(),
-                };
-                let connection = host
-                    .connect_channel(
-                        &dial
-                            .iter()
-                            .fold(iroh::EndpointAddr::new(source), |a, s| a.with_ip_addr(*s)),
-                        Channel::ArtifactChunk,
-                        &clock,
-                        end.earliest(deadline()?).map_err(|_| "deadline_invalid")?,
-                    )
-                    .map_err(|e| format!("{e:?}"))?;
-                let mut link = runtime::iroh_artifact::ChunkSession::new(
-                    connection,
-                    &rt,
-                    &clock,
-                    addr.id,
-                    serve_limits().map_err(|_| "budget_unavailable")?.wire,
-                )
-                .map_err(|e| e.0)?;
-                let size = offer["message"]["transfer"]["size_bytes"]
-                    .as_u64()
-                    .ok_or("size_invalid")?;
-                let cap = B::PyMyceliumA13MacosSliceAcquisitionMaxSegmentBytesL63
-                    .bytes()
-                    .map_err(|_| "budget_unavailable")?
-                    .get();
-                let mut offset = 0;
-                while offset < size {
-                    operation.check()?;
-                    // Never hold membership's renewal mutex over network I/O.
-                    let snapshot = session
-                        .session
-                        .lock()
-                        .map_err(|_| "session_poisoned")?
-                        .as_ref()
-                        .ok_or("not_joined")?
-                        .clone();
-                    let length = cap
-                        .min(protocol::artifact_grant::MAX_CHUNK_BYTES)
-                        .min(size - offset);
-                    let chunk = ChunkRequest {
-                        request_id: format!("chunk-{offset}"),
-                        source_endpoint_id: source.to_string(),
-                        object_digest: offer["message"]["transfer"]["content_digest"]
-                            .as_str()
-                            .ok_or("digest_invalid")?
-                            .into(),
-                        offset_bytes: offset,
-                        length_bytes: length,
-                    };
-                    receive
-                        .fetch_chunk_checked(
-                            &mut link,
-                            &chunk,
-                            &snapshot,
-                            &signer,
-                            &carrier,
-                            &app_host::now,
-                            end,
-                            &|| {
-                                operation.check().map_err(|_| {
-                                    api::compiler_inputs::Error(
-                                        if operation
-                                            .cancelled
-                                            .load(std::sync::atomic::Ordering::SeqCst)
-                                        {
-                                            "member_operation_cancelled"
-                                        } else {
-                                            "member_operation_deadline"
-                                        },
-                                    )
-                                })?;
-                                session.current(&signer).map(drop)
-                            },
-                        )
-                        .map_err(|e| e.0)?;
-                    offset += length;
-                }
-                link.finish();
-                // Each bounded verification read admits against the CURRENT
-                // renewed session, never a pre-verify snapshot (F5).
-                let live =
-                    || -> std::result::Result<api::member::Session, api::compiler_inputs::Error> {
-                        session
-                            .session
-                            .lock()
-                            .map_err(|_| api::compiler_inputs::Error("session_poisoned"))?
-                            .as_ref()
-                            .ok_or(api::compiler_inputs::Error("not_joined"))
-                            .cloned()
-                    };
-                receive
-                    .verify_live(&live, &signer, &carrier, &app_host::now, &|| {
-                        operation.check().map_err(|_| {
-                            api::compiler_inputs::Error("member_operation_interrupted")
-                        })?;
-                        session.current(&signer).map(drop)
-                    })
-                    .map_err(|e| e.0.to_owned())?;
-                Ok(
-                    json!({"received_bytes":size,"path":receive.path(),"node_id":session.current(&signer).map_err(|e| e.0.to_owned())?["node_id"],"generation":session.current(&signer).map_err(|e| e.0.to_owned())?["generation"],"route_ready":false,"pid":std::process::id()}),
-                )
-            }
-            "prepare_native" => {
-                if native.is_none() {
-                    // A refused custody hand-over keeps the received shard owned (F4).
-                    match NativeShard::try_new(shard.take().ok_or("shard_required")?) {
-                        Ok(compute) => native = Some(compute),
-                        Err(refused) => {
-                            let (error, received) = *refused;
-                            shard = Some(received);
-                            return Err(error.0.to_owned());
-                        }
-                    }
-                }
-                let member = session.as_ref().ok_or("not_joined")?;
-                let range = serde_json::from_value(request["range"].clone())
-                    .map_err(|_| "range_invalid")?;
-                let tokens = request["tokens"].as_u64().ok_or("tokens_invalid")? as usize;
-                let nonce = request["nonce"].as_str().ok_or("nonce_invalid")?;
-                let source = PathBuf::from(
-                    request["forbidden_source"]
-                        .as_str()
-                        .ok_or("source_invalid")?,
-                );
-                let signed = native
-                    .as_mut()
-                    .unwrap()
-                    .prepare_until(
-                        range,
-                        tokens,
-                        nonce,
-                        &signer,
-                        &|| member.current(&signer),
-                        operation.cancelled.clone(),
-                        &source,
-                        operation.deadline,
-                    )
-                    .map_err(|e| e.0.to_owned())?;
-                proof_digest = Some(
-                    api::joined_shard::route::proof_digest(&signed).map_err(|e| e.0.to_owned())?,
-                );
-                Ok(signed)
-            }
-            "native_step" => {
-                use base64::Engine;
-                let member = session.as_ref().ok_or("not_joined")?;
-                let input: Option<Vec<u32>> = serde_json::from_value(request["tokens"].clone())
-                    .map_err(|_| "tokens_invalid")?;
-                let payload = base64::engine::general_purpose::STANDARD
-                    .decode(request["payload"].as_str().ok_or("payload_invalid")?)
-                    .map_err(|_| "payload_invalid")?;
-                let bytes = native
-                    .as_mut()
-                    .ok_or("native_required")?
-                    .step_until(
-                        input.as_deref(),
-                        &payload,
-                        &|| member.current(&signer),
-                        operation.cancelled.clone(),
-                        operation.deadline,
-                    )
-                    .map_err(|e| e.0.to_owned())?;
-                Ok(json!({"payload":base64::engine::general_purpose::STANDARD.encode(bytes)}))
-            }
-            "native_close" => native
-                .as_mut()
-                .ok_or("native_required")?
-                .close()
-                .map_err(|e| e.0.to_owned()),
-            "discard" => {
-                if native.is_none() && shard.is_none() {
-                    // Nothing owned: never report a discard that did not happen (F4).
-                    return Ok(
-                        json!({"inert_bytes_discarded":false,"nothing_owned":true,"route_ready":false}),
-                    );
-                }
-                if let Some(compute) = native.as_mut() {
-                    compute.discard().map_err(|e| e.0.to_owned())?;
-                }
-                native = None;
-                if let Some(receive) = shard.as_mut() {
-                    receive.discard().map_err(|e| e.0.to_owned())?;
-                }
-                shard = None;
-                Ok(json!({"inert_bytes_discarded":true,"route_ready":false}))
-            }
+            "consent_status" => work::consent_status(&root),
+            "receive" => owned.receive(
+                session.as_ref(),
+                &work::Carrier {
+                    host: &host,
+                    runtime: &rt,
+                    clock: &clock,
+                    endpoint: addr.id,
+                    lan: policy.as_ref(),
+                },
+                &signer,
+                &carrier,
+                &operation,
+            ),
+            "prepare_native" => owned.prepare_native(session.as_ref(), &signer, &operation),
+            "native_step" => owned.native_step(session.as_ref(), &signer, &operation),
+            "native_close" => owned.native_close(),
+            "discard" => owned.discard(),
             "close" => Ok(json!({"closing":true,"route_ready":false})),
             _ => Err("operator_command_unknown".into()),
         })();
@@ -706,25 +381,7 @@ fn run() -> Result<()> {
             Ok(value) => json!({"ok":true,"result":value}),
             Err(code) => json!({"ok":false,"code":code}),
         };
-        // The worker child is still owned (unreaped) here: bind its pid now.
-        let worker_pid = native.as_ref().and_then(NativeShard::worker_pid);
-        status.record_worker(worker_pid);
-        if let Ok(mut s) = status.lock() {
-            s["joined"] = json!(session.is_some());
-            s["left"] = json!(left);
-            s["worker_pid"] = json!(worker_pid);
-            s["native_owned"] = json!(native.is_some());
-            s["shard_owned"] = json!(shard.is_some());
-            s["last_operation"] =
-                json!({"command":command,"operation_id":operation.id,"ok":out["ok"]});
-            // A finished serve's teardown evidence (member-signed with the reply).
-            if command == "serve" {
-                s["last_serve"] = out.clone();
-            }
-            if command == "leave" {
-                s["last_leave"] = out.clone();
-            }
-        }
+        owned.record(&status, session.is_some(), command, &operation, &out);
         input.complete(&operation, out)?;
         if command == "close" {
             break;
