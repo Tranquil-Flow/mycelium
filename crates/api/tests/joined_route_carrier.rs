@@ -1808,3 +1808,126 @@ fn product_epoch_reads_member_leases_from_the_real_seed() {
         m.thread.join().unwrap().unwrap();
     }
 }
+
+/// SL review finding 7: the product pump reads the seed's member leases on a bounded cadence (one
+/// owner poll), not on every wake. A pump woken per token would take the seed coordinator's lock
+/// and parse its table once per token; v0.1.4's owner checks a member's lease per command poll
+/// (`control_session.py:315-326`), and a lease is 300 s long. Counted through an injected view:
+/// a fast answer of many tokens reads each stage's lease at most once per owner poll (+1 for the
+/// first pass and +1 for a pass in flight at the end).
+#[test]
+fn product_epoch_reads_member_leases_once_per_owner_poll() {
+    let s = swarm();
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let tokens: Vec<u32> = (1..=48).collect();
+    let (members, verified) =
+        s.serve_lan_scripts(loopback, &policy, [Script::default(), scripted(&tokens)]);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let nodes: Vec<String> = (0..2)
+        .map(|i| s.live(i)["node_id"].as_str().unwrap().to_owned())
+        .collect();
+    let view = SeedView::fresh(&[nodes[0].as_str(), nodes[1].as_str()]);
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted: SeedMembers = {
+        let (inner, reads) = (view.members(), reads.clone());
+        Arc::new(move |node: &str| {
+            reads.fetch_add(1, Ordering::SeqCst);
+            inner(node)
+        })
+    };
+    let began = Instant::now();
+    let epoch = Epoch::open_watched(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+        counted,
+    )
+    .unwrap();
+    let (_, rx, reader) = chat(&epoch, tokens.len() as u64);
+    let all = until_terminal(&rx, tokens.len() + 1);
+    let read = reads.load(Ordering::SeqCst);
+    let elapsed = began.elapsed();
+    reader.join().unwrap();
+    epoch.close();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+    assert_eq!(all.last().unwrap()["type"], "completed", "{all:?}");
+    let polls = (elapsed.as_millis() / span(B::OwnerPoll).as_millis()) as usize;
+    assert!(
+        read <= 2 * (polls + 2),
+        "{read} lease reads for {} tokens in {elapsed:?} ({polls} owner polls)",
+        tokens.len()
+    );
+}
+
+/// A seed that cannot answer a lease read is recorded by its code (the epoch's refusals), not
+/// dropped: here the seed's own clock becomes invalid (`seed_clock_invalid`).
+#[test]
+fn product_epoch_records_a_seed_lease_read_failure() {
+    let offset = Arc::new(AtomicU64::new(0f64.to_bits()));
+    let seed_offset = offset.clone();
+    let s = swarm_clocked(Box::new(move || {
+        app_host::now() + f64::from_bits(seed_offset.load(Ordering::SeqCst))
+    }));
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (members, verified) = s.serve_lan_scripts(
+        loopback,
+        &policy,
+        [Script::default(), scripted(&[5, 9, 3, 7])],
+    );
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let epoch = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+    )
+    .unwrap();
+    offset.store(f64::NAN.to_bits(), Ordering::SeqCst);
+    let end = Instant::now() + span(B::OwnerPoll) * 8;
+    let mut seen = Vec::new();
+    while Instant::now() < end {
+        seen = epoch.refusals();
+        if seen.iter().any(|code| code == "seed_clock_invalid") {
+            break;
+        }
+        std::thread::sleep(span(B::OwnerPoll) / 5);
+    }
+    offset.store(0f64.to_bits(), Ordering::SeqCst);
+    epoch.close();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+    assert!(
+        seen.iter().any(|code| code == "seed_clock_invalid"),
+        "refusals: {seen:?}"
+    );
+}
