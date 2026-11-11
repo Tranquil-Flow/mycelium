@@ -138,7 +138,10 @@ impl Control {
     /// Record a compute event under the dispatcher lock (no lost wake-up for [`Control::wait`]).
     fn record(&self, seen: &Mutex<Seen>, event: (&'static str, u64)) {
         let ops = self.lock();
-        seen.lock().unwrap_or_else(|p| p.into_inner()).compute.push(event);
+        seen.lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .compute
+            .push(event);
         drop(ops);
         self.changed.notify_all();
     }
@@ -238,12 +241,16 @@ impl TestMember {
                 }
                 // CONTROLLED, not a resident proof: only the test's controlled admission
                 // reads it; the product's proof verifier never sees it.
-                let proof = json!({"controlled_proof":self.session.node_id(),"worker_pid":CONTROLLED_PID});
+                let proof =
+                    json!({"controlled_proof":self.session.node_id(),"worker_pid":CONTROLLED_PID});
                 self.proof = Some(proof.clone());
                 Ok(proof)
             }
             Some("discard") => {
-                self.seen.lock().unwrap_or_else(|p| p.into_inner()).discard_at = Some(Instant::now());
+                self.seen
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .discard_at = Some(Instant::now());
                 self.control.record(&self.seen, ("discard", 0));
                 Ok(match self.shard.take() {
                     Some(mut shard) => {
@@ -355,7 +362,8 @@ impl TestMember {
             .verify(&self.session, &self.signer, carrier, &app_host::now)
             .map_err(|e| e.0.to_owned())?;
         let ops = self.control.lock();
-        self.seen.lock().unwrap_or_else(|p| p.into_inner()).received = Some(fs::read(shard.path()).unwrap());
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).received =
+            Some(fs::read(shard.path()).unwrap());
         drop(ops);
         self.control.changed.notify_all();
         host.close(&clock, deadline())
@@ -1510,8 +1518,10 @@ impl Admission for ControlledAdmission {
         within: Duration,
     ) -> Result<(), Refusal> {
         for st in stages.iter_mut() {
-            st.member.begin(json!({"command":"prepare_native","range":st.range,"tokens":tokens,
-                "nonce":"controlled","forbidden_source":forbidden_source}))?;
+            st.member.begin(
+                json!({"command":"prepare_native","range":st.range,"tokens":tokens,
+                "nonce":"controlled","forbidden_source":forbidden_source}),
+            )?;
         }
         self.prepared.clear();
         for st in stages.iter_mut() {
@@ -1558,7 +1568,8 @@ impl Swarm {
     /// Hand the members to a work port that admits them through the controlled admission;
     /// `scripts` per stage (the last stage's emits [`SCRIPTED`]).
     fn serving(&mut self, plan: Plan, scripts: Vec<Serving>) -> (OwnerWork, Vec<Watched>) {
-        let (seed, _, _) = app_host::identity_in(&self.owner, app_host::SEED_IDENTITY_FILE).unwrap();
+        let (seed, _, _) =
+            app_host::identity_in(&self.owner, app_host::SEED_IDENTITY_FILE).unwrap();
         let mut taken = Vec::new();
         let mut members = Vec::new();
         for (mut j, script) in self.members.drain(..).zip(scripts) {
@@ -1591,7 +1602,8 @@ impl Swarm {
     /// A 60 s run plan whose model names a well-formed manifest digest.
     fn serving_plan(&self) -> Plan {
         let mut plan = self.plan(60);
-        plan.model["manifest_digest"] = json!(protocol::canonical::digest(&json!("manifest")).unwrap());
+        plan.model["manifest_digest"] =
+            json!(protocol::canonical::digest(&json!("manifest")).unwrap());
         plan
     }
 }
@@ -1615,7 +1627,12 @@ fn activate(work: &mut OwnerWork) -> Value {
     let activated = ActivationPort::activate(work, &proposal);
     assert!(activated.is_ok(), "{activated:?}");
     let serving = work.wait_state(
-        |s| matches!(s["state"].as_str(), Some("api_running" | "failed" | "stopped")),
+        |s| {
+            matches!(
+                s["state"].as_str(),
+                Some("api_running" | "failed" | "stopped")
+            )
+        },
         span(B::WorkerStartup),
     );
     assert_eq!(serving["state"], "api_running", "{serving}");
@@ -1646,7 +1663,10 @@ fn post(gateway: &Value) -> (u16, Value) {
 fn events(
     gateway: &Value,
     accepted: &Value,
-) -> (mpsc::Receiver<(Value, Instant)>, std::thread::JoinHandle<()>) {
+) -> (
+    mpsc::Receiver<(Value, Instant)>,
+    std::thread::JoinHandle<()>,
+) {
     let (tx, rx) = mpsc::channel();
     let (addr, path) = (
         gateway_addr(gateway),
@@ -1657,8 +1677,9 @@ fn events(
         bearer(gateway),
         accepted["session_token"].as_str().unwrap()
     );
-    let reader =
-        std::thread::spawn(move || sse_client::stream(addr, path, auth, tx, span(B::WorkerStartup)));
+    let reader = std::thread::spawn(move || {
+        sse_client::stream(addr, path, auth, tx, span(B::WorkerStartup))
+    });
     (rx, reader)
 }
 /// Events until the chat's terminal (bounded per event).
@@ -1745,11 +1766,21 @@ fn a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member() {
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.commands,
-            ["consent_status", "receive", "prepare_native", "carrier_address", "serve"],
+            [
+                "consent_status",
+                "receive",
+                "prepare_native",
+                "carrier_address",
+                "serve"
+            ],
             "one prepare and one serve per member for {CHATS} chats"
         );
         assert_eq!(count(&seen, "reset"), CHATS, "{:?}", seen.compute);
-        assert_eq!(count(&seen, "close") + count(&seen, "abort"), 0, "compute kept");
+        assert_eq!(
+            count(&seen, "close") + count(&seen, "abort"),
+            0,
+            "compute kept"
+        );
     }
     work.teardown().unwrap();
     let state = work.state();
@@ -1759,14 +1790,28 @@ fn a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member() {
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.commands,
-            ["consent_status", "receive", "prepare_native", "carrier_address", "serve", "discard"]
+            [
+                "consent_status",
+                "receive",
+                "prepare_native",
+                "carrier_address",
+                "serve",
+                "discard"
+            ]
         );
-        assert_eq!(seen.cancels, 0, "the epoch's close ended the serve, not a cancel");
+        assert_eq!(
+            seen.cancels, 0,
+            "the epoch's close ended the serve, not a cancel"
+        );
         let served = seen.served.clone().unwrap().unwrap();
         assert_eq!(served["teardown"], "owner_closed", "{served}");
         assert_eq!(served["requests_served"], CHATS, "{served}");
         assert_eq!(count(&seen, "close"), 1, "{:?}", seen.compute);
-        assert!(first(&seen, "close") < first(&seen, "discard"), "{:?}", seen.compute);
+        assert!(
+            first(&seen, "close") < first(&seen, "discard"),
+            "{:?}",
+            seen.compute
+        );
     }
 }
 
@@ -1815,15 +1860,29 @@ fn a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_
     assert_eq!(state["cleanup_error"], Value::Null, "{state}");
     for (seen, _, _) in &members {
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.cancels, 0, "Stop closed the epoch; it never cancelled a serve");
+        assert_eq!(
+            seen.cancels, 0,
+            "Stop closed the epoch; it never cancelled a serve"
+        );
         assert_eq!(
             seen.commands,
-            ["consent_status", "receive", "prepare_native", "carrier_address", "serve", "discard"]
+            [
+                "consent_status",
+                "receive",
+                "prepare_native",
+                "carrier_address",
+                "serve",
+                "discard"
+            ]
         );
         let released = first(&seen, "close").or(first(&seen, "abort"));
         assert!(released.is_some(), "{:?}", seen.compute);
         assert!(released < first(&seen, "discard"), "{:?}", seen.compute);
-        assert!(seen.served.as_ref().is_some_and(Result::is_ok), "{:?}", seen.served);
+        assert!(
+            seen.served.as_ref().is_some_and(Result::is_ok),
+            "{:?}",
+            seen.served
+        );
     }
     // The next run over the same members: each receives its shard again.
     let mut work = _stopper.join().unwrap();
@@ -1898,7 +1957,13 @@ fn a_retired_epoch_is_never_reopened_and_later_chats_are_refused_until_stop() {
     for (seen, _, _) in &members {
         assert_eq!(
             seen.lock().unwrap().commands,
-            ["consent_status", "receive", "prepare_native", "carrier_address", "serve"],
+            [
+                "consent_status",
+                "receive",
+                "prepare_native",
+                "carrier_address",
+                "serve"
+            ],
             "never re-prepared, never re-served"
         );
     }
@@ -1950,10 +2015,7 @@ fn a_stop_with_a_member_silent_on_its_receive_ends_within_the_stop_allowance() {
         state["cleanup_error"], "owner_target_cleanup_unproven",
         "{state}"
     );
-    assert_eq!(
-        state["member_cleanup"][0]["discarded"], false,
-        "{state}"
-    );
+    assert_eq!(state["member_cleanup"][0]["discarded"], false, "{state}");
     assert!(
         members[1].0.lock().unwrap().commands.is_empty(),
         "member 1 never reached"
@@ -1978,7 +2040,11 @@ fn a_silent_member_early_in_stage_order_leaves_only_its_own_cleanup_unproven() {
     let (mut work, members) = s.work_with(host_clocks(), plan);
     let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
     assert!(work.start_serving(&json!({"max_wall_seconds":60})).is_ok());
-    assert!(members[1].2.holding("prepare_native", span(B::WorkerStartup)));
+    assert!(
+        members[1]
+            .2
+            .holding("prepare_native", span(B::WorkerStartup))
+    );
     let (seen, _, control) = &members[0];
     assert!(control.wait(
         seen,
@@ -1999,11 +2065,22 @@ fn a_silent_member_early_in_stage_order_leaves_only_its_own_cleanup_unproven() {
         state["cleanup_error"], "owner_target_cleanup_unproven",
         "{state}"
     );
-    let rows = state["member_cleanup"].as_array().cloned().unwrap_or_default();
+    let rows = state["member_cleanup"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let row = |node: &str| rows.iter().find(|r| r["node_id"] == node).cloned();
     let (first, second) = (&s_node(&members, 0, &state), &s_node(&members, 1, &state));
-    assert_eq!(row(first).map(|r| r["discarded"].clone()), Some(json!(false)), "{state}");
-    assert_eq!(row(second).map(|r| r["discarded"].clone()), Some(json!(true)), "{state}");
+    assert_eq!(
+        row(first).map(|r| r["discarded"].clone()),
+        Some(json!(false)),
+        "{state}"
+    );
+    assert_eq!(
+        row(second).map(|r| r["discarded"].clone()),
+        Some(json!(true)),
+        "{state}"
+    );
     let later = members[1].0.lock().unwrap();
     assert!(later.cancels >= 1, "member 1's prepare is cancelled");
     assert_eq!(

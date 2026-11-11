@@ -705,7 +705,9 @@ impl Work {
             .as_ref()
             .filter(|v| run.is_some() && v.announcement()["run_id"].as_str() == run);
         match verified {
-            Some(v) if !required || v.work_limits().is_some() => Self::admit(v, &self.root, session),
+            Some(v) if !required || v.work_limits().is_some() => {
+                Self::admit(v, &self.root, session)
+            }
             _ if required => Err("member_share_unannounced".into()),
             _ => Ok(None),
         }
@@ -942,7 +944,12 @@ impl Work {
         }
         // F1: the share announced for the offer's own run fits this member's bound caps, before
         // any native worker (custody stays owned on a refusal).
-        let offer = self.native.as_ref().ok_or("native_required")?.offer().clone();
+        let offer = self
+            .native
+            .as_ref()
+            .ok_or("native_required")?
+            .offer()
+            .clone();
         self.admit_share_for(session, &offer, self.require_share)?;
         self.prepared_at.get_or_insert_with(std::time::Instant::now);
         let member = session.ok_or("not_joined")?;

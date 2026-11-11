@@ -214,7 +214,11 @@ impl Drop for Joined {
 /// work admission lets through ends at `source_id_missing`, before any custody or dial.
 fn receive(work: &mut Work, member: &Joined) -> Result<Value, String> {
     // The owner run's stage transfer (`<run_id>-transfer-<stage>`) the S4b announcements name.
-    receive_offer(work, member, &json!({"message":{"run":"run-s4b-transfer-0"}}))
+    receive_offer(
+        work,
+        member,
+        &json!({"message":{"run":"run-s4b-transfer-0"}}),
+    )
 }
 /// [`receive`] of `offer`.
 fn receive_offer(work: &mut Work, member: &Joined, offer: &Value) -> Result<Value, String> {
@@ -359,9 +363,11 @@ fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard
     let case = &fixture["cases"][0];
     let session = member.session.lock().unwrap().clone().unwrap();
     let carrier_key = iroh::SecretKey::generate();
-    let carrier =
-        Identity::from_secret(&carrier_key.public().to_string(), &member.signer.secret_bytes())
-            .unwrap();
+    let carrier = Identity::from_secret(
+        &carrier_key.public().to_string(),
+        &member.signer.secret_bytes(),
+    )
+    .unwrap();
     let registration =
         api::joined_shard::register(&session, &member.signer, &carrier, app_host::now()).unwrap();
     let mut recipe = case["node_plans"]["node-0"].clone();
@@ -424,16 +430,16 @@ fn a_share_above_the_caps_announced_for_this_run_after_the_push_refuses_the_prep
         "the push precedes the `work` announcement: custody on the hard limits"
     );
     work.shard = Some(shard);
-    work.announced(&member.announced_for(
-        "run-ep2",
-        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
-    ));
+    work.announced(&member.announced_for("run-ep2", Some(share(OVER_MEMORY, 1_000_000_000, 300))));
     assert_eq!(
         prepare(&mut work, &member),
         Err("member_memory_cap_below_share".into())
     );
     assert!(
-        work.native.as_ref().is_some_and(|n| n.worker_pid().is_none()) || work.shard.is_some(),
+        work.native
+            .as_ref()
+            .is_some_and(|n| n.worker_pid().is_none())
+            || work.shard.is_some(),
         "custody kept, no worker"
     );
     assert!(work.discard().is_ok());
@@ -451,29 +457,22 @@ fn a_previous_runs_announcement_never_decides_this_runs_share() {
     member.bind();
     let mut work = Work::new(member.member_root.clone());
     let (offer, shard) = custody(&member, "run-ep2-transfer-1");
-    work.announced(&member.announced_for(
-        "run-ep1",
-        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
-    ));
+    work.announced(&member.announced_for("run-ep1", Some(share(OVER_MEMORY, 1_000_000_000, 300))));
     assert_eq!(
         receive_offer(&mut work, &member, &offer),
         Err("source_id_missing".into()),
         "another run's share is not this offer's"
     );
     work.shard = Some(shard);
-    work.announced(&member.announced_for(
-        "run-ep1",
-        Some(share(1_000_000_000, 1_000_000_000, 300)),
-    ));
+    work.announced(
+        &member.announced_for("run-ep1", Some(share(1_000_000_000, 1_000_000_000, 300))),
+    );
     assert_eq!(
         prepare(&mut work, &member),
         Err("member_share_unannounced".into()),
         "the previous run's smaller share does not admit this run"
     );
-    work.announced(&member.announced_for(
-        "run-ep2",
-        Some(share(OVER_MEMORY, 1_000_000_000, 300)),
-    ));
+    work.announced(&member.announced_for("run-ep2", Some(share(OVER_MEMORY, 1_000_000_000, 300))));
     assert_eq!(
         prepare(&mut work, &member),
         Err("member_memory_cap_below_share".into())
@@ -494,9 +493,9 @@ fn an_operator_driven_member_prepares_without_an_announcement() {
     work.shard = Some(shard);
     let prepared = prepare(&mut work, &member);
     assert!(
-        prepared
-            .as_ref()
-            .is_err_and(|code| code != "member_share_unannounced" && !code.ends_with("_below_share")),
+        prepared.as_ref().is_err_and(
+            |code| code != "member_share_unannounced" && !code.ends_with("_below_share")
+        ),
         "reaches the native prepare (no worker binary here): {prepared:?}"
     );
     if let Some(native) = work.native.as_mut() {
@@ -517,7 +516,11 @@ fn an_operator_driven_member_prepares_without_an_announcement() {
 /// carrier and stays silent; the dispatcher's operation wall (`op_wall`) is shorter than the
 /// route's lifetime (`lifetime`). Returns the serve outcome and when it ended (wall clock), and the
 /// route's expiry.
-fn serve_route(member: &Joined, op_wall: Duration, lifetime: Duration) -> (Result<Value, String>, f64, f64) {
+fn serve_route(
+    member: &Joined,
+    op_wall: Duration,
+    lifetime: Duration,
+) -> (Result<Value, String>, f64, f64) {
     let mut work = Work::new(member.member_root.clone());
     let (offer, shard) = custody(member, "run-ep2-transfer-0");
     work.native = Some(api::joined_shard::native::NativeShard::new(shard).unwrap());
@@ -530,7 +533,12 @@ fn serve_route(member: &Joined, op_wall: Duration, lifetime: Duration) -> (Resul
         .build()
         .unwrap();
     let clock = api::managed_carrier::HostClock::default();
-    let until = |id: B| clock.monotonic().checked_add(id.span(Entries::ZERO).unwrap()).unwrap();
+    let until = |id: B| {
+        clock
+            .monotonic()
+            .checked_add(id.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
     let mut host = LoopbackHost::bind(&rt, &clock, until(B::RouterClose)).unwrap();
     let address = host.address().unwrap();
     let owner = iroh::SecretKey::generate();
@@ -564,15 +572,31 @@ fn serve_route(member: &Joined, op_wall: Duration, lifetime: Duration) -> (Resul
             .build()
             .unwrap();
         let clock = api::managed_carrier::HostClock::default();
-        let until = |id: B| clock.monotonic().checked_add(id.span(Entries::ZERO).unwrap()).unwrap();
-        let mut host = LoopbackHost::bind_with_secret(&rt, &clock, until(B::RouterClose), owner).unwrap();
+        let until = |id: B| {
+            clock
+                .monotonic()
+                .checked_add(id.span(Entries::ZERO).unwrap())
+                .unwrap()
+        };
+        let mut host =
+            LoopbackHost::bind_with_secret(&rt, &clock, until(B::RouterClose), owner).unwrap();
         let connections: Vec<_> = (0..2)
             .map(|_| {
-                host.connect_channel(&address, transport::Channel::Router, &clock, until(B::RouterClose))
-                    .unwrap()
+                host.connect_channel(
+                    &address,
+                    transport::Channel::Router,
+                    &clock,
+                    until(B::RouterClose),
+                )
+                .unwrap()
             })
             .collect();
-        let held = hold.recv_timeout(B::WorkerStartup.span(Entries::ZERO).map(|s| Duration::from_millis(s.millis())).unwrap());
+        let held = hold.recv_timeout(
+            B::WorkerStartup
+                .span(Entries::ZERO)
+                .map(|s| Duration::from_millis(s.millis()))
+                .unwrap(),
+        );
         drop(connections);
         host.close(&clock, until(B::RouterClose)).unwrap();
         held.is_ok()
@@ -598,7 +622,10 @@ fn serve_route(member: &Joined, op_wall: Duration, lifetime: Duration) -> (Resul
     );
     let ended = app_host::now();
     done.send(()).unwrap();
-    assert!(dialer.join().unwrap(), "the owner held its connections until the serve ended");
+    assert!(
+        dialer.join().unwrap(),
+        "the owner held its connections until the serve ended"
+    );
     host.close(&clock, until(B::RouterClose)).unwrap();
     assert!(work.discard().is_ok());
     (served, ended, expires_at)
@@ -618,7 +645,10 @@ fn a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wa
     let (served, ended, expires_at) = serve_route(&member, poll * 2, lifetime);
     let report = served.unwrap();
     assert!(
-        matches!(report["teardown"].as_str(), Some("route_expired" | "owner_closed")),
+        matches!(
+            report["teardown"].as_str(),
+            Some("route_expired" | "owner_closed")
+        ),
         "the epoch ends at the route's expiry: {report}"
     );
     assert!(
