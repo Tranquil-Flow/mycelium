@@ -1282,3 +1282,90 @@ fn a_fenced_member_that_resumes_is_current_again_and_its_schedule_renews() {
     let after = member_lease(&member.member);
     assert!(after > resumed, "renewed lease {after} > {resumed}");
 }
+
+/// GRF3 (review GRF2 F1): the safety side of F12. The owner revokes the member at its seed; the
+/// renewal thread's next pass gets a definitive refusal and the schedule ends. The member then
+/// resumes and the seed REFUSES that resume: it stays fenced (`member_renewal_failed`, not current
+/// on its old session's still-fresh lease) and its schedule stays ended (no renewal pass ever runs
+/// again). Only a resume the seed accepted and verified clears the fence (the accepted side is
+/// `a_fenced_member_that_resumes_is_current_again_and_its_schedule_renews`). Two ways the fence
+/// comes: the real seed after the revoke (`seed_message_mismatch`, final in v0.2, class D, see
+/// `final_refusal`), and the revoked answer v0.1.4 records a disposition for (`peer_member_revoked`,
+/// from a front on the seed's port). v0.1.4: `_resume` installs the session only after
+/// `client.resume` and the verified acceptance, and clears the recorded disposition after that
+/// (peer.py:932-1018, :1018); a refused start raises before it (/api/start app.py:1630-1634 ->
+/// target_app.py:76-78 -> peer.py:327 `start`).
+#[test]
+fn a_fenced_member_whose_resume_the_seed_refuses_stays_fenced_and_its_schedule_stays_ended() {
+    for (front, fenced_by) in [
+        (None, "seed_message_mismatch"),
+        (
+            Some(Answer::Refused("seed_member_lifecycle_ineligible")),
+            "peer_member_revoked",
+        ),
+    ] {
+        let mut rig = Rig::new();
+        let member = Ticked::new(&rig);
+        rig.time.advance(1);
+        (rig.revoke_action())();
+        let front = front.map(|answer| {
+            rig.seed_down();
+            Front::up(&rig, answer)
+        });
+        rig.time.advance(1);
+        assert_eq!(
+            member.pass(),
+            membership::Beat::Pass(Err(fenced_by.to_owned())),
+            "the revoked member's renewal gets a definitive refusal"
+        );
+        assert_eq!(
+            member.next(),
+            membership::Beat::Ended,
+            "{fenced_by}: a final refusal ends the schedule"
+        );
+        assert_eq!(
+            member.member.current(&rig.signer).unwrap_err().0,
+            "member_renewal_failed"
+        );
+        if let Some(front) = front {
+            drop(front);
+            rig.seed_up();
+        }
+        let lease = member_lease(&member.member);
+        rig.time.advance(1);
+        assert!(
+            rig.time.now() < lease,
+            "{fenced_by}: the old session's own lease is still fresh: only the fence refuses"
+        );
+        assert_eq!(
+            member.member.resume(&rig.signer),
+            Err("peer_member_revoked".to_owned()),
+            "{fenced_by}: the seed refuses a revoked member's resume"
+        );
+        assert_eq!(
+            member.member.current(&rig.signer).unwrap_err().0,
+            "member_renewal_failed",
+            "{fenced_by}: a resume the seed refused leaves the member fenced"
+        );
+        assert_eq!(
+            member_lease(&member.member),
+            lease,
+            "{fenced_by}: a refused resume installs no session"
+        );
+        // A tick after the refused resume: an ended schedule runs no pass for it. The member's
+        // drop joins whatever thread holds the schedule, so every beat it sent is in `beats`.
+        member.tick.send(()).unwrap();
+        let Ticked {
+            tick,
+            beats,
+            member,
+        } = member;
+        drop(tick);
+        drop(member);
+        assert_eq!(
+            beats.try_iter().collect::<Vec<_>>(),
+            Vec::<membership::Beat>::new(),
+            "{fenced_by}: no renewal pass runs and no schedule restarts after a refused resume"
+        );
+    }
+}
