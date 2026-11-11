@@ -618,6 +618,11 @@ impl PackagedHost {
     pub fn publishing(&self) -> Option<Publishing> {
         self.publishing.clone()
     }
+    /// The owner authority this host loaded (`None`: its state was refused at bind), for the
+    /// product routes to read the owner's seed (`crate::packaged_product`).
+    pub fn authority_handle(&self) -> Option<Arc<Mutex<Authority>>> {
+        self.authority.as_ref().ok().cloned()
+    }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {
         self.policy.iter().cloned().collect()
