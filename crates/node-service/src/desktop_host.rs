@@ -341,6 +341,12 @@ impl DesktopServices {
             network.clone(),
             host.authority_result(),
         );
+        // `PublishedStatus.start()` (published_status.py:26-30, app.py:630-632 @ f4e366e9): a complete
+        // initial status before the window's first request, so the page shows the join-consent
+        // document at once. A failure keeps its code on stderr; the next action publishes again.
+        if let Err(error) = api::actions::Backend::publish(&mut node.clone()) {
+            eprintln!("status_publish_failed: {}", error.code);
+        }
         let backend = PersistentBackend::new(private.to_owned(), host, delegate);
         // `DemoApp._pending_windows`: the relay's Start materializes the backend's own list.
         network.share_pending(backend.pending_windows());

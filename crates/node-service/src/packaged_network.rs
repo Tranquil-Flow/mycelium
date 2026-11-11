@@ -196,6 +196,29 @@ impl Network {
     }
 }
 
+/// `_become_target`'s role switch (app.py:1106-1116 @ f4e366e9), after the backend stopped the owner
+/// authority and wrote `installation-role.json`: this Mac's authority is the joining target's from now
+/// on (its peer state in the same private root, as the headless launcher keeps it).
+pub fn adopt_target_role(authority: &Mutex<Authority>) {
+    let mut a = lock(authority);
+    a.target = true;
+    a.running = false;
+}
+
+/// `authority.status().get('membership_state')`: the owner authority's, or a joined target's own
+/// (`TargetApplication.status()`, peer.py:395-455), as its status shows it.
+pub fn membership_state(authority: &Mutex<Authority>) -> Option<String> {
+    let target = lock(authority).target;
+    if !target {
+        return app_host::membership_state(authority);
+    }
+    let status = joined_member::target_status(&lock(authority));
+    match status.get("membership_state") {
+        Some(Json::Str(state)) => Some(state.clone()),
+        _ => None,
+    }
+}
+
 /// The packaged authority as `api::app_host`'s [`Cell`]: the relay origin and `_left` beside it,
 /// and how a joining member reaches the owner's seed.
 pub struct PackagedCell<'a> {

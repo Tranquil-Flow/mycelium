@@ -694,10 +694,12 @@ impl Host for PackagedHost {
         self.node.closed().unwrap_or(true)
     }
     /// `installation_role == 'owner'`. v0.1.4 starts as owner (app.py:537) unless
-    /// `installation-role.json` selects a target (app.py:595-611). The packaged process has no
-    /// target role yet (joining is a later S1 step) and publishes `installation_role: owner`.
+    /// `installation-role.json` selects a target (app.py:595-611), as the joined Mac's does once it
+    /// joined (`_become_target`, app.py:1106-1116; `crate::packaged_network`). A state refused at
+    /// bind has no role file read: it answers as the owner it starts as.
     fn owner(&self) -> bool {
-        true
+        self.loaded()
+            .is_none_or(|authority| !authority.lock().is_ok_and(|a| a.target))
     }
     /// `os.environ.get(name)`. A value that is not UTF-8 stays set (Python decodes it with
     /// `surrogateescape`), so it is never mistaken for an unset variable.
@@ -800,8 +802,10 @@ impl Host for PackagedHost {
     fn swarm_created(&self) -> bool {
         self.loaded().is_some_and(app_host::swarm_created)
     }
+    /// `authority.status().get('membership_state')`: a joined Mac's own (`crate::packaged_network`).
     fn membership_state(&self) -> Option<String> {
-        self.loaded().and_then(app_host::membership_state)
+        self.loaded()
+            .and_then(crate::packaged_network::membership_state)
     }
     fn running(&self) -> bool {
         self.loaded().is_some_and(app_host::running)
@@ -825,8 +829,9 @@ impl Host for PackagedHost {
     ) -> Result<Json, PublicError> {
         app_host::pair_approve(self.authority()?, request, ttl_seconds, quota)
     }
+    /// `accept_pairing` over the member's seed path (`crate::packaged_network`'s join seams).
     fn pair_accept(&mut self, handoff: &Value) -> Result<Json, PublicError> {
-        app_host::pair_accept(self.authority()?, handoff)
+        app_host::pair_accept(&self.network.cell(self.authority()?), handoff)
     }
     /// The owner's window store. Without a relay origin the persistent backend answers `open`
     /// itself (a pending window, `_open_pending_window`); list/approve/revoke are the store's,
@@ -876,6 +881,33 @@ impl Host for PackagedHost {
         if let Some(authority) = self.loaded() {
             self.network.bind_seed(authority);
         }
+    }
+    /// `installation_role = 'target'` (the role file is written by the backend first).
+    fn adopt_target_role(&mut self) -> Result<(), PublicError> {
+        crate::packaged_network::adopt_target_role(self.authority()?);
+        self.refresh_fast_mode();
+        Ok(())
+    }
+    fn join_submit(
+        &mut self,
+        link: &api::persistent::JoinLink,
+        request: &Value,
+        quota: &Value,
+    ) -> Result<(Value, Vec<Value>), PublicError> {
+        let base = self.network.seams().join_base.clone();
+        api::joined_member::join_submit(&self.root, base.as_deref(), link, request, quota)
+    }
+    fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
+        api::joined_member::join_poll(state, self.network.seams().join_base.as_deref())
+    }
+    fn join_accept(
+        &mut self,
+        handoff: &Value,
+        seed_key_digest: Option<&str>,
+    ) -> Result<api::persistent::JoinAccepted, PublicError> {
+        let base = self.network.seams().join_base.clone();
+        let cell = self.network.cell(self.authority()?);
+        api::joined_member::join_accept(&cell, handoff, seed_key_digest, base.as_deref())
     }
     /// `POST /api/swarm/publish` (`swarm_publish.action`, app mode): the explicit opt-in.
     fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
