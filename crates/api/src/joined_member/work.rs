@@ -33,7 +33,7 @@ use budgets::{BudgetId as B, Entries, MonoInstant};
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
 use runtime::{
     iroh_control_receive::NodeControlReceiver,
-    iroh_host::{LanPolicy, LoopbackHost},
+    iroh_host::{LanPolicy, LoopbackHost, NetworkMode},
     sidecar_artifact::serve_limits,
 };
 use serde_json::{Value, json};
@@ -325,12 +325,19 @@ impl Pins {
         &self,
         verified: &VerifiedAnnouncement,
     ) -> std::result::Result<OwnerPin, PinRefusal> {
-        let _ = verified;
-        Err(PinRefusal("owner_pin_unimplemented"))
+        let pin = OwnerPin::from_announcement(verified);
+        *self.held() = pin.as_ref().ok().cloned();
+        pin
     }
     /// The pin held now, if any.
     pub fn current(&self) -> Option<OwnerPin> {
-        self.0.lock().ok().and_then(|held| held.clone())
+        self.held().clone()
+    }
+    fn held(&self) -> MutexGuard<'_, Option<OwnerPin>> {
+        // A pin is replaced whole; a panicked holder cannot leave a half-written one.
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 impl OwnerTrust {
@@ -338,7 +345,10 @@ impl OwnerTrust {
     pub fn owner(&self) -> Result<iroh::EndpointId> {
         match self {
             Self::Operator(owner) => Ok(*owner),
-            Self::Announced(_) => Err("owner_pin_unimplemented".into()),
+            Self::Announced(pins) => pins
+                .current()
+                .map(|pin| pin.endpoint())
+                .ok_or_else(|| "owner_pin_missing".into()),
         }
     }
 }
@@ -374,7 +384,19 @@ pub fn control_loop(
     stop: &AtomicBool,
 ) -> Result<()> {
     let mut last = 0u64;
+    let mut admitted: Option<iroh::EndpointId> = None;
     while !stop.load(Ordering::SeqCst) {
+        // Direct LAN: the transport admits only the announced key; a new pin replaces it. A
+        // cleared pin keeps the last key at the transport while no command is admitted.
+        if let OwnerTrust::Announced(_) = trust
+            && host.mode() == NetworkMode::DirectLan
+            && let Ok(owner) = trust.owner()
+            && admitted != Some(owner)
+        {
+            host.admit_peer_ids(&[owner])
+                .map_err(|e| format!("member_control_admission_failed:{e:?}"))?;
+            admitted = Some(owner);
+        }
         // Bounded accept so the stop flag is observed within one owner poll.
         let Ok(connection) = host.accept(clock, until(clock, B::OwnerPoll)?) else {
             continue;

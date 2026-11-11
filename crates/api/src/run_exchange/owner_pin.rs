@@ -21,7 +21,12 @@
 //! 5. exactly `{protocol, endpoint_id}` → else `owner_pin_invalid`;
 //! 6. `endpoint_id` parses as an endpoint id and re-prints to the same text → else
 //!    `owner_pin_endpoint_invalid`.
-use crate::run_exchange_client::{ClientError, ExchangeClient};
+use crate::{
+    run_exchange::{ANNOUNCEMENT, PHASES},
+    run_exchange_client::{BINDING, ClientError, ExchangeClient},
+    run_exchange_routes::{DISCOVERY, RESPONSE},
+    wire::Json,
+};
 use serde_json::{Value, json};
 
 /// The announcement key.
@@ -37,7 +42,9 @@ pub const REFUSALS: [&str; 6] = [
     "owner_pin_version_unsupported",
     "owner_pin_endpoint_invalid",
 ];
-const UNIMPLEMENTED: &str = "owner_pin_unimplemented";
+const UNVERIFIED: PinRefusal = PinRefusal("owner_pin_announcement_unverified");
+const INVALID: PinRefusal = PinRefusal("owner_pin_invalid");
+const ENDPOINT_INVALID: PinRefusal = PinRefusal("owner_pin_endpoint_invalid");
 
 /// What the owner publishes: its member-control endpoint key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,6 +62,16 @@ impl OwnerControl {
     pub fn to_value(&self) -> Value {
         json!({"protocol": PROTOCOL, "endpoint_id": self.endpoint.to_string()})
     }
+    /// The same value in its published key order (`protocol`, then `endpoint_id`).
+    pub fn to_json(&self) -> Json {
+        Json::Obj(vec![
+            ("protocol".into(), PROTOCOL.into()),
+            (
+                "endpoint_id".into(),
+                self.endpoint.to_string().as_str().into(),
+            ),
+        ])
+    }
 }
 
 /// A closed refusal code of the member-side check.
@@ -71,8 +88,13 @@ pub struct VerifiedAnnouncement {
 impl VerifiedAnnouncement {
     /// One signed read (`ExchangeClient::read`, which verifies before it answers).
     pub fn read(client: &mut ExchangeClient) -> Result<Self, ClientError> {
-        let _ = client;
-        Err(ClientError(UNIMPLEMENTED.into()))
+        let announcement = client.read()?;
+        let seed_key_digest = seed_key_digest(client)
+            .ok_or_else(|| ClientError("managed_control_response_invalid".into()))?;
+        Ok(Self {
+            announcement,
+            seed_key_digest,
+        })
     }
     /// A read response this member already received for `request_id`.
     pub fn from_response(
@@ -80,8 +102,27 @@ impl VerifiedAnnouncement {
         response: &Value,
         request_id: &str,
     ) -> Result<Self, PinRefusal> {
-        let _ = (client, response, request_id);
-        Err(PinRefusal(UNIMPLEMENTED))
+        // 1. The seed-signed answer to this member's own read, bound to it (`_verified_response`).
+        let statement = client
+            .verified(response, RESPONSE, request_id, DISCOVERY, DISCOVERY)
+            .map_err(|_| UNVERIFIED)?;
+        let seed_key_digest = seed_key_digest(client).ok_or(UNVERIFIED)?;
+        // 2. The closed demo-run state `ExchangeClient::read` accepts.
+        let announcement = &statement["announcement"];
+        if statement
+            .as_object()
+            .is_none_or(|o| o.len() != 8 + BINDING.len() + 2)
+            || announcement["protocol"] != ANNOUNCEMENT
+            || !announcement["phase"]
+                .as_str()
+                .is_some_and(|p| PHASES.contains(&p))
+        {
+            return Err(PinRefusal("demo_announcement_invalid"));
+        }
+        Ok(Self {
+            announcement: announcement.clone(),
+            seed_key_digest,
+        })
     }
     pub fn announcement(&self) -> &Value {
         &self.announcement
@@ -101,8 +142,28 @@ pub struct OwnerPin {
 impl OwnerPin {
     /// Checks 3-6 of the module contract on a verified announcement.
     pub fn from_announcement(verified: &VerifiedAnnouncement) -> Result<Self, PinRefusal> {
-        let _ = verified;
-        Err(PinRefusal(UNIMPLEMENTED))
+        let field = verified
+            .announcement
+            .get(FIELD)
+            .ok_or(PinRefusal("owner_pin_missing"))?;
+        let map = field.as_object().ok_or(INVALID)?;
+        let protocol = map.get("protocol").and_then(Value::as_str).ok_or(INVALID)?;
+        if protocol != PROTOCOL {
+            return Err(PinRefusal("owner_pin_version_unsupported"));
+        }
+        if map.len() != 2 || !map.contains_key("endpoint_id") {
+            return Err(INVALID);
+        }
+        let text = map["endpoint_id"].as_str().ok_or(ENDPOINT_INVALID)?;
+        let endpoint: iroh::EndpointId = text.parse().map_err(|_| ENDPOINT_INVALID)?;
+        // One encoding only: the text must be the key's own display form.
+        if endpoint.to_string() != text {
+            return Err(ENDPOINT_INVALID);
+        }
+        Ok(Self {
+            control: OwnerControl::new(endpoint),
+            seed_key_digest: verified.seed_key_digest.clone(),
+        })
     }
     pub fn endpoint(&self) -> iroh::EndpointId {
         self.control.endpoint
@@ -111,4 +172,10 @@ impl OwnerPin {
     pub fn seed_key_digest(&self) -> &str {
         &self.seed_key_digest
     }
+}
+/// The digest of the seed key this member pinned at join.
+fn seed_key_digest(client: &ExchangeClient) -> Option<String> {
+    client.member().owner_key["verification_key_digest"]
+        .as_str()
+        .map(str::to_owned)
 }

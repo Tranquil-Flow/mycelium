@@ -480,6 +480,10 @@ impl RunExchange {
             _ => String::new(),
         };
         value.set("model_source", self.model_source_hint(&phase));
+        // Additive (`owner_pin`): only an owner that set its pin publishes the key.
+        if let Some(control) = lock(&self.owner_control).as_ref() {
+            value.set(owner_pin::FIELD, control.to_json());
+        }
         value
     }
 
