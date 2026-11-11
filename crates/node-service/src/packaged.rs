@@ -139,21 +139,45 @@ impl ModelGate for NativeOnDemand {
 }
 pub enum AppCleanup {
     /// The window's services, then the run model's acquisition.
-    Service(Box<ServiceCleanup<DesktopServices>>, ModelClose),
+    Service(Box<WindowQuit>),
     Nothing,
+}
+/// Quit's steps over the window's services and the run model's acquisition, run as v0.1.4's
+/// `DemoApp.close` runs its own (app.py:1835-1847 @ f4e366e9): a step that fails records the
+/// failure (`cleanup_error = ...`) and the next step still runs. The attempt is asked to stop as
+/// Quit begins, whatever the services answered; the acquisition is closed once the services
+/// finished, verified or failed; Quit then reports the first failure (exit 3), else `Verified`.
+pub struct WindowQuit {
+    services: ServiceCleanup<DesktopServices>,
+    /// The services' cleanup has its result (verified or failed): nothing polls them again.
+    services_done: bool,
+    model: ModelClose,
+    /// The first step that failed, reported once every step ran.
+    failed: Option<CleanupError>,
+}
+impl WindowQuit {
+    fn keep(&mut self, error: CleanupError) {
+        self.failed.get_or_insert(error);
+    }
 }
 impl Cleanup for AppCleanup {
     fn bind_clock(&mut self, origin: std::time::Instant) -> Result<(), CleanupError> {
         match self {
-            Self::Service(cleanup, _) => cleanup.bind_clock(origin),
+            Self::Service(quit) => quit.services.bind_clock(origin),
             Self::Nothing => Ok(()),
         }
     }
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
-            Self::Service(cleanup, model) => {
-                cleanup.begin(deadline)?;
-                model.begin();
+            Self::Service(quit) => {
+                // A refused begin is kept, not returned: the shell stops polling a Quit whose
+                // begin failed, and the acquisition must still be closed.
+                if let Err(error) = quit.services.begin(deadline) {
+                    eprintln!("window cleanup: begin failed: {error:?}");
+                    quit.keep(error);
+                    quit.services_done = true;
+                }
+                quit.model.begin();
                 Ok(())
             }
             Self::Nothing => Ok(()),
@@ -161,10 +185,23 @@ impl Cleanup for AppCleanup {
     }
     fn poll(&mut self) -> Result<Poll, CleanupError> {
         match self {
-            Self::Service(cleanup, model) => match cleanup.poll()? {
-                Poll::Verified => model.poll(),
-                Poll::Pending => Ok(Poll::Pending),
-            },
+            Self::Service(quit) => {
+                if !quit.services_done {
+                    match quit.services.poll() {
+                        Ok(Poll::Pending) => return Ok(Poll::Pending),
+                        Ok(Poll::Verified) => quit.services_done = true,
+                        Err(error) => {
+                            quit.keep(error);
+                            quit.services_done = true;
+                        }
+                    }
+                }
+                match quit.model.poll() {
+                    Ok(Poll::Pending) => Ok(Poll::Pending),
+                    Ok(Poll::Verified) => quit.failed.map_or(Ok(Poll::Verified), Err),
+                    Err(error) => Err(quit.failed.unwrap_or(error)),
+                }
+            }
             Self::Nothing => Ok(Poll::Verified),
         }
     }
@@ -173,7 +210,7 @@ impl Cleanup for AppCleanup {
 /// `self.acquisition.close()` cancels and joins the running attempt and persists `closed`, so the
 /// next launch answers `closed` with the bytes kept, never a recovered interrupted transfer. The
 /// attempt is asked to stop as soon as Quit begins; the close runs on its own thread once the
-/// window's services have stopped (no request can start or reopen an attempt after it), and its
+/// window's services finished, verified or failed (no new request is admitted then), and its
 /// receipt is read without blocking. A close that fails keeps its code on stderr and leaves the
 /// cleanup unproven, as v0.1.4's `cleanup_error = 'acquisition_stop_failed'` makes its launcher
 /// report `cleanup_incomplete`.
@@ -295,6 +332,11 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
     let (core, cleanup) = desktop::services::adapt(Arc::new(services), CALLBACK_CAPACITY);
     (
         core,
-        AppCleanup::Service(Box::new(cleanup), ModelClose::new(source)),
+        AppCleanup::Service(Box::new(WindowQuit {
+            services: cleanup,
+            services_done: false,
+            model: ModelClose::new(source),
+            failed: None,
+        })),
     )
 }
