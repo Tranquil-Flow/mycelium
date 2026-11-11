@@ -12,7 +12,8 @@
 mod macs;
 use desktop::lifecycle::Poll;
 use macs::{
-    Mac, STORAGE, approve_and_join, consent, join_body, member, owner, private, state_root,
+    Mac, STORAGE, approve_and_join, consent, join_body, member, member_lease, member_renewing,
+    millis, owner, private, state_root,
 };
 use serde_json::{Value, json};
 
@@ -175,6 +176,58 @@ fn packaged_member_root_never_holds_seed_authority() {
     );
     assert_eq!(seed_authority(&member), Vec::<&str>::new());
     assert_eq!(member.status()["installation_role"], "target");
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
+/// A joined Mac that is relaunched resumes its own membership as v0.1.4's does (`DemoApp.start` ->
+/// `authority.start()` -> `RemoteMacMember.start` -> `_resume`, app.py:613-626, peer.py:327-380 @
+/// f4e366e9): its status shows its OWN membership (`TargetApplication.status`, peer.py:395-455:
+/// `current` with the next generation once resumed), and its renewal goes on through the owner's
+/// seed.
+#[test]
+fn packaged_member_relaunch_resumes_its_own_membership() {
+    let base = state_root("resume");
+    let owner = owner(&base);
+    let member = member_renewing(&base, &owner, budgets::BudgetId::OwnerPoll);
+    let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    let joined = approve_and_join(&owner, &member);
+    let generation = joined["membership_generation"].as_u64().unwrap();
+    let state = member.state.clone();
+    let config = node_service::packaged_network::NetworkConfig {
+        seams: owner.seams.clone(),
+        renewal: budgets::BudgetId::OwnerPoll,
+        ..Default::default()
+    };
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    let member = Mac::launch(&state, config);
+    let resumed = member.status();
+    assert_eq!(resumed["installation_role"], "target", "{resumed}");
+    assert_eq!(
+        resumed["authority"]["membership_state"], "current",
+        "{resumed}"
+    );
+    assert_eq!(
+        resumed["authority"]["membership_generation"],
+        json!(generation + 1),
+        "{resumed}"
+    );
+    // The relaunched Mac renews again: its row moves past where the resume left it.
+    let resumed_at = member_lease(&owner.mac).unwrap();
+    let deadline = std::time::Instant::now() + millis(budgets::BudgetId::WorkerStartup);
+    loop {
+        let now = member_lease(&owner.mac).unwrap();
+        if now > resumed_at {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no renewal after the relaunch: {resumed_at} -> {now}"
+        );
+        std::thread::sleep(millis(budgets::BudgetId::OwnerPoll));
+    }
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();

@@ -278,6 +278,17 @@ pub fn leases(owner: &Mac) -> Vec<(String, f64)> {
         })
         .collect()
 }
+/// The lease of the one member row that is not the owner's own (`owner-swarm.json`'s node).
+pub fn member_lease(owner: &Mac) -> Option<f64> {
+    let own: Value = serde_json::from_slice(
+        &std::fs::read(private(&owner.state).join("owner-swarm.json")).unwrap(),
+    )
+    .unwrap();
+    leases(owner)
+        .into_iter()
+        .find(|(node, _)| own["node_id"] != node.as_str())
+        .map(|(_, at)| at)
+}
 pub fn join_body(member: &Mac, link: &str, wall: u64) -> Value {
     let digest = member.status()["join_flow"]["standing_disclosure"]["digest"].clone();
     json!({
