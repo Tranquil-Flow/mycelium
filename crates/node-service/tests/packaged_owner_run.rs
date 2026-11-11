@@ -362,6 +362,151 @@ fn stop_mid_run_ends_it_stopped() {
     assert_eq!(mac.quit(), Ok(Poll::Verified));
 }
 
+/// This Mac's resource observation (`app._resource_check()`'s probe), which holds a call made on
+/// the owner's run thread (`a13-owner-run`) once armed until the test releases it: the descriptors
+/// step's local agent asks for it on every tick, so a held probe is a chain call in flight.
+/// Calls from any other thread (the policy loop, status) are answered at once.
+#[derive(Default)]
+struct HeldObserver {
+    state: std::sync::Mutex<Hold>,
+    changed: std::sync::Condvar,
+}
+#[derive(Default)]
+struct Hold {
+    armed: bool,
+    held: bool,
+    released: bool,
+    exited: Option<std::sync::mpsc::Receiver<()>>,
+}
+/// Dropped when the thread that holds it exits (its thread-local destructor), so its channel
+/// proves that the run thread itself has ended.
+struct OnExit(std::sync::mpsc::Sender<()>);
+impl Drop for OnExit {
+    fn drop(&mut self) {
+        self.0.send(()).unwrap_or_default();
+    }
+}
+thread_local! {
+    static RUN_THREAD_EXIT: std::cell::RefCell<Option<OnExit>> = const { std::cell::RefCell::new(None) };
+}
+impl api::resources::Observer for HeldObserver {
+    fn observe(&self) -> api::resources::Observation {
+        if std::thread::current().name() == Some("a13-owner-run") {
+            let mut hold = self.state.lock().unwrap();
+            if hold.armed && !hold.held {
+                let (tx, rx) = std::sync::mpsc::channel();
+                RUN_THREAD_EXIT.with(|slot| *slot.borrow_mut() = Some(OnExit(tx)));
+                hold.exited = Some(rx);
+                hold.held = true;
+                self.changed.notify_all();
+                while !hold.released {
+                    hold = self.changed.wait(hold).unwrap();
+                }
+            }
+        }
+        macs::Permissive.observe()
+    }
+}
+impl HeldObserver {
+    fn arm(&self) {
+        self.state.lock().unwrap().armed = true;
+    }
+    /// Wait (bounded by the join patience) until the run thread is held inside its probe.
+    fn wait_held(&self) {
+        let hold = self.state.lock().unwrap();
+        let (hold, timeout) = self
+            .changed
+            .wait_timeout_while(hold, millis(B::WorkerStartup) * 2, |h| !h.held)
+            .unwrap();
+        assert!(
+            !timeout.timed_out(),
+            "the run thread never asked for this Mac's observation"
+        );
+        drop(hold);
+    }
+    fn release(&self) -> std::sync::mpsc::Receiver<()> {
+        let mut hold = self.state.lock().unwrap();
+        hold.released = true;
+        self.changed.notify_all();
+        hold.exited.take().expect("the run thread was held")
+    }
+}
+
+/// REVIEW-lanePH3B-S3 F1: Quit JOINS the run thread (`demo_app.close`: `run.stop(); run.join(60)`,
+/// demo_app.py:199-203 @ f4e366e9). A chain call is held in flight on the run thread; Quit must
+/// stay pending until it is released (a Stop without a join would let Quit finish while the run
+/// thread still runs), and once Quit finished the run thread itself has exited.
+#[test]
+fn quit_waits_for_a_held_chain_call_and_joins_the_run_thread() {
+    let repository = Repository::start();
+    let base = state_root("run-quit-held");
+    let state = base.join("owner");
+    std::fs::create_dir(&state).unwrap();
+    let config = RunConfig {
+        sidecar: Some(base.join("sidecar-not-installed")),
+        ..RunConfig::default()
+    };
+    let observer = Arc::new(HeldObserver::default());
+    let (core, mut cleanup) = packaged::core_with_run(
+        &state,
+        repository.transport(),
+        observer.clone(),
+        NetworkConfig::default(),
+        config.clone(),
+    )
+    .unwrap();
+    use desktop::lifecycle::Cleanup;
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let mut mac = Mac {
+        core,
+        cleanup,
+        state: state.clone(),
+    };
+    create_and_prepare(&mac);
+    let (code, started) = mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    mac.until("the run waits in descriptors", owner_run, |r| {
+        r["step"] == "descriptors"
+            && r["participants"][0]["detail"] == "native_sidecar_installation_invalid"
+    });
+    observer.arm();
+    observer.wait_held();
+    // Quit begins while the run thread is inside its chain call.
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    mac.cleanup.begin(allowance).unwrap();
+    let window = Instant::now() + millis(B::OwnerPoll) * 6;
+    while Instant::now() < window {
+        assert_eq!(
+            mac.cleanup.poll(),
+            Ok(Poll::Pending),
+            "Quit finished while a chain call still runs on the run thread"
+        );
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    }
+    let exited = observer.release();
+    let deadline = Instant::now() + millis(B::WorkerStartup) * 2;
+    let result = loop {
+        match mac.cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(Instant::now() < deadline, "Quit never finished");
+                std::thread::sleep(millis(B::OwnerPoll) / 5);
+            }
+            other => break other,
+        }
+    };
+    assert_eq!(result, Ok(Poll::Verified));
+    // The run thread itself has exited (its thread-local destructor ran before the join returned).
+    assert_eq!(
+        exited.try_recv(),
+        Ok(()),
+        "Quit finished but the run thread has not exited"
+    );
+    let view = config.observed().expect("the composition installed the owner run");
+    assert!(!view.active(), "the run still owns its driver after Quit");
+    let after = view.status().map(|s| s.to_value()).unwrap_or(Value::Null);
+    assert_eq!(after["state"], "stopped", "{after}");
+}
+
 #[test]
 fn quit_during_a_run_stops_it_and_joins_it_within_the_allowance() {
     let repository = Repository::start();
