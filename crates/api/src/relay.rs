@@ -222,8 +222,10 @@ struct Handlers {
     chat: Option<RichHandler>,
     swarm: Option<RichHandler>,
 }
+/// What the accept loop and every connection thread share. The listener is NOT here: the accept
+/// thread owns it, so it is closed when `Proxy::close` has joined that thread, even while proxied
+/// requests are still in flight (v0.1.4 `server_close()`, `public_relay.py:240`).
 struct ProxyShared {
-    listener: TcpListener,
     stop: AtomicBool,
     slots: AtomicUsize,
     trust_client_ip: bool,
@@ -241,7 +243,6 @@ impl Proxy {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let port = listener.local_addr()?.port();
         let shared = Arc::new(ProxyShared {
-            listener,
             stop: AtomicBool::new(false),
             slots: AtomicUsize::new(MAX_CONNECTIONS),
             trust_client_ip,
@@ -255,7 +256,7 @@ impl Proxy {
         let accept = shared.clone();
         let handle = thread::Builder::new()
             .name("a13-seed-relay".into())
-            .spawn(move || accept_loop(&accept))?;
+            .spawn(move || accept_loop(&listener, &accept))?;
         Ok(Arc::new(Proxy {
             shared,
             port,
@@ -299,9 +300,9 @@ impl Proxy {
         }
     }
 }
-fn accept_loop(shared: &Arc<ProxyShared>) {
+fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
     loop {
-        let Ok((stream, _)) = shared.listener.accept() else {
+        let Ok((stream, _)) = listener.accept() else {
             if shared.stop.load(Ordering::SeqCst) {
                 return;
             }

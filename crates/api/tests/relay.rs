@@ -774,7 +774,7 @@ fn a_closed_proxy_frees_its_port_while_a_request_is_still_in_flight() {
     let mut answer = Vec::new();
     client.read_to_end(&mut answer).expect("answer");
     assert!(
-        answer.starts_with(b"HTTP/1.1 200"),
+        answer.starts_with(b"HTTP/1.0 200"),
         "{}",
         String::from_utf8_lossy(&answer)
     );
