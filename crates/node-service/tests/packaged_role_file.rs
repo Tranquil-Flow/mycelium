@@ -16,8 +16,9 @@ use macs::{
     Mac, approve_and_join, consent, join_body, member, owner, private, state_root, test_network,
 };
 use serde_json::{Value, json};
+use node_service::packaged_network::NetworkConfig;
 use std::{
-    os::unix::fs::{DirBuilderExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
     path::Path,
 };
 
@@ -158,4 +159,81 @@ fn a_targets_state_without_its_role_file_is_refused() {
     refused(&created, "installation_role_missing");
     assert!(!seed, "a joined Mac without its role file created a seed");
     assert_eq!(role, Value::Null);
+}
+
+/// The installation files the action routes persist (consent, role, join window, standing grant),
+/// each with its bytes and inode (a rewrite with the same bytes is still a rewrite).
+fn installation_files(state: &Path) -> Vec<(&'static str, Option<(Vec<u8>, u64)>)> {
+    [
+        "installation-role.json",
+        "resource-policy.json",
+        "standing-consent.json",
+        "join-window.json",
+    ]
+    .into_iter()
+    .map(|name| {
+        let path = private(state).join(name);
+        let file = std::fs::read(&path)
+            .ok()
+            .map(|bytes| (bytes, std::fs::metadata(&path).unwrap().ino()));
+        (name, file)
+    })
+    .collect()
+}
+
+/// The shipped app does not start over a refused installation state (`DemoApp.start` raises,
+/// app.py:595-611), so nothing can rewrite it. The packaged window stays up (B3F item 4, class C):
+/// its action routes must leave the refused state as it is. `/api/create` and `/api/join/window`
+/// persist the consent and the role before they reach the refused authority (review B3F 4
+/// follow-up); a saved consent would even turn this refused state into an accepted target at the
+/// next launch.
+#[test]
+fn a_refused_installation_state_is_not_rewritten_by_an_action() {
+    let base = state_root("role-norewrite");
+    let owner = owner(&base);
+    let state = base.join("member");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
+    write_private(
+        &state,
+        "installation-role.json",
+        json!({"protocol": ROLE_PROTOCOL, "role": "target"})
+            .to_string()
+            .as_bytes(),
+    );
+    let before = installation_files(&state);
+    let mac = Mac::launch(
+        &state,
+        NetworkConfig {
+            seams: owner.seams.clone(),
+            ..test_network()
+        },
+    );
+    let created = mac.post("/api/create", json!({"consent": consent(macs::STORAGE)}));
+    let after_create = installation_files(&state);
+    let joined = mac.post("/api/join/window", join_body(&mac, &owner.link, 600));
+    let after_join = installation_files(&state);
+    assert_eq!(mac.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    let changed = |after: &[(&'static str, Option<(Vec<u8>, u64)>)]| -> Vec<&'static str> {
+        before
+            .iter()
+            .zip(after)
+            .filter(|(was, now)| was != now)
+            .map(|(was, _)| was.0)
+            .collect()
+    };
+    assert_eq!(
+        (changed(&after_create), changed(&after_join)),
+        (vec![], vec![]),
+        "files /api/create (answered {}) and /api/join/window (answered {}) rewrote over the \
+         refused state",
+        created.1,
+        joined.1
+    );
+    refused(&created, "target_consent_missing");
+    refused(&joined, "target_consent_missing");
 }
