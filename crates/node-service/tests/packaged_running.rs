@@ -13,6 +13,10 @@
 //! source (:231, :235). Before this fix the packaged status carried the node service's native-request
 //! flag there, so an idle packaged window read "Stopped" and disabled all of them.
 //!
+//! The same document's `role` is v0.1.4's constant `not_yet_serving` (app.py:1263), shown as the
+//! serving line (`#serving-state`, app.js:227); the packaged page showed the node service's
+//! `development_owner`.
+//!
 //! Two packaged hosts in this one process (`support/packaged_macs.rs`), loopback only.
 #![cfg(feature = "desktop-shell")]
 #[path = "support/packaged_macs.rs"]
@@ -29,6 +33,8 @@ fn the_page_reads_the_applications_running_flag_on_both_macs() {
     let base = state_root("running");
     let owner = owner(&base);
     let shown = owner.mac.status();
+    // `'role':'not_yet_serving'` (app.py:1263), shown by `#serving-state` (app.js:227).
+    assert_eq!(shown["role"], "not_yet_serving", "{shown}");
     assert_eq!(shown["running"], true, "an idle owner app is running: {shown}");
     let member = member(&base, &owner);
     let fresh = member.status();
