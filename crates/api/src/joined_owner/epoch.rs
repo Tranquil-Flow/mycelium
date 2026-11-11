@@ -7,7 +7,9 @@ use super::{Ids, Wall, fail, span};
 use crate::{
     joined_shard::carrier::VerifiedCarrier,
     m16_requests::{Host as _, M16Requests},
-    m16_route::{self, Codec, Currentness, RouteExecutor, RouteHandle, RouteHost, StagePeer},
+    m16_route::{
+        self, Codec, Currentness, RouteExecutor, RouteHandle, RouteHost, SeedMembers, StagePeer,
+    },
     registry::Config,
     schema::PublicError,
 };
@@ -59,6 +61,17 @@ pub fn currentness(coordinator: &Arc<seed::Coordinator>) -> Currentness {
     })
 }
 
+/// The seed's current member rows at its own clock, for the lease death source.
+/// A row whose durable state is unstable reads as `None` (no evidence).
+pub fn seed_members(coordinator: &Arc<seed::Coordinator>) -> SeedMembers {
+    let coordinator = coordinator.clone();
+    Arc::new(move |node: &str| {
+        coordinator
+            .with_current_member(node, |row, now| Ok((row.clone(), now)))
+            .ok()
+    })
+}
+
 impl Epoch {
     /// Attach the owner side of an already-issued, already-delivered route
     /// envelope: verify it against the seed, dial every stage, build the M16
@@ -69,6 +82,18 @@ impl Epoch {
         owner: iroh::SecretKey,
         carriers: Carriers,
         codec: Arc<dyn Codec>,
+    ) -> Result<Self, PublicError> {
+        let seed = seed_members(&coordinator);
+        Self::open_watched(coordinator, envelope, owner, carriers, codec, seed)
+    }
+    /// [`Epoch::open`] with the seed view the pump reads member leases from.
+    pub fn open_watched(
+        coordinator: Arc<seed::Coordinator>,
+        envelope: Value,
+        owner: iroh::SecretKey,
+        carriers: Carriers,
+        codec: Arc<dyn Codec>,
+        seed: SeedMembers,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
@@ -230,6 +255,7 @@ impl Epoch {
             .map_err(|_| fail("joined_owner_thread_failed"))?;
         epoch.threads.push(gateway);
         // Pump: event-driven by carrier changes, bounded by the owner poll.
+        // Each pass first reads the seed's member leases (cross-host death).
         let (service, stop, handle, refusals) = (
             epoch.service.clone(),
             epoch.stop.clone(),
@@ -240,14 +266,20 @@ impl Epoch {
             .name("joined-owner-pump".into())
             .spawn(move || {
                 let mut seen = 0;
+                let record = |code: &'static str| {
+                    // Distinct closed codes in first-seen order: bounded by
+                    // the code set, however long the epoch runs.
+                    let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
+                    if !r.iter().any(|seen| seen == code) {
+                        r.push(code.to_owned());
+                    }
+                };
                 while !stop.load(Ordering::SeqCst) {
+                    if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed) {
+                        record(e.code);
+                    }
                     if let Err(e) = service.tick() {
-                        // Distinct closed codes in first-seen order: bounded by
-                        // the code set, however long the epoch runs.
-                        let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
-                        if !r.iter().any(|seen| seen == e.code) {
-                            r.push(e.code.to_owned());
-                        }
+                        record(e.code);
                     }
                     seen = handle.wait(seen, poll);
                 }

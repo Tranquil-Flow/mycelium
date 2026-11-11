@@ -69,6 +69,9 @@ struct Script {
     tokens: Vec<u32>,
     bad_logits_at: Option<u64>,
     close_gate: Option<mpsc::Receiver<()>>,
+    /// The stage goes silent at this step index until the gate opens (a member
+    /// Mac that stopped answering mid-request; nothing is ever sent for it).
+    step_gate: Option<(u64, mpsc::Receiver<()>)>,
 }
 struct Controlled {
     offer: Value,
@@ -99,6 +102,13 @@ impl StageCompute for Controlled {
         let mut log = self.log.lock().unwrap();
         let t = log.steps;
         log.steps += 1;
+        drop(log);
+        if let Some((at, gate)) = &self.script.step_gate
+            && *at == t
+            && let Err(e) = gate.recv_timeout(span(B::WorkerStartup))
+        {
+            eprintln!("silent stage gate: {e}");
+        }
         if !self.last {
             return Ok(vec![t as u8; 16]);
         }
@@ -777,9 +787,18 @@ impl Swarm {
         policy: &LanPolicy,
         tokens: &[u32],
     ) -> (Vec<Member>, Vec<VerifiedCarrier>) {
+        self.serve_lan_scripts(interface, policy, [Script::default(), scripted(tokens)])
+    }
+    /// Stage servers with one controlled script per stage.
+    fn serve_lan_scripts(
+        &self,
+        interface: IpAddr,
+        policy: &LanPolicy,
+        scripts: [Script; 2],
+    ) -> (Vec<Member>, Vec<VerifiedCarrier>) {
         let mut out = Vec::new();
         let mut verified = Vec::new();
-        for i in 0..2 {
+        for (i, script) in scripts.into_iter().enumerate() {
             let m = &self.members[i];
             let (session, signer) = (
                 m.session.clone(),
@@ -795,11 +814,7 @@ impl Swarm {
                 live,
                 m.offer.clone(),
                 i == 1,
-                if i == 1 {
-                    scripted(tokens)
-                } else {
-                    Script::default()
-                },
+                script,
                 proof(i),
             );
             assert_eq!(served.endpoint, m.secret.public(), "registered carrier key");
@@ -1379,4 +1394,322 @@ fn product_epoch_refuses_an_unreachable_stage_with_a_typed_error() {
         began.elapsed() < span(B::WorkerStartup) + span(B::RouterClose),
         "bounded dial"
     );
+}
+
+// ---- SL (gap row 16): cross-host member death settled by the SEED's lease.
+// v0.1.4 treats a member whose lease ran out as gone for good: the owner refuses
+// every command and result wait to it (`control_session.py:315-326`
+// `managed_control_member_stale`), the seed refuses its renewal
+// (`coordinator.py:1367-1370`) and the member refuses its own work past its
+// lease (`peer.py:625-640`). The seed view below is injected: a fixed seed clock
+// and per-node (generation, lease expiry); the dead member is a stage that went
+// silent mid-request (its compute blocked on a gate), never a second host.
+use api::m16_route::SeedMembers;
+use std::collections::BTreeMap;
+
+/// The seed clock of these tests (an instant, not a timeout).
+const SEED_NOW: f64 = 2_000_000.0;
+fn clock_skew() -> f64 {
+    span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31).as_secs_f64()
+}
+/// The owner's per-token hop deadline (`m16_route::generate`).
+fn hop_deadline() -> Duration {
+    span(B::PyFinalScriptsRunA11RouteBenchmarkTargetTpotMsL398C12)
+}
+fn lease() -> f64 {
+    span(B::PyFinalMyceliumSeedCoordinatorLeaseSecondsL180C31).as_secs_f64()
+}
+#[derive(Clone, Default)]
+struct SeedView(Arc<Mutex<BTreeMap<String, (u64, f64)>>>);
+impl SeedView {
+    /// Both members current: generation 1, lease running a full term from now.
+    fn fresh(nodes: &[&str]) -> Self {
+        let view = Self::default();
+        for n in nodes {
+            view.set(n, 1, SEED_NOW + lease());
+        }
+        view
+    }
+    fn set(&self, node: &str, generation: u64, lease_expires_at: f64) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert(node.into(), (generation, lease_expires_at));
+    }
+    fn members(&self) -> SeedMembers {
+        let view = self.0.clone();
+        Arc::new(move |node: &str| {
+            let (generation, lease) = *view.lock().unwrap().get(node)?;
+            Some((
+                json!({"node_id":node,"generation":generation,"lease_expires_at":lease,
+                    "lifecycle_state":"RUNNING"}),
+                SEED_NOW,
+            ))
+        })
+    }
+}
+fn observe(r: &Route, view: &SeedView) -> Vec<usize> {
+    m16_route::observe_member_leases(&r.handle, &r.message, &view.members()).unwrap()
+}
+fn evidence(r: &Route, stage: usize) -> Option<Value> {
+    r.handle.state.lock().unwrap().stages[stage]
+        .death_evidence
+        .clone()
+}
+/// Tick the service like `pump_until`, but report instead of panicking at the bound.
+fn pump_for(r: &Route, bound: Duration, done: impl Fn(&Route) -> bool) -> bool {
+    let end = Instant::now() + bound;
+    let mut seen = 0;
+    while !done(r) {
+        if Instant::now() >= end {
+            return false;
+        }
+        if let Err(e) = r.service.tick() {
+            panic!("tick: {e:?}; {}", r.state());
+        }
+        seen = r.handle.wait(seen, span(B::OwnerPoll));
+    }
+    true
+}
+fn silent_at(step: u64) -> (mpsc::Sender<()>, Script) {
+    let (open, gate) = mpsc::channel();
+    (
+        open,
+        Script {
+            tokens: vec![5, 9, 3, 7],
+            step_gate: Some((step, gate)),
+            ..Script::default()
+        },
+    )
+}
+
+/// Two members, the second dies mid-answer: once the seed shows its lease ran
+/// out (past the members' clock tolerance), the request fails with the code and
+/// settles at once; the surviving member ACKs, the dead one is settled by the
+/// seed's evidence, recorded once; the epoch is spent afterwards.
+#[test]
+fn a_member_silent_mid_request_settles_when_its_seed_lease_runs_out() {
+    let (open, script) = silent_at(2);
+    let r = route([Script::default(), script], 32);
+    r.pump_until(span(B::WorkerStartup), |r| tokens(r) >= 2);
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    assert_eq!(
+        observe(&r, &view),
+        Vec::<usize>::new(),
+        "both leases current"
+    );
+    // The last renewal of node-b was a full lease ago, plus the clock tolerance.
+    view.set("node-b", 1, SEED_NOW - clock_skew());
+    assert_eq!(observe(&r, &view), vec![1], "{}", r.state());
+    assert!(
+        pump_for(&r, hop_deadline(), |r| r.terminal().is_some()),
+        "settled before the hop deadline could: {}",
+        r.state()
+    );
+    assert_eq!(r.terminal().as_deref(), Some("failed"), "{}", r.state());
+    {
+        let o = r.handle.state.lock().unwrap();
+        assert_eq!(o.failure, Some("joined_route_member_stale"));
+        assert!(o.settled());
+        assert!(o.stages[0].acknowledged_ms.is_some(), "{:?}", o.stages[0]);
+        assert!(o.stages[0].death_evidence.is_none());
+        assert_eq!(o.teardown_attempts, 1, "no re-dial of a settled stage");
+    }
+    let dead = evidence(&r, 1).unwrap();
+    assert_eq!(
+        dead,
+        json!({"source":"seed_member_lease","node_id":"node-b","generation":1,
+            "lease_expires_at":SEED_NOW - clock_skew(),"observed_at":SEED_NOW,
+            "clock_skew_seconds":clock_skew()})
+    );
+    assert_eq!(observe(&r, &view), Vec::<usize>::new(), "recorded once");
+    assert_eq!(evidence(&r, 1).unwrap(), dead);
+    assert_eq!(r.service.qualification().unwrap_err().code, "route_dropped");
+    open.send(()).unwrap();
+    r.finish();
+}
+
+/// The realistic order on two Macs: the hop deadline fails the request first
+/// (the member's Mac is gone, nothing answers the teardown), the debt is
+/// retained without a terminal; when the seed's lease runs out the stage is
+/// settled and the request publishes `failed` with the code it failed with.
+#[test]
+fn a_member_dead_past_the_hop_deadline_publishes_its_failure_once_its_lease_runs_out() {
+    let (open, script) = silent_at(2);
+    let r = route([Script::default(), script], 32);
+    r.pump_until(span(B::WorkerStartup), |r| {
+        let o = r.handle.state.lock().unwrap();
+        o.failure.is_some() && o.teardown_attempts >= 1 && !o.teardown_busy
+    });
+    assert_eq!(
+        r.handle.state.lock().unwrap().failure,
+        Some("joined_route_hop_deadline")
+    );
+    assert!(r.terminal().is_none(), "debt retained while unsettled");
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 1, SEED_NOW - lease());
+    assert_eq!(observe(&r, &view), vec![1], "{}", r.state());
+    assert!(
+        pump_for(&r, span(B::WorkerStartup), |r| r.terminal().is_some()),
+        "{}",
+        r.state()
+    );
+    assert_eq!(r.terminal().as_deref(), Some("failed"));
+    let o = r.handle.state.lock().unwrap();
+    assert_eq!(
+        o.failure,
+        Some("joined_route_hop_deadline"),
+        "first cause kept"
+    );
+    assert!(o.settled());
+    drop(o);
+    open.send(()).unwrap();
+    r.finish();
+}
+
+/// A member that dies while the epoch is idle: the epoch is no longer offered
+/// and the queued request is refused with the code (v0.1.4 refuses admission to
+/// a lost peer, `route.py:3086-3106`), never dispatched to the dead member.
+#[test]
+fn a_member_silent_while_idle_retires_the_epoch_on_its_seed_lease() {
+    let r = route([Script::default(), scripted(&[5, 9, 3, 7])], 4);
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 1, SEED_NOW - lease());
+    assert_eq!(observe(&r, &view), vec![1], "{}", r.state());
+    assert_eq!(
+        r.service.qualification().unwrap_err().code,
+        "joined_route_member_stale"
+    );
+    assert!(pump_for(&r, hop_deadline(), |r| r.terminal().is_some()));
+    assert_eq!(r.terminal().as_deref(), Some("failed"), "{}", r.state());
+    assert_eq!(evidence(&r, 1).unwrap()["source"], "seed_member_lease");
+    assert!(evidence(&r, 0).is_none());
+    assert_eq!(r.handle.state.lock().unwrap().tokens, Vec::<u32>::new());
+    r.finish();
+}
+
+/// A member that renewed before expiry, or whose lease ended inside the
+/// members' clock tolerance, is not dead: the request completes normally.
+#[test]
+fn a_member_renewed_before_expiry_or_inside_the_clock_skew_is_not_dead() {
+    let r = route([Script::default(), scripted(&[5, 9, 3, 7])], 4);
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 1, SEED_NOW - clock_skew() + 0.5);
+    assert_eq!(observe(&r, &view), Vec::<usize>::new(), "inside the skew");
+    view.set("node-b", 1, SEED_NOW + lease());
+    assert_eq!(observe(&r, &view), Vec::<usize>::new(), "renewed");
+    r.pump_until(span(B::WorkerStartup), |r| r.terminal().is_some());
+    assert_eq!(r.terminal().as_deref(), Some("completed"), "{}", r.state());
+    let o = r.handle.state.lock().unwrap();
+    assert!(o.stages.iter().all(|s| s.death_evidence.is_none()));
+    assert_eq!(o.tokens, vec![5, 9, 3, 7]);
+    drop(o);
+    r.finish();
+}
+
+/// The member comes back after its lease ran out (resumed: a newer generation
+/// with a fresh lease): the route's member stays settled, evidence unchanged and
+/// recorded once; the spent epoch is not revived (v0.1.4: an expired member must
+/// re-join; the old route never serves it again).
+#[test]
+fn a_member_back_after_its_lease_ran_out_stays_settled_once() {
+    let r = route([Script::default(), scripted(&[5, 9, 3, 7])], 4);
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 1, SEED_NOW - lease());
+    assert_eq!(observe(&r, &view), vec![1]);
+    let dead = evidence(&r, 1).unwrap();
+    view.set("node-b", 2, SEED_NOW + lease());
+    assert_eq!(observe(&r, &view), Vec::<usize>::new());
+    view.set("node-b", 1, SEED_NOW + lease());
+    assert_eq!(observe(&r, &view), Vec::<usize>::new());
+    assert_eq!(evidence(&r, 1).unwrap(), dead);
+    assert_eq!(
+        r.service.qualification().unwrap_err().code,
+        "joined_route_member_stale"
+    );
+    r.finish();
+}
+
+/// A resumed member (newer generation) whose NEW lease later runs out is not
+/// evidence about the route's member: the route signed generation 1.
+#[test]
+fn a_lease_of_another_generation_is_not_evidence_for_the_route_member() {
+    let r = route([Script::default(), scripted(&[5, 9, 3, 7])], 4);
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 2, SEED_NOW - lease());
+    assert_eq!(observe(&r, &view), Vec::<usize>::new());
+    assert!(evidence(&r, 1).is_none());
+    r.finish();
+}
+
+/// The product epoch's own pump reads the seed view: a member that goes silent
+/// mid-answer ends the chat stream `failed` with the code once its seed lease
+/// ran out, with nothing but the injected seed clock moving.
+#[test]
+fn product_epoch_settles_a_member_whose_seed_lease_ran_out() {
+    let s = swarm();
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (open, script) = silent_at(2);
+    let (members, verified) = s.serve_lan_scripts(loopback, &policy, [Script::default(), script]);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let nodes: Vec<String> = (0..2)
+        .map(|i| s.live(i)["node_id"].as_str().unwrap().to_owned())
+        .collect();
+    let view = SeedView::fresh(&[nodes[0].as_str(), nodes[1].as_str()]);
+    let epoch = Epoch::open_watched(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+        view.members(),
+    )
+    .unwrap();
+    let (_, rx, reader) = chat(&epoch, 32);
+    let mut all = until_terminal(&rx, 2);
+    view.set(&nodes[1], 1, SEED_NOW - clock_skew());
+    // Collect for less than the hop deadline: only the seed can end it in time.
+    let end = Instant::now() + hop_deadline();
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let Ok((event, _)) = rx.recv_timeout(left) else {
+            break;
+        };
+        let done = matches!(
+            event["type"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        );
+        all.push(event);
+        if done {
+            break;
+        }
+    }
+    let last = all.last().unwrap().clone();
+    assert_eq!(last["type"], "failed", "{all:?}");
+    assert_eq!(last["code"], "joined_route_member_stale", "{all:?}");
+    reader.join().unwrap();
+    let o = epoch.handle().state.lock().unwrap();
+    assert!(o.settled());
+    assert_eq!(
+        o.stages[1].death_evidence.as_ref().unwrap()["node_id"],
+        nodes[1].as_str()
+    );
+    drop(o);
+    assert_eq!(epoch.qualification().unwrap_err().code, "route_dropped");
+    epoch.close();
+    open.send(()).unwrap();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
 }
