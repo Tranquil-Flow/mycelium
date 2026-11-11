@@ -1342,9 +1342,14 @@ fn a_fenced_member_whose_resume_the_seed_refuses_stays_fenced_and_its_schedule_s
             Err("peer_member_revoked".to_owned()),
             "{fenced_by}: the seed refuses a revoked member's resume"
         );
+        // Left side on failure: the generation the member would be current on.
         assert_eq!(
-            member.member.current(&rig.signer).unwrap_err().0,
-            "member_renewal_failed",
+            member
+                .member
+                .current(&rig.signer)
+                .map(|identity| identity["generation"].clone())
+                .map_err(|e| e.0),
+            Err("member_renewal_failed"),
             "{fenced_by}: a resume the seed refused leaves the member fenced"
         );
         assert_eq!(
