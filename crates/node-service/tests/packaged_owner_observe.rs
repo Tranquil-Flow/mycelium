@@ -459,11 +459,13 @@ mod observe_test_double {
 /// the chain past observe: both Macs' real hello helpers answer, the owner's cleanup request reaches
 /// both (the owner's own contributor closes its worker on request, `_cleanup_if_requested`), every
 /// offer is retired and observe is done; the real compile port then reads the double's context.
-/// Compile refuses by name: the joined Mac's capability report is not current
-/// (`member_capability_report_stale`, chain_compile `_capability_rows`; the packaged member sends no
-/// periodic report yet, REVIEW-lanePH3B-S2 F4). Past it, the model-free fixture model would end at
-/// the native challenge producer (only Qwen3-0.6B with the native worker, ruling 28); the work
-/// phase (slices, publish, targets, activate: PH3b S4c) is not reached.
+/// The joined Mac's capability report is current (S4c-a item 2: bound to its membership
+/// generation), so compile passes its report check and starts the build; the model-free fixture
+/// model (the default Qwen2.5-0.5B run model) has no native challenge producer (only Qwen3-0.6B
+/// with the pinned native worker and the real checkpoint, ruling 28: `native_compiler::build`
+/// answers none, `native_challenge_producer_unavailable` inside the compiler), and the step fails
+/// with the workflow's failed state, `chain_compile_failed` (chain_compile `failed_state`). The
+/// work phase (slices, publish, targets, activate: PH3b S4c-b) is not reached.
 #[test]
 fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_name() {
     let base = state_root("observe-double");
@@ -497,7 +499,9 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
     assert_eq!(run["steps"][4]["name"], "compile", "{run}");
     assert_eq!(run["steps"][4]["state"], "failed", "{run}");
     assert_eq!(run["failed_step"], "compile", "{run}");
-    assert_eq!(run["error_code"], "member_capability_report_stale", "{run}");
+    // Changed in S4c-a item 2 (was `member_capability_report_stale`: the join report carried no
+    // generation and the member sent no periodic report).
+    assert_eq!(run["error_code"], "chain_compile_failed", "{run}");
     for step in run["steps"].as_array().unwrap().iter().skip(5) {
         assert_eq!(
             step["state"], "pending",
@@ -572,6 +576,9 @@ fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_
         run["error_code"], "member_capability_report_required",
         "{run}"
     );
+    // S4c-a item 3: past the report check the model-free run ends where the build needs the
+    // native challenge producer (Metal, Qwen3-0.6B only), as the test above.
+    assert_eq!(run["error_code"], "chain_compile_failed", "{run}");
     let report = member.status()["join_flow"]["last_report"].clone();
     assert_eq!(report["purpose"], "periodic", "{report}");
     assert_eq!(report["state"], "delivered", "{report}");

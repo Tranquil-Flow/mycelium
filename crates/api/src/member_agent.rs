@@ -171,6 +171,15 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
     fn accept_context(&self) -> Option<AcceptContext> {
         None
     }
+    /// `_standing_tick`'s `due = time.monotonic() >= self._next_periodic_report` (app.py:1197 @
+    /// f4e366e9): the host keeps `_next_periodic_report` (every `_auto_report` moves it). A host
+    /// that keeps none sends no periodic report.
+    fn periodic_report_due(&self) -> bool {
+        false
+    }
+    /// The end of `_auto_report` (app.py:1161-1162): `self.last_report = record` (shown in
+    /// `join_flow.last_report`) and the next periodic report 300 s on.
+    fn reported(&self, _record: Value) {}
     /// `preview_work(actor, offer, stage_acknowledged=True, limits=, resource_policy=)`: no member
     /// work service is composed by default (it is the member work service's, S4b/S4c).
     fn work_preview(
@@ -373,9 +382,24 @@ impl<H: MemberHost> MemberAgent<H> {
                 return;
             }
         };
+        let context = host.accept_context();
+        // `if report_due: outcome['report'] = app.auto_report('periodic')` (standing_consent.py:
+        // 362-363), past the gates above and a current membership binding (:357-359), before the
+        // acceptor and the agent; `_auto_report` never raises (app.py:1138-1163).
+        if let Some(context) = &context
+            && context.binding.is_some()
+            && host.periodic_report_due()
+        {
+            let record = crate::joined_member::auto_report(
+                &root,
+                context.join_base.as_deref(),
+                "periodic",
+            );
+            host.reported(record);
+        }
         // `auto_accept` before `auto_steps` (standing_consent.py:363-365); its exception ends the
         // pass (`_standing_loop` records it as `standing_error`, app.py:1210-1212).
-        if let Some(context) = host.accept_context() {
+        if let Some(context) = context {
             let holds = self.agent.as_mut().is_some_and(LocalAgent::holds_offer);
             let acceptor = self.acceptor.get_or_insert_with(|| {
                 MemberAcceptor::new(root.clone(), self.announcement.clone())
@@ -909,6 +933,8 @@ impl<H: MemberHost> WorkAcceptance for MemberWork<'_, H> {
         if record["state"] != "delivered" {
             eprintln!("member {purpose} report: {}", record["error"]);
         }
+        // `_auto_report` records every report it makes (app.py:1161-1162).
+        self.host.reported(record);
         Ok(())
     }
     fn preview(

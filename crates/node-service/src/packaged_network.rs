@@ -837,6 +837,17 @@ impl api::member_agent::MemberHost for PackagedMember {
             join_base: self.network.seams.join_base.clone(),
         })
     }
+    /// `DemoApp._next_periodic_report` lives beside `last_report` in the authority's record.
+    fn periodic_report_due(&self) -> bool {
+        lock(&self.authority)
+            .recorded
+            .periodic_report_due(std::time::Instant::now())
+    }
+    fn reported(&self, record: Value) {
+        lock(&self.authority)
+            .recorded
+            .reported(record, std::time::Instant::now());
+    }
     fn spawn(
         &self,
         pump: api::target_pump::TargetPump<api::member_agent::RemoteTarget<Self>>,

@@ -391,11 +391,13 @@ pub fn join_client(origin: &str, test_base: Option<&str>) -> Result<JoinWindowCl
         None => Ok(client),
     }
 }
-/// `_measure_and_sign(client, purpose)`.
+/// `_measure_and_sign(client, purpose)`; `generation` is the membership's
+/// ([`report_generation`]), `None` only for the join request's report before any membership.
 pub fn measure_and_sign(
     root: &Path,
     client: &mut JoinWindowClient,
     purpose: &str,
+    generation: Option<i64>,
 ) -> Result<Value, PublicError> {
     let started = Instant::now();
     let mut clock = move || started.elapsed().as_secs_f64();
@@ -412,7 +414,7 @@ pub fn measure_and_sign(
         &signer,
         &node,
         purpose,
-        None,
+        generation,
         &device,
         &link,
         now(),
@@ -445,15 +447,32 @@ pub fn handoff_seed_key_digest(root: &Path, handoff_value: &Value) -> Result<Str
         .unwrap_or_default()
         .to_owned())
 }
-/// `_auto_report(purpose)` (app.py:1138-1163) as the join answer carries it: the signed device +
-/// relay-link report to the owner's inbox, never failing the caller (a failure is its code).
+/// The generation `peer.signed_capability_link_report` signs (peer.py:1118-1139 @ f4e366e9):
+/// "`join` reports precede membership (no generation); every later report is bound to the
+/// current membership generation" — a join report once the membership exists carries it too
+/// (`purpose != 'join' or self._member is not None`). The owner's compile refuses a report whose
+/// generation is not the member's (`member_capability_report_stale`, chain_compile
+/// `_capability_rows`). With no membership a report other than `join` refuses
+/// (`_require_current`).
+pub fn report_generation(root: &Path, purpose: &str) -> Result<Option<i64>, PublicError> {
+    let generation = crate::peer::load_membership_state(root)?
+        .and_then(|m| m.get("membership_generation").and_then(Value::as_i64));
+    if generation.is_none() && purpose != "join" {
+        return Err(PublicError::new(400, "membership_required"));
+    }
+    Ok(generation)
+}
+/// `_auto_report(purpose)` (app.py:1138-1163): the signed device + relay-link report, bound to
+/// the membership generation, to the owner's inbox, never failing the caller (a failure is its
+/// code). The caller records it (`Recorded::reported`: `last_report`, next periodic report).
 pub fn auto_report(root: &Path, test_base: Option<&str>, purpose: &str) -> Value {
     let mut state = "delivered";
     let mut error = Value::Null;
     let sent = (|| -> Result<(), PublicError> {
         let origin = owner_origin(root).ok_or(PublicError::new(400, "membership_required"))?;
+        let generation = report_generation(root, purpose)?;
         let mut client = join_client(&origin, test_base)?;
-        let report = measure_and_sign(root, &mut client, purpose)?;
+        let report = measure_and_sign(root, &mut client, purpose, generation)?;
         client.member_report(&report).map(drop)
     })();
     if let Err(e) = sent {
@@ -472,7 +491,8 @@ pub fn join_submit(
     quota: &Value,
 ) -> Result<(Value, Vec<Value>), PublicError> {
     let mut client = join_client(&link.origin, test_base)?;
-    let report = measure_and_sign(root, &mut client, "join")?;
+    // The join request precedes the membership: no generation (peer.py:1123-1124).
+    let report = measure_and_sign(root, &mut client, "join", None)?;
     let answer = client.submit(&link.window_id, &link.code, request, &report, quota)?;
     Ok((answer, client.warnings().to_vec()))
 }
@@ -513,7 +533,7 @@ pub fn join_accept(
     let generation = cell.with(|c| c.session.as_ref().and_then(|s| s.generation()));
     let report = auto_report(&root, test_base, "join");
     // `self.last_report = record` (`_auto_report`, app.py:1161), shown in `join_flow.last_report`.
-    cell.with(|c| c.recorded.last_report = Some(report.clone()));
+    cell.with(|c| c.recorded.reported(report.clone(), Instant::now()));
     Ok(JoinAccepted {
         membership_state: joined
             .get("membership_state")

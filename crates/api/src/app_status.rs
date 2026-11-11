@@ -58,12 +58,13 @@ pub enum RenewalPass {
 impl Recorded {
     /// `_auto_report`'s end (app.py:1161-1162): `self.last_report = record` and
     /// `self._next_periodic_report = time.monotonic() + 300` ([`periodic_report_period`]).
-    pub fn reported(&mut self, record: Value, _now: std::time::Instant) {
+    pub fn reported(&mut self, record: Value, now: std::time::Instant) {
         self.last_report = Some(record);
+        self.next_periodic_report = Some(now + periodic_report_period());
     }
     /// `_standing_tick`'s `due = time.monotonic() >= self._next_periodic_report` (app.py:1197).
-    pub fn periodic_report_due(&self, _now: std::time::Instant) -> bool {
-        false
+    pub fn periodic_report_due(&self, now: std::time::Instant) -> bool {
+        self.next_periodic_report.is_none_or(|next| now >= next)
     }
     /// Record a pass of `_renew_loop`; `running_open` is `self.running and not
     /// self.closed.is_set()` read after the pass (app.py:926).

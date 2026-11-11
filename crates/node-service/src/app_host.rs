@@ -1128,6 +1128,20 @@ impl Host for PackagedHost {
         let base = self.network.seams().join_base.clone();
         api::joined_member::join_submit(&self.root, base.as_deref(), link, request, quota)
     }
+    /// `_auto_report(purpose)` (app.py:1138-1163) for this joined Mac, recorded beside the
+    /// authority (`last_report`, the next periodic report).
+    fn auto_report(&mut self, purpose: &str) {
+        let Some(authority) = self.loaded() else {
+            return;
+        };
+        let base = self.network.seams().join_base.clone();
+        let record = api::joined_member::auto_report(&self.root, base.as_deref(), purpose);
+        authority
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .recorded
+            .reported(record, std::time::Instant::now());
+    }
     fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
         api::joined_member::join_poll(state, self.network.seams().join_base.as_deref())
     }
