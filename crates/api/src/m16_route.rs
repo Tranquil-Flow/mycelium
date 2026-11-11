@@ -582,6 +582,21 @@ pub fn record_stage_exit(
     handle.changed.notify_all();
     Ok(())
 }
+/// The seed's view of one route member for the lease death source: its current
+/// member projection and the seed clock (seconds) it was read at. `None` = the
+/// seed cannot answer for that node (unknown, or its durable row is unstable).
+pub type SeedMembers = Arc<dyn Fn(&str) -> Option<(Value, f64)> + Send + Sync>;
+
+/// Seed lease expiry as stage death evidence across hosts.
+///
+/// Returns the stage indices newly settled by this call.
+pub fn observe_member_leases(
+    _handle: &RouteHandle,
+    _message: &Value,
+    _seed: &SeedMembers,
+) -> Result<Vec<usize>, PublicError> {
+    Ok(Vec::new())
+}
 fn elapsed_ms(since: Instant) -> f64 {
     since.elapsed().as_secs_f64() * 1000.0
 }

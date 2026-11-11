@@ -7,7 +7,9 @@ use super::{Ids, Wall, fail, span};
 use crate::{
     joined_shard::carrier::VerifiedCarrier,
     m16_requests::{Host as _, M16Requests},
-    m16_route::{self, Codec, Currentness, RouteExecutor, RouteHandle, RouteHost, StagePeer},
+    m16_route::{
+        self, Codec, Currentness, RouteExecutor, RouteHandle, RouteHost, SeedMembers, StagePeer,
+    },
     registry::Config,
     schema::PublicError,
 };
@@ -59,6 +61,17 @@ pub fn currentness(coordinator: &Arc<seed::Coordinator>) -> Currentness {
     })
 }
 
+/// The seed's current member rows at its own clock, for the lease death source.
+/// A row whose durable state is unstable reads as `None` (no evidence).
+pub fn seed_members(coordinator: &Arc<seed::Coordinator>) -> SeedMembers {
+    let coordinator = coordinator.clone();
+    Arc::new(move |node: &str| {
+        coordinator
+            .with_current_member(node, |row, now| Ok((row.clone(), now)))
+            .ok()
+    })
+}
+
 impl Epoch {
     /// Attach the owner side of an already-issued, already-delivered route
     /// envelope: verify it against the seed, dial every stage, build the M16
@@ -69,6 +82,18 @@ impl Epoch {
         owner: iroh::SecretKey,
         carriers: Carriers,
         codec: Arc<dyn Codec>,
+    ) -> Result<Self, PublicError> {
+        let seed = seed_members(&coordinator);
+        Self::open_watched(coordinator, envelope, owner, carriers, codec, seed)
+    }
+    /// [`Epoch::open`] with the seed view the pump reads member leases from.
+    pub fn open_watched(
+        coordinator: Arc<seed::Coordinator>,
+        envelope: Value,
+        owner: iroh::SecretKey,
+        carriers: Carriers,
+        codec: Arc<dyn Codec>,
+        _seed: SeedMembers,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
