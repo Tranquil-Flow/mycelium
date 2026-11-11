@@ -436,7 +436,14 @@ impl DesktopServices {
             ("GET", "/api/status") => {
                 // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
                 let mut status = self.node.published_status()?;
-                status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                // Only into a published object, never indexed into a panic (REVIEW-lanePH2 F8).
+                status
+                    .as_object_mut()
+                    .ok_or_else(|| err("status_unavailable"))?
+                    .insert(
+                        "swarm".into(),
+                        crate::app_host::swarm_status(self.publishing.as_ref()),
+                    );
                 // v0.1.4's network window, role, consent and join flow (`crate::packaged_network`).
                 crate::packaged_network::status_overlay(
                     &mut status,

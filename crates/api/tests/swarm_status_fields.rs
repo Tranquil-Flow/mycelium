@@ -7,6 +7,7 @@
 //! last heartbeat's status, the swarm link and `killed`. Without them a published card reads
 //! `Published "undefined" · starting · access undefined` (REVIEW-lanePH2 F7). Loopback directory only.
 #[path = "support/swarm_publisher.rs"]
+#[allow(dead_code)] // the shared support's `restart` is not used here
 mod support;
 use api::swarm::{
     docs,

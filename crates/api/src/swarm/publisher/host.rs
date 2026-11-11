@@ -38,6 +38,9 @@ impl PublisherHost {
     pub fn status(&self) -> Status {
         self.publisher.status()
     }
+    pub fn shown(&self) -> super::Shown {
+        self.publisher.shown()
+    }
     pub fn observe(&mut self, now: i64, view: OwnerView<'_>) -> Result<Status, Error> {
         let step = self.begin_observe(now, view)?;
         self.publisher.drive(step)

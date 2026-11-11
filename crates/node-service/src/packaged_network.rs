@@ -475,6 +475,11 @@ pub fn resume_leave(
 /// `network`, `installation_role`, `resource_policy`, `authority`, `join_flow` (the join-consent
 /// document, `standing_disclosure`, for both roles) and `leave`.
 pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {
+    // A document that is not a JSON object is left as it is, never indexed into a panic
+    // (REVIEW-lanePH2 F8).
+    if !status.is_object() {
+        return;
+    }
     let pending = lock(&network.pending).clone();
     status["network"] = network.status().to_value();
     let Some(authority) = authority else {
