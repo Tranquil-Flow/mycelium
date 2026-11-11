@@ -312,6 +312,16 @@ pub fn start_seed<M: ManagedSlot>(
 ) -> Result<SeedRuntime<M>, PublicError> {
     run_seed(prepare_seed(root, swarm_id)?, origin)
 }
+/// [`start_seed`] over a seed whose coordinator reads `clock` (a test moves the seed's own clock,
+/// as v0.1.4's `set_test_clock_offset` does, app.py:1336-1341).
+pub fn start_seed_clocked<M: ManagedSlot>(
+    root: &Path,
+    swarm_id: &str,
+    origin: Option<&str>,
+    clock: ::seed::Clock,
+) -> Result<SeedRuntime<M>, PublicError> {
+    run_seed(prepare_seed_clocked(root, swarm_id, clock)?, origin)
+}
 /// What `create_swarm` makes before it commits the metadata (authority.py:412-446 @ f4e366e9): the
 /// seed's key, its local TLS material and the coordinator that binds its database to the swarm.
 pub struct PreparedSeed {
@@ -375,6 +385,14 @@ fn prepared_state(root: &Path) -> bool {
 /// `create_swarm`'s preparation in its order: the seed key, the TLS material (its own code is the
 /// answer, `LocalTLSError`), then the coordinator over the seed database bound to `swarm_id`.
 pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicError> {
+    prepare_seed_clocked(root, swarm_id, Box::new(now))
+}
+/// [`prepare_seed`] with the coordinator's clock given.
+fn prepare_seed_clocked(
+    root: &Path,
+    swarm_id: &str,
+    clock: ::seed::Clock,
+) -> Result<PreparedSeed, PublicError> {
     let dir = root.join("seed-rs");
     fs::create_dir_all(&dir).map_err(|_| failure())?;
     fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
@@ -402,7 +420,7 @@ pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicE
             &dir.join("seed.sqlite"),
             signer,
             options,
-            Box::new(now),
+            clock,
             Box::new(uuid4),
         )
         .map_err(|e| seed_failure(&e))?,

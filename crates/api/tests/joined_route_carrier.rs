@@ -664,6 +664,10 @@ impl Drop for Swarm {
     }
 }
 fn swarm() -> Swarm {
+    swarm_clocked(Box::new(app_host::now))
+}
+/// [`swarm`] whose seed coordinator reads `clock`.
+fn swarm_clocked(clock: seed::Clock) -> Swarm {
     let root = std::env::temp_dir().join(format!(
         "b8-lan-{}-{}",
         std::process::id(),
@@ -673,7 +677,9 @@ fn swarm() -> Swarm {
     let root = std::fs::canonicalize(root).unwrap();
     let owner = root.join("owner");
     std::fs::create_dir(&owner).unwrap();
-    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b8-lan-swarm", None).unwrap();
+    let seed =
+        app_host::start_seed_clocked::<app_host::Unmanaged>(&owner, "b8-lan-swarm", None, clock)
+            .unwrap();
     let (seed_signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
     let fixture: Value = serde_json::from_str(include_str!(
         "../../planner/tests/fixtures/source-slices.json"
@@ -1707,6 +1713,95 @@ fn product_epoch_settles_a_member_whose_seed_lease_ran_out() {
     );
     drop(o);
     assert_eq!(epoch.qualification().unwrap_err().code, "route_dropped");
+    epoch.close();
+    open.send(()).unwrap();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+}
+
+/// The PRODUCTION seed view (`Epoch::open` -> `epoch::seed_members` over the real coordinator,
+/// SL review F1 / mutant M8): a swarm seed whose own clock the test moves (real time plus an
+/// offset, as v0.1.4's `set_test_clock_offset`), two members whose last renewal set their seed
+/// lease; one goes silent mid-answer; once the seed's clock passes its lease plus the members'
+/// clock tolerance, the epoch's own pump settles it from the seed row and the chat stream ends
+/// `failed` `joined_route_member_stale` before the hop deadline could.
+#[test]
+fn product_epoch_reads_member_leases_from_the_real_seed() {
+    let offset = Arc::new(AtomicU64::new(0f64.to_bits()));
+    let seed_offset = offset.clone();
+    let s = swarm_clocked(Box::new(move || {
+        app_host::now() + f64::from_bits(seed_offset.load(Ordering::SeqCst))
+    }));
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (open, script) = silent_at(2);
+    let (members, verified) = s.serve_lan_scripts(loopback, &policy, [Script::default(), script]);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let nodes: Vec<String> = (0..2)
+        .map(|i| s.live(i)["node_id"].as_str().unwrap().to_owned())
+        .collect();
+    let epoch = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+    )
+    .unwrap();
+    let (_, rx, reader) = chat(&epoch, 32);
+    let mut all = until_terminal(&rx, 2);
+    // Both leases still run: no evidence from the real seed rows.
+    assert!(
+        epoch
+            .handle()
+            .state
+            .lock()
+            .unwrap()
+            .stages
+            .iter()
+            .all(|stage| stage.death_evidence.is_none()),
+        "evidence while both leases run"
+    );
+    // The seed's clock passes a full lease plus the members' clock tolerance: no renewal can land.
+    offset.store((lease() + clock_skew() + 1.0).to_bits(), Ordering::SeqCst);
+    // Collect for less than the hop deadline: only the seed can end it in time.
+    let end = Instant::now() + hop_deadline();
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let Ok((event, _)) = rx.recv_timeout(left) else {
+            break;
+        };
+        let done = matches!(
+            event["type"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        );
+        all.push(event);
+        if done {
+            break;
+        }
+    }
+    let last = all.last().unwrap().clone();
+    assert_eq!(last["type"], "failed", "{all:?}");
+    assert_eq!(last["code"], "joined_route_member_stale", "{all:?}");
+    reader.join().unwrap();
+    let o = epoch.handle().state.lock().unwrap();
+    assert!(o.settled());
+    let evidence = o.stages[1].death_evidence.clone().unwrap();
+    drop(o);
+    assert_eq!(evidence["source"], "seed_member_lease", "{evidence}");
+    assert_eq!(evidence["node_id"], nodes[1].as_str(), "{evidence}");
+    assert_eq!(evidence["generation"], 1, "{evidence}");
     epoch.close();
     open.send(()).unwrap();
     for m in members {
