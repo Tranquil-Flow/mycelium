@@ -167,8 +167,24 @@ impl Teardown {
     }
     /// The reason of a teardown from the run's own status (`owner_driver::status_json`) and the
     /// teardown's `failed` flag, as demo_chain.py:1329-1331 decides it.
-    pub fn of_run(_failed: bool, _status: &Value) -> Self {
-        Self::Stopped
+    /// `rollover_requested` is the status's `rollover.state == "switching"` (both are set together,
+    /// owner-run machine.rs `serving_poll`); the monitor's code is the `error_code` of a run that
+    /// failed at its serving step (`fail_serving`: ceiling, monitor), any other failure is
+    /// `owner_run_failed`.
+    pub fn of_run(failed: bool, status: &Value) -> Self {
+        if status["rollover"]["state"] == "switching" {
+            return Self::SwitchingRuns;
+        }
+        if !failed {
+            return Self::Stopped;
+        }
+        match status["error_code"].as_str() {
+            Some("execution_ceiling_reached") if status["failed_step"] == "serving" => {
+                Self::CeilingReached
+            }
+            Some(code) if status["failed_step"] == "serving" => Self::Failed(code.to_owned()),
+            _ => Self::Failed("owner_run_failed".into()),
+        }
     }
 }
 /// The hook the owner run's teardown calls: `chat.cancel_all(code)`. Returns the chats cancelled.
@@ -704,18 +720,22 @@ impl ChatService {
                     record.error = Some(reason.unwrap_or(error.code));
                 }
             }
-            record.done = true;
             record.finished = Some(finished);
             if record.terminal == Some("completed") && record.cancel_reason.is_none() {
                 timing = Some(Self::timing_line(record, finished));
             }
         }
-        if state.busy.as_deref() == Some(id) {
-            state.busy = None;
-        }
         drop(state);
+        // The record is complete (`finally`, chat.py:383-398) once its timing line is written.
         if let (Some(line), Some(path)) = (timing, &self.inner.timing) {
             Self::append(path, &line);
+        }
+        let mut state = self.state_lock();
+        if let Some(record) = state.requests.get_mut(id) {
+            record.done = true;
+        }
+        if state.busy.as_deref() == Some(id) {
+            state.busy = None;
         }
     }
     /// The performance record of a completed chat (chat.py:386-395).
