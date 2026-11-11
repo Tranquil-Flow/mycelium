@@ -2,7 +2,7 @@
   {
     "path": "Contents/MacOS/native/resource_probe",
     "kind": "Helper",
-    "bytes": 675344,
-    "sha256": "0a0e830ef626b9df020f23a4c5b550a57aec089ea1d1a1d87f8e5fdac424e2c7"
+    "bytes": 675232,
+    "sha256": "563b9206c56e9cd4988b55ed1660c72a8ed62f12b985005afbee462174a7726d"
   }
 ]

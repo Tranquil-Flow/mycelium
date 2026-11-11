@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! `native/resource_probe`: the packaged app's one-shot, read-only resource observation, the Rust
 //! port of v0.1.4's `mycelium_a13_macos/native/resource_probe.m` (@ f4e366e9). It reads three OS
-//! facts and prints one JSON line; `desktop::resource_probe` decides what they mean, and
+//! facts and prints one JSON line; `src/resource_probe.rs` decides what they mean, and
 //! `api::resources::ProbeObserver` runs this file from `<exe dir>/native/resource_probe` with its own
 //! bound. Only system libraries are used (libSystem, libobjc, Foundation, Network): no crate, no
 //! compiler at runtime, no write anywhere, no network traffic (a path monitor only reads state).
 #![allow(unsafe_code)]
-use desktop::resource_probe;
+// The decisions are compiled into this helper from their one source file instead of through the
+// `desktop` library, so the pinned helper bytes do not move whenever unrelated library code does.
+#[path = "../resource_probe.rs"]
+mod resource_probe;
 use std::io::Write;
 use std::{
     ffi::{CStr, c_char, c_void},
