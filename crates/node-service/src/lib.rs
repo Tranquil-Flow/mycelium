@@ -26,13 +26,14 @@ pub mod loopback;
 pub mod native;
 pub mod native_selection;
 pub mod owner_chain;
-#[cfg(feature = "packaged")]
+#[cfg(any(feature = "desktop-shell", feature = "packaged"))]
 pub mod packaged;
 pub mod phase;
 pub mod planning;
 pub mod private_state;
 pub mod reap;
 pub mod receipts;
+pub mod router_port;
 pub mod service;
 pub mod spawn;
 pub mod status;

@@ -169,11 +169,13 @@ impl fmt::Debug for FreeBytes {
     }
 }
 
-/// One `placement_status()` entry (:321-336), fields in the source's order.
+/// One `placement_status()` entry (:321-336), fields in the source's order. `V` holds its two
+/// graph values: owned ([`ResourceLedger::placement_status`]) or borrowed from the ledger
+/// ([`ResourceLedger::placement_status_borrowed`], which copies no graph value).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PlacementStatus {
-    pub placement_id: Value,
-    pub node_id: Value,
+pub struct PlacementStatus<V = Value> {
+    pub placement_id: V,
+    pub node_id: V,
     pub memory_capacity_bytes: PyInt,
     pub reserved_memory_bytes: PyNumber,
     pub free_memory_bytes: FreeBytes,
@@ -464,6 +466,31 @@ impl<C: LeaseClock, I: IdSource> ResourceLedger<C, I> {
 
     /// :308-338, sorted by placement id.
     pub fn placement_status(&self) -> Result<Vec<PlacementStatus>, LedgerError> {
+        Ok(self
+            .placement_status_borrowed()?
+            .into_iter()
+            .map(|status| PlacementStatus {
+                placement_id: status.placement_id.clone(),
+                node_id: status.node_id.clone(),
+                memory_capacity_bytes: status.memory_capacity_bytes,
+                reserved_memory_bytes: status.reserved_memory_bytes,
+                free_memory_bytes: status.free_memory_bytes,
+                kv_capacity_bytes: status.kv_capacity_bytes,
+                reserved_kv_bytes: status.reserved_kv_bytes,
+                free_kv_bytes: status.free_kv_bytes,
+                workspace_capacity_bytes: status.workspace_capacity_bytes,
+                reserved_workspace_bytes: status.reserved_workspace_bytes,
+                free_workspace_bytes: status.free_workspace_bytes,
+                active_reservations: status.active_reservations,
+                maximum_reservations: status.maximum_reservations,
+            })
+            .collect())
+    }
+
+    /// [`Self::placement_status`] with each placement's id and node borrowed from the ledger:
+    /// no graph value is copied or dropped, so a caller may convert one of any depth with its
+    /// own bounded walk (the status projection does).
+    pub fn placement_status_borrowed(&self) -> Result<Vec<PlacementStatus<&Value>>, LedgerError> {
         let mut output = Vec::with_capacity(self.capacities.len());
         for slot in sorted_slots(&self.capacities)? {
             let capacity = &self.capacities[slot];
@@ -472,8 +499,8 @@ impl<C: LeaseClock, I: IdSource> ResourceLedger<C, I> {
             let reserved_kv = py_sum(active.iter().map(|r| &r.kv_bytes))?;
             let reserved_workspace = py_sum(active.iter().map(|r| &r.workspace_bytes))?;
             output.push(PlacementStatus {
-                placement_id: capacity.placement_id.clone(),
-                node_id: capacity.node_id.clone(),
+                placement_id: &capacity.placement_id,
+                node_id: &capacity.node_id,
                 memory_capacity_bytes: capacity.memory.clone(),
                 free_memory_bytes: subtract(&capacity.memory, &reserved_memory)?,
                 reserved_memory_bytes: reserved_memory,

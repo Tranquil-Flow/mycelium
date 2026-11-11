@@ -13,7 +13,7 @@
 //! The owner-authority seams (create, authority start/stop, pairing request/approve/accept, the
 //! owner's pairing windows) are `api::app_host`, the same code the packaged executable runs.
 use api::{
-    acquisition::{self, Acquisition, HttpTransport, PrepareError, Preparer},
+    acquisition::{self, Acquisition, HttpTransport},
     actions::{Action, Backend, Control},
     app_host::{
         self, Authority, HANDOFF_FILE, HostView, IDENTITY_FILE, NETWORK_FILE, PENDING_FILE,
@@ -1399,10 +1399,7 @@ impl Host for HeadlessHost {
     }
     fn run_model_saved(&mut self) {
         // acquisition_policy_error = None; _open_acquisition(): selection never starts a download.
-        self.with(|c| {
-            c.acquisition_policy_error = None;
-            open_acquisition(c).unwrap_or(());
-        });
+        self.with(|c| with_acquisition(c, app_host::run_model_saved));
     }
     fn resource_check(&mut self) -> Option<&'static str> {
         resource_check(&self.core)
@@ -1411,32 +1408,13 @@ impl Host for HeadlessHost {
         self.with(|c| c.acquisition_policy_error = reason);
     }
     fn acquisition_start(&mut self, grant: &Value) -> Result<Json, PublicError> {
-        self.with(|c| {
-            let acq = c.acquisition.clone().ok_or_else(failure)?;
-            match acq.start(grant) {
-                Ok(status) => {
-                    c.acquisition_active = true;
-                    Ok(Json::from(&status.to_value(acq.model())))
-                }
-                Err(e) => Err(acquisition_error(&e)),
-            }
-        })
+        self.with(|c| with_acquisition(c, |view, _| app_host::acquisition_start(view, grant)))
     }
     fn acquisition_cancel(&mut self) -> Result<Json, PublicError> {
-        self.with(|c| {
-            let acq = c.acquisition.clone().ok_or_else(failure)?;
-            acq.cancel();
-            c.acquisition_active = false;
-            Ok(Json::from(&acq.status_value()))
-        })
+        self.with(|c| with_acquisition(c, |view, _| app_host::acquisition_cancel(view)))
     }
     fn cancel_acquisition(&mut self) {
-        self.with(|c| {
-            if let Some(acq) = &c.acquisition {
-                acq.cancel();
-            }
-            c.acquisition_active = false;
-        });
+        self.with(|c| with_acquisition(c, |view, _| app_host::cancel_acquisition(view)));
     }
     fn swarm_created(&self) -> bool {
         app_host::swarm_created(&self.cell())
@@ -1463,14 +1441,7 @@ impl Host for HeadlessHost {
     }
     fn reopen_acquisition_if_needed(&mut self) {
         // `if acquisition is None or its state_root differs: self._open_acquisition()`.
-        self.with(|c| {
-            let wanted = acquisition_root(c).ok();
-            if c.acquisition.is_none()
-                || wanted.as_deref() != c.acquisition.as_ref().map(Acquisition::state_root)
-            {
-                open_acquisition(c).unwrap_or(());
-            }
-        });
+        self.with(|c| with_acquisition(c, app_host::reopen_acquisition_if_needed));
     }
     /// Target side of `authority.pair_request()` (authority.py:841-871).
     fn pair_request(&mut self) -> Result<Json, PublicError> {
@@ -2398,98 +2369,44 @@ impl NativeLauncher for Launcher {
     }
 }
 
-/// `AcquisitionError` as the handler answers it: a closed library code, status 409 (`public_failure_code`).
-fn acquisition_error(error: &acquisition::AcqError) -> PublicError {
-    PublicError::new(409, acquisition::closed_code(error.code())).raised_by(Raised::Acquisition)
-}
-/// `serving.prepare_local_source`'s caller: the oracle's own snapshot checks, then the native manifest compile
-/// (`api::local_manifest`, equal to `physical_deployment.compile_local_model_manifest`).
-struct SnapshotPreparer;
-impl Preparer for SnapshotPreparer {
-    fn prepare(
-        &self,
-        snapshot: &Path,
-        model: &api::model_catalog::Model,
-    ) -> Result<(), PrepareError> {
-        self.prepare_facts(snapshot, model).map(|_| ())
-    }
-    fn prepare_facts(
-        &self,
-        snapshot: &Path,
-        model: &api::model_catalog::Model,
-    ) -> Result<Option<acquisition::PreparedFacts>, PrepareError> {
-        match api::serving_source::prepare_local_source(snapshot, model, &|source| {
-            api::local_manifest::compile_local_model_manifest(
-                &api::local_manifest::LocalModelSource {
-                    root: source.root.clone(),
-                    model_id: source.model_id.to_owned(),
-                    requested_revision: source.requested_revision.to_owned(),
-                    resolved_commit: source.resolved_commit.to_owned(),
-                    tokenizer_assets: Ok(Vec::new()),
-                },
-            )
-            // Any other exception class: the caller answers `native_manifest_compile_failed`.
-            .map_err(|_| api::serving_source::Failure::Other)
-        }) {
-            Ok(prepared) => Ok(Some(acquisition::PreparedFacts {
-                source_bytes: prepared.source_bytes,
-                manifest_digest: prepared.manifest_digest,
-            })),
-            Err(api::serving_source::Failure::Serving(code)) => Err(PrepareError::Serving(code)),
-            Err(api::serving_source::Failure::Other) => Err(PrepareError::Other),
-        }
-    }
-}
-/// `DemoApp._open_acquisition`'s root: one directory per run model (the 7B candidate keeps `model-source`),
-/// a joined Mac under its staging consumer's `serving` root.
-fn acquisition_root(core: &Core) -> Result<PathBuf, PublicError> {
+/// The core's acquisition fields and where `_open_acquisition` (`api::app_host`) puts the run model's
+/// acquisition: its private root, the owner's `model-source*` beside it, `MYCELIUM_A13_RUN_MODEL`, and the
+/// repository transport. Test seam (like MYCELIUM_L10_TEST_RESOURCE_PROBE): a loopback repository instead of the
+/// hub, so a process-level test can run a download to `prepared` without a network. Never set in a window run.
+fn with_acquisition<R>(
+    core: &mut Core,
+    step: impl FnOnce(&mut app_host::AcquisitionView<'_>, &app_host::AcquisitionSite<'_>) -> R,
+) -> R {
     let env = std::env::var(run_model::ENV).ok();
-    let model = run_model::selected_model(&core.root, env.as_deref())?;
-    let candidate = &api::model_catalog::registered()[0];
-    let suffix = if model.resolved_commit == candidate.resolved_commit {
-        String::new()
-    } else {
-        format!("-{}", &model.resolved_commit[..12])
+    let offline = core.offline;
+    let transport = move || -> Arc<dyn acquisition::Transport> {
+        Arc::new(match std::env::var("MYCELIUM_L10_TEST_HUB_ORIGIN") {
+            Ok(origin) => HttpTransport::loopback_for_tests(&origin),
+            Err(_) => HttpTransport::hugging_face(offline),
+        })
     };
-    Ok(if core.target {
-        let serving = core.root.join("target").join("serving");
-        if suffix.is_empty() {
-            serving
-        } else {
-            serving.join(format!("model-source{suffix}"))
-        }
-    } else {
-        core.root.join(format!("model-source{suffix}"))
-    })
-}
-/// `DemoApp._open_acquisition`: close the previous one, open the run model's.
-fn open_acquisition(core: &mut Core) -> Result<(), PublicError> {
-    if let Some(previous) = core.acquisition.take() {
-        previous.close().map_err(|e| acquisition_error(&e))?;
-    }
-    let env = std::env::var(run_model::ENV).ok();
-    let model = run_model::selected_model(&core.root, env.as_deref())?;
-    let root = acquisition_root(core)?;
-    let acquisition = Acquisition::open(
-        &root,
-        model,
-        acquisition::Options {
-            // Test seam (like MYCELIUM_L10_TEST_RESOURCE_PROBE): a loopback repository instead of the hub, so a
-            // process-level test can run a download to `prepared` without a network. Never set in a window run.
-            transport: Arc::new(match std::env::var("MYCELIUM_L10_TEST_HUB_ORIGIN") {
-                Ok(origin) => HttpTransport::loopback_for_tests(&origin),
-                Err(_) => HttpTransport::hugging_face(core.offline),
-            }),
-            preparer: Arc::new(SnapshotPreparer),
-            disk_free: Box::new(acquisition::disk_free_bytes),
-            clock_unix_ms: Box::new(acquisition::system_clock_ms),
-            observer: None,
+    let Core {
+        authority,
+        acquisition,
+        acquisition_active,
+        acquisition_policy_error,
+        ..
+    } = core;
+    let site = app_host::AcquisitionSite {
+        root: &authority.root,
+        sources: &authority.root,
+        target: authority.target,
+        run_model_env: env.as_deref(),
+        transport: &transport,
+    };
+    step(
+        &mut app_host::AcquisitionView {
+            acquisition,
+            active: acquisition_active,
+            policy_error: acquisition_policy_error,
         },
+        &site,
     )
-    .map_err(|e| acquisition_error(&e))?;
-    core.acquisition = Some(acquisition);
-    core.acquisition_active = false;
-    Ok(())
 }
 /// `DemoApp._resource_check` (app.py:929-947): the observation is made outside the app lock; a member leave
 /// fence refuses first. The A16 adaptive admission is off in this host.
@@ -2647,7 +2564,7 @@ fn load_core(root: PathBuf) -> Result<Core, String> {
         compiled_receipt: None,
     };
     // `DemoApp.start` -> `_open_acquisition()`.
-    open_acquisition(&mut core).map_err(|e| e.code.to_owned())?;
+    with_acquisition(&mut core, app_host::open_acquisition).map_err(|e| e.code.to_owned())?;
     Ok(core)
 }
 

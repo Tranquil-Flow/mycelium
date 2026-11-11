@@ -966,3 +966,178 @@ pub fn owner_window(
         _ => Err(failure()),
     }
 }
+
+// ---- the run model's acquisition (`DemoApp.acquisition`) ----
+//
+// Moved unchanged from the headless L3 launcher, which now calls them, so the launcher and the
+// packaged executable run one copy: `_open_acquisition` (app.py:649-672), `/api/model/download`'s
+// start and `/api/model/cancel` (app.py:1551-1577), `_cancel_acquisition` (app.py:1001-1004), the
+// re-open after a run-model choice (app.py:866-867) and on becoming a target (app.py:1120-1122),
+// all @ f4e366e9. The host keeps the three fields below its own lock and lends them for one step.
+
+/// What a host keeps for its model acquisition, borrowed for one step: `DemoApp.acquisition`,
+/// `DemoApp._acquisition_active` and `DemoApp.acquisition_policy_error`.
+pub struct AcquisitionView<'a> {
+    pub acquisition: &'a mut Option<crate::acquisition::Acquisition>,
+    pub active: &'a mut bool,
+    pub policy_error: &'a mut Option<&'static str>,
+}
+/// Where `_open_acquisition` opens the run model's acquisition and how it fetches.
+pub struct AcquisitionSite<'a> {
+    /// `self.root`: the private state root the run-model choice is read from.
+    pub root: &'a Path,
+    /// Where an owner's `model-source*` directories live (`self.root` in v0.1.4; the packaged
+    /// executable keeps them in its state root, beside its private `v02-node/`).
+    pub sources: &'a Path,
+    /// `installation_role == 'target'`: the cache lives in the staging consumer's `serving` root.
+    pub target: bool,
+    /// `MYCELIUM_A13_RUN_MODEL` as the host reads its environment (`app_run_model`).
+    pub run_model_env: Option<&'a str>,
+    /// The repository transport of a freshly opened acquisition.
+    pub transport: &'a dyn Fn() -> Arc<dyn crate::acquisition::Transport>,
+}
+/// `AcquisitionError` as the handler answers it: a closed library code, status 409 (`public_failure_code`).
+pub fn acquisition_error(error: &crate::acquisition::AcqError) -> PublicError {
+    PublicError::new(409, crate::acquisition::closed_code(error.code()))
+        .raised_by(Raised::Acquisition)
+}
+/// `serving.prepare_local_source`'s caller: the oracle's own snapshot checks, then the native manifest compile
+/// (`api::local_manifest`, equal to `physical_deployment.compile_local_model_manifest`).
+pub struct SnapshotPreparer;
+impl crate::acquisition::Preparer for SnapshotPreparer {
+    fn prepare(
+        &self,
+        snapshot: &Path,
+        model: &crate::model_catalog::Model,
+    ) -> Result<(), crate::acquisition::PrepareError> {
+        self.prepare_facts(snapshot, model).map(|_| ())
+    }
+    fn prepare_facts(
+        &self,
+        snapshot: &Path,
+        model: &crate::model_catalog::Model,
+    ) -> Result<Option<crate::acquisition::PreparedFacts>, crate::acquisition::PrepareError> {
+        use crate::acquisition::PrepareError;
+        match crate::serving_source::prepare_local_source(snapshot, model, &|source| {
+            crate::local_manifest::compile_local_model_manifest(
+                &crate::local_manifest::LocalModelSource {
+                    root: source.root.clone(),
+                    model_id: source.model_id.to_owned(),
+                    requested_revision: source.requested_revision.to_owned(),
+                    resolved_commit: source.resolved_commit.to_owned(),
+                    tokenizer_assets: Ok(Vec::new()),
+                },
+            )
+            // Any other exception class: the caller answers `native_manifest_compile_failed`.
+            .map_err(|_| crate::serving_source::Failure::Other)
+        }) {
+            Ok(prepared) => Ok(Some(crate::acquisition::PreparedFacts {
+                source_bytes: prepared.source_bytes,
+                manifest_digest: prepared.manifest_digest,
+            })),
+            Err(crate::serving_source::Failure::Serving(code)) => Err(PrepareError::Serving(code)),
+            Err(crate::serving_source::Failure::Other) => Err(PrepareError::Other),
+        }
+    }
+}
+/// `_open_acquisition`'s root: one directory per run model (the 7B candidate keeps `model-source`),
+/// a joined Mac under its staging consumer's `serving` root.
+pub fn acquisition_root(site: &AcquisitionSite<'_>) -> Result<PathBuf, PublicError> {
+    let model = crate::preferences::run_model::selected_model(site.root, site.run_model_env)?;
+    let candidate = &crate::model_catalog::registered()[0];
+    let suffix = if model.resolved_commit == candidate.resolved_commit {
+        String::new()
+    } else {
+        format!("-{}", &model.resolved_commit[..12])
+    };
+    Ok(if site.target {
+        let serving = site.root.join("target").join("serving");
+        if suffix.is_empty() {
+            serving
+        } else {
+            serving.join(format!("model-source{suffix}"))
+        }
+    } else {
+        site.sources.join(format!("model-source{suffix}"))
+    })
+}
+/// `DemoApp._open_acquisition`: close the previous one, open the run model's.
+pub fn open_acquisition(
+    view: &mut AcquisitionView<'_>,
+    site: &AcquisitionSite<'_>,
+) -> Result<(), PublicError> {
+    use crate::acquisition::{self, Acquisition};
+    if let Some(previous) = view.acquisition.take() {
+        previous.close().map_err(|e| acquisition_error(&e))?;
+    }
+    let model = crate::preferences::run_model::selected_model(site.root, site.run_model_env)?;
+    let root = acquisition_root(site)?;
+    let acquisition = Acquisition::open(
+        &root,
+        model,
+        acquisition::Options {
+            transport: (site.transport)(),
+            preparer: Arc::new(SnapshotPreparer),
+            disk_free: Box::new(acquisition::disk_free_bytes),
+            clock_unix_ms: Box::new(acquisition::system_clock_ms),
+            observer: None,
+        },
+    )
+    .map_err(|e| acquisition_error(&e))?;
+    *view.acquisition = Some(acquisition);
+    *view.active = false;
+    Ok(())
+}
+/// `acquisition_policy_error = None; _open_acquisition()` once the run-model choice is saved
+/// (app.py:866-867): selection never starts a download.
+pub fn run_model_saved(view: &mut AcquisitionView<'_>, site: &AcquisitionSite<'_>) {
+    *view.policy_error = None;
+    open_acquisition(view, site).unwrap_or(());
+}
+/// `self.acquisition.start(grant)` then `self._acquisition_active = True`: the status document answered.
+pub fn acquisition_start(
+    view: &mut AcquisitionView<'_>,
+    grant: &Value,
+) -> Result<Json, PublicError> {
+    let acquisition = view.acquisition.clone().ok_or_else(failure)?;
+    match acquisition.start(grant) {
+        Ok(status) => {
+            *view.active = true;
+            Ok(Json::from(&status.to_value(acquisition.model())))
+        }
+        Err(e) => Err(acquisition_error(&e)),
+    }
+}
+/// `/api/model/cancel`: `self._cancel_acquisition(); return self.acquisition.status()`.
+pub fn acquisition_cancel(view: &mut AcquisitionView<'_>) -> Result<Json, PublicError> {
+    let acquisition = view.acquisition.clone().ok_or_else(failure)?;
+    acquisition.cancel();
+    *view.active = false;
+    Ok(Json::from(&acquisition.status_value()))
+}
+/// `DemoApp._cancel_acquisition` alone (`/api/stop`, revocation of this Mac).
+pub fn cancel_acquisition(view: &mut AcquisitionView<'_>) {
+    if let Some(acquisition) = view.acquisition.as_ref() {
+        acquisition.cancel();
+    }
+    *view.active = false;
+}
+/// `if acquisition is None or its state_root differs: self._open_acquisition()`.
+///
+/// An open acquisition keeps its root's physical path (`acquisition::Acquisition::state_root`,
+/// legitimate ancestor aliases such as macOS `/var` admitted once), so the wanted root is compared
+/// physically: the same root spelled through an alias is the same root.
+pub fn reopen_acquisition_if_needed(view: &mut AcquisitionView<'_>, site: &AcquisitionSite<'_>) {
+    let wanted = acquisition_root(site)
+        .ok()
+        .map(|root| std::fs::canonicalize(&root).unwrap_or(root));
+    if view.acquisition.is_none()
+        || wanted.as_deref()
+            != view
+                .acquisition
+                .as_ref()
+                .map(crate::acquisition::Acquisition::state_root)
+    {
+        open_acquisition(view, site).unwrap_or(());
+    }
+}

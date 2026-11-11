@@ -245,8 +245,10 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
   `src/bin/mycelium.rs` (a core-less shell kept as the test double for entry/launch-wiring tests).
   It routes like v0.1.4, admits the OS and the pinned payload, then serves the unchanged UI over
   SLICE-1's node service (`node_service::packaged`): the pinned Qwen2.5-0.5B is looked up in the
-  state root's v0.1.4 `model-source-*` layout (never downloaded; absent => 503 `model_not_installed`),
-  private state and per-launch evidence live under `<state>/v02-node/`. The same executable is the
+  state root's v0.1.4 `model-source-*` layout, where the window's `/api/model/download` puts it
+  (until it is prepared the chat answers 503 `model_not_installed`; then the native service is
+  composed over it without a relaunch), private state and per-launch evidence live under
+  `<state>/v02-node/`. The same executable is the
   node's member/owner-leaf worker (re-executed with `member|owner-leaf`), admitted first. It links
   `libmlxc` through `@executable_path/../Frameworks` only. Probe hooks do not exist in it: the
   test-only `qualification-probe` feature (scratch bundles for `bundle_chat`) is the only way to

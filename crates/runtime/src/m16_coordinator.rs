@@ -10,10 +10,11 @@
 //! [`RouteScorer`], [`RoutePolicy`], [`ProgressivePathBuilder`] and [`HopScheduler`]. The owner
 //! admits one chat request (mycelium_live/router_port.py:776, mycelium_live/registry.py:381),
 //! dispatches it, moves it through its phases, ends it with `complete` or `cancel`
-//! (registry.py:406) and hands `route_identity` / `path_manifest` to the physical route. No
+//! (registry.py:406) and hands `route_identity` / `path_manifest` to the physical route. The
 //! status projection (`status`, `_request_projection`, `attach_performance_budget`,
-//! `validate_m16_runtime_status`), recovery successor (:709-988) or registry factory
-//! (`build_live_m16_runtime`, :1163-1262) is here.
+//! `validate_m16_runtime_status`, :601-652, :988-1018, :1043-1160) is the child module
+//! `status`. No recovery successor (:709-988) or registry factory (`build_live_m16_runtime`,
+//! :1163-1262) is here.
 //!
 //! Errors keep the oracle's exception kinds apart ([`CoordinatorError`]): the stable public
 //! [`M16AdmissionError`] codes, the coordinator's own ValueError codes
@@ -102,6 +103,13 @@ use serde_json::{Map, Number, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+mod status;
+pub use status::{
+    BudgetError, PERFORMANCE_BUDGET_V3_PROTOCOL, STATUS_INT_TOO_LARGE_FOR_FLOAT, STATUS_PROTOCOL,
+    STATUS_UNREPRESENTABLE_VALUE, StatusError, StatusValidationError, validate_m16_runtime_status,
+    validate_performance_budget_v3,
+};
 
 /// :75-81 `M16AdmissionError(code, retry_after_seconds=None)`, a RuntimeError subclass: the
 /// stable public admission failure.
@@ -661,6 +669,8 @@ struct Inner {
     lease_clock: SharedClock,
     id_source: IdHandle,
     max_concurrent_requests: u64,
+    /// `self._config` (:372), which `status` reads (:625-641).
+    config: RouterConfig,
     ledger: Ledger,
     policy: RoutePolicy,
     scheduler: HopScheduler,
@@ -671,9 +681,12 @@ struct Inner {
     incidents: Vec<Incident>,
     incident_sequence: u64,
     graph_digest: String,
+    /// `self._performance_budgets` (:400): empty, or the one validated v3 document
+    /// `attach_performance_budget` keeps (:989-991).
+    performance_budgets: Vec<PyJson>,
 }
 
-/// `M16RuntimeCoordinator` (:348-707, :1020-1041).
+/// `M16RuntimeCoordinator` (:348-707, :1020-1041; the status projection in `status`).
 pub struct M16RuntimeCoordinator {
     inner: Mutex<Inner>,
 }
@@ -823,7 +836,7 @@ impl M16RuntimeCoordinator {
         )
         .map_err(CoordinatorError::Ledger)?;
         let policy = RoutePolicy::new(RouteScorer::new(config.clone()));
-        let scheduler = HopScheduler::new(config).map_err(CoordinatorError::Config)?;
+        let scheduler = HopScheduler::new(config.clone()).map_err(CoordinatorError::Config)?;
         let graph_digest = execution_graph_digest(&graph).map_err(CoordinatorError::Digest)?;
         Ok(Self {
             inner: Mutex::new(Inner {
@@ -834,6 +847,7 @@ impl M16RuntimeCoordinator {
                 lease_clock,
                 id_source,
                 max_concurrent_requests,
+                config,
                 ledger,
                 policy,
                 scheduler,
@@ -843,6 +857,7 @@ impl M16RuntimeCoordinator {
                 incidents: Vec::new(),
                 incident_sequence: 0,
                 graph_digest,
+                performance_budgets: Vec::new(),
             }),
         })
     }

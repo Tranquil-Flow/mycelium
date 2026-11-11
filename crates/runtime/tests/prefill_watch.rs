@@ -263,6 +263,21 @@ fn prefill_watch_core_lru_evicts_oldest() {
     // A repeat moves r001 to the most recent end (:2364); the 257th id then evicts the least
     // recent one, r002 (:2361-2362 popitem(last=False)).
     assert_eq!(watch.watch_prefill("r001", deadline), Ok(()));
+    // The send path's counter writers only `_prefill_progress.get` a record and mutate it in
+    // place (:1937-1943, :1999-2001, :2138-2144, :2538-2545); only a watch calls move_to_end
+    // (:2364). Progress on the oldest record r002 therefore does not save it from eviction.
+    watch
+        .progress_mut("r002")
+        .expect("r002 is watched before the 257th id")
+        .progress_events += 1;
+    assert_eq!(
+        watch.prefill_progress("r002"),
+        Some(PrefillProgress {
+            deadline: Some(160.0),
+            progress_events: 1,
+            ..fresh(100.0)
+        })
+    );
     assert_eq!(watch.watch_prefill("r257", deadline), Ok(()));
     assert_eq!(watch.len(), 256);
     assert_eq!(watch.prefill_progress("r002"), None);
