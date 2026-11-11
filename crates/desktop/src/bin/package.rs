@@ -24,7 +24,9 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
         match arg.as_str() {
             "--resource-probe" if probe.is_none() => probe = Some(rest.next().ok_or(USAGE)?),
             "--sign-adhoc" if !sign => sign = true,
-            flag if flag.starts_with("--") => return Err(format!("{USAGE}\nunknown or repeated {flag}")),
+            flag if flag.starts_with("--") => {
+                return Err(format!("{USAGE}\nunknown or repeated {flag}"));
+            }
             _ => positional.push(arg),
         }
     }
@@ -115,7 +117,8 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
 /// the compile-time native pins and helper pins plus the bundle's measured executable.
 fn admit_command(app: &str) -> Result<(), String> {
     let mut pins: Vec<package::Entry> =
-        serde_json::from_str(include_str!("../../package-pins.json")).map_err(|_| "pins_invalid")?;
+        serde_json::from_str(include_str!("../../package-pins.json"))
+            .map_err(|_| "pins_invalid")?;
     pins.extend(package::helper_pins().map_err(|e| format!("helper_pins:{e:?}"))?);
     let app = Path::new(app);
     let manifest = package::with_measured_executable(pins, &app.join("Contents/MacOS/mycelium"))

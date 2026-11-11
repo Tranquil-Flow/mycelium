@@ -60,8 +60,104 @@ pub fn is_adhoc_display(stderr: &str) -> bool {
     stderr.lines().any(|l| l.trim() == "Signature=adhoc")
 }
 
-/// Sign `app` ad-hoc (RED stub: not implemented yet).
+/// Sign `app` ad-hoc. `pinned` = the code entries admitted by pin (dylibs and helpers); every one
+/// must exist in the bundle with its pinned bytes before and after.
 pub fn adhoc(app: &Path, pinned: &[Entry]) -> Result<Value, SignError> {
-    let _unused = (app, pinned, json!({}), Kind::Helper, run as fn(&[&str], &Path) -> _);
-    Err(refuse("sign_not_implemented", "RED"))
+    let mut steps = Vec::new();
+    let path = |relative: &str| app.join(relative).display().to_string();
+    let mut code: Vec<&Entry> = pinned
+        .iter()
+        .filter(|e| matches!(e.kind, Kind::Dylib | Kind::Helper))
+        .collect();
+    code.sort_by(|a, b| a.path.cmp(&b.path));
+    if code.is_empty() {
+        return Err(refuse("sign_no_pinned_code", "no dylib or helper pin"));
+    }
+    let check_pins = |when: &str| -> Result<Vec<Value>, SignError> {
+        code.iter()
+            .map(|entry| {
+                let (bytes, sha256) =
+                    crate::bundle::measure(&app.join(&entry.path)).map_err(|e| {
+                        refuse("sign_pinned_unreadable", format!("{}: {e:?}", entry.path))
+                    })?;
+                if bytes != entry.bytes || sha256 != entry.sha256 {
+                    return Err(refuse(
+                        "sign_pinned_bytes_changed",
+                        format!(
+                            "{} {when}: {sha256} ({bytes} B), pinned {}",
+                            entry.path, entry.sha256
+                        ),
+                    ));
+                }
+                Ok(json!({"path": entry.path, "sha256": sha256, "bytes": bytes}))
+            })
+            .collect()
+    };
+    let pinned_before = check_pins("before signing")?;
+    for entry in &code {
+        let file = path(&entry.path);
+        let (verify, record) = run(&["--verify", "--strict", "-v", &file], app)?;
+        steps.push(record);
+        let (display, record) = run(&["-d", "-v", &file], app)?;
+        steps.push(record);
+        if !verify.status.success()
+            || !display.status.success()
+            || !is_adhoc_display(&String::from_utf8_lossy(&display.stderr))
+        {
+            return Err(refuse("pinned_code_not_adhoc_signed", &entry.path));
+        }
+    }
+    let exe = format!("Contents/MacOS/{}", crate::bundle::EXECUTABLE);
+    let exe_before = crate::bundle::measure(&app.join(&exe))
+        .map_err(|e| refuse("sign_executable_unreadable", format!("{e:?}")))?;
+    let app_text = app.display().to_string();
+    for target in [path(&exe), app_text.clone()] {
+        let (signed, record) = run(
+            &["--force", "--sign", "-", "--timestamp=none", &target],
+            app,
+        )?;
+        steps.push(record);
+        if !signed.status.success() {
+            return Err(refuse(
+                "codesign_failed",
+                target.replace(&app_text, "<app>"),
+            ));
+        }
+    }
+    let (verified, verify_record) =
+        run(&["--verify", "--deep", "--strict", "-vvv", &app_text], app)?;
+    steps.push(verify_record.clone());
+    if !verified.status.success() {
+        return Err(refuse(
+            "codesign_verify_failed",
+            verify_record["stderr"].to_string(),
+        ));
+    }
+    let (display, record) = run(&["-d", "-vvv", &app_text], app)?;
+    steps.push(record.clone());
+    if !display.status.success() || !is_adhoc_display(&String::from_utf8_lossy(&display.stderr)) {
+        return Err(refuse(
+            "bundle_signature_not_adhoc",
+            record["stderr"].to_string(),
+        ));
+    }
+    let pinned_after = check_pins("after signing")?;
+    let exe_after = crate::bundle::measure(&app.join(&exe))
+        .map_err(|e| refuse("sign_executable_unreadable", format!("{e:?}")))?;
+    let seal = crate::bundle::measure(&app.join(crate::package::CODE_RESOURCES_PATH))
+        .map_err(|e| refuse("sign_seal_missing", format!("{e:?}")))?;
+    Ok(json!({
+        "schema": "mycelium.l11.adhoc-signature.v1",
+        "spdx_license_identifier": "AGPL-3.0-only",
+        "trust_level": TRUST_LEVEL,
+        "oracle": "scripts/build_a13_macos.py:167-168 @ f4e366e98a1f705dfaf182897044500d290dbd7f",
+        "policy": "inside-out: pinned code keeps its verified ad-hoc linker signature (its bytes are admitted by pin at every start); the executable, then the bundle are signed ad-hoc; no --deep signing",
+        "pinned_code": pinned_before,
+        "pinned_code_after": pinned_after,
+        "executable": {"path": exe, "sha256_before": exe_before.1, "bytes_before": exe_before.0,
+                       "sha256_after": exe_after.1, "bytes_after": exe_after.0},
+        "code_resources": {"path": crate::package::CODE_RESOURCES_PATH, "sha256": seal.1, "bytes": seal.0},
+        "verify": verify_record,
+        "steps": steps,
+    }))
 }

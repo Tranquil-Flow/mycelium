@@ -47,9 +47,24 @@ fn bundle_with_probe(root: &Path, probe_path: &str) -> Manifest {
         schema: 1,
         entries: vec![
             entry(root, "Contents/MacOS/mycelium", Kind::Executable, b"exe"),
-            entry(root, "Contents/Frameworks/libmlx.dylib", Kind::Dylib, b"mlx"),
-            entry(root, "Contents/Frameworks/libmlxc.dylib", Kind::Dylib, b"mlxc"),
-            entry(root, "Contents/Frameworks/mlx.metallib", Kind::Metal, b"metal"),
+            entry(
+                root,
+                "Contents/Frameworks/libmlx.dylib",
+                Kind::Dylib,
+                b"mlx",
+            ),
+            entry(
+                root,
+                "Contents/Frameworks/libmlxc.dylib",
+                Kind::Dylib,
+                b"mlxc",
+            ),
+            entry(
+                root,
+                "Contents/Frameworks/mlx.metallib",
+                Kind::Metal,
+                b"metal",
+            ),
             entry(root, probe_path, Kind::Helper, b"probe"),
         ],
     }
@@ -167,14 +182,22 @@ fn assembly_places_only_the_pinned_probe_bytes_beside_the_executable() {
             expected_native_inputs_sha256: None,
         },
         &[(&probe, &pin)],
-    ).unwrap();
+    )
+    .unwrap();
     let placed = built.app.join(RESOURCE_PROBE_PATH);
     assert_eq!(fs::read(&placed).unwrap(), b"probe bytes");
     use std::os::unix::fs::PermissionsExt;
-    assert_eq!(fs::metadata(&placed).unwrap().permissions().mode() & 0o777, 0o755);
-    assert!(built.manifest.entries.iter().any(|e| e.path == pin.path
-        && e.kind == Kind::Helper
-        && e.sha256 == pin.sha256));
+    assert_eq!(
+        fs::metadata(&placed).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert!(
+        built
+            .manifest
+            .entries
+            .iter()
+            .any(|e| e.path == pin.path && e.kind == Kind::Helper && e.sha256 == pin.sha256)
+    );
     assert_eq!(package::verify(&built.app, &built.manifest), Ok(()));
 
     fs::write(&probe, b"other bytes").unwrap();
@@ -182,16 +205,20 @@ fn assembly_places_only_the_pinned_probe_bytes_beside_the_executable() {
     fs::create_dir(&out2).unwrap();
     assert_eq!(
         bundle::build_with_helpers(
-        &bundle::Spec {
-            executable: &exe,
-            native_inputs: &native,
-            icon: &icon,
-            out_dir: &out2,
-            expected_native_inputs_sha256: None,
-        },
-        &[(&probe, &pin)],
-    ).err(),
+            &bundle::Spec {
+                executable: &exe,
+                native_inputs: &native,
+                icon: &icon,
+                out_dir: &out2,
+                expected_native_inputs_sha256: None,
+            },
+            &[(&probe, &pin)],
+        )
+        .err(),
         Some(BundleError::SourceIdentity(probe.display().to_string()))
     );
-    assert!(!out2.join("Mycelium A13 Demo.app").exists(), "a refused build leaves no bundle");
+    assert!(
+        !out2.join("Mycelium A13 Demo.app").exists(),
+        "a refused build leaves no bundle"
+    );
 }

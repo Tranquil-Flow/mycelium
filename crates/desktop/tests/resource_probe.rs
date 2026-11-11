@@ -12,7 +12,12 @@ fn power_is_the_pmset_power_source_like_v014() {
     assert_eq!(power(Some(ac)), "external");
     assert_eq!(power(Some(battery)), "battery");
     // resource_probe.m:38-43 checks AC first.
-    assert_eq!(power(Some(b"Now drawing from 'AC Power' Now drawing from 'Battery Power'")), "external");
+    assert_eq!(
+        power(Some(
+            b"Now drawing from 'AC Power' Now drawing from 'Battery Power'"
+        )),
+        "external"
+    );
     assert_eq!(power(Some(b"Now drawing from 'UPS Power'\n")), "unknown");
     assert_eq!(power(Some(b"")), "unknown");
     // pmset did not run or exited non-zero.
@@ -25,7 +30,9 @@ fn power_is_the_pmset_power_source_like_v014() {
 fn thermal_is_the_four_process_info_states_and_unknown_otherwise() {
     assert_eq!(
         [-1, 0, 1, 2, 3, 4].map(thermal),
-        ["unknown", "nominal", "fair", "serious", "critical", "unknown"]
+        [
+            "unknown", "nominal", "fair", "serious", "critical", "unknown"
+        ]
     );
 }
 
@@ -92,7 +99,8 @@ fn the_built_helper_answers_an_admitted_observation_of_this_mac() {
 #[test]
 #[ignore = "needs the v0.1.4 helper binary path in MYCELIUM_V014_RESOURCE_PROBE"]
 fn the_helper_answers_what_the_v014_helper_answers_on_this_mac() {
-    let v014 = std::env::var_os("MYCELIUM_V014_RESOURCE_PROBE").expect("MYCELIUM_V014_RESOURCE_PROBE");
+    let v014 =
+        std::env::var_os("MYCELIUM_V014_RESOURCE_PROBE").expect("MYCELIUM_V014_RESOURCE_PROBE");
     let run = |exe: &std::ffi::OsStr| {
         let out = std::process::Command::new(exe).output().unwrap();
         assert!(out.status.success(), "{out:?}");
@@ -102,7 +110,10 @@ fn the_helper_answers_what_the_v014_helper_answers_on_this_mac() {
         let old = run(&v014);
         let new = run(env!("CARGO_BIN_EXE_resource_probe").as_ref());
         println!("v0.1.4 {old}v0.2   {new}");
-        assert_eq!(parse_probe_output(new.as_bytes()), parse_probe_output(old.as_bytes()));
+        assert_eq!(
+            parse_probe_output(new.as_bytes()),
+            parse_probe_output(old.as_bytes())
+        );
         assert_eq!(new, old, "byte-identical line");
     }
 }

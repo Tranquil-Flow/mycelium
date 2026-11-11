@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "path": "Contents/MacOS/native/resource_probe",
+    "kind": "Helper",
+    "bytes": 675344,
+    "sha256": "0a0e830ef626b9df020f23a4c5b550a57aec089ea1d1a1d87f8e5fdac424e2c7"
+  }
+]

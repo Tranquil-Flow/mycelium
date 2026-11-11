@@ -143,7 +143,7 @@ fn layout(manifest: &Manifest) -> Result<(), PackageError> {
                     || entry.path.starts_with("Contents/Resources/licenses/")
                     || entry.path == CODE_RESOURCES_PATH
             }
-            Kind::Helper => false,
+            Kind::Helper => entry.path == RESOURCE_PROBE_PATH,
         };
         if !kind_ok {
             return Err(PackageError::Layout);

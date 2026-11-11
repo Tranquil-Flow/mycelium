@@ -101,8 +101,17 @@ fn freeze_binds_the_commit_the_exe_and_the_bundle_bytes() {
     assert!(text(&frozen).contains(&manifest.sha256));
     assert_eq!(manifest.verify_bytes(), Ok(()));
     // A later byte change is visible to every consumer of the manifest.
-    fs::write(sandbox.app().join("Contents/Info.plist"), "<plist> </plist>").unwrap();
-    assert!(manifest.verify_bytes().unwrap_err().contains("package_bundle_mismatch"));
+    fs::write(
+        sandbox.app().join("Contents/Info.plist"),
+        "<plist> </plist>",
+    )
+    .unwrap();
+    assert!(
+        manifest
+            .verify_bytes()
+            .unwrap_err()
+            .contains("package_bundle_mismatch")
+    );
 }
 
 #[test]
@@ -112,14 +121,26 @@ fn freeze_refuses_another_commit_a_dirty_tree_and_an_existing_manifest() {
     let other = "0".repeat(40);
     let wrong = sandbox.freeze(&other, &out);
     assert_eq!(wrong.status.code(), Some(2), "{}", text(&wrong));
-    assert!(text(&wrong).contains("freeze_source_mismatch"), "{}", text(&wrong));
+    assert!(
+        text(&wrong).contains("freeze_source_mismatch"),
+        "{}",
+        text(&wrong)
+    );
     fs::write(sandbox.root.join("repo/untracked.txt"), "x").unwrap();
     let dirty = sandbox.freeze(&sandbox.head, &out);
-    assert!(text(&dirty).contains("freeze_tree_dirty"), "{}", text(&dirty));
+    assert!(
+        text(&dirty).contains("freeze_tree_dirty"),
+        "{}",
+        text(&dirty)
+    );
     assert!(!out.exists(), "a refused freeze writes nothing");
     fs::remove_file(sandbox.root.join("repo/untracked.txt")).unwrap();
     fs::write(&out, "{}").unwrap();
     let exists = sandbox.freeze(&sandbox.head, &out);
-    assert!(text(&exists).contains("freeze_out_unwritable"), "{}", text(&exists));
+    assert!(
+        text(&exists).contains("freeze_out_unwritable"),
+        "{}",
+        text(&exists)
+    );
     assert_eq!(fs::read_to_string(&out).unwrap(), "{}", "never overwritten");
 }

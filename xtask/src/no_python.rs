@@ -87,7 +87,8 @@ pub fn python_shebang(head: &[u8]) -> Option<String> {
     let rest = head.strip_prefix(b"#!")?;
     let line = rest.split(|b| *b == b'\n').next().unwrap_or_default();
     let text = String::from_utf8_lossy(line).to_ascii_lowercase();
-    text.contains("python").then(|| format!("#!{}", text.trim()))
+    text.contains("python")
+        .then(|| format!("#!{}", text.trim()))
 }
 
 /// Names of ZIP central-directory members anywhere in `bytes` (handles prefixed zipapps).
@@ -115,8 +116,7 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 fn python_member(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     let last = lower.rsplit('/').next().unwrap_or(&lower);
-    last == "__main__.py"
-        || [".py", ".pyc", ".pyo"].iter().any(|s| last.ends_with(s))
+    last == "__main__.py" || [".py", ".pyc", ".pyo"].iter().any(|s| last.ends_with(s))
 }
 
 fn io(path: &Path, error: &std::io::Error) -> String {
@@ -129,14 +129,60 @@ fn relative(root: &Path, path: &Path) -> String {
         .into_owned()
 }
 
-/// Every Python indicator below `root` (RED stub: finds nothing yet).
+/// Every Python indicator below `root` (a directory). Errors are IO failures, never findings.
 pub fn audit(root: &Path, mode: Mode) -> Result<Report, String> {
-    let _unused = (mode, relative as fn(&Path, &Path) -> String, io as fn(&Path, &std::io::Error) -> String);
-    fs::symlink_metadata(root).map_err(|e| io(root, &e))?;
-    Ok(Report::default())
+    let mut report = Report::default();
+    let meta = fs::symlink_metadata(root).map_err(|e| io(root, &e))?;
+    if !meta.is_dir() {
+        return Err(format!("NO-PYTHON: {} is not a directory", root.display()));
+    }
+    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let mut children: Vec<_> = fs::read_dir(&dir)
+            .map_err(|e| io(&dir, &e))?
+            .collect::<Result<_, _>>()
+            .map_err(|e| io(&dir, &e))?;
+        children.sort_by_key(fs::DirEntry::file_name);
+        for child in children {
+            let path = child.path();
+            let name = child.file_name().to_string_lossy().into_owned();
+            if mode == Mode::Repository && dir == root && (name == ".git" || name == "target") {
+                continue;
+            }
+            let rel = relative(root, &path);
+            let kind = child.file_type().map_err(|e| io(&path, &e))?;
+            if python_name(&name) {
+                report.findings.push(Finding {
+                    path: rel.clone(),
+                    code: "NP001",
+                    detail: format!("python-named component {name}"),
+                });
+            }
+            if kind.is_symlink() {
+                let target = fs::read_link(&path).map_err(|e| io(&path, &e))?;
+                if target
+                    .components()
+                    .any(|c| python_name(&c.as_os_str().to_string_lossy()))
+                {
+                    report.findings.push(Finding {
+                        path: rel,
+                        code: "NP001",
+                        detail: format!("symlink to {}", target.display()),
+                    });
+                }
+            } else if kind.is_dir() {
+                pending.push(path);
+            } else if kind.is_file() {
+                report.files += 1;
+                scan_file(&path, &rel, mode, &mut report)?;
+            }
+        }
+    }
+    report.findings.sort();
+    report.findings.dedup();
+    Ok(report)
 }
 
-#[allow(dead_code)]
 fn scan_file(path: &Path, rel: &str, mode: Mode, report: &mut Report) -> Result<(), String> {
     let mut file = File::open(path).map_err(|e| io(path, &e))?;
     let mut head = [0_u8; 512];
@@ -181,10 +227,7 @@ fn scan_file(path: &Path, rel: &str, mode: Mode, report: &mut Report) -> Result<
                 report.findings.push(Finding {
                     path: rel.into(),
                     code: "NP004",
-                    detail: format!(
-                        "python runtime bytes {:?}",
-                        String::from_utf8_lossy(needle)
-                    ),
+                    detail: format!("python runtime bytes {:?}", String::from_utf8_lossy(needle)),
                 });
             }
         }

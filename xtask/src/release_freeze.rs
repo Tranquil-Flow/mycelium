@@ -39,10 +39,80 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
 
 /// Freeze `exe` + `bundle` built from `repo` at `sha` into a new manifest file at `out`.
 /// Returns the manifest file's sha256.
-pub fn freeze(repo: &Path, sha: &str, exe: &Path, bundle: &Path, out: &Path) -> Result<String, String> {
-    let _unused = (repo, sha, exe, bundle, out, git as fn(&Path, &[&str]) -> _, json!({}), OpenOptions::new(), SystemTime::now(), UNIX_EPOCH);
-    let _also = (fs::canonicalize::<&Path>, release::file_sha256 as fn(&Path) -> _);
-    Err(fail("freeze_not_implemented", "RED"))
+pub fn freeze(
+    repo: &Path,
+    sha: &str,
+    exe: &Path,
+    bundle: &Path,
+    out: &Path,
+) -> Result<String, String> {
+    let head = git(repo, &["rev-parse", "HEAD"])?;
+    if head.trim() != sha {
+        return Err(fail(
+            "freeze_source_mismatch",
+            format!("{} is at {}, not {sha}", repo.display(), head.trim()),
+        ));
+    }
+    let dirty = git(repo, &["status", "--porcelain=v1", "--untracked-files=all"])?;
+    if !dirty.trim().is_empty() {
+        return Err(fail(
+            "freeze_tree_dirty",
+            format!(
+                "{} has uncommitted or untracked files: {}",
+                repo.display(),
+                dirty.lines().next().unwrap_or_default().trim()
+            ),
+        ));
+    }
+    let absolute = |p: &Path, what: &str| -> Result<PathBuf, String> {
+        fs::canonicalize(p).map_err(|e| {
+            fail(
+                "freeze_path_invalid",
+                format!("{what} {}: {}", p.display(), io_text(&e)),
+            )
+        })
+    };
+    let (exe, bundle) = (absolute(exe, "exe")?, absolute(bundle, "bundle")?);
+    if !fs::symlink_metadata(&exe).is_ok_and(|m| m.is_file()) {
+        return Err(fail(
+            "freeze_path_invalid",
+            format!("exe {} is not a regular file", exe.display()),
+        ));
+    }
+    let exe_sha256 = release::file_sha256(&exe)
+        .map_err(|e| fail("freeze_exe_unreadable", format!("{}: {e}", exe.display())))?;
+    let bundle_sha256 = release::bundle_digest(&bundle)?;
+    let frozen_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| fail("clock_invalid", e))?
+        .as_secs_f64()
+        .floor();
+    let text = serde_json::to_string_pretty(&json!({
+        "schema": 1,
+        "candidate": {"source_commit": sha, "exe_sha256": exe_sha256, "bundle_sha256": bundle_sha256},
+        "frozen_at": frozen_at,
+        "exe_path": exe.display().to_string(),
+        "bundle_dir": bundle.display().to_string(),
+    }))
+    .map_err(|e| fail("freeze_encode", e))?
+        + "\n";
+    // The machine's own parser must accept what was frozen, and the bytes must still match.
+    let manifest = release::Manifest::parse(&text, Path::new("/"))?;
+    manifest.verify_bytes()?;
+    let io = |e: std::io::Error| {
+        fail(
+            "freeze_out_unwritable",
+            format!("{}: {}", out.display(), io_text(&e)),
+        )
+    };
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(out)
+        .map_err(io)?;
+    file.write_all(text.as_bytes()).map_err(io)?;
+    file.sync_all().map_err(io)?;
+    Ok(manifest.sha256)
 }
 
 pub const FREEZE_USAGE: &str =
@@ -53,7 +123,11 @@ pub fn cli(args: &[String]) -> Result<u8, String> {
     let Some((sha, rest)) = args.split_first() else {
         return Err(usage(FREEZE_USAGE));
     };
-    if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if sha.len() != 40
+        || !sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return Err(usage("the candidate sha is 40 lower-case hex"));
     }
     let mut values = std::collections::BTreeMap::new();
@@ -62,7 +136,9 @@ pub fn cli(args: &[String]) -> Result<u8, String> {
         if !["--exe", "--bundle", "--out", "--repo"].contains(&key.as_str()) {
             return Err(usage(&format!("unknown option {key}; {FREEZE_USAGE}")));
         }
-        let value = it.next().ok_or_else(|| usage(&format!("{key} needs a value")))?;
+        let value = it
+            .next()
+            .ok_or_else(|| usage(&format!("{key} needs a value")))?;
         if values.insert(key.as_str(), PathBuf::from(value)).is_some() {
             return Err(usage(&format!("repeated option {key}")));
         }

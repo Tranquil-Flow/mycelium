@@ -7,12 +7,12 @@
 //! compiler at runtime, no write anywhere, no network traffic (a path monitor only reads state).
 #![allow(unsafe_code)]
 use desktop::resource_probe;
+use std::io::Write;
 use std::{
     ffi::{CStr, c_char, c_void},
     process::{Command, ExitCode, Stdio},
     sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
 };
-use std::io::Write;
 
 type Id = *mut c_void;
 type Sel = *mut c_void;
@@ -129,7 +129,9 @@ extern "C" fn drained(_context: *mut c_void) {}
 fn wait_nanos() -> i64 {
     budgets::BudgetId::ResourceProbeNetworkWait
         .span(budgets::Entries::ZERO)
-        .map_or(0, |s| i64::try_from(s.millis()).map_or(i64::MAX, |ms| ms.saturating_mul(1_000_000)))
+        .map_or(0, |s| {
+            i64::try_from(s.millis()).map_or(i64::MAX, |ms| ms.saturating_mul(1_000_000))
+        })
 }
 
 /// `networkObservation`: the latest update seen once the first one arrived or the wait ended.

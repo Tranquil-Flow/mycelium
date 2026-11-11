@@ -36,7 +36,11 @@ impl Drop for Tree {
 }
 fn clang(args: &[&str]) {
     let out = Command::new("/usr/bin/clang").args(args).output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 fn pin(app: &Path, path: &str, kind: Kind) -> Entry {
     let bytes = fs::read(app.join(path)).unwrap();
@@ -58,7 +62,11 @@ fn app(root: &Path) -> (PathBuf, Vec<Entry>) {
     let lib = root.join("l.c");
     fs::write(&lib, "int value(void){return 7;}\n").unwrap();
     let path = |p: &str| app.join(p).display().to_string();
-    clang(&["-o", &path("Contents/MacOS/mycelium"), source.to_str().unwrap()]);
+    clang(&[
+        "-o",
+        &path("Contents/MacOS/mycelium"),
+        source.to_str().unwrap(),
+    ]);
     clang(&["-o", &path(RESOURCE_PROBE_PATH), source.to_str().unwrap()]);
     clang(&[
         "-dynamiclib",
@@ -80,7 +88,11 @@ fn app(root: &Path) -> (PathBuf, Vec<Entry>) {
     (app, pins)
 }
 fn codesign(args: &[&str], target: &Path) -> std::process::Output {
-    Command::new(sign::CODESIGN).args(args).arg(target).output().unwrap()
+    Command::new(sign::CODESIGN)
+        .args(args)
+        .arg(target)
+        .output()
+        .unwrap()
 }
 
 #[test]
@@ -92,25 +104,53 @@ fn adhoc_signing_keeps_pinned_code_bytes_signs_the_executable_and_seals_the_bund
     assert!(receipt.is_ok(), "{receipt:?}");
     let receipt = receipt.unwrap();
     for entry in &pins {
-        assert_eq!(pin(&app, &entry.path, entry.kind.clone()).sha256, entry.sha256, "{}", entry.path);
+        assert_eq!(
+            pin(&app, &entry.path, entry.kind.clone()).sha256,
+            entry.sha256,
+            "{}",
+            entry.path
+        );
     }
-    assert_ne!(fs::read(app.join("Contents/MacOS/mycelium")).unwrap(), exe_before);
+    assert_ne!(
+        fs::read(app.join("Contents/MacOS/mycelium")).unwrap(),
+        exe_before
+    );
     assert!(app.join(CODE_RESOURCES_PATH).is_file());
     // Independently of the receipt: the whole bundle verifies, strictly and deeply, and is ad-hoc.
     let verify = codesign(&["--verify", "--deep", "--strict", "-vvv"], &app);
     assert!(verify.status.success(), "{verify:?}");
     let display = codesign(&["-d", "-v"], &app);
-    assert!(sign::is_adhoc_display(&String::from_utf8_lossy(&display.stderr)), "{display:?}");
+    assert!(
+        sign::is_adhoc_display(&String::from_utf8_lossy(&display.stderr)),
+        "{display:?}"
+    );
     assert_eq!(receipt["verify"]["exit"], 0);
     assert_eq!(receipt["trust_level"], sign::TRUST_LEVEL);
     let text = receipt.to_string();
-    assert!(!text.contains(&app.display().to_string()), "receipt paths are bundle-relative");
+    assert!(
+        !text.contains(&app.display().to_string()),
+        "receipt paths are bundle-relative"
+    );
     // No identity, timestamp or notarization appears in any command.
     for step in receipt["steps"].as_array().unwrap() {
-        let argv: Vec<&str> = step["argv"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
-        assert!(!argv.iter().any(|a| a.contains("Developer ID") || a.starts_with("--keychain") || *a == "--timestamp" || a.contains("notar")), "{argv:?}");
+        let argv: Vec<&str> = step["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a.as_str().unwrap())
+            .collect();
+        assert!(
+            !argv.iter().any(|a| a.contains("Developer ID")
+                || a.starts_with("--keychain")
+                || *a == "--timestamp"
+                || a.contains("notar")),
+            "{argv:?}"
+        );
         if argv.contains(&"--sign") {
-            assert_eq!(argv[argv.iter().position(|a| *a == "--sign").unwrap() + 1], "-");
+            assert_eq!(
+                argv[argv.iter().position(|a| *a == "--sign").unwrap() + 1],
+                "-"
+            );
             assert!(argv.contains(&"--timestamp=none"));
             assert!(!argv.contains(&"--deep"), "no --deep signing");
         }
@@ -131,10 +171,15 @@ fn pinned_code_without_a_valid_adhoc_signature_is_refused_before_anything_is_sig
     let exe_before = fs::read(app.join("Contents/MacOS/mycelium")).unwrap();
     let refused = sign::adhoc(&app, &pins);
     assert!(
-        refused.as_ref().is_err_and(|e| e.0.starts_with("pinned_code_not_adhoc_signed")),
+        refused
+            .as_ref()
+            .is_err_and(|e| e.0.starts_with("pinned_code_not_adhoc_signed")),
         "{refused:?}"
     );
-    assert_eq!(fs::read(app.join("Contents/MacOS/mycelium")).unwrap(), exe_before);
+    assert_eq!(
+        fs::read(app.join("Contents/MacOS/mycelium")).unwrap(),
+        exe_before
+    );
     assert!(!app.join(CODE_RESOURCES_PATH).exists());
 }
 
@@ -145,7 +190,9 @@ fn pinned_code_with_other_bytes_is_refused() {
     pins[1].sha256 = "0".repeat(64);
     let refused = sign::adhoc(&app, &pins);
     assert!(
-        refused.as_ref().is_err_and(|e| e.0.starts_with("sign_pinned_bytes_changed")),
+        refused
+            .as_ref()
+            .is_err_and(|e| e.0.starts_with("sign_pinned_bytes_changed")),
         "{refused:?}"
     );
     assert!(!app.join(CODE_RESOURCES_PATH).exists());

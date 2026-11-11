@@ -266,7 +266,6 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
 /// each source must have exactly its pinned bytes and only system/bundle links; it is copied to
 /// the pinned path with mode 0755 and listed in the manifest as `Kind::Helper`.
 pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Built, BundleError> {
-    let helpers: &[(&Path, &Entry)] = &helpers[..0];
     let mut limited = Vec::new();
     std::fs::File::open(spec.native_inputs)
         .map_err(io)?
@@ -405,9 +404,11 @@ pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Bu
             }
         }
         for (_, pin) in helpers {
-            if !manifest.entries.iter().any(|e| {
-                e.path == pin.path && e.sha256 == pin.sha256 && e.bytes == pin.bytes
-            }) {
+            if !manifest
+                .entries
+                .iter()
+                .any(|e| e.path == pin.path && e.sha256 == pin.sha256 && e.bytes == pin.bytes)
+            {
                 return Err(BundleError::SourceIdentity(pin.path.clone()));
             }
         }

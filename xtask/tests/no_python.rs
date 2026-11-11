@@ -41,13 +41,17 @@ fn zip(name: &str) -> Vec<u8> {
     let n = u16::try_from(name.len()).unwrap();
     let mut out = Vec::new();
     out.extend_from_slice(b"PK\x03\x04");
-    out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    out.extend_from_slice(&[
+        20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
     out.extend_from_slice(&n.to_le_bytes());
     out.extend_from_slice(&[0, 0]);
     out.extend_from_slice(name.as_bytes());
     let central = out.len();
     out.extend_from_slice(b"PK\x01\x02");
-    out.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    out.extend_from_slice(&[
+        20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
     out.extend_from_slice(&n.to_le_bytes());
     out.extend_from_slice(&[0; 16]);
     out.extend_from_slice(name.as_bytes());
@@ -71,19 +75,78 @@ fn codes(root: &Path, mode: Mode) -> Vec<(String, &'static str)> {
 /// Reject fixtures: (fixture, path, bytes, expected finding code). One indicator each.
 fn reject_fixtures() -> Vec<(&'static str, &'static str, Vec<u8>, &'static str)> {
     vec![
-        ("py-source", "tools/build.py", b"print(1)\n".to_vec(), "NP001"),
-        ("pyc", "lib/__init__.cpython-314.pyc", vec![0x0d, 0x0a], "NP001"),
+        (
+            "py-source",
+            "tools/build.py",
+            b"print(1)\n".to_vec(),
+            "NP001",
+        ),
+        (
+            "pyc",
+            "lib/__init__.cpython-314.pyc",
+            vec![0x0d, 0x0a],
+            "NP001",
+        ),
         ("pyo", "lib/old.pyo", vec![1], "NP001"),
         ("pycache", "lib/__pycache__/m.bin", vec![1], "NP001"),
-        ("dist-info", "site/x-1.0.dist-info/METADATA", b"Name: x\n".to_vec(), "NP001"),
-        ("framework", "Contents/Frameworks/Python.framework/Versions/3.14/Resources/Info.plist", b"<plist/>".to_vec(), "NP001"),
-        ("libpython", "Contents/Frameworks/libpython3.14.dylib", vec![0xcf, 0xfa, 0xed, 0xfe], "NP001"),
-        ("interpreter", "bin/python3.14", vec![0xcf, 0xfa, 0xed, 0xfe], "NP001"),
-        ("env-shebang", "scripts/run", b"#!/usr/bin/env python3\nimport sys\n".to_vec(), "NP002"),
-        ("abs-shebang", "scripts/tool.sh", b"#!/usr/bin/python -u\n".to_vec(), "NP002"),
-        ("zip-member", "release/app.zip", zip("pkg/__main__.py"), "NP003"),
-        ("zipapp", "release/tool.pyz.bin", [b"#!/bin/sh\n".to_vec(), zip("m.pyc")].concat(), "NP003"),
-        ("pyinstaller", "release/frozen.bin", [b"#!/bin/sh\nexit 0\n".to_vec(), b"MEI\x0c\x0b\x0a\x0b\x0e".to_vec()].concat(), "NP003"),
+        (
+            "dist-info",
+            "site/x-1.0.dist-info/METADATA",
+            b"Name: x\n".to_vec(),
+            "NP001",
+        ),
+        (
+            "framework",
+            "Contents/Frameworks/Python.framework/Versions/3.14/Resources/Info.plist",
+            b"<plist/>".to_vec(),
+            "NP001",
+        ),
+        (
+            "libpython",
+            "Contents/Frameworks/libpython3.14.dylib",
+            vec![0xcf, 0xfa, 0xed, 0xfe],
+            "NP001",
+        ),
+        (
+            "interpreter",
+            "bin/python3.14",
+            vec![0xcf, 0xfa, 0xed, 0xfe],
+            "NP001",
+        ),
+        (
+            "env-shebang",
+            "scripts/run",
+            b"#!/usr/bin/env python3\nimport sys\n".to_vec(),
+            "NP002",
+        ),
+        (
+            "abs-shebang",
+            "scripts/tool.sh",
+            b"#!/usr/bin/python -u\n".to_vec(),
+            "NP002",
+        ),
+        (
+            "zip-member",
+            "release/app.zip",
+            zip("pkg/__main__.py"),
+            "NP003",
+        ),
+        (
+            "zipapp",
+            "release/tool.pyz.bin",
+            [b"#!/bin/sh\n".to_vec(), zip("m.pyc")].concat(),
+            "NP003",
+        ),
+        (
+            "pyinstaller",
+            "release/frozen.bin",
+            [
+                b"#!/bin/sh\nexit 0\n".to_vec(),
+                b"MEI\x0c\x0b\x0a\x0b\x0e".to_vec(),
+            ]
+            .concat(),
+            "NP003",
+        ),
     ]
 }
 
@@ -92,13 +155,19 @@ fn every_reject_fixture_is_found_in_a_tree_and_in_a_bundle() {
     for (name, path, bytes, code) in reject_fixtures() {
         for mode in [Mode::Repository, Mode::Bundle] {
             let tree = Tree::new();
-            tree.file("README.md", b"clean neighbour\n").file(path, &bytes);
+            tree.file("README.md", b"clean neighbour\n")
+                .file(path, &bytes);
             let found = codes(&tree.0, mode);
             assert!(
-                found.iter().any(|(p, c)| path.starts_with(p.as_str()) && *c == code),
+                found
+                    .iter()
+                    .any(|(p, c)| path.starts_with(p.as_str()) && *c == code),
                 "{name} ({mode:?}): expected {code} at {path}, found {found:?}"
             );
-            assert!(found.iter().all(|(p, _)| p != "README.md"), "{name}: {found:?}");
+            assert!(
+                found.iter().all(|(p, _)| p != "README.md"),
+                "{name}: {found:?}"
+            );
         }
     }
 }
@@ -108,7 +177,10 @@ fn a_symlink_to_an_interpreter_is_a_finding() {
     let tree = Tree::new();
     tree.file("bin/keep", b"x");
     std::os::unix::fs::symlink("/usr/bin/python3", tree.0.join("bin/py")).unwrap();
-    assert_eq!(codes(&tree.0, Mode::Bundle), [("bin/py".to_string(), "NP001")]);
+    assert_eq!(
+        codes(&tree.0, Mode::Bundle),
+        [("bin/py".to_string(), "NP001")]
+    );
 }
 
 #[test]
@@ -116,7 +188,11 @@ fn runtime_bytes_inside_a_shipped_binary_are_found_in_bundle_mode_only() {
     let tree = Tree::new();
     tree.file(
         "Contents/MacOS/app",
-        &[&[0xcf, 0xfa, 0xed, 0xfe][..], b"....@rpath/libpython3.14.dylib....Py_Initialize"].concat(),
+        &[
+            &[0xcf, 0xfa, 0xed, 0xfe][..],
+            b"....@rpath/libpython3.14.dylib....Py_Initialize",
+        ]
+        .concat(),
     );
     let found = codes(&tree.0, Mode::Bundle);
     assert_eq!(
@@ -134,17 +210,29 @@ fn runtime_bytes_inside_a_shipped_binary_are_found_in_bundle_mode_only() {
 #[test]
 fn accept_fixtures_are_clean_in_both_modes() {
     let tree = Tree::new();
-    tree.file("docs/python-free.md", b"v0.2 has zero Python; v0.1.4 used python3 and libpython.\n")
-        .file("scripts/build.sh", b"#!/bin/bash\necho python is not used\n")
-        .file("data/paths.json", b"{\"oracle\": \"mycelium_a13_macos/app.py:84\"}\n")
-        .file("src/pyramid.rs", b"// pyramid\n")
-        .file("assets/app.zip", &zip("index.html"))
-        .file("crates/x/happy.pyramid", b"x")
-        .file("Contents/Resources/typing.pyi.txt", b"x");
+    tree.file(
+        "docs/python-free.md",
+        b"v0.2 has zero Python; v0.1.4 used python3 and libpython.\n",
+    )
+    .file(
+        "scripts/build.sh",
+        b"#!/bin/bash\necho python is not used\n",
+    )
+    .file(
+        "data/paths.json",
+        b"{\"oracle\": \"mycelium_a13_macos/app.py:84\"}\n",
+    )
+    .file("src/pyramid.rs", b"// pyramid\n")
+    .file("assets/app.zip", &zip("index.html"))
+    .file("crates/x/happy.pyramid", b"x")
+    .file("Contents/Resources/typing.pyi.txt", b"x");
     assert_eq!(codes(&tree.0, Mode::Repository), []);
     let bundle = Tree::new();
     bundle
-        .file("Contents/MacOS/mycelium", &[0xcf, 0xfa, 0xed, 0xfe, 0, 1, 2])
+        .file(
+            "Contents/MacOS/mycelium",
+            &[0xcf, 0xfa, 0xed, 0xfe, 0, 1, 2],
+        )
         .file("Contents/Resources/licenses/01-LICENSE", b"MIT\n")
         .file("Contents/Info.plist", b"<plist/>");
     assert_eq!(codes(&bundle.0, Mode::Bundle), []);
