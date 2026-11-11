@@ -224,15 +224,17 @@ before full integration; preserve F16's missing loaded-profile p99 blocker.
 
 ## Local unsigned bundle (round 4; not a release)
 
-`desktop-package bundle` assembles `Mycelium A13 Demo.app` into a caller-owned output
+`desktop-package bundle` assembles `Mycelium.app` into a caller-owned output
 directory, exclusively (refuses an existing app, removes a failed one). It never installs,
 signs, notarizes, registers or launches anything, and its tests refuse any bundle path outside a
 `.hermes/cache/scratch/` directory.
 
-- **Identity (policy):** display/bundle name, bundle identifier `org.mycelium.a13-macos-demo`,
+- **Identity (owner ruling 25):** v0.2 has its own name `Mycelium` and bundle identifier
+  `org.mycelium.app`, so it sits beside an installed v0.1.4 (`Mycelium A13 Demo`,
+  `org.mycelium.a13-macos-demo`) and never reads, writes or deletes its files (ruling 20).
   `icon-windowed.icns` (byte-identical to the certified v0.1.4 icon), `LSMinimumSystemVersion
-  15.6.1` and the Info.plist key set are the released v0.1.4 values so a later installer can upgrade
-  in place. Differences, named in a test: executable `mycelium` and version `0.2.0`. Window title
+  15.6.1` and the Info.plist key set are v0.1.4's. Differences, named in a test: name, bundle
+  identifier, executable `mycelium` and version `0.2.0`. Window title
   `Mycelium`. The packaged Tauri identity is `tauri.packaged.conf.json`, merged via `TAURI_CONFIG`
   at build time; `tauri.conf.json` stays the development identity.
 - **Native payload:** `libjaccl/libmlx/libmlxc.dylib` and `mlx.metallib` are copied from the
@@ -276,8 +278,8 @@ source $SCRATCH/env.sh   # (pre-round-9 manual recipe) CARGO_TARGET_DIR, MACOSX_
                           # TAURI_CONFIG="$(cat crates/desktop/tauri.packaged.conf.json)"
 cargo build --release --offline --locked -j 2 -p desktop --features tauri-shell --bin mycelium --bin desktop-package
 desktop-package bundle target/release/mycelium evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns OUT_DIR
-MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium A13 Demo.app" cargo test --release --offline --locked -j 2 -p desktop --test bundle_gate -- --ignored --test-threads=1
-MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium A13 Demo.app" cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell --test bundle_smoke -- --ignored --nocapture --test-threads=1
+MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium.app" cargo test --release --offline --locked -j 2 -p desktop --test bundle_gate -- --ignored --test-threads=1
+MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium.app" cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell --test bundle_smoke -- --ignored --nocapture --test-threads=1
 ```
 
 `bundle_smoke` executes only the scratch bundle's own executable (no `open`, no name or bundle-id
@@ -310,9 +312,11 @@ mycelium (--install [--bundle DIR] | --uninstall [--delete-identity-and-state] |
   fixtures refused with the install root, Applications folder and state byte-identical afterwards.
   `finalize` writes the documents with a key FILE (32 raw bytes, never printed); tests use throw-away
   seeds, the production signer is never read.
-- **Same layout as v0.1.4** under `HOME`: programs `Library/Application Support/Mycelium/programs/<version>`
-  (+ `versions.json`, `.install.lock`), link `APPLICATIONS/Mycelium A13.app`, state
-  `Library/Application Support/Mycelium A13 macOS Demo`; the record is v0.1.4's, kept as JSON so unknown
+- **v0.1.4's layout under v0.2's own folder** (ruling 25) under `HOME`: programs
+  `Library/Application Support/org.mycelium.app/programs/<version>` (+ `versions.json`,
+  `.install.lock`), link `APPLICATIONS/Mycelium.app`, state `Library/Application
+  Support/org.mycelium.app/state` (v0.1.4: `Mycelium/programs`, `Mycelium A13.app`, `Mycelium A13
+  macOS Demo`; test `ruling20_v02_install_and_model_free_launch_beside_v014_touch_no_v014_path`); the record is v0.1.4's, kept as JSON so unknown
   fields survive; owner-only checks are v0.1.4's (directory exactly 0700, record exactly 0600, one link,
   no link on the path; missing parents are made 0700).
 - **Order (v0.1.4's):** verify before any write; lock; `<version>.partial` staging by `/usr/bin/ditto`;
@@ -323,7 +327,7 @@ mycelium (--install [--bundle DIR] | --uninstall [--delete-identity-and-state] |
   even the running version (deferred self-removal as v0.1.4: `running_version_removed_after_exit`),
   and keeps state unless `--delete-identity-and-state`.
 - **`Install Mycelium.command`** is v0.1.4's script byte for byte except the executable name
-  (`mycelium`), pinned by the sha256 of the real v0.1.2 release's script. It runs
+  (`mycelium`) and the app name (`Mycelium.app`, ruling 25), pinned by the sha256 of the real v0.1.2 release's script. It runs
   `<app>/Contents/MacOS/mycelium --install --bundle <folder>`.
 - **Entry routing (`entry`)**: a bare launch (or `-psn_*`) outside `programs/<version>` prints a
   `launcher_refused` event, shows an alert (`MYCELIUM_LAUNCH_ALERT=off` suppresses it for scripted

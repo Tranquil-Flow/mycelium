@@ -19,7 +19,7 @@ use std::{
 };
 
 static SEQ: AtomicUsize = AtomicUsize::new(0);
-const APP: &str = "Mycelium A13 Demo.app";
+const APP: &str = "Mycelium.app";
 const EXE: &str = "Contents/MacOS/mycelium";
 const QUARANTINE: &str = "com.apple.quarantine";
 const QVALUE: &str = "0083;6700f000;Safari;F00DF00D-0000-0000-0000-000000000000";
@@ -54,7 +54,7 @@ const STUB: &str = r#"#!/bin/sh
 BUNDLE="$3"
 OUT="$BUNDLE/ran.txt"
 { printf 'args:'; for a in "$@"; do printf ' [%s]' "$a"; done; echo; } > "$OUT"
-for item in "$BUNDLE/Mycelium A13 Demo.app" "$BUNDLE/Mycelium A13 Demo.app/Contents/Resources/data.bin"; do
+for item in "$BUNDLE/Mycelium.app" "$BUNDLE/Mycelium.app/Contents/Resources/data.bin"; do
   if "__FAKE_XATTR__" -p __ATTRIBUTE__ "$item" >/dev/null 2>&1; then echo quarantined >> "$OUT"; else echo clean >> "$OUT"; fi
 done
 echo '{"action": "install", "version": "0.1.0"}'

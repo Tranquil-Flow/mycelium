@@ -4,7 +4,7 @@
 //! before (`Mycelium A13 Demo` / `org.mycelium.a13-macos-demo`, `~/Applications/Mycelium A13.app`,
 //! `Application Support/Mycelium/programs`, `Application Support/Mycelium A13 macOS Demo`).
 use desktop::{bundle, install, launch_location};
-use std::path::Path;
+use std::path::PathBuf;
 
 /// Every name v0.1.4 creates under a user's home (installer.py:60-62,117,121; __main__.py:67;
 /// finalize_a13_macos.py:135; scripts/a13_operator: `Mycelium A13 Demo/`) @ f4e366e9.
@@ -40,8 +40,10 @@ fn v02_has_its_own_applications_entry_payload_directory_and_data_folder() {
     assert_eq!(install::APPLICATIONS_ENTRY, "Mycelium.app");
     assert_eq!(install::PAYLOAD_DIRECTORY, "Mycelium.app");
     assert_eq!(install::SUPPORT_FOLDER, "org.mycelium.app");
-    let home = Path::new("/h");
-    let roots = install::Roots::new(home, Path::new("/h/Applications")).unwrap();
+    // The app's own roots (`$HOME`, read only: asking creates nothing).
+    let roots = install::Roots::for_current_user().unwrap();
+    let home_buf = PathBuf::from(std::env::var("HOME").unwrap());
+    let home = home_buf.as_path();
     let support = home.join("Library/Application Support/org.mycelium.app");
     assert_eq!(roots.programs(), support.join("programs"));
     assert_eq!(roots.state(), support.join("state"));
@@ -51,7 +53,7 @@ fn v02_has_its_own_applications_entry_payload_directory_and_data_folder() {
     );
     assert_eq!(
         roots.application_entry(),
-        Path::new("/h/Applications/Mycelium.app")
+        home.join("Applications/Mycelium.app")
     );
     // No v0.2 path component is, or starts like, a name v0.1.4 creates.
     for path in [roots.programs(), roots.state(), roots.application_entry()] {

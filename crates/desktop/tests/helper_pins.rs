@@ -218,7 +218,7 @@ fn assembly_places_only_the_pinned_probe_bytes_beside_the_executable() {
         Some(BundleError::SourceIdentity(probe.display().to_string()))
     );
     assert!(
-        !out2.join("Mycelium A13 Demo.app").exists(),
+        !out2.join("Mycelium.app").exists(),
         "a refused build leaves no bundle"
     );
 }

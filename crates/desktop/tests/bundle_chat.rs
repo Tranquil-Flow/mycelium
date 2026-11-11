@@ -7,7 +7,7 @@
 //! the cleanup receipts and that every owned process is gone.
 //!
 //! ```text
-//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium A13 Demo.app" \
+//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium.app" \
 //! MYCELIUM_MODEL_SNAPSHOT="<dir with model.safetensors and tokenizer.json>" \
 //!   cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell \
 //!   --test bundle_chat -- --ignored --nocapture --test-threads=1
@@ -75,7 +75,7 @@ fn installed_bundle_streams_a_native_token_into_the_page_then_stop_and_apple_eve
     assert_eq!(pressure_level(), "1", "memory safety gate before launch");
 
     let (fake, fake_home, executable) = install_scratch(&app, "v02-l11-chat");
-    let state = fake_home.join("Library/Application Support/Mycelium A13 macOS Demo");
+    let state = fake_home.join("Library/Application Support/org.mycelium.app/state");
     let target = state
         .join(format!("model-source-{}", &REVISION[..12]))
         .join("models--Qwen--Qwen2.5-0.5B-Instruct/snapshots")

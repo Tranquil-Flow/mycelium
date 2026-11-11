@@ -43,14 +43,14 @@ impl Sandbox {
         git(&["add", "README"]);
         git(&["commit", "-q", "-m", "x"]);
         let head = git(&["rev-parse", "HEAD"]).trim().to_string();
-        let app = root.join("out/Mycelium A13 Demo.app/Contents/MacOS");
+        let app = root.join("out/Mycelium.app/Contents/MacOS");
         fs::create_dir_all(&app).unwrap();
         fs::write(app.join("mycelium"), "exe bytes").unwrap();
         fs::write(app.join("../Info.plist"), "<plist/>").unwrap();
         Self { root, head }
     }
     fn app(&self) -> PathBuf {
-        self.root.join("out/Mycelium A13 Demo.app")
+        self.root.join("out/Mycelium.app")
     }
     fn exe(&self) -> PathBuf {
         self.app().join("Contents/MacOS/mycelium")

@@ -307,19 +307,16 @@ fn link_target(tree: &Tree) -> PathBuf {
 // ---- layout and the safety rail -------------------------------------------------------
 
 #[test]
-fn layout_is_the_v014_layout_under_the_given_root() {
+fn layout_is_v02s_own_layout_under_the_given_root_ruling25() {
     let tree = Tree::new();
     let roots = tree.roots();
     let support = tree.path("home/Library/Application Support");
-    assert_eq!(roots.programs(), support.join("Mycelium/programs"));
-    assert_eq!(roots.state(), support.join("Mycelium A13 macOS Demo"));
-    assert_eq!(
-        roots.application_entry(),
-        tree.path("apps/Mycelium A13.app")
-    );
+    assert_eq!(roots.programs(), support.join("org.mycelium.app/programs"));
+    assert_eq!(roots.state(), support.join("org.mycelium.app/state"));
+    assert_eq!(roots.application_entry(), tree.path("apps/Mycelium.app"));
     assert_eq!(
         roots.version_dir("0.2.0"),
-        support.join("Mycelium/programs/0.2.0")
+        support.join("org.mycelium.app/programs/0.2.0")
     );
 }
 
@@ -434,7 +431,7 @@ fn every_check_refuses_before_any_write() {
             "payload bytes changed after the package was described",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                let exe = bundle.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+                let exe = bundle.join("Mycelium.app/Contents/MacOS/mycelium");
                 fs::write(exe, b"tampered").unwrap();
                 bundle
             }),
@@ -445,11 +442,7 @@ fn every_check_refuses_before_any_write() {
             "an added file the description does not list",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                put(
-                    &bundle.join("Mycelium A13 Demo.app/Contents/extra"),
-                    b"x",
-                    0o644,
-                );
+                put(&bundle.join("Mycelium.app/Contents/extra"), b"x", 0o644);
                 bundle
             }),
             mac(),
@@ -479,8 +472,7 @@ fn every_check_refuses_before_any_write() {
             "payload executable missing",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                fs::remove_file(bundle.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium"))
-                    .unwrap();
+                fs::remove_file(bundle.join("Mycelium.app/Contents/MacOS/mycelium")).unwrap();
                 bundle
             }),
             mac(),
@@ -490,11 +482,7 @@ fn every_check_refuses_before_any_write() {
             "an absolute link in the payload",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                symlink(
-                    "/etc/hosts",
-                    bundle.join("Mycelium A13 Demo.app/Contents/abs"),
-                )
-                .unwrap();
+                symlink("/etc/hosts", bundle.join("Mycelium.app/Contents/abs")).unwrap();
                 bundle
             }),
             mac(),
@@ -504,11 +492,7 @@ fn every_check_refuses_before_any_write() {
             "a link that escapes the bundle",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                symlink(
-                    "../../../x",
-                    bundle.join("Mycelium A13 Demo.app/Contents/esc"),
-                )
-                .unwrap();
+                symlink("../../../x", bundle.join("Mycelium.app/Contents/esc")).unwrap();
                 bundle
             }),
             mac(),
@@ -518,11 +502,7 @@ fn every_check_refuses_before_any_write() {
             "a dangling link",
             Box::new(|tree, pkg| {
                 let bundle = make(tree, pkg);
-                symlink(
-                    "nowhere",
-                    bundle.join("Mycelium A13 Demo.app/Contents/dangling"),
-                )
-                .unwrap();
+                symlink("nowhere", bundle.join("Mycelium.app/Contents/dangling")).unwrap();
                 bundle
             }),
             mac(),
@@ -809,11 +789,9 @@ fn leftovers_of_a_killed_installer_are_cleaned_by_the_next_run() {
     let tree = Tree::new();
     let roots = tree.roots();
     private_programs(&roots);
-    fs::create_dir_all(roots.programs().join("0.2.0.partial/Mycelium A13 Demo.app")).unwrap();
+    fs::create_dir_all(roots.programs().join("0.2.0.partial/Mycelium.app")).unwrap();
     fs::write(
-        roots
-            .programs()
-            .join("0.2.0.partial/Mycelium A13 Demo.app/half"),
+        roots.programs().join("0.2.0.partial/Mycelium.app/half"),
         b"x",
     )
     .unwrap();
@@ -943,7 +921,7 @@ fn a_recorded_version_damaged_on_disk_is_repaired_from_the_verified_bundle_keepi
     install::install(&bundle, &roots, &h.seams).unwrap();
     let damaged = roots
         .version_dir("0.2.0")
-        .join("Mycelium A13 Demo.app/Contents/Resources/data.bin");
+        .join("Mycelium.app/Contents/Resources/data.bin");
     fs::write(&damaged, b"bit rot").unwrap();
     install::install(&bundle, &roots, &h.seams).unwrap();
     assert_eq!(
@@ -957,7 +935,7 @@ fn a_recorded_version_damaged_on_disk_is_repaired_from_the_verified_bundle_keepi
         .find(|p| p.file_name().unwrap().to_string_lossy().contains(".stale-"))
         .expect("damaged copy kept for inspection");
     assert_eq!(
-        fs::read(aside.join("Mycelium A13 Demo.app/Contents/Resources/data.bin")).unwrap(),
+        fs::read(aside.join("Mycelium.app/Contents/Resources/data.bin")).unwrap(),
         b"bit rot"
     );
 }
@@ -1033,11 +1011,7 @@ fn an_app_the_user_put_in_applications_is_never_replaced_and_v014s_residue_is_ch
         assert_eq!(record(&tree)["current"]["version"], "0.2.0");
         // A bundle with another defect still reports that defect first (no early register check).
         let tampered = make(&tree, &Pkg::new("bad", "0.2.1"));
-        fs::write(
-            tampered.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium"),
-            b"x",
-        )
-        .unwrap();
+        fs::write(tampered.join("Mycelium.app/Contents/MacOS/mycelium"), b"x").unwrap();
         assert_eq!(
             code(install::install(&tampered, &roots, &ok().seams)),
             "package_digest_mismatch"
@@ -1127,7 +1101,7 @@ fn rollback_refusals_change_nothing() {
             "previous tampered",
             |dir: &Path| {
                 fs::write(
-                    dir.join("Mycelium A13 Demo.app/Contents/Resources/data.bin"),
+                    dir.join("Mycelium.app/Contents/Resources/data.bin"),
                     b"evil",
                 )
                 .unwrap()
@@ -1248,11 +1222,7 @@ fn user_state_survives_install_upgrade_rollback_refusals_and_uninstall_byte_for_
     assert!(install::install(&make(&tree, &hostile), &roots, &h.seams).is_err());
     same("refused upgrade (publisher)");
     let tampered = make(&tree, &Pkg::new("bad2", "0.2.3"));
-    fs::write(
-        tampered.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium"),
-        b"x",
-    )
-    .unwrap();
+    fs::write(tampered.join("Mycelium.app/Contents/MacOS/mycelium"), b"x").unwrap();
     assert!(install::install(&tampered, &roots, &h.seams).is_err());
     same("refused upgrade (tampered)");
     let mut failing = ok();
@@ -1454,9 +1424,12 @@ fn missing_parents_are_created_owner_only_like_private_directory_create() {
     let mode = |p: &str| fs::metadata(tree.path(p)).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode("home/Library"), 0o700);
     assert_eq!(mode("home/Library/Application Support"), 0o700);
-    assert_eq!(mode("home/Library/Application Support/Mycelium"), 0o700);
     assert_eq!(
-        mode("home/Library/Application Support/Mycelium A13 macOS Demo"),
+        mode("home/Library/Application Support/org.mycelium.app"),
+        0o700
+    );
+    assert_eq!(
+        mode("home/Library/Application Support/org.mycelium.app/state"),
         0o700
     );
 }
@@ -1493,7 +1466,7 @@ fn uninstall_run_from_the_installed_version_unlinks_it_while_running_like_v014()
     install::install(&make(&tree, &Pkg::new("b2", "0.2.1")), &roots, &h.seams).unwrap();
     let running = roots
         .version_dir("0.2.1")
-        .join("Mycelium A13 Demo.app/Contents/MacOS/mycelium")
+        .join("Mycelium.app/Contents/MacOS/mycelium")
         .canonicalize()
         .unwrap();
     h.seams.running_executable = Box::new(move || running.clone());
@@ -1504,7 +1477,7 @@ fn uninstall_run_from_the_installed_version_unlinks_it_while_running_like_v014()
     assert_eq!(report["version"], "0.2.1");
     assert_eq!(
         report["removed_entries"],
-        serde_json::json!(["Mycelium A13.app"])
+        serde_json::json!(["Mycelium.app"])
     );
     assert!(
         !roots.programs().exists(),

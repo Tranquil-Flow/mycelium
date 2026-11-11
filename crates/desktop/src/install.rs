@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Per-user install / upgrade / rollback / uninstall, ported from the v0.1.4 macOS installer
 //! (`mycelium_a13_packaging/installer_core.py` and `mycelium_a13_macos/installer.py` at
-//! f4e366e9). Same layout, same record file, same verify-before-write order, same refusal codes,
+//! f4e366e9). Same layout (under v0.2's own folder, owner ruling 25), same record file, same verify-before-write order, same refusal codes,
 //! and the same signed package documents (`crate::docs`: Ed25519 manifest, install source, key pin,
 //! rollback floor). A same-version reinstall drops the rollback target, an uninstall with a damaged
 //! record refuses, the register-target check runs after the install like v0.1.4's, the running
@@ -25,10 +25,16 @@ use std::{
 };
 
 pub const PROTOCOL: &str = "mycelium.a13_macos_installer.v1";
-pub const PAYLOAD_DIRECTORY: &str = "Mycelium A13 Demo.app";
-pub const APPLICATIONS_ENTRY: &str = "Mycelium A13.app";
-/// RED stub (ruling 25): v0.2's own folder under `~/Library/Application Support`.
-pub const SUPPORT_FOLDER: &str = "Mycelium";
+// Owner ruling 25: v0.2 has its own identity so it sits beside v0.1.4 and never touches its
+// files (ruling 20). v0.1.4 uses `~/Applications/Mycelium A13.app`, the payload `Mycelium A13
+// Demo.app`, and `Application Support/{Mycelium/{programs,service}, Mycelium A13 macOS Demo,
+// Mycelium A13 Demo}`; every v0.2 name below differs from all of them, and the data folder does
+// not even begin with `Mycelium`, so no prefix match on v0.1.4's folders can include it.
+pub const PAYLOAD_DIRECTORY: &str = "Mycelium.app";
+pub const APPLICATIONS_ENTRY: &str = "Mycelium.app";
+/// v0.2's one folder under `~/Library/Application Support` (named by its bundle identifier, the
+/// macOS convention); it holds `programs/` and `state/`.
+pub const SUPPORT_FOLDER: &str = "org.mycelium.app";
 pub const FIRST_USE_PIN: &str = docs::FIRST_USE_PIN;
 /// v0.1.4 (PyInstaller) and v0.2 executables; the only names an installed payload may carry.
 const EXECUTABLES: [&str; 2] = ["Mycelium A13 Demo", "mycelium"];
@@ -106,10 +112,10 @@ impl Roots {
         self.home.join("Library/Application Support")
     }
     pub fn programs(&self) -> PathBuf {
-        self.support().join("Mycelium/programs")
+        self.support().join(SUPPORT_FOLDER).join("programs")
     }
     pub fn state(&self) -> PathBuf {
-        self.support().join("Mycelium A13 macOS Demo")
+        self.support().join(SUPPORT_FOLDER).join("state")
     }
     pub fn application_entry(&self) -> PathBuf {
         self.applications.join(APPLICATIONS_ENTRY)

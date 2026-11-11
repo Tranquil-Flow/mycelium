@@ -1004,7 +1004,7 @@ pub const INSTALL_COMMAND: &str = include_str!("../package-assets/install-myceli
 pub const README: &str = include_str!("../package-assets/README-PILOT.txt");
 pub const COMMAND_NAME: &str = "Install Mycelium.command";
 
-/// Write the finalize outputs next to `<bundle>/Mycelium A13 Demo.app`: signed manifest, install
+/// Write the finalize outputs next to `<bundle>/Mycelium.app`: signed manifest, install
 /// source, `APP-FILES.sha256`, the install script, README, artifact identity and `SHA256SUMS`.
 pub fn finalize(bundle: &Path, signer: &Signer, spec: &FinalizeSpec) -> Result<String> {
     let app = bundle.join(crate::install::PAYLOAD_DIRECTORY);

@@ -15,8 +15,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const DISPLAY_NAME: &str = "Mycelium A13 Demo";
-pub const BUNDLE_ID: &str = "org.mycelium.a13-macos-demo";
+// Owner ruling 25: v0.2's own identity (v0.1.4: `Mycelium A13 Demo` / `org.mycelium.a13-macos-demo`).
+pub const DISPLAY_NAME: &str = "Mycelium";
+pub const BUNDLE_ID: &str = "org.mycelium.app";
 pub const VERSION: &str = "0.2.0";
 pub const MINIMUM_OS: &str = "15.6.1";
 pub const EXECUTABLE: &str = "mycelium";

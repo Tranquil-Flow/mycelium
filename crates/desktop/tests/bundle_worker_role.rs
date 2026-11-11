@@ -12,7 +12,7 @@
 //! socket option with EINVAL on macOS, so "exit 0 on a closed link" is not asserted here.
 //!
 //! ```text
-//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium A13 Demo.app" \
+//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium.app" \
 //!   cargo test --offline --locked -j 2 -p desktop --features tauri-shell --test bundle_worker_role \
 //!   -- --ignored --nocapture --test-threads=1
 //! ```

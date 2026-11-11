@@ -2,7 +2,7 @@
 //! Explicit gate over a REAL built bundle (never counted by the default run):
 //!
 //! ```text
-//! MYCELIUM_BUNDLE_APP="/path/Mycelium A13 Demo.app" cargo test --offline --locked -j 2 \
+//! MYCELIUM_BUNDLE_APP="/path/Mycelium.app" cargo test --offline --locked -j 2 \
 //!   -p desktop --test bundle_gate -- --ignored --test-threads=1
 //! ```
 //!
