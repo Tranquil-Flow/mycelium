@@ -425,10 +425,19 @@ impl HeldObserver {
         drop(hold);
     }
     fn release(&self) -> std::sync::mpsc::Receiver<()> {
-        let mut hold = self.state.lock().unwrap();
+        let mut hold = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         hold.released = true;
         self.changed.notify_all();
         hold.exited.take().expect("the run thread was held")
+    }
+}
+/// Releases a held call when the test unwinds, before the Mac's run joins its thread.
+struct Released(Arc<HeldObserver>);
+impl Drop for Released {
+    fn drop(&mut self) {
+        let mut hold = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        hold.released = true;
+        self.0.changed.notify_all();
     }
 }
 
@@ -469,6 +478,7 @@ fn quit_waits_for_a_held_chain_call_and_joins_the_run_thread() {
         r["step"] == "descriptors"
             && r["participants"][0]["detail"] == "native_sidecar_installation_invalid"
     });
+    let _released = Released(observer.clone());
     observer.arm();
     observer.wait_held();
     // Quit begins while the run thread is inside its chain call.
