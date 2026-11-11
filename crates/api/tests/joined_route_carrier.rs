@@ -1067,9 +1067,8 @@ fn lan_carrier_refuses_mitm_keys_unexpected_peers_and_public_interfaces() {
 // (`api::joined_owner::epoch`), driven through its own loopback HTTP gateway
 // and SSE stream, over real pairing rows and the direct-LAN carrier on an
 // explicit loopback interface. Stage compute stays controlled (no model).
-#[path = "support/sse_client.rs"]
-mod sse_client;
 use api::joined_owner::epoch::{Carriers, Epoch};
+use api::sse_client;
 impl Swarm {
     fn signed(&self, endpoints: &[iroh::EndpointId], owner: &iroh::SecretKey) -> Value {
         let (signer, _, _) =
