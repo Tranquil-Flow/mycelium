@@ -1040,3 +1040,19 @@ fn a_stop_ends_the_native_chat_chat_cancelled_as_the_page_shows() {
         );
     }
 }
+/// REVIEW-lanePH3B-S5 F7, checked: v0.1.4's `/api/stop` (the page's app.js:361 -> `DemoApp._action`
+/// app.py:1626-1631: `_cancel_acquisition`, `_stop_local_contributor`, `authority.stop`) calls no
+/// `cancel_all`, so the page never shows `chat_cancelled` for it (chat.py:366-369). Here `/api/stop`
+/// does not reach the node service's run at all (api persistent.rs `Action::Stop`), so the native
+/// chat is not cancelled and ends with its own end (this driver's), never `chat_cancelled`; only the
+/// Stops that cancel chats (`/api/demo/stop`, and v0.2's unified `/api/serving/stop`) show it.
+#[test]
+fn an_app_stop_never_shows_the_native_chat_chat_cancelled() {
+    let seen = chat_with_stop("/api/stop", StopAt::Registered);
+    assert_eq!((seen.runs, seen.cancelled), (1, false), "/api/stop");
+    assert_eq!(
+        seen.outcome,
+        (json!("failed"), json!("driver_never_cancelled")),
+        "/api/stop"
+    );
+}
