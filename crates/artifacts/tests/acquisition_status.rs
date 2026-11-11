@@ -759,6 +759,178 @@ fn acquisition_status_reason_code_grammar_not_enum() {
     assert_eq!(status.reason_code.as_deref(), Some("zz_unlisted"));
 }
 
+/// A deeply nested or oversized current.json/history.json (on-disk corruption or a hostile
+/// file) is refused with its own code at a small documented bound, before it can exhaust the
+/// stack or memory: more than 32 nested containers is `artifact_document_too_deep`, more than
+/// 16 MiB is `artifact_document_too_large`. A valid document nests at most 4 containers
+/// (history list > status > `sources` > source) and a full 256-entry history stays far below
+/// 16 MiB. The oracle's own limit (RecursionError at ~116178 levels) is a Python quirk the port
+/// does not reproduce (owner ruling 1). Both refusals leave the files as they were.
+#[test]
+fn acquisition_status_hostile_documents_are_bounded() {
+    const DEEP: &str = "artifact_document_too_deep";
+    const LARGE: &str = "artifact_document_too_large";
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+    let valid = base().to_string();
+    let deep_state = |n: usize| {
+        let lists = String::from_utf8(nested_lists(n)).unwrap();
+        valid
+            .replacen(
+                "\"state\":\"transferring\"",
+                &format!("\"state\":{lists}"),
+                1,
+            )
+            .into_bytes()
+    };
+    let padded = |document: &[u8], size: usize| {
+        let mut bytes = document.to_vec();
+        bytes.resize(size, b' ');
+        bytes
+    };
+    let rows: Vec<(&str, Option<Vec<u8>>, Option<Vec<u8>>, &str)> = vec![
+        // Inside the bound a deep document is ordinary corruption.
+        (
+            "current lists 32",
+            Some(nested_lists(32)),
+            None,
+            "artifact_state_corrupt",
+        ),
+        (
+            "current dicts 32",
+            Some(nested_dicts(32)),
+            None,
+            "artifact_state_corrupt",
+        ),
+        ("current lists 33", Some(nested_lists(33)), None, DEEP),
+        ("current dicts 33", Some(nested_dicts(33)), None, DEEP),
+        (
+            "current lists 2000000",
+            Some(nested_lists(2_000_000)),
+            None,
+            DEEP,
+        ),
+        (
+            "current unclosed 2000000",
+            Some(b"[".repeat(2_000_000)),
+            None,
+            DEEP,
+        ),
+        (
+            "current status, state 31 deep",
+            Some(deep_state(31)),
+            None,
+            "TypeError",
+        ),
+        (
+            "current status, state 32 deep",
+            Some(deep_state(32)),
+            None,
+            DEEP,
+        ),
+        ("history lists 33", None, Some(nested_lists(33)), DEEP),
+        (
+            "history dicts 2000000",
+            None,
+            Some(nested_dicts(2_000_000)),
+            DEEP,
+        ),
+        (
+            "recovery, history lists 33",
+            Some(valid.clone().into_bytes()),
+            Some(nested_lists(33)),
+            DEEP,
+        ),
+        // Size: exactly 16 MiB is read; one byte more is refused before decoding.
+        (
+            "current 16 MiB",
+            Some(padded(valid.as_bytes(), MAX_BYTES)),
+            None,
+            "opened",
+        ),
+        (
+            "current 16 MiB + 1",
+            Some(padded(valid.as_bytes(), MAX_BYTES + 1)),
+            None,
+            LARGE,
+        ),
+        (
+            "history 16 MiB",
+            None,
+            Some(padded(b"[]", MAX_BYTES)),
+            "opened",
+        ),
+        (
+            "history 16 MiB + 1",
+            None,
+            Some(padded(b"[]", MAX_BYTES + 1)),
+            LARGE,
+        ),
+    ];
+    // (row, outcome, files left exactly as they were); every refusal keeps both files.
+    let mut outcomes = Vec::new();
+    let mut expected = Vec::new();
+    for (name, current, history, code) in &rows {
+        let root = store_root("acq-bounded", current.as_deref(), history.as_deref());
+        let outcome = open_outcome(&root);
+        let read = |file: &str| fs::read(root.join("state").join(file)).ok();
+        let kept = read("current.json") == *current && read("history.json") == *history;
+        outcomes.push((*name, outcome, kept || outcome == "opened"));
+        expected.push((*name, *code, true));
+        fs::remove_dir_all(&root).unwrap();
+    }
+    // ledger() rereads both files after a clean open: the same bounds hold there.
+    let late: [(&str, &str, Vec<u8>, &str); 4] = [
+        (
+            "ledger, current lists 33",
+            "current.json",
+            nested_lists(33),
+            DEEP,
+        ),
+        (
+            "ledger, history lists 33",
+            "history.json",
+            nested_lists(33),
+            DEEP,
+        ),
+        (
+            "ledger, current 16 MiB + 1",
+            "current.json",
+            padded(valid.as_bytes(), MAX_BYTES + 1),
+            LARGE,
+        ),
+        (
+            "ledger, history 16 MiB + 1",
+            "history.json",
+            padded(b"[]", MAX_BYTES + 1),
+            LARGE,
+        ),
+    ];
+    for (name, file, bytes, code) in &late {
+        let root = store_root("acq-bounded-ledger", None, None);
+        let store = open(&root).unwrap();
+        let path = root.join("state").join(file);
+        fs::write(&path, bytes).unwrap();
+        let outcome = store.ledger().map(|_| "ok").unwrap_or_else(|e| e.code);
+        let kept = fs::read(&path).ok().as_ref() == Some(bytes);
+        outcomes.push((*name, outcome, kept));
+        expected.push((*name, *code, true));
+        fs::remove_dir_all(&root).unwrap();
+    }
+    assert_eq!(outcomes, expected);
+}
+
+/// `[` n times, then `]` n times: n nested containers.
+fn nested_lists(n: usize) -> Vec<u8> {
+    ["[".repeat(n), "]".repeat(n)].concat().into_bytes()
+}
+
+/// `{"a":` n times, `1`, then `}` n times: n nested containers.
+fn nested_dicts(n: usize) -> Vec<u8> {
+    ["{\"a\":".repeat(n), "1".to_owned(), "}".repeat(n)]
+        .concat()
+        .into_bytes()
+}
+
 /// `history.json` written by the executed oracle (CPython 3.14.2, f4e366e9) when it opens a store
 /// whose history holds the cancelled `acq-0` and whose current.json is the interrupted `acq-1`
 /// updated at [`FUTURE`] (case 1 of `acquisition_status_interrupted_current_recovered_failed`).
