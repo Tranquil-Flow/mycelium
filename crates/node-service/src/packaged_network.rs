@@ -22,7 +22,7 @@ use api::{
     joined_member,
     persistent::RelayState,
     preferences::private_state,
-    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend},
+    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend, StartGuard},
     schema::{PublicError, Raised},
     seed::SeedOptions,
     windows::PendingWindows,
@@ -88,6 +88,8 @@ pub struct Network {
     seams: JoinSeams,
     fenced: AtomicBool,
     left: AtomicBool,
+    /// Quit's hold on a relay a Start is still bringing up (`self.guard`, app.py:1344, 1831).
+    start_guard: StartGuard,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -110,6 +112,7 @@ impl Network {
             seams: config.seams,
             fenced: AtomicBool::new(false),
             left: AtomicBool::new(false),
+            start_guard: StartGuard::default(),
         })
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
@@ -147,6 +150,13 @@ impl Network {
             Self::fresh(&self.root, &self.hooks),
         );
         relay.close();
+    }
+    /// Quit's relay step (`DemoApp.close`, app.py:1831, 1848-1850): a relay a Start is still
+    /// bringing up is closed at once and no later Start brings one up (`application_closed`),
+    /// then the relay this host keeps is closed.
+    pub fn quit(&self) {
+        self.start_guard.close();
+        self.close();
     }
     /// `_leave_fence`: no new work once a leave began.
     pub fn fenced(&self) -> bool {
@@ -190,6 +200,7 @@ impl Network {
             &mut *lock(&self.relay),
             Self::fresh(&self.root, &self.hooks),
         );
+        relay.set_start_guard(self.start_guard.clone());
         // `_relay_is_serving`: the packaged host has no owner run, so the relay never extends
         // itself; it closes at the end of the granted window.
         let probe: Probe = Arc::new(|| Ok(false));
@@ -603,7 +614,7 @@ impl RelayClose {
         let network = self.network.clone();
         self.closing = match std::thread::Builder::new()
             .name("packaged-relay-close".into())
-            .spawn(move || network.close())
+            .spawn(move || network.quit())
         {
             Ok(worker) => RelayClosing::Running {
                 worker,

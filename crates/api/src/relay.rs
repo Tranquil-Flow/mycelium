@@ -1029,6 +1029,12 @@ impl Relay {
         )
         .map_err(|_| "relay_proxy_port_unavailable")?;
         let mut st = lock(&self.inner.state);
+        if st.closed {
+            // closed while it started ([`StartGuard::close`]): nothing listens for it
+            drop(st);
+            proxy.close();
+            return Err("relay_not_startable");
+        }
         st.proxy = Some(proxy);
         st.started = true;
         st.public_origin = self.inner.chosen_origin.clone();
@@ -1056,7 +1062,15 @@ impl Relay {
         }
         command.env("HOME", &home);
         let proxy = Proxy::start(0, true).map_err(|_| "relay_start_failed")?;
-        lock(&self.inner.state).proxy = Some(proxy.clone());
+        // A relay closed while it starts ([`StartGuard::close`], the app's Quit) spawns nothing; the
+        // state stays locked until the child is stored, so a close that follows always reaps it.
+        let mut st = lock(&self.inner.state);
+        if st.closed {
+            drop(st);
+            proxy.close();
+            return Err("relay_start_failed");
+        }
+        st.proxy = Some(proxy.clone());
         let grace = format!("{}s", span(BudgetId::PyRelayCloudflaredGrace).as_secs());
         command
             .args(["--no-autoupdate", "tunnel", "--url"])
@@ -1088,14 +1102,14 @@ impl Relay {
                 ended.send(()).unwrap_or(());
             })
             .map_err(|_| "relay_start_failed")?;
-        let mut st = lock(&self.inner.state);
         st.process = Some(child);
         st.started = true;
         st.reader = Some((reader, reader_ended));
+        // `close` ends the wait: a relay closed while it waits for its origin does not start.
         let (guard, _) = self
             .inner
             .ready
-            .wait_timeout_while(st, self.inner.hooks.ready_wait, |s| !s.ready)
+            .wait_timeout_while(st, self.inner.hooks.ready_wait, |s| !s.ready && !s.closed)
             .unwrap_or_else(|p| {
                 let (g, t) = p.into_inner();
                 (g, t)
@@ -1105,7 +1119,7 @@ impl Relay {
             .process
             .as_mut()
             .is_none_or(|c| !matches!(c.try_wait(), Ok(None)));
-        if !st.ready || st.error_code.is_some() || exited {
+        if !st.ready || st.error_code.is_some() || exited || st.closed {
             return Err("relay_start_failed");
         }
         self.start_lifetime(&mut st, seconds);
@@ -1347,6 +1361,8 @@ fn close(inner: &Arc<Inner>) {
         }
         st.closed = true;
         inner.wake.notify_all();
+        // a start still waiting for its origin gives up now (`Relay::start_quick`)
+        inner.ready.notify_all();
         (
             st.process.take(),
             st.proxy.take(),
@@ -1472,6 +1488,50 @@ pub struct OwnerRelay {
     root: PathBuf,
     relay: Option<Relay>,
     hooks: Box<dyn Fn() -> Hooks + Send>,
+    guard: Option<StartGuard>,
+}
+
+/// The app's hold on the relay [`OwnerRelay::start_public_relay`] is bringing up. v0.1.4 runs
+/// Start and `close` under one `self.guard` (`_action`, app.py:1344; `DemoApp.close`, app.py:1831),
+/// so Quit closes the relay a Start brings up, and once closed every action answers
+/// `application_closed` (app.py:1345). Here the start does not hold the app's locks while it waits
+/// for its origin: [`StartGuard::close`] closes the relay being started at once instead (its ready
+/// wait ends, a child it spawned is reaped within the relay's own close budgets) and every later
+/// start is refused `application_closed` before it spawns anything.
+#[derive(Clone, Default)]
+pub struct StartGuard(Arc<Mutex<Guarded>>);
+#[derive(Default)]
+struct Guarded {
+    closed: bool,
+    /// The relay most recently adopted (closing a closed relay again does nothing).
+    relay: Option<Arc<Inner>>,
+}
+impl StartGuard {
+    /// Close the relay being started (if any) and refuse every later start.
+    pub fn close(&self) {
+        let relay = {
+            let mut guarded = lock(&self.0);
+            guarded.closed = true;
+            guarded.relay.take()
+        };
+        if let Some(inner) = relay {
+            close(&inner);
+        }
+    }
+    pub fn closed(&self) -> bool {
+        lock(&self.0).closed
+    }
+    /// The relay a start is about to bring up; refused (and closed) once the guard closed.
+    fn adopt(&self, relay: &Relay) -> Result<(), PublicError> {
+        let mut guarded = lock(&self.0);
+        if guarded.closed {
+            drop(guarded);
+            relay.close();
+            return Err(PublicError::new(400, "application_closed"));
+        }
+        guarded.relay = Some(relay.inner.clone());
+        Ok(())
+    }
 }
 fn value_error() -> PublicError {
     // a builtin `ValueError` escapes to the handler: 409 `action_not_completed`
@@ -1495,7 +1555,12 @@ impl OwnerRelay {
             root: root.to_path_buf(),
             relay: None,
             hooks: Box::new(hooks),
+            guard: None,
         }
+    }
+    /// The relay each later start brings up is adopted by `guard` (the app's Quit closes it).
+    pub fn set_start_guard(&mut self, guard: StartGuard) {
+        self.guard = Some(guard);
     }
     /// `self.public_relay` and its `status()['state']`.
     pub fn state(&self) -> RelayState {
@@ -1584,6 +1649,9 @@ impl OwnerRelay {
         let external = body.get("provider").is_some_and(|v| v == "external");
         let existing = host.swarm_created();
         let relay = self.new_relay(body, &probe)?;
+        if let Some(guard) = &self.guard {
+            guard.adopt(&relay)?;
+        }
         let outcome = (|| -> Result<(), PublicError> {
             relay
                 .start(&body["relay_acknowledged"], &body["max_seconds"])
