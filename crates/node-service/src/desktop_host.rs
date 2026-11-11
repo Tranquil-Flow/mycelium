@@ -358,10 +358,17 @@ impl DesktopServices {
                 let prompt = crate::chat_template::qwen2_chat_prompt(&plan.prompt);
                 let document = json!({"protocol":"mycelium.request_gateway.v1","prompt":prompt,"max_new_tokens":tokens,"qualification":self.node.qualification()?});
                 protocol::request::submission(&document).map_err(|e| PublicError::new(400, e.0))?;
-                let gate = self.gate.lock().map_err(|_| err("desktop_poisoned"))?;
-                if gate.closing {
-                    return Err(err("application_closed"));
-                }
+                // The gate is only Quit's fence here, never held across the send's admission
+                // (rollover, `Serving::submit`'s wait for the start, up to WorkerStartup): every
+                // other callback (status, Stop, Quit's begin) takes it on the window's thread.
+                // `chat` stays the single-admission fence: one send at a time, the rest 429.
+                let closing = || -> Result<(), PublicError> {
+                    if self.gate.lock().map_err(|_| err("desktop_poisoned"))?.closing {
+                        return Err(err("application_closed"));
+                    }
+                    Ok(())
+                };
+                closing()?;
                 let mut chat = self
                     .chat
                     .try_lock()
@@ -369,6 +376,9 @@ impl DesktopServices {
                 if chat.as_ref().is_some_and(|c| !c.done) {
                     return Err(PublicError::new(429, "chat_busy"));
                 }
+                // Quit may have begun meanwhile: nothing is rolled over or admitted after it (an
+                // admission racing it is refused by the node service's own shutdown fence).
+                closing()?;
                 // The owner's own page is the one local client (`chat.client_key`).
                 self.rate
                     .lock()

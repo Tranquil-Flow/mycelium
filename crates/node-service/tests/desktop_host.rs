@@ -405,6 +405,8 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
         Arc::new(held.clone()),
     );
     let release = Release(held.clone());
+    // What the page's status answers with nothing in flight (here: nothing published yet).
+    let idle = answered_within(&host, "GET", "/api/status", json!({})).expect("idle status");
     held.hold();
     let (sent_tx, sent) = std::sync::mpsc::channel();
     host.submit(
@@ -422,7 +424,7 @@ fn stop_and_status_answer_while_a_send_waits_for_its_start() {
     held.wait_inside();
     let status = answered_within(&host, "GET", "/api/status", json!({}))
         .expect("/api/status blocked behind a send waiting for its start");
-    assert_eq!(status.status, 200);
+    assert_eq!((status.status, status.body), (idle.status, idle.body));
     let state = answered_within(&host, "POST", "/chat/api/state", json!({}))
         .expect("/chat/api/state blocked behind a send waiting for its start");
     assert_eq!(state.status, 200);
