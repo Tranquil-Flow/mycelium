@@ -746,6 +746,58 @@ fn packaged_owner_start_after_failed_preparation_refuses_partial_state() {
     );
 }
 
+/// An existing swarm whose seed TLS directory is lost (review A2-F3, inherited from main). v0.1.4
+/// `_start_runtime`: existing metadata makes a missing TLS root a fail-closed identity loss, 409
+/// `authority_tls_identity_missing`, never fresh material (authority.py:508-512 @ f4e366e9); the
+/// relaunch raises the same code (the packaged host binds and answers it). An existing directory
+/// with nothing in it is not that refusal: the material is generated in it (tls.py:309-330), so
+/// the restart succeeds. Executed oracle (a2 review `oracle-probes.json`, case `missing_tls`):
+/// create 200, stop 200, start 409 `authority_tls_identity_missing` recorded for `/api/start`, the
+/// swarm record kept; relaunch `authority_tls_identity_missing`.
+#[test]
+fn packaged_owner_start_refuses_a_lost_tls_identity() {
+    let root = private_root();
+    let tls = root.join("seed-rs/tls");
+    let host = compose(&root);
+    assert_eq!(create(&host).0, 200);
+    let record = kept_record(&root);
+    assert_eq!(post(&host, "/api/stop", json!({})).0, 200);
+    std::fs::remove_dir_all(&tls).unwrap();
+    let restarted = answer(&post(&host, "/api/start", json!({})));
+    let regenerated = tls.exists();
+    let recorded = root
+        .join("last-action-error.private.json")
+        .is_file()
+        .then(|| last_failure(&root));
+    // The near miss: an empty directory is regenerated and the owner starts (a restart that
+    // already made new material leaves it to be replaced by an empty directory first).
+    if regenerated {
+        std::fs::remove_dir_all(&tls).unwrap();
+    }
+    std::fs::DirBuilder::new().mode(0o700).create(&tls).unwrap();
+    let empty = answer(&post(&host, "/api/start", json!({})));
+    let material = tls.join("ca.pem").is_file();
+    assert_eq!(post(&host, "/api/stop", json!({})).0, 200);
+    std::fs::remove_dir_all(&tls).unwrap();
+    drop(host);
+    let relaunched = compose(&root);
+    let relaunch = answer(&create(&relaunched));
+    let code = "authority_tls_identity_missing";
+    assert_eq!(
+        (restarted, regenerated, recorded, empty, material, relaunch),
+        (
+            (409, code.to_owned()),
+            false,
+            Some((json!("/api/start"), json!(code))),
+            (200, String::new()),
+            true,
+            (409, code.to_owned())
+        )
+    );
+    assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+    assert!(!tls.exists(), "the relaunch made new TLS material");
+}
+
 /// A stopped owner whose retained membership cannot be read. `/api/create` asks
 /// `authority.status()` (app.py:1604), whose branch without a coordinator lets
 /// `load_membership_state`'s `DurableMembershipError` out (authority.py:669-674), answered 409 with
