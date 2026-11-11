@@ -273,3 +273,151 @@ fn the_cli_exits_1_on_findings_0_when_clean_and_2_on_a_missing_tree() {
     let missing = run(&[&clean.0.join("absent")]);
     assert_eq!(missing.status.code(), Some(2), "{missing:?}");
 }
+
+// ---- lane RELF item 6 (review F3): the blind spots the review planted ------------------------
+
+/// A gzip-compressed tar holding `members` (each a small file), made by the system `tar`.
+fn tar_gz(tree: &Tree, name: &str, members: &[&str]) -> Vec<u8> {
+    let src = tree.0.join(format!("{name}-src"));
+    for member in members {
+        let p = src.join(member);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, b"print(1)\n").unwrap();
+    }
+    let out = tree.0.join(format!("{name}.tmp"));
+    let status = Command::new("/usr/bin/tar")
+        .arg("-czf")
+        .arg(&out)
+        .arg("-C")
+        .arg(&src)
+        .args(members)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let bytes = fs::read(&out).unwrap();
+    fs::remove_file(out).unwrap();
+    fs::remove_dir_all(src).unwrap();
+    bytes
+}
+
+#[test]
+fn the_reviewers_blind_spots_are_found_in_a_tree_and_in_a_bundle() {
+    for mode in [Mode::Repository, Mode::Bundle] {
+        let scratch = Tree::new();
+        let archive = tar_gz(&scratch, "a", &["pkg/x.py"]);
+        let cases: Vec<(&str, Vec<u8>, &str)> = vec![
+            (
+                "tools/run",
+                b"import os\n\ndef main():\n    print(os.getcwd())\n".to_vec(),
+                "NP005",
+            ),
+            (
+                "tools/gen",
+                b"from pathlib import Path\nPath('x').write_text('y')\n".to_vec(),
+                "NP005",
+            ),
+            (
+                "scripts/build.sh",
+                b"#!/bin/bash\nset -e\npython3 - <<EOF\nprint(1)\nEOF\n".to_vec(),
+                "NP006",
+            ),
+            (
+                "scripts/Install.command",
+                b"#!/bin/sh\ncd \"$(dirname \"$0\")\" && exec /usr/bin/env python3 -m pkg\n"
+                    .to_vec(),
+                "NP006",
+            ),
+            ("release/src.tar.gz", archive.clone(), "NP003"),
+            ("release/src.tgz.bin", archive, "NP003"),
+            ("notebooks/a.ipynb", b"{\"cells\": []}\n".to_vec(), "NP001"),
+            (
+                "pyproject.toml",
+                b"[project]\nname = \"x\"\n".to_vec(),
+                "NP001",
+            ),
+            ("requirements.txt", b"mlx==0.29\n".to_vec(), "NP001"),
+            (
+                "release/prefixed.bin",
+                [vec![b'x'; 600], zip("pkg/__main__.py")].concat(),
+                "NP003",
+            ),
+        ];
+        for (path, bytes, code) in cases {
+            let tree = Tree::new();
+            tree.file("README.md", b"clean neighbour\n")
+                .file(path, &bytes);
+            let found = codes(&tree.0, mode);
+            assert!(
+                found.iter().any(|(p, c)| p == path && *c == code),
+                "{path} ({mode:?}): expected {code}, found {found:?}"
+            );
+            assert!(found.iter().all(|(p, _)| p != "README.md"), "{found:?}");
+        }
+    }
+}
+
+#[test]
+fn look_alikes_of_the_new_indicators_are_clean() {
+    let tree = Tree::new();
+    tree.file("NOTES", b"important: import the key\nclass notes follow\n")
+        .file("LICENSE", b"Permission is hereby granted, from the authors\n")
+        .file(
+            "scripts/check.sh",
+            b"#!/bin/bash\n# no python3 here (v0.1.4 used python3)\necho \"python is gone\"\npythonic=1\n",
+        )
+        .file(
+            "assets/app.js",
+            b"import { a } from './b.js';\nexport default a;\n",
+        )
+        .file("src/main.rs", b"use std::fs;\nfn main() {}\n")
+        .file("data/plain.tar.gz", &tar_gz(&tree, "p", &["index.html"]));
+    assert_eq!(codes(&tree.0, Mode::Repository), []);
+    assert_eq!(codes(&tree.0, Mode::Bundle), []);
+}
+
+#[test]
+fn an_empty_tree_or_bundle_is_refused_not_passed() {
+    let empty = Tree::new();
+    let error = audit(&empty.0, Mode::Bundle).unwrap_err();
+    assert!(error.contains("no files"), "{error}");
+    let error = audit(&empty.0, Mode::Repository).unwrap_err();
+    assert!(error.contains("no files"), "{error}");
+    let clean = Tree::new();
+    clean.file("a.txt", b"x");
+    let out = Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .arg("no-python")
+        .arg("--root")
+        .arg(&clean.0)
+        .arg("--bundle")
+        .arg(&empty.0)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+}
+
+#[test]
+fn the_shipped_no_python_cell_runs_on_the_frozen_bundle_only() {
+    let profile: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("release-profile.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let cell = profile["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "no-python")
+        .cloned()
+        .unwrap();
+    assert_eq!(cell["verify"]["argv_is_hint"], true, "{cell}");
+    let hint: Vec<&str> = cell["hint"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h.as_str().unwrap())
+        .collect();
+    assert!(
+        hint.windows(2).any(|w| w == ["--bundle", "<bundle>"]),
+        "{hint:?}"
+    );
+}
