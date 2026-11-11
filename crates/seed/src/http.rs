@@ -115,6 +115,11 @@ fn error_status(code: &str) -> u16 {
     if matches!(code, "seed_member_unknown" | "seed_assignment_unknown") {
         return 404;
     }
+    // The combined seed handler's managed-control capacity refusal (v0.1.4
+    // `mycelium_a13_macos/tls.py:438-441`; owner ruling 16). Only this code.
+    if code == "managed_control_capacity_exhausted" {
+        return 503;
+    }
     if code.contains("signature") || code.contains("key_pin") {
         return 401;
     }
@@ -132,6 +137,7 @@ fn reason(status: u16) -> &'static str {
         426 => "Upgrade Required",
         500 => "Internal Server Error",
         501 => "Not Implemented",
+        503 => "Service Unavailable",
         _ => "Unknown",
     }
 }
