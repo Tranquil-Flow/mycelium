@@ -251,6 +251,14 @@ impl RunHost for HeadlessRun {
     fn sidecar(&self) -> Result<PathBuf, Failure> {
         installed_sidecar()
     }
+    fn pending_cleanup(&self, node: &str) -> Result<Option<Value>, Failure> {
+        api::owner_observation::pending_cleanup(self, node)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
+    fn cleanup(&self, node: &str, request: &Value) -> Result<(), Failure> {
+        api::owner_observation::cleanup(self, node, request)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
 }
 /// `installed_sidecar()` (`api::owner_ports`); `MYCELIUM_L10_TEST_SIDECAR` is the test launcher's seam.
 fn installed_sidecar() -> Result<PathBuf, Failure> {

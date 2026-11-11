@@ -451,12 +451,16 @@ mod observe_test_double {
 }
 
 /// With the OBSERVE PORT replaced by a test double (decision U4), the same two packaged Macs run
-/// the chain past observe: the real compile port reads the double's context and compiles the
-/// route over both Macs. The model-free fixture model has no admitted native challenge producer
-/// (only Qwen3-0.6B with the native worker, ruling 28), so compile ends there by name; the work
-/// phase after it (slices, publish, targets, activate: PH3b S4c) is never reached.
+/// the chain past observe: both Macs' real hello helpers answer, the owner's cleanup request reaches
+/// both (the owner's own contributor closes its worker on request, `_cleanup_if_requested`), every
+/// offer is retired and observe is done; the real compile port then reads the double's context.
+/// Compile refuses by name: the joined Mac's capability report is not current
+/// (`member_capability_report_stale`, chain_compile `_capability_rows`; the packaged member sends no
+/// periodic report yet, REVIEW-lanePH3B-S2 F4). Past it, the model-free fixture model would end at
+/// the native challenge producer (only Qwen3-0.6B with the native worker, ruling 28); the work
+/// phase (slices, publish, targets, activate: PH3b S4c) is not reached.
 #[test]
-fn with_an_observe_test_double_the_run_compiles_over_both_macs() {
+fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_name() {
     let base = state_root("observe-double");
     let repository = Repository::start();
     let sidecar = sidecar_file(&base);
@@ -483,9 +487,25 @@ fn with_an_observe_test_double_the_run_compiles_over_both_macs() {
     assert_eq!(run["steps"][2]["detail"], "2 of 2 Macs reported", "{run}");
     assert_eq!(run["steps"][3]["name"], "observe", "{run}");
     assert_eq!(run["steps"][3]["state"], "done", "{run}");
+    assert_eq!(
+        run["steps"][3]["detail"], "2 Macs observed, 2 distinct hosts",
+        "{run}"
+    );
     assert_eq!(run["steps"][4]["name"], "compile", "{run}");
-    assert_ne!(run["steps"][4]["state"], "pending", "{run}");
+    assert_eq!(run["steps"][4]["state"], "failed", "{run}");
+    assert_eq!(run["failed_step"], "compile", "{run}");
+    assert_eq!(run["error_code"], "member_capability_report_stale", "{run}");
+    for step in run["steps"].as_array().unwrap().iter().skip(5) {
+        assert_eq!(step["state"], "pending", "the work phase is not reached: {run}");
+    }
     assert_eq!(run["route_ready"], false, "{run}");
+    // Both hello helpers are closed (observe finished only once both acknowledged their cleanup).
+    for path in [
+        private(&owner.mac.state).join("local-contributor/native-bootstrap/state.json"),
+        private(&member.state).join("native-bootstrap/state.json"),
+    ] {
+        assert_eq!(native_state(&path)["phase"], "closed", "{}", path.display());
+    }
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     drop(repository);

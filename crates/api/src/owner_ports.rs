@@ -101,6 +101,16 @@ pub trait RunHost: Clone + Send + Sync + 'static {
     ) -> Result<(), Failure>;
     /// `installed_sidecar()`: the native sidecar this host names in its descriptor.
     fn sidecar(&self) -> Result<PathBuf, Failure>;
+    /// `actor.pending_cleanup()` of the owner's own contributor `node`: the offer whose stage
+    /// cleanup the owner requested, if any. Without a producer nothing is pending.
+    fn pending_cleanup(&self, _node: &str) -> Result<Option<Value>, Failure> {
+        Ok(None)
+    }
+    /// `_cleanup_if_requested`'s stop and cleanup accept for the contributor `node`. Without a
+    /// producer it refuses (the run's cleanup wait then names the Mac).
+    fn cleanup(&self, _node: &str, _request: &Value) -> Result<(), Failure> {
+        Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
+    }
 }
 
 /// `<root>/local-contributor`: the contributor's own state directory (identity, membership, consent).
@@ -375,6 +385,12 @@ impl<H: RunHost> AgentView<'_, H> {
 impl<H: RunHost> AgentHost for AgentView<'_, H> {
     fn bootstrap(&mut self, run: &str, deployment: &str, offer: &str) -> Result<(), Failure> {
         self.host.bootstrap(&self.node, run, deployment, offer)
+    }
+    fn pending_cleanup(&mut self) -> Result<Option<Value>, Failure> {
+        self.host.pending_cleanup(&self.node)
+    }
+    fn cleanup(&mut self, request: &Value) -> Result<(), Failure> {
+        self.host.cleanup(&self.node, request)
     }
     fn announcement(&mut self) -> Result<Option<Value>, crate::local_agent::ExchangeUnavailable> {
         Ok(Some(

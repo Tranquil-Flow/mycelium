@@ -225,6 +225,17 @@ impl RunHost for PackagedRun {
     fn sidecar(&self) -> Result<PathBuf, Failure> {
         owner_ports::installed_sidecar(self.sidecar.clone())
     }
+    /// The owner's request to clean its own contributor's hello stage
+    /// (`api::owner_observation::pending_cleanup`).
+    fn pending_cleanup(&self, node: &str) -> Result<Option<Value>, Failure> {
+        owner_observation::pending_cleanup(self, node)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
+    /// Close the contributor's hello worker for that request (`api::owner_observation::cleanup`).
+    fn cleanup(&self, node: &str, request: &Value) -> Result<(), Failure> {
+        owner_observation::cleanup(self, node, request)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
 }
 impl ChainHost for PackagedRun {
     type Weak = WeakRun;

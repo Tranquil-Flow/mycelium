@@ -815,6 +815,132 @@ pub fn bootstrap<H: ChainHost>(
     target::start(core, host, signer, expected, actual.clone(), archive)
 }
 
+/// A signed staging statement of the owner's own contributor for `node`, over the local mailbox
+/// carrier (the statement a joined Mac posts to the seed's managed-control routes), verified as
+/// `answer` (the member side is `crate::member_agent`'s `stage_call`).
+fn own_stage_call<H: ChainHost>(
+    core: &H,
+    node: &str,
+    protocol: &str,
+    extra: Value,
+    answer: &str,
+) -> OResult<Value> {
+    let backend = Backend::<H> {
+        core: core.downgrade(),
+        published: BTreeMap::new(),
+    };
+    let host = backend.host()?;
+    let seed = host.pin()?;
+    let signer = viewed(core, |c| {
+        c.run
+            .contributor
+            .as_ref()
+            .filter(|local| local.node == node)
+            .map(|local| local.signer.clone())
+            .ok_or(OwnerError("managed_control_member_stale"))
+    })??;
+    let member = host.member(node)?;
+    if signer.verification_key_digest() != member["verification_key_digest"] {
+        return Err(OwnerError("managed_control_member_stale"));
+    }
+    let scope = binding(&member, &json!("stage-discovery"), &json!("stage-discovery"))?;
+    let mut statement = scope.clone();
+    let now = host.wall_seconds();
+    let ttl = BudgetId::PyQuantityMyceliumA13MacosManagedOffersL371C28
+        .span(Entries::ZERO)
+        .map_err(|_| OwnerError("budget_unavailable"))?;
+    let request_id = nonce()?;
+    for (k, v) in json!({"protocol": protocol, "swarm_id": seed.coordinator.swarm_id(),
+        "request_id": request_id, "sequence": 1, "nonce": nonce()?, "issued_at": now,
+        "expires_at": now + ttl.millis() as f64 / 1000.0})
+    .as_object()
+    .into_iter()
+    .flatten()
+    .chain(extra.as_object().into_iter().flatten())
+    {
+        statement[k] = v.clone();
+    }
+    let envelope = json!({"protocol": protocol::managed::SIGNED_ENVELOPE_PROTOCOL,
+        "signature": signer.sign(&statement).map_err(|_| OwnerError("managed_control_sign_failed"))?,
+        "verification_key": signer.public_key_record(), "statement": statement});
+    let end = host
+        .monotonic()
+        .checked_add(ttl)
+        .map_err(|_| OwnerError("managed_control_timeout"))?;
+    let response = host.raw(&json!({"envelope": envelope}), end, None)?;
+    let body = protocol::managed::verify(
+        &response,
+        answer,
+        &host.signer.public_key_record(),
+        host.signer.endpoint_id(),
+        host.wall_seconds(),
+        managed_time_limits()?,
+    )
+    .map_err(OwnerError::from)?;
+    let offer = &body["offer"];
+    if body["request_id"] != request_id
+        || body["swarm_id"] != seed.coordinator.swarm_id()
+        || (!offer.is_null()
+            && scope
+                .as_object()
+                .ok_or(OwnerError("offer_response_invalid"))?
+                .keys()
+                .filter(|k| *k != "run_id" && *k != "deployment_id")
+                .any(|k| offer[k] != scope[k]))
+    {
+        return Err(OwnerError("offer_response_invalid"));
+    }
+    Ok(body)
+}
+const CLEANUP_READ: &str = "mycelium.managed_stage_cleanup_read.v1";
+const CLEANUP_ACK: &str = "mycelium.managed_stage_cleanup_ack.v1";
+const CLEANUP_STATE: &str = "mycelium.managed_stage_cleanup_state.v1";
+
+/// `actor.pending_cleanup()` of the owner's own contributor (`ManagedOfferClient.pending_cleanup`,
+/// managed_offers.py:419 @ f4e366e9): the bootstrap offer whose stage cleanup the owner requested
+/// for `node`, if any. An owner whose mailbox does not exist yet has published nothing.
+pub fn pending_cleanup<H: ChainHost>(core: &H, node: &str) -> OResult<Option<Value>> {
+    let body = match own_stage_call(
+        core,
+        node,
+        CLEANUP_READ,
+        json!({"offer_id": null}),
+        CLEANUP_STATE,
+    ) {
+        Err(OwnerError("managed_owner_unavailable")) => return Ok(None),
+        other => other?,
+    };
+    Ok((!body["offer"].is_null()).then(|| body["offer"].clone()))
+}
+
+/// `_cleanup_if_requested`'s `/api/control/stop` then `/api/staging/cleanup/accept`
+/// (demo_target.py; `cleanup_offer`, target_app.py:125-145) for the owner's own contributor: the
+/// hello worker is closed (its pump removes the stage and ACKs this cleanup itself); with nothing
+/// staged here the cleanup is confirmed with nothing to remove.
+pub fn cleanup<H: ChainHost>(core: &H, node: &str, request: &Value) -> OResult<()> {
+    let (had_worker, root) = viewed(core, |c| {
+        (
+            c.bootstrap.is_some() || c.bootstrap_failure.is_some(),
+            c.root.clone(),
+        )
+    })?;
+    target::close(core)?;
+    if had_worker {
+        return Ok(());
+    }
+    let stage = root.join("local-contributor/native-bootstrap/stage");
+    let ack = json!({"protocol": "mycelium.controller_remote_cleanup_ack.v1",
+        "node_id": request["target_node_id"], "staging_root": stage, "removed": true});
+    own_stage_call(
+        core,
+        node,
+        CLEANUP_ACK,
+        json!({"offer_id": request["offer_id"], "ack": ack}),
+        CLEANUP_STATE,
+    )
+    .map(drop)
+}
+
 impl<H: ChainHost> ObservationBackend for Backend<H> {
     fn is_owner(&self) -> bool {
         H::upgrade(&self.core).is_some_and(|c| {
