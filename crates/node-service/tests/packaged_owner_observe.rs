@@ -223,7 +223,11 @@ fn a_joined_packaged_mac_answers_hello_and_one_mac_ends_observe_hosts_not_distin
     assert_eq!(run["steps"][2]["name"], "descriptors", "{run}");
     assert_eq!(run["steps"][2]["state"], "done", "{run}");
     assert_eq!(run["steps"][2]["detail"], "2 of 2 Macs reported", "{run}");
-    assert_eq!(run["participants"].as_array().map(Vec::len), Some(2), "{run}");
+    assert_eq!(
+        run["participants"].as_array().map(Vec::len),
+        Some(2),
+        "{run}"
+    );
     assert_eq!(run["steps"][3]["name"], "observe", "{run}");
     assert_eq!(run["failed_step"], "observe", "{run}");
     assert_eq!(
@@ -232,7 +236,8 @@ fn a_joined_packaged_mac_answers_hello_and_one_mac_ends_observe_hosts_not_distin
     );
     assert_eq!(run["route_ready"], false, "{run}");
     // Both Macs ran their own admitted hello helper, and both closed it on the owner's cleanup.
-    let owner_native = private(&owner.mac.state).join("local-contributor/native-bootstrap/state.json");
+    let owner_native =
+        private(&owner.mac.state).join("local-contributor/native-bootstrap/state.json");
     let member_native = private(&member.state).join("native-bootstrap/state.json");
     for (who, path) in [("owner", &owner_native), ("member", &member_native)] {
         let closed = until_within(
@@ -469,9 +474,7 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
         &repository,
         RunConfig {
             sidecar: Some(sidecar),
-            observe_test_double: Some(Arc::new(
-                observe_test_double::HostIdentityTestDouble::over,
-            )),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
             ..RunConfig::default()
         },
     );
@@ -496,7 +499,10 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
     assert_eq!(run["failed_step"], "compile", "{run}");
     assert_eq!(run["error_code"], "member_capability_report_stale", "{run}");
     for step in run["steps"].as_array().unwrap().iter().skip(5) {
-        assert_eq!(step["state"], "pending", "the work phase is not reached: {run}");
+        assert_eq!(
+            step["state"], "pending",
+            "the work phase is not reached: {run}"
+        );
     }
     assert_eq!(run["route_ready"], false, "{run}");
     // Both hello helpers are closed (observe finished only once both acknowledged their cleanup).

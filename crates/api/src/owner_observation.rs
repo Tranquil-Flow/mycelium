@@ -843,7 +843,11 @@ fn own_stage_call<H: ChainHost>(
     if signer.verification_key_digest() != member["verification_key_digest"] {
         return Err(OwnerError("managed_control_member_stale"));
     }
-    let scope = binding(&member, &json!("stage-discovery"), &json!("stage-discovery"))?;
+    let scope = binding(
+        &member,
+        &json!("stage-discovery"),
+        &json!("stage-discovery"),
+    )?;
     let mut statement = scope.clone();
     let now = host.wall_seconds();
     let ttl = BudgetId::PyQuantityMyceliumA13MacosManagedOffersL371C28

@@ -427,7 +427,10 @@ impl HeldObserver {
         drop(hold);
     }
     fn release(&self) -> std::sync::mpsc::Receiver<()> {
-        let mut hold = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut hold = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         hold.released = true;
         self.changed.notify_all();
         hold.exited.take().expect("the run thread was held")
@@ -437,7 +440,11 @@ impl HeldObserver {
 struct Released(Arc<HeldObserver>);
 impl Drop for Released {
     fn drop(&mut self) {
-        let mut hold = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut hold = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         hold.released = true;
         self.0.changed.notify_all();
     }
@@ -513,7 +520,9 @@ fn quit_waits_for_a_held_chain_call_and_joins_the_run_thread() {
         Ok(()),
         "Quit finished but the run thread has not exited"
     );
-    let view = config.observed().expect("the composition installed the owner run");
+    let view = config
+        .observed()
+        .expect("the composition installed the owner run");
     assert!(!view.active(), "the run still owns its driver after Quit");
     let after = view.status().map(|s| s.to_value()).unwrap_or(Value::Null);
     assert_eq!(after["state"], "stopped", "{after}");

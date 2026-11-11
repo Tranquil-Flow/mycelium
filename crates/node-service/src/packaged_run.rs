@@ -80,9 +80,8 @@ pub trait ObserveDouble: ObservePort + Send {
     fn teardown(&mut self) -> Result<(), String>;
 }
 /// Builds a test's [`ObserveDouble`] over the run's real observation backend.
-pub type ObserveTestDouble = Arc<
-    dyn Fn(owner_observation::Backend<PackagedRun>) -> Box<dyn ObserveDouble> + Send + Sync,
->;
+pub type ObserveTestDouble =
+    Arc<dyn Fn(owner_observation::Backend<PackagedRun>) -> Box<dyn ObserveDouble> + Send + Sync>;
 /// The composed run's shared handle (opaque).
 #[derive(Clone, Default)]
 pub struct RunSlot(Arc<Mutex<Option<Installed>>>);
@@ -430,14 +429,12 @@ impl PackagedChainPorts {
                 (Observe::Real(observation), compiler)
             }
             Some(double) => {
-                let observation = DoubleObservation(Arc::new(Mutex::new(double(
-                    owner_observation::Backend {
+                let observation =
+                    DoubleObservation(Arc::new(Mutex::new(double(owner_observation::Backend {
                         core: host.downgrade(),
                         published: std::collections::BTreeMap::new(),
-                    },
-                ))));
-                let compiler =
-                    Compiler::observing(host.downgrade(), Box::new(observation.clone()));
+                    }))));
+                let compiler = Compiler::observing(host.downgrade(), Box::new(observation.clone()));
                 (Observe::TestDouble(observation), compiler)
             }
         };

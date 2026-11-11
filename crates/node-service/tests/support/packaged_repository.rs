@@ -162,4 +162,3 @@ pub fn sidecar_file(base: &Path) -> PathBuf {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
     path
 }
-

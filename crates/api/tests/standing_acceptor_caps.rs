@@ -61,8 +61,10 @@ struct Member {
 }
 impl WorkAcceptance for Member {
     fn pending_offer(&mut self) -> Result<Option<Value>, AcceptFailure> {
-        Ok(Some(json!({"offer_id": "offer-1", "run_id": "run-1", "deployment_id": "dep-1",
-            "target_node_id": "node-member", "archive_bytes": 1000, "expires_at": NOW + 600.0})))
+        Ok(Some(
+            json!({"offer_id": "offer-1", "run_id": "run-1", "deployment_id": "dep-1",
+            "target_node_id": "node-member", "archive_bytes": 1000, "expires_at": NOW + 600.0}),
+        ))
     }
     fn report(&mut self, purpose: &str, offer: &Value) -> Result<(), AcceptFailure> {
         self.calls
@@ -76,9 +78,11 @@ impl WorkAcceptance for Member {
         policy: &Value,
     ) -> Result<Value, AcceptFailure> {
         self.calls.push(json!(["preview", limits]));
-        Ok(json!({"protocol": "mycelium.a13.work_preview.v1", "route_ready": false,
+        Ok(
+            json!({"protocol": "mycelium.a13.work_preview.v1", "route_ready": false,
             "limits": limits, "consent_digest": format!("sha256:{}", "66".repeat(32)),
-            "node_id": "node-member", "resource_policy": policy}))
+            "node_id": "node-member", "resource_policy": policy}),
+        )
     }
     fn accept(
         &mut self,
@@ -146,7 +150,11 @@ fn a_float_cap_compares_numerically_and_refuses_the_larger_share_by_name() {
             Some(json!({"offer_id": "offer-1", "state": "refused", "reason": reason})),
             "{tag}"
         );
-        assert_eq!(calls, Vec::<Value>::new(), "{tag}: no report, preview or accept");
+        assert_eq!(
+            calls,
+            Vec::<Value>::new(),
+            "{tag}: no report, preview or accept"
+        );
     }
 }
 
@@ -154,7 +162,12 @@ fn a_float_cap_compares_numerically_and_refuses_the_larger_share_by_name() {
 fn a_string_cap_fails_the_tick_closed_and_accepts_nothing() {
     // `3600 > "600"` / `68719476736 > "4294967296"` raise TypeError in v0.1.4: the pass fails.
     for (tag, cap, value, share) in [
-        ("wall-string", "max_wall_seconds", json!("600"), wall_share()),
+        (
+            "wall-string",
+            "max_wall_seconds",
+            json!("600"),
+            wall_share(),
+        ),
         (
             "memory-string",
             "max_memory_bytes",
@@ -167,6 +180,10 @@ fn a_string_cap_fails_the_tick_closed_and_accepts_nothing() {
             outcome.is_err(),
             "{tag}: a malformed cap must fail the tick, got {outcome:?} after {calls:?}"
         );
-        assert_eq!(calls, Vec::<Value>::new(), "{tag}: no report, preview or accept");
+        assert_eq!(
+            calls,
+            Vec::<Value>::new(),
+            "{tag}: no report, preview or accept"
+        );
     }
 }
