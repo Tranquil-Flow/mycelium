@@ -209,7 +209,9 @@ impl Sandbox {
     }
     /// (Re)freeze: a fresh manifest of the bundle as it is now.
     fn freeze(&self) {
-        let _ = fs::remove_file(self.manifest_path());
+        if self.manifest_path().exists() {
+            fs::remove_file(self.manifest_path()).unwrap();
+        }
         let out = Command::new(env!("CARGO_BIN_EXE_xtask"))
             .args(["release", "freeze", &self.head, "--exe"])
             .arg(self.app().join("Contents/MacOS/mycelium"))
