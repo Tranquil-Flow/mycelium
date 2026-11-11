@@ -9,6 +9,7 @@ pub mod preflight;
 pub mod provenance;
 pub mod quick;
 pub mod release;
+pub mod release_check;
 pub mod release_emit;
 pub mod release_freeze;
 pub mod retention;

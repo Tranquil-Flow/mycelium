@@ -129,23 +129,30 @@
       "claim": "CL-L13-01",
       "bind": "bytes",
       "verify": {
-        "runs": "receipt",
-        "kind": "release_receipt",
-        "name": "bundle-admission"
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "release",
+          "check-bundle",
+          "bundle-admission"
+        ],
+        "argv_is_hint": true
       },
       "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
         "xtask",
+        "--",
         "release",
-        "emit",
-        "release_receipt",
+        "check-bundle",
         "bundle-admission",
         "--manifest",
         "<manifest>",
-        "--pass",
-        "--producer",
-        "<tool>",
-        "--artifact",
-        "<receipt-file>"
+        "--manifest-sha256",
+        "<manifest_sha256>"
       ]
     },
     {
@@ -154,23 +161,30 @@
       "claim": "CL-L13-01",
       "bind": "bytes",
       "verify": {
-        "runs": "receipt",
-        "kind": "release_receipt",
-        "name": "relocation"
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "release",
+          "check-bundle",
+          "relocation"
+        ],
+        "argv_is_hint": true
       },
       "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
         "xtask",
+        "--",
         "release",
-        "emit",
-        "release_receipt",
+        "check-bundle",
         "relocation",
         "--manifest",
         "<manifest>",
-        "--pass",
-        "--producer",
-        "<tool>",
-        "--artifact",
-        "<receipt-file>"
+        "--manifest-sha256",
+        "<manifest_sha256>"
       ]
     },
     {
@@ -204,23 +218,30 @@
       "claim": "CL-L12-01",
       "bind": "bytes",
       "verify": {
-        "runs": "receipt",
-        "kind": "release_receipt",
-        "name": "release-build"
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "release",
+          "check-bundle",
+          "release-build"
+        ],
+        "argv_is_hint": true
       },
       "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
         "xtask",
+        "--",
         "release",
-        "emit",
-        "release_receipt",
+        "check-bundle",
         "release-build",
         "--manifest",
         "<manifest>",
-        "--pass",
-        "--producer",
-        "<tool>",
-        "--artifact",
-        "<receipt-file>"
+        "--manifest-sha256",
+        "<manifest_sha256>"
       ]
     },
     {
@@ -229,23 +250,30 @@
       "claim": "CL-L11-06",
       "bind": "bytes",
       "verify": {
-        "runs": "receipt",
-        "kind": "release_receipt",
-        "name": "adhoc-signature"
+        "runs": "check",
+        "argv_has": [
+          "xtask",
+          "release",
+          "check-bundle",
+          "adhoc-signature"
+        ],
+        "argv_is_hint": true
       },
       "hint": [
+        "cargo",
+        "run",
+        "--offline",
+        "--locked",
+        "-p",
         "xtask",
+        "--",
         "release",
-        "emit",
-        "release_receipt",
+        "check-bundle",
         "adhoc-signature",
         "--manifest",
         "<manifest>",
-        "--pass",
-        "--producer",
-        "<tool>",
-        "--artifact",
-        "<receipt-file>"
+        "--manifest-sha256",
+        "<manifest_sha256>"
       ]
     },
     {
@@ -406,7 +434,8 @@
       "verify": {
         "runs": "receipt",
         "kind": "release_receipt",
-        "name": "model-free-launch-smoke"
+        "name": "model-free-launch-smoke",
+        "operator_receipt": true
       },
       "hint": [
         "xtask",
@@ -418,9 +447,9 @@
         "<manifest>",
         "--pass",
         "--producer",
-        "<tool>",
+        "operator: <who and script>",
         "--artifact",
-        "<receipt-file>"
+        "<receipt naming manifest_sha256 and exe_sha256>"
       ]
     },
     {
