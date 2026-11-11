@@ -405,46 +405,10 @@ fn the_teardown_reason_is_the_shipped_expression() {
     );
 }
 
-/// The teardown's reason from the run's status (demo_chain.py:1329-1331): rollover requested ->
-/// `chat_switching_runs`; failed -> the monitor's code (a serving failure: the ceiling,
-/// `joined_route_member_stale`, ...) else `owner_run_failed`; a plain Stop -> `chat_cancelled`.
-/// A failed run's code reaches the page as the chat's error.
+/// A failed run's teardown reason (the monitor's dead-member code) reaches the page as the
+/// chat's error (demo_chain.py:1332-1334 -> chat.py:367-369).
 #[test]
-fn the_teardown_reason_follows_the_runs_status_and_reaches_the_page() {
-    let status = |rollover: &str, failed_step: Value, error_code: Value| {
-        json!({"run_id":"run-1","state":"stopping","rollover":{"state":rollover},
-            "failed_step":failed_step,"error_code":error_code})
-    };
-    let of = Teardown::of_run;
-    assert_eq!(
-        of(false, &status("idle", Value::Null, Value::Null)),
-        Teardown::Stopped
-    );
-    assert_eq!(
-        of(false, &status("switching", Value::Null, Value::Null)),
-        Teardown::SwitchingRuns
-    );
-    assert_eq!(
-        of(
-            true,
-            &status("idle", json!("serving"), json!("execution_ceiling_reached"))
-        ),
-        Teardown::CeilingReached
-    );
-    assert_eq!(
-        of(
-            true,
-            &status("idle", json!("serving"), json!("joined_route_member_stale"))
-        ),
-        Teardown::Failed("joined_route_member_stale".into())
-    );
-    assert_eq!(
-        of(
-            true,
-            &status("idle", json!("descriptors"), json!("two_macs_required"))
-        ),
-        Teardown::Failed("owner_run_failed".into())
-    );
+fn a_failed_runs_teardown_code_reaches_the_page() {
     let fake = FakeGateway::start(Script::ending(&["a"], End::Hold));
     let chat = service(run_over(http(&fake), Some(serving("run-1"))), None);
     let sent = chat.send("local", prompt("hi", 8)).unwrap();

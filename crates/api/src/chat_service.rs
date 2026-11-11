@@ -171,28 +171,16 @@ impl Teardown {
     /// the monitor's dead-member check (demo_chain.py:1179-1181); the ceiling cancels its chats
     /// itself when it fires (demo_chain.py:1155-1163, [`Teardown::CeilingReached`]).
     pub fn of(rollover_requested: bool, failed: bool, monitor_error_code: Option<&str>) -> Self {
-        let _ = (rollover_requested, failed, monitor_error_code);
-        Self::Stopped
-    }
-    /// The reason of a teardown from the run's own status (`owner_driver::status_json`) and the
-    /// teardown's `failed` flag, as demo_chain.py:1329-1331 decides it.
-    /// `rollover_requested` is the status's `rollover.state == "switching"` (both are set together,
-    /// owner-run machine.rs `serving_poll`); the monitor's code is the `error_code` of a run that
-    /// failed at its serving step (`fail_serving`: ceiling, monitor), any other failure is
-    /// `owner_run_failed`.
-    pub fn of_run(failed: bool, status: &Value) -> Self {
-        if status["rollover"]["state"] == "switching" {
+        if rollover_requested {
             return Self::SwitchingRuns;
         }
         if !failed {
             return Self::Stopped;
         }
-        match status["error_code"].as_str() {
-            Some("execution_ceiling_reached") if status["failed_step"] == "serving" => {
-                Self::CeilingReached
-            }
-            Some(code) if status["failed_step"] == "serving" => Self::Failed(code.to_owned()),
-            _ => Self::Failed("owner_run_failed".into()),
+        match monitor_error_code {
+            Some("execution_ceiling_reached") => Self::CeilingReached,
+            Some(code) => Self::Failed(code.to_owned()),
+            None => Self::Failed("owner_run_failed".into()),
         }
     }
 }
