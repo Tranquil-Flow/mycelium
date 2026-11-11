@@ -58,9 +58,16 @@ impl Shared {
 /// final when v0.1.4 records a terminal disposition for it (`_translate`, peer.py:300-325:
 /// revoked, generation stale, unknown, expired; the snapshot then refuses at once), or when the
 /// seed no longer answers this session's identity at all (`seed_message_mismatch`: the generation
-/// moved on, `mycelium_seed/coordinator.py:1354-1362`; the shipped app's snapshot refuses that
-/// member at once through its retained-binding check, peer.py:631-638). Everything else (relay
-/// 5xx, seed 500, a truncated reply, transport) is retried.
+/// moved on, `mycelium_seed/coordinator.py:1354-1362`). Everything else (relay 5xx, seed 500, a
+/// truncated reply, transport) is retried.
+///
+/// `seed_message_mismatch` is a v0.2 difference (class D), not parity: v0.1.4 records no
+/// disposition for it and retries. After an owner revoke (app.py:1648 -> authority.py:1218-1226
+/// -> `advance_member_generation` STOPPED, coordinator.py:1086-1094) the v0.1.4 member stays
+/// current until its own lease ends, because its retained binding is its own unchanged file; its
+/// snapshot refuses at once (retained-binding check, peer.py:631-638) only when this Mac's own
+/// state file was rewritten (it resumed elsewhere). v0.2 fences at once in both cases, the safer
+/// side: that generation can never renew again, and the owner refuses it per chunk anyway.
 pub fn final_refusal(code: &str) -> bool {
     matches!(
         code,
