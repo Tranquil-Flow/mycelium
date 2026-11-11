@@ -466,34 +466,101 @@ fn packaged_owner_create_failed_approve_or_accept_keeps_swarm_record() {
     }
 }
 
-/// The seed itself fails to start after `create_swarm` committed the swarm (here its kept-url file
-/// is not a private record). v0.1.4 keeps the metadata and only closes the runtime
-/// (authority.py:448-454); executed oracle case `runtime_start`: no pairing code without a
-/// coordinator (`pairing_window_swarm_required`), every retry in that process refuses
-/// `authority_swarm_missing` (the swarm exists, its seed does not run), and a relaunch with the
-/// fault gone starts the seed and the retry re-enrols the same swarm.
+/// Set in a child of this test binary that [`sandboxed`] runs: the private root it runs in.
+const SANDBOX_CHILD_ROOT: &str = "PACKAGED_OWNER_CREATE_SANDBOX_CHILD_ROOT";
+/// The line a sandboxed child prints its trace on.
+const SANDBOX_TRACE: &str = "SANDBOX_TRACE ";
+/// In a child that [`sandboxed`] runs: the root to run in; `None` in the test's own process.
+fn sandbox_child_root() -> Option<PathBuf> {
+    std::env::var_os(SANDBOX_CHILD_ROOT).map(PathBuf::from)
+}
+/// What a sandboxed child hands its parent.
+fn print_trace(trace: &Value) {
+    println!("{SANDBOX_TRACE}{trace}");
+}
+/// `path` as a literal in a sandbox profile regex: every character but `/` and alphanumerics is
+/// a one-character class.
+fn sandbox_literal(path: &Path) -> String {
+    path.to_str()
+        .unwrap()
+        .chars()
+        .map(|c| {
+            if c == '/' || c.is_ascii_alphanumeric() {
+                c.to_string()
+            } else {
+                format!("[{c}]")
+            }
+        })
+        .collect()
+}
+/// A fault at the real operation, not a planted entry (which v0.1.4 would count as authority
+/// state, authority.py:390,410): run this binary's test `name` again over `root` in a child under
+/// a macOS sandbox profile that denies only creating a path matching `root` + `denied` (a profile
+/// regex), and answer the trace the child printed ([`print_trace`]). The fault lasts for the
+/// child's life; a child that fails fails its parent with its output.
+fn sandboxed(name: &str, root: &Path, denied: &str) -> Value {
+    let profile = format!(
+        "(version 1)(allow default)(deny file-write-create (regex #\"^{}{denied}$\"))",
+        sandbox_literal(root)
+    );
+    let child = std::process::Command::new("/usr/bin/sandbox-exec")
+        .args(["-p", &profile])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", name, "--nocapture", "--test-threads", "1"])
+        .env(SANDBOX_CHILD_ROOT, root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&child.stdout);
+    assert!(
+        child.status.success(),
+        "sandboxed child: {}\n{stdout}\n{}",
+        child.status,
+        String::from_utf8_lossy(&child.stderr)
+    );
+    stdout
+        .lines()
+        .find_map(|line| line.split_once(SANDBOX_TRACE).map(|(_, trace)| trace))
+        .map(|trace| serde_json::from_str(trace).unwrap())
+        .unwrap_or_else(|| panic!("the child printed no trace: {stdout}"))
+}
+
+/// The seed itself fails to start after `create_swarm` committed the swarm (here storing its
+/// kept url is refused: the sandbox denies creating `seed-rs/.seed-url.json.<unique>.tmp`). v0.1.4
+/// keeps the metadata and only closes the runtime (authority.py:448-454); executed oracle case
+/// `runtime_start`: no pairing code without a coordinator (`pairing_window_swarm_required`),
+/// every retry in that process refuses `authority_swarm_missing` (the swarm exists, its seed does
+/// not run, and the retry does not try to start it: a restart would meet the fault again and
+/// answer its write failure), and a relaunch with the fault gone starts the seed and the retry
+/// re-enrols the same swarm.
 #[test]
 fn packaged_owner_create_failed_seed_start_keeps_swarm_record() {
+    if let Some(root) = sandbox_child_root() {
+        let host = compose(&root);
+        let refused = create(&host);
+        assert_eq!(refused.0, 409, "{}", refused.1);
+        let record = kept_record(&root);
+        assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
+        assert_eq!(
+            refusal(&post(
+                &host,
+                "/api/pair/window/open",
+                json!({"ttl_seconds": 30})
+            )),
+            (400, "pairing_window_swarm_required")
+        );
+        assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
+        assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
+        assert_eq!(private_json(&root.join(SWARM_FILE)), record);
+        print_trace(&record);
+        return;
+    }
     let root = private_root();
-    let fault = plant(&root, "seed-rs/seed-url.json", Fault::Garbage);
-    let host = compose(&root);
-    let refused = create(&host);
-    assert_eq!(refused.0, 409, "{}", refused.1);
-    let record = kept_record(&root);
-    assert_eq!(seed_swarm_id(&root), record["swarm_id"]);
-    assert_eq!(
-        refusal(&post(
-            &host,
-            "/api/pair/window/open",
-            json!({"ttl_seconds": 30})
-        )),
-        (400, "pairing_window_swarm_required")
+    let record = sandboxed(
+        "packaged_owner_create_failed_seed_start_keeps_swarm_record",
+        &root,
+        "/seed-rs/[.]seed-url[.]json[.][^/]+[.]tmp",
     );
-    assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
-    unplant(&fault);
-    assert_eq!(refusal(&create(&host)), (409, "authority_swarm_missing"));
     assert_eq!(private_json(&root.join(SWARM_FILE)), record);
-    drop(host);
     let relaunched = compose(&root);
     assert_reenrolled(&create(&relaunched));
     assert_eq!(private_json(&root.join(SWARM_FILE)), record);
@@ -514,62 +581,58 @@ fn answer(reply: &(u16, Value)) -> (u16, String) {
     )
 }
 
-/// A failure while `create_swarm` still prepares the swarm (here the seed's TLS directory is a
-/// regular file). v0.1.4 makes the identities, the local TLS material and the seed database bound
-/// to the new swarm id BEFORE it commits the metadata (authority.py:412-449 @ f4e366e9), so the
-/// failure leaves no swarm. Executed oracle (`workers/rv-s1-owner-create-failed-join-retry/
-/// evidence/rv-logs-s1-failed-join-retry/oracle-extra.json`, case `tls_precommit`): 409
+/// A failure while `create_swarm` still prepares the swarm (here the sandbox denies creating the
+/// seed's TLS directory). v0.1.4 makes the identities, the local TLS material and the seed
+/// database bound to the new swarm id BEFORE it commits the metadata (authority.py:412-449 @
+/// f4e366e9), so the failure leaves no swarm. Executed oracle (`workers/rv-s1-owner-create-failed-
+/// join-retry/evidence/rv-logs-s1-failed-join-retry/oracle-extra.json`, case `tls_precommit`): 409
 /// `local_tls_path_invalid` with no metadata, no seed state and no membership, the consent kept and
-/// the failure recorded; with the fault removed the retry refuses `authority_swarm_exists` (the
-/// prepared state is there, authority.py:410-411) and still commits nothing; a relaunch refuses
-/// that partial state (`authority.start()`, authority.py:390-391: `authority_partial_state`). The
-/// oracle's relaunch raises out of `DemoApp.__init__`; the packaged host binds and keeps that code,
-/// which its authority seams answer (`PackagedHost::authority`).
+/// the failure recorded; the retry refuses `authority_swarm_exists` (the prepared state is there,
+/// authority.py:410-411, so the retry never reaches the TLS step again) and still commits nothing;
+/// a relaunch with the fault gone refuses that partial state (`authority.start()`,
+/// authority.py:390-391: `authority_partial_state`). The oracle's relaunch raises out of
+/// `DemoApp.start`; the packaged host binds and keeps that code, which its authority seams answer
+/// (`PackagedHost::authority`).
 #[test]
 fn packaged_owner_create_failed_preparation_commits_no_swarm() {
-    let root = private_root();
-    let fault = plant(&root, "seed-rs/tls", Fault::Garbage);
     // The answer, then whether a swarm record, a seed database and a membership exist.
-    let step = |reply: &(u16, Value)| {
-        (
-            answer(reply),
-            root.join(SWARM_FILE).exists(),
-            root.join("seed-rs/seed.sqlite").exists(),
-            root.join(MEMBER_DIR).join("membership.state.json").exists(),
-        )
-    };
-    let host = compose(&root);
-    let failed = step(&create(&host));
-    let failed_record = last_failure(&root);
-    unplant(&fault);
-    let retried = step(&create(&host));
-    let retried_record = last_failure(&root);
-    drop(host);
+    let step = |root: &Path, reply: &(u16, Value)| json!([answer(reply), committed(root)]);
+    if let Some(root) = sandbox_child_root() {
+        let host = compose(&root);
+        let failed = step(&root, &create(&host));
+        let failed_record = last_failure(&root);
+        let retried = step(&root, &create(&host));
+        let retried_record = last_failure(&root);
+        print_trace(&json!([failed, retried, failed_record, retried_record]));
+        return;
+    }
+    let root = private_root();
+    let trace = sandboxed(
+        "packaged_owner_create_failed_preparation_commits_no_swarm",
+        &root,
+        "/seed-rs/tls",
+    );
     let relaunched = compose(&root);
-    let relaunch = step(&create(&relaunched));
-    let nothing = |code: &str| ((409, code.to_owned()), false, false, false);
+    let relaunch = step(&root, &create(&relaunched));
+    let nothing = |code: &str| json!([[409, code], [false, false, false]]);
     assert_eq!(
-        [failed, retried, relaunch],
+        [&trace[0], &trace[1], &relaunch],
         [
-            nothing("local_tls_path_invalid"),
-            nothing("authority_swarm_exists"),
-            nothing("authority_partial_state")
+            &nothing("local_tls_path_invalid"),
+            &nothing("authority_swarm_exists"),
+            &nothing("authority_partial_state")
         ]
     );
     assert_eq!(
-        failed_record,
-        (json!("/api/create"), json!("local_tls_path_invalid"))
-    );
-    assert_eq!(
-        retried_record,
-        (json!("/api/create"), json!("authority_swarm_exists"))
+        (&trace[2], &trace[3]),
+        (
+            &json!(["/api/create", "local_tls_path_invalid"]),
+            &json!(["/api/create", "authority_swarm_exists"])
+        )
     );
     assert_eq!(private_json(&root.join("resource-policy.json")), consent());
 }
 
-/// Set in the sandboxed child of [`packaged_owner_create_seed_key_failure_commits_no_swarm`]: the
-/// private root its two creates run in.
-const SEED_KEY_CHILD_ROOT: &str = "PACKAGED_OWNER_CREATE_SEED_KEY_CHILD_ROOT";
 /// What a create left committed: a swarm record, a seed database, a membership.
 fn committed(root: &Path) -> [bool; 3] {
     [
@@ -577,21 +640,6 @@ fn committed(root: &Path) -> [bool; 3] {
         root.join("seed-rs/seed.sqlite").exists(),
         root.join(MEMBER_DIR).join("membership.state.json").exists(),
     ]
-}
-/// `path` as a literal in a sandbox profile regex: every character but `/` and alphanumerics is
-/// a one-character class.
-fn sandbox_literal(path: &Path) -> String {
-    path.to_str()
-        .unwrap()
-        .chars()
-        .map(|c| {
-            if c == '/' || c.is_ascii_alphanumeric() {
-                c.to_string()
-            } else {
-                format!("[{c}]")
-            }
-        })
-        .collect()
 }
 
 /// A failure while `create_swarm` installs the seed key, after the seed's directory exists (review
@@ -610,53 +658,25 @@ fn sandbox_literal(path: &Path) -> String {
 /// code, the accepted host boundary of `packaged_owner_create_failed_preparation_commits_no_swarm`).
 #[test]
 fn packaged_owner_create_seed_key_failure_commits_no_swarm() {
-    if let Some(root) = std::env::var_os(SEED_KEY_CHILD_ROOT) {
-        let root = PathBuf::from(root);
+    if let Some(root) = sandbox_child_root() {
         let host = compose(&root);
         let failed = answer(&create(&host));
         let failed_state = (committed(&root), last_failure(&root));
         let retried = answer(&create(&host));
         let retried_state = (committed(&root), last_failure(&root));
-        println!(
-            "SEED_KEY_CHILD {}",
-            json!({
-                "steps": [[failed, failed_state], [retried, retried_state]],
-                "seed_dir": root.join("seed-rs").is_dir(),
-                "seed_identity": root.join("seed-identity.json").exists(),
-            })
-        );
+        print_trace(&json!({
+            "steps": [[failed, failed_state], [retried, retried_state]],
+            "seed_dir": root.join("seed-rs").is_dir(),
+            "seed_identity": root.join("seed-identity.json").exists(),
+        }));
         return;
     }
     let root = private_root();
-    let profile = format!(
-        "(version 1)(allow default)(deny file-write-create (regex #\"^{}/[.]seed-identity[.]json[.][^/]+[.]tmp$\"))",
-        sandbox_literal(&root)
+    let trace = sandboxed(
+        "packaged_owner_create_seed_key_failure_commits_no_swarm",
+        &root,
+        "/[.]seed-identity[.]json[.][^/]+[.]tmp",
     );
-    let child = std::process::Command::new("/usr/bin/sandbox-exec")
-        .args(["-p", &profile])
-        .arg(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "packaged_owner_create_seed_key_failure_commits_no_swarm",
-            "--nocapture",
-            "--test-threads",
-            "1",
-        ])
-        .env(SEED_KEY_CHILD_ROOT, &root)
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&child.stdout);
-    assert!(
-        child.status.success(),
-        "sandboxed child: {}\n{stdout}\n{}",
-        child.status,
-        String::from_utf8_lossy(&child.stderr)
-    );
-    let trace: Value = stdout
-        .lines()
-        .find_map(|line| line.split_once("SEED_KEY_CHILD ").map(|(_, trace)| trace))
-        .map(|line| serde_json::from_str(line).unwrap())
-        .unwrap_or_else(|| panic!("the child printed no trace: {stdout}"));
     let relaunched = compose(&root);
     let relaunch = answer(&create(&relaunched));
     let nothing = [false; 3];
