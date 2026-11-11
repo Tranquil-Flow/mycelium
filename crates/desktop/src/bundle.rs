@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Local, unsigned `.app` assembly and the no-Python audit.
 //!
-//! Identity policy (S14, v0.2 local bundle): the user-visible name, bundle
-//! identifier, icon, minimum OS and Info.plist key set are the released v0.1.4
-//! values (`Contents/Info.plist` sha256 `e1220422…` in the certified package),
-//! so a later installer can upgrade in place. Only the executable name and the
-//! version string differ, and a test names that difference. Nothing here signs,
+//! Identity policy (owner ruling 25): v0.2 has its own user-visible name `Mycelium` and bundle
+//! identifier `org.mycelium.app`, so it sits beside an installed v0.1.4 and never touches its
+//! files (ruling 20). Icon, minimum OS and the Info.plist key set are the released v0.1.4 values
+//! (`Contents/Info.plist` sha256 `e1220422…` in the certified package); name, identifier,
+//! executable name and version differ, and a test names those differences. Nothing here signs,
 //! notarizes, installs, upgrades or touches an installed application.
 use crate::package::{Entry, Kind, Manifest, PackageError};
 use serde::Deserialize;
@@ -359,9 +359,16 @@ pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Bu
             0o644,
         ));
         for (source, pin) in helpers {
+            // A helper is built by the recipe like the executable: where it was built (the
+            // CARGO_TARGET_DIR) is not part of the bundle, its pinned bytes are (two-path repro).
             sources.push((
                 pin.path.clone(),
-                source.display().to_string(),
+                format!(
+                    "built by the recipe: {}",
+                    source
+                        .file_name()
+                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                ),
                 "pinned_helper".into(),
                 None,
             ));
@@ -526,7 +533,7 @@ pub fn content_manifest(built: &Built) -> Result<serde_json::Value, BundleError>
         "identity": {
             "display_name": DISPLAY_NAME, "bundle_identifier": BUNDLE_ID, "version": VERSION,
             "minimum_system_version": MINIMUM_OS, "executable": EXECUTABLE, "icon": ICON_FILE,
-            "policy": "v0.1.4 name, identifier, icon and Info.plist key set retained for in-place upgrade; executable name and version differ",
+            "policy": "owner ruling 25: v0.2's own name and identifier, so it sits beside an installed v0.1.4 and never touches its files; v0.1.4 icon and Info.plist key set; executable name and version differ",
         },
         "trust_level": match &built.signature {
             None => serde_json::json!({
