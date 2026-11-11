@@ -287,3 +287,22 @@ fn the_content_manifest_states_v02s_own_identity() {
     assert!(!policy.contains("v0.1.4 name, identifier"), "{policy}");
     assert!(policy.contains("ruling 25"), "{policy}");
 }
+/// The probe pin is the probe the canonical recipe builds (lane RELF: item 5's recipe change,
+/// `-Wl,-S`, changed the probe's LC_UUID and so its bytes, and only a bundle build noticed:
+/// `desktop-package bundle` refused it with `SourceIdentity`). Ignored: it needs a probe built by
+/// `repro/build-bundle.sh` (`<CARGO_TARGET_DIR>/release/resource_probe`), given in
+/// `MYCELIUM_RECIPE_RESOURCE_PROBE`.
+#[test]
+#[ignore = "needs a probe built by the canonical recipe in MYCELIUM_RECIPE_RESOURCE_PROBE"]
+fn the_probe_pin_is_the_probe_the_canonical_recipe_builds() {
+    let path = std::env::var_os("MYCELIUM_RECIPE_RESOURCE_PROBE")
+        .expect("MYCELIUM_RECIPE_RESOURCE_PROBE names the recipe-built probe");
+    let bytes = fs::read(path).unwrap();
+    let pins = package::helper_pins().unwrap();
+    let pin = pins.iter().find(|p| p.path == RESOURCE_PROBE_PATH).unwrap();
+    assert_eq!(
+        (bytes.len() as u64, format!("{:x}", Sha256::digest(&bytes))),
+        (pin.bytes, pin.sha256.clone()),
+        "helper-pins.json's resource_probe pin is not the recipe's probe"
+    );
+}
