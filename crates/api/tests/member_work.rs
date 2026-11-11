@@ -113,6 +113,10 @@ impl Joined {
     fn grant(&self) {
         standing_consent::grant(&self.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}), &self.policy, app_host::now(), Some(16_000_000_000)).unwrap();
     }
+    /// [`Joined::grant`] with the operator's own consent wall `seconds`.
+    fn grant_wall(&self, seconds: u64) {
+        standing_consent::grant(&self.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":seconds,"max_commands":1000}}), &self.policy, app_host::now(), Some(16_000_000_000)).unwrap();
+    }
     fn bind(&self) {
         work::bind_consent(&self.member_root, self).unwrap();
     }
@@ -518,12 +522,14 @@ fn an_operator_driven_member_prepares_without_an_announcement() {
 /// route's expiry.
 fn serve_route(
     member: &Joined,
+    prepared_ago: Option<Duration>,
     op_wall: Duration,
     lifetime: Duration,
 ) -> (Result<Value, String>, f64, f64) {
     let mut work = Work::new(member.member_root.clone());
     let (offer, shard) = custody(member, "run-ep2-transfer-0");
     work.native = Some(api::joined_shard::native::NativeShard::new(shard).unwrap());
+    work.prepared_at = prepared_ago.map(|ago| Instant::now().checked_sub(ago).unwrap());
     let document = json!({"controlled_proof":"serve-deadline"});
     let digest = |v: &Value| protocol::canonical::digest(v).unwrap();
     work.proof_digest = Some(digest(&document));
@@ -637,12 +643,13 @@ fn serve_route(
 /// operation wall).
 #[test]
 fn a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wall() {
+    // Order 1: the route's signed expiry ends first (consent wall 600 s from the serve).
     let member = Joined::new();
     member.grant();
     member.bind();
     let poll = Duration::from_millis(B::OwnerPoll.span(Entries::ZERO).unwrap().millis());
     let lifetime = Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis());
-    let (served, ended, expires_at) = serve_route(&member, poll * 2, lifetime);
+    let (served, ended, expires_at) = serve_route(&member, None, poll * 2, lifetime);
     let report = served.unwrap();
     assert!(
         matches!(
@@ -655,4 +662,28 @@ fn a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wa
         ended >= expires_at - poll.as_secs_f64(),
         "served until {ended}, the route expires at {expires_at}"
     );
+}
+
+/// Item 2, the other order (REVIEW-laneEP R1: the member never outlives its OWN consent): when the
+/// member's consent wall ends before the route's signed expiry, the serve ends at the consent wall
+/// (counted from the first prepare, set here 59 s before a 60 s wall), not at the expiry the
+/// owner signed. (The serve reports `operator_cancelled` for that end: `joined_shard/serve.rs` has no
+/// consent-wall code; lane EPF owns that file.)
+#[test]
+fn a_member_whose_consent_wall_ends_first_stops_serving_at_its_consent_wall_not_the_routes_expiry() {
+    let member = Joined::new();
+    member.grant_wall(60);
+    member.bind();
+    let lifetime = Duration::from_millis(B::CancelAndCleanup.span(Entries::ZERO).unwrap().millis());
+    let started = app_host::now();
+    // The first prepare ran 59 s ago: one second of the 60 s consent wall is left.
+    let (served, ended, expires_at) =
+        serve_route(&member, Some(Duration::from_secs(59)), lifetime, lifetime);
+    let report = served.unwrap();
+    assert_ne!(report["teardown"], "route_expired", "{report}");
+    assert!(
+        ended < expires_at - 2.0,
+        "the consent wall (1 s left) ended the serve: ended {ended}, route expires {expires_at}"
+    );
+    assert!(ended >= started + 0.9, "served until the consent wall: {started}..{ended}");
 }

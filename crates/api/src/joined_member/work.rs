@@ -637,7 +637,7 @@ pub struct Work {
     /// `false` for the operator-driven member (`Work::operator`).
     require_share: bool,
     /// The first native prepare: the member's consent wall counts from it.
-    prepared_at: Option<std::time::Instant>,
+    pub prepared_at: Option<std::time::Instant>,
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
