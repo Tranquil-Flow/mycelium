@@ -1572,6 +1572,63 @@ fn packaged_quit_fences_and_cancels_when_the_services_refuse_its_begin() {
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
+/// v0.1.4's `DemoApp.close` runs `swarm_publish.close` and then `acquisition.close()`, keeping the
+/// first failure (app.py:1824-1847 @ f4e366e9): a failed listing close is reported only once the
+/// download's close ended (REVIEW-lanePH1 finding 5, mutant Mss). The listing state cannot be read
+/// (its file is a directory), so the custody's close fails at once, while the download's close
+/// waits for the attempt its held response keeps: Quit stays pending until that close was
+/// written, then reports the failure (exit 3).
+#[test]
+fn packaged_quit_reports_a_failed_swarm_close_only_after_the_download_close_ended() {
+    let state = state_root();
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(
+            state
+                .join("v02-node/private")
+                .join(api::swarm::publisher::app::DB_FILE),
+        )
+        .unwrap();
+    let files = tiny_snapshot(None);
+    let repository = Repository::start(files.clone());
+    let observed = Observed::new(permissive());
+    let (core, mut cleanup) = packaged_core(&state, &repository, &observed);
+    assert_created(&core);
+    repository.hold("model.safetensors");
+    assert_started(&download(&core));
+    repository.wait_held();
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    for _ in 0..6 {
+        assert_eq!(
+            cleanup.poll(),
+            Ok(Poll::Pending),
+            "Quit reported the listing's failed close while the download's close still ran"
+        );
+        assert_ne!(acquisition_status(&state)["state"], "closed");
+        std::thread::sleep(poll());
+    }
+    repository.release();
+    assert_eq!(
+        quit_result(&mut cleanup),
+        Err(desktop::lifecycle::CleanupError::Poll),
+        "a failed swarm close was reported as a clean Quit"
+    );
+    assert_eq!(
+        acquisition_status(&state),
+        status_doc(
+            "closed",
+            size_of(&files, "config.json"),
+            total(&files),
+            None
+        )
+    );
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 // ---- `_policy_loop`: a running download follows this Mac and the saved consent ----
 
 /// `DemoApp._policy_loop` (app.py:1007-1030 @ f4e366e9): every second, while an attempt is active,
