@@ -769,3 +769,85 @@ fn the_packaged_assignment_and_recovery_sources_publish_v014s_unreadable_source(
     quit(host);
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
+
+/// v0.1.4's `/api/status` carries the owner's listing custody (`'swarm': _swarm_status(self)`,
+/// app.py:1280 and :430-436; `swarm_publish.status`, swarm_publish.py:524-530 @ f4e366e9): an owner
+/// that never opted in shows `{enabled: false, mode: null}`, an opted-in one the custody's own
+/// status, as the headless launcher's status does (reconcile/laneB12f.md). The directory is a
+/// loopback listener that never answers: no test reaches the real directory.
+#[test]
+fn the_packaged_status_shows_the_swarm_listing_custody() {
+    let state = state_root("status");
+    let directory = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!(
+        "http://127.0.0.1:{}",
+        directory.local_addr().unwrap().port()
+    );
+    let (core, mut cleanup) = node_service::packaged::core_with(
+        &state,
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+        Arc::new(Permissive),
+    )
+    .unwrap();
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let status = |core: &Arc<dyn Core>| {
+        let (code, status) =
+            through_window(core, window_request("main", "GET", "/api/status", &[]));
+        assert_eq!(code, 200, "{status}");
+        status
+    };
+    // (The packaged status is published with the first action: before it, 503 status_unavailable.)
+    let action = [
+        ("origin", ORIGIN),
+        ("x-mycelium-action", "1"),
+        ("content-type", "application/json"),
+    ];
+    let call = |core: &Arc<dyn Core>, path: &str, body: Value| {
+        through_window(
+            core,
+            Request {
+                body: serde_json::to_vec(&body).unwrap(),
+                ..window_request("main", "POST", path, &action)
+            },
+        )
+    };
+    let created = call(&core, "/api/create", json!({"consent": consent()}));
+    assert_eq!(created.0, 200, "create: {}", created.1);
+    assert_eq!(
+        status(&core)["swarm"],
+        json!({"enabled": false, "mode": null})
+    );
+    let published = call(
+        &core,
+        "/api/swarm/publish",
+        json!({"directory": origin, "name": "Packaged swarm", "access_mode": "request",
+               "description": "A packaged owner"}),
+    );
+    assert_eq!(published.0, 200, "publish: {}", published.1);
+    let shown = status(&core)["swarm"].clone();
+    for key in ["enabled", "mode", "directory", "swarm_id"] {
+        assert_eq!(shown[key], published.1[key], "{key}: {shown}");
+    }
+    assert_eq!(shown["enabled"], true);
+    let withdrawn = call(&core, "/api/swarm/unpublish", json!({}));
+    assert_eq!(withdrawn.0, 200, "unpublish: {}", withdrawn.1);
+    let shown = status(&core)["swarm"].clone();
+    assert_eq!(
+        (&shown["enabled"], &shown["mode"]),
+        (&json!(false), &json!("app"))
+    );
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let deadline = Instant::now() + millis(B::WorkerStartup);
+    while cleanup.poll().unwrap() != Poll::Verified {
+        assert!(
+            Instant::now() < deadline,
+            "the packaged core did not clean up"
+        );
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    }
+    drop(core);
+    drop(directory);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
