@@ -5,7 +5,7 @@
 //! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
 use crate::{
-    app_host::{FastModeDefault, FastModeProcess, PackagedHost},
+    app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost, Publishing},
     router_port::{self, Serving, ServingActions},
     service::NodeService,
 };
@@ -143,8 +143,28 @@ fn err(code: &'static str) -> PublicError {
 }
 struct Gate {
     closing: bool,
+    /// Admitted callbacks (chat send and events, actions): at most `capacity` at once.
     tasks: Vec<JoinHandle<()>>,
+    /// Stop, status and the chat state: never refused for the admitted ones, bounded apart.
+    servable: Vec<JoinHandle<()>>,
     failed: bool,
+}
+/// The callbacks the page can always reach (v0.1.4's gateway serves Stop, status and health
+/// whatever its admitted requests hold, laneB18 FU1): the page's and the owner's status, the chat
+/// state, and every Stop (`/api/serving/stop`, `/api/demo/stop`, `/api/stop`) and the web Quit.
+fn always_servable(request: &ServiceRequest) -> bool {
+    matches!(
+        (request.method.as_str(), request.target.as_str()),
+        ("GET", "/api/status")
+            | (
+                "POST",
+                "/chat/api/state"
+                    | "/api/serving/stop"
+                    | "/api/demo/stop"
+                    | "/api/stop"
+                    | "/api/quit"
+            )
+    )
 }
 struct Chat {
     id: String,
@@ -183,6 +203,11 @@ pub struct DesktopServices {
     /// Every `POST /api/*`, in one action transaction at a time (v0.1.4's `app.guard`).
     actions: Arc<Actions>,
     fast_mode: FastModeProcess,
+    /// The packaged host's own loops (its `_policy_loop`): Quit stops them as it fences
+    /// admission and proves them ended and joined before the services verify.
+    loops: Vec<Arc<HostLoop>>,
+    /// The packaged host's listing custody, closed by the packaged Quit (not by these services).
+    publishing: Option<Publishing>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -242,6 +267,24 @@ impl DesktopServices {
         let qualification = development_source(&node);
         Self::with_host(node, capacity, private, host, qualification)
     }
+    /// The packaged executable's services: [`DesktopServices::with_model_source`] with the
+    /// owner's listing custody over `publisher` (`PackagedHost::with_publisher`).
+    pub fn packaged(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+        publisher: Arc<api::swarm::publisher::app::AppPublisher>,
+    ) -> Self {
+        let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
+            .with_publisher(publisher);
+        let qualification = development_source(&node);
+        Self::with_host(node, capacity, private, host, qualification)
+    }
+    /// The listing custody these services' host keeps (none outside the packaged executable).
+    pub fn publishing(&self) -> Option<Publishing> {
+        self.publishing.clone()
+    }
     /// Every `/chat/*` request first asks `gate` (on its request thread, never the window's):
     /// the packaged executable's chat waits for its native service over a prepared model.
     pub fn gated(mut self, gate: Arc<dyn ModelGate>) -> Self {
@@ -259,6 +302,8 @@ impl DesktopServices {
             .and_then(|source| Serving::new(node.clone(), source))
             .map(Arc::new);
         let fast_mode = host.fast_mode_process();
+        let loops = host.loops();
+        let publishing = host.publishing();
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
@@ -267,11 +312,14 @@ impl DesktopServices {
             ))),
             serving,
             fast_mode,
+            loops,
+            publishing,
             node,
             model: None,
             gate: Arc::new(Mutex::new(Gate {
                 closing: false,
                 tasks: Vec::new(),
+                servable: Vec::new(),
                 failed: false,
             })),
             chat: Arc::new(Mutex::new(None)),
@@ -353,10 +401,22 @@ impl DesktopServices {
                 let prompt = crate::chat_template::qwen2_chat_prompt(&plan.prompt);
                 let document = json!({"protocol":"mycelium.request_gateway.v1","prompt":prompt,"max_new_tokens":tokens,"qualification":self.node.qualification()?});
                 protocol::request::submission(&document).map_err(|e| PublicError::new(400, e.0))?;
-                let gate = self.gate.lock().map_err(|_| err("desktop_poisoned"))?;
-                if gate.closing {
-                    return Err(err("application_closed"));
-                }
+                // The gate is only Quit's fence here, never held across the send's admission
+                // (rollover, `Serving::submit`'s wait for the start, up to WorkerStartup): every
+                // other callback (status, Stop, Quit's begin) takes it on the window's thread.
+                // `chat` stays the single-admission fence: one send at a time, the rest 429.
+                let closing = || -> Result<(), PublicError> {
+                    if self
+                        .gate
+                        .lock()
+                        .map_err(|_| err("desktop_poisoned"))?
+                        .closing
+                    {
+                        return Err(err("application_closed"));
+                    }
+                    Ok(())
+                };
+                closing()?;
                 let mut chat = self
                     .chat
                     .try_lock()
@@ -364,6 +424,9 @@ impl DesktopServices {
                 if chat.as_ref().is_some_and(|c| !c.done) {
                     return Err(PublicError::new(429, "chat_busy"));
                 }
+                // Quit may have begun meanwhile: nothing is rolled over or admitted after it (an
+                // admission racing it is refused by the node service's own shutdown fence).
+                closing()?;
                 // The owner's own page is the one local client (`chat.client_key`).
                 self.rate
                     .lock()
@@ -583,20 +646,34 @@ impl Services for DesktopServices {
             Self::complete_error(complete, err("application_closed"));
             return;
         }
-        for task in std::mem::take(&mut gate.tasks) {
-            if task.is_finished() {
-                if task.join().is_err() {
-                    gate.failed = true;
+        let Gate {
+            tasks,
+            servable,
+            failed,
+            ..
+        } = &mut *gate;
+        for slots in [&mut *tasks, &mut *servable] {
+            for task in std::mem::take(slots) {
+                if task.is_finished() {
+                    if task.join().is_err() {
+                        *failed = true;
+                    }
+                } else {
+                    slots.push(task);
                 }
-            } else {
-                gate.tasks.push(task);
             }
         }
-        if gate.failed {
+        if *failed {
             Self::complete_error(complete, err("desktop_callback_panicked"));
             return;
         }
-        if gate.tasks.len() >= self.capacity.get() {
+        // Stop and status never wait for a slot the admitted requests hold; they have their own.
+        let slots = if always_servable(&request) {
+            servable
+        } else {
+            tasks
+        };
+        if slots.len() >= self.capacity.get() {
             crate::phase::mark("callback_capacity", "refused");
             Self::complete_error(complete, err("desktop_callback_capacity"));
             return;
@@ -613,7 +690,7 @@ impl Services for DesktopServices {
                     this.work(request, callback);
                 }
             }) {
-            Ok(task) => gate.tasks.push(task),
+            Ok(task) => slots.push(task),
             Err(_) => {
                 if let Ok(mut callback) = callback.lock()
                     && let Some(callback) = callback.take()
@@ -625,6 +702,9 @@ impl Services for DesktopServices {
     }
     fn begin_shutdown(&self, _: std::time::Instant) -> Result<(), CleanupError> {
         self.gate.lock().map_err(|_| CleanupError::Begin)?.closing = true;
+        for host_loop in &self.loops {
+            host_loop.stop();
+        }
         if let Ok(serving) = &self.serving {
             serving.begin_shutdown();
         }
@@ -637,16 +717,37 @@ impl Services for DesktopServices {
         if !gate.closing {
             return Err(CleanupError::Poll);
         }
-        if gate.tasks.iter().any(|t| !t.is_finished()) {
+        if gate
+            .tasks
+            .iter()
+            .chain(&gate.servable)
+            .any(|t| !t.is_finished())
+        {
             return Ok(Poll::Pending);
         }
-        for task in std::mem::take(&mut gate.tasks) {
+        let ended: Vec<_> = std::mem::take(&mut gate.tasks)
+            .into_iter()
+            .chain(std::mem::take(&mut gate.servable))
+            .collect();
+        for task in ended {
             if task.join().is_err() {
                 gate.failed = true;
             }
         }
         if gate.failed {
             return Err(CleanupError::Poll);
+        }
+        // The host's loops end after their pass in progress (one observation at most).
+        for host_loop in &self.loops {
+            match host_loop.poll_join() {
+                Ok(true) => {}
+                Ok(false) => return Ok(Poll::Pending),
+                Err(code) => {
+                    eprintln!("desktop shutdown: {code}");
+                    gate.failed = true;
+                    return Err(CleanupError::Poll);
+                }
+            }
         }
         // The live request's gateway worker ends after its driver job (or its refusal).
         if self.serving.as_ref().is_ok_and(|s| !s.settled()) {

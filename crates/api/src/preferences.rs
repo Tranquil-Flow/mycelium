@@ -434,12 +434,13 @@ pub mod run_model {
     }
     /// `DemoApp._choose_run_model` under the app guard: shape, choice, environment lock,
     /// acquisition and owner-run activity are checked in that order before anything is written.
-    /// `open_acquisition` is the host's reset of `acquisition_policy_error` + `_open_acquisition`.
+    /// `open_acquisition` is the host's reset of `acquisition_policy_error` + `_open_acquisition`;
+    /// its failure is the answer (raised after the choice was saved, app.py:866-867).
     pub fn choose(
         root: &Path,
         facts: &Facts<'_>,
         body: &Map<String, Value>,
-        open_acquisition: &mut dyn FnMut(),
+        open_acquisition: &mut dyn FnMut() -> Result<(), PublicError>,
     ) -> Result<Value, PublicError> {
         choose_json(root, facts, body, open_acquisition).map(|j| j.to_value())
     }
@@ -447,7 +448,7 @@ pub mod run_model {
         root: &Path,
         facts: &Facts<'_>,
         body: &Map<String, Value>,
-        open_acquisition: &mut dyn FnMut(),
+        open_acquisition: &mut dyn FnMut() -> Result<(), PublicError>,
     ) -> Result<Json, PublicError> {
         if body.len() != 1 || !body.contains_key("choice") {
             return Err(demo("invalid_request"));
@@ -466,7 +467,7 @@ pub mod run_model {
             return Err(demo("owner_run_active"));
         }
         save_choice(root, picked)?;
-        open_acquisition();
+        open_acquisition()?;
         document_json(root, facts.env, facts.device_memory_bytes)
     }
 }
