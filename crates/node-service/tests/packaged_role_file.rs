@@ -161,9 +161,11 @@ fn a_targets_state_without_its_role_file_is_refused() {
     assert_eq!(role, Value::Null);
 }
 
+/// Each installation file's name with its bytes and inode, `None` when absent.
+type Files = Vec<(&'static str, Option<(Vec<u8>, u64)>)>;
 /// The installation files the action routes persist (consent, role, join window, standing grant),
 /// each with its bytes and inode (a rewrite with the same bytes is still a rewrite).
-fn installation_files(state: &Path) -> Vec<(&'static str, Option<(Vec<u8>, u64)>)> {
+fn installation_files(state: &Path) -> Files {
     [
         "installation-role.json",
         "resource-policy.json",
@@ -218,7 +220,7 @@ fn a_refused_installation_state_is_not_rewritten_by_an_action() {
     assert_eq!(mac.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();
-    let changed = |after: &[(&'static str, Option<(Vec<u8>, u64)>)]| -> Vec<&'static str> {
+    let changed = |after: &Files| -> Vec<&'static str> {
         before
             .iter()
             .zip(after)
