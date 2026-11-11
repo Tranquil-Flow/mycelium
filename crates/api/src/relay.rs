@@ -870,6 +870,20 @@ struct Inner {
 pub struct Relay {
     inner: Arc<Inner>,
 }
+/// The lifetime loop's view of one relay (`_lifetime_loop`'s `self`): it steps and reports the
+/// relay without its host's locks, and it never closes the relay on drop.
+#[derive(Clone)]
+pub struct Lifetime(Arc<Inner>);
+impl Lifetime {
+    /// One `_lifetime_step`, as the lifetime thread runs it.
+    pub fn step(&self) {
+        lifetime_step(&self.0);
+    }
+    /// `status()` of the same relay.
+    pub fn status(&self) -> Json {
+        status_of(&self.0)
+    }
+}
 impl Relay {
     /// `TemporaryHttpsRelay(state_root, provider, **spec)`; the checks run in the source's order.
     pub fn new(
@@ -1120,9 +1134,27 @@ impl Relay {
     pub fn step(&self) {
         lifetime_step(&self.inner);
     }
+    /// What the lifetime thread holds: the relay's own state only, never its host's locks.
+    pub fn lifetime(&self) -> Lifetime {
+        Lifetime(self.inner.clone())
+    }
     /// `status()`.
     pub fn status(&self) -> Json {
-        let inner = &self.inner;
+        status_of(&self.inner)
+    }
+    /// `close()`: idempotent; terminates the child, closes the proxy, writes `relay-tail.log`.
+    pub fn close(&self) {
+        close(&self.inner);
+    }
+}
+impl Drop for Relay {
+    fn drop(&mut self) {
+        close(&self.inner);
+    }
+}
+/// `TemporaryHttpsRelay.status()`.
+fn status_of(inner: &Arc<Inner>) -> Json {
+    {
         let mut st = lock(&inner.state);
         let running = match inner.provider {
             Provider::External => st.proxy.is_some() && !st.closed && st.error_code.is_none(),
@@ -1173,15 +1205,6 @@ impl Relay {
             value.set("local_forward_target", Json::from(target));
         }
         value
-    }
-    /// `close()`: idempotent; terminates the child, closes the proxy, writes `relay-tail.log`.
-    pub fn close(&self) {
-        close(&self.inner);
-    }
-}
-impl Drop for Relay {
-    fn drop(&mut self) {
-        close(&self.inner);
     }
 }
 
@@ -1506,6 +1529,10 @@ impl OwnerRelay {
             None => crate::jobj! {"state" => "private"},
             Some(relay) => relay.status(),
         }
+    }
+    /// The running relay's lifetime handle (what its lifetime thread steps), if there is one.
+    pub fn lifetime(&self) -> Option<Lifetime> {
+        self.relay.as_ref().map(Relay::lifetime)
     }
     /// `self.public_relay.proxy.bind_seed(self.authority.seed_server)` after the seed exists.
     pub fn bind_seed(&self, backend: Option<Arc<dyn SeedBackend>>) {
