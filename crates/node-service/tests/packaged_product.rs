@@ -9,6 +9,7 @@
 //! (GET) and every other owner action (POST).
 #![cfg(feature = "desktop-shell")]
 use api::{
+    gateway::{Qualification, QualificationSource, Unavailable},
     resources::{Observation, Observer},
     schema::PublicError,
 };
@@ -629,6 +630,71 @@ fn the_packaged_route_source_reads_the_live_route_it_does_not_have() {
         source_notice(&snapshot, "route-source").unwrap()["code"],
         "route_source_failed"
     );
+    quit(host);
+    std::fs::remove_dir_all(&root).unwrap_or_default();
+}
+
+/// The v0.1.4 projector's own output on recorded steps (FX-B13-PRODUCT-SNAPSHOTS).
+const ORACLE: &str = include_str!("../../api/tests/fixtures/oracle_product_snapshots.json");
+/// `source_states` row and source notice of `source` in the oracle's snapshot at `case[step]`.
+fn oracle(case: &str, step: usize, source: &str) -> (Value, Option<Value>) {
+    let fixture: Value = serde_json::from_str(ORACLE).unwrap();
+    let expected = fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["case"] == case)
+        .unwrap()["steps"][step]["expected"]
+        .clone();
+    (
+        source_state(&expected, source).clone(),
+        source_notice(&expected, source).cloned(),
+    )
+}
+/// The source's `source_states` row and notice equal the oracle's at `case[step]`, byte for byte.
+fn assert_source_as_oracle(snapshot: &Value, source: &str, case: &str, step: usize) {
+    let (row, notice) = oracle(case, step, source);
+    assert_eq!(
+        sorted(source_state(snapshot, source)),
+        sorted(&row),
+        "{source}"
+    );
+    assert_eq!(
+        source_notice(snapshot, source).map(sorted),
+        notice.as_ref().map(sorted),
+        "{source}"
+    );
+}
+/// A qualification source that cannot be read (`qualification_source.current()` raising).
+struct Unreadable;
+impl QualificationSource for Unreadable {
+    fn current(&self, _: Option<&str>) -> Result<Option<Qualification>, Unavailable> {
+        Err(Unavailable)
+    }
+}
+
+/// `qualification_source` is `route_qualification_to_dict(qualification_source.current())`
+/// (supervisor.py:2166-2168): the serving root's qualification source. The packaged development
+/// record has no `mycelium.route_qualification.v1` document (`qualification_source_missing`, the
+/// oracle's `owner_only` row), and a source that cannot be read publishes
+/// `qualification_source_failed` (the oracle's `serving[2]` row).
+#[test]
+fn the_packaged_qualification_source_is_the_serving_roots_qualifier() {
+    let (root, host, snapshot) = served("qualification");
+    assert_source_as_oracle(&snapshot, "qualification-source", "owner_only", 0);
+    quit(host);
+    std::fs::remove_dir_all(&root).unwrap_or_default();
+
+    let root = state_root("qualification-unreadable");
+    let host = DesktopServices::with_qualification(
+        node(),
+        NonZeroUsize::new(4).unwrap(),
+        &root,
+        Arc::new(Unreadable),
+    );
+    create(&host);
+    let snapshot = json_of(&get(&host, SNAPSHOT));
+    assert_source_as_oracle(&snapshot, "qualification-source", "serving", 2);
     quit(host);
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
