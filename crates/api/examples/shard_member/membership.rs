@@ -256,8 +256,10 @@ impl Membership {
         })
     }
     /// One renewal pass now, exactly as the renewal thread runs it (`tests/grant_window.rs` drives
-    /// it on its own schedule; this binary only runs it from the thread).
-    #[allow(dead_code)]
+    /// it on its own schedule; this binary only runs it from the thread). Test-only: it records a
+    /// final refusal without ending a live renewal thread, and `rearm` relies on the thread having
+    /// ended whenever a final refusal is recorded.
+    #[cfg(test)]
     pub fn renew_once(&self) -> Result<(), String> {
         self.shared.renew_once()
     }
