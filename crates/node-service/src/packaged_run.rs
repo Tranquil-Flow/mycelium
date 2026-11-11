@@ -7,21 +7,26 @@
 //! `DemoApp.close`, app.py:1815-1825) and `_stop_local_contributor` (app.py:1842).
 //!
 //! The run is `api::owner_driver::DemoRuns` over the shared `OwnerChain`; the model step reads this
-//! host's acquisition, the contributor and descriptors steps are `api::owner_ports` (the same
-//! composition the headless launcher runs). The observe and compile steps have no producer in this
-//! host yet: they end with the closed `owner_run_step_not_ported` refusal naming their seam, never a
-//! success. The work phase (`slices_ports`/`work_ports`) stays absent (PH3b S4a/S4c).
+//! host's acquisition, the contributor and descriptors steps are `api::owner_ports`, the observe
+//! and compile steps are `api::owner_observation` / `api::owner_compiler` over this host's
+//! [`ChainHost`] (lane PH3b S3c; the same composition the headless launcher runs): the managed owner
+//! is bound on this owner's seed (its mailbox serves the seed's managed-control routes, so a joined
+//! Mac's agent reaches the run as in the shipped app). The work phase (`slices_ports`/`work_ports`)
+//! stays absent (PH3b S4c: `api::joined_owner::work::OwnerWork`) and ends with the closed
+//! `owner_run_step_not_ported` refusal naming its seam, never a success.
 use crate::{app_host::HostLoop, packaged_network::Network, service::NodeService};
 use api::{
     acquisition::Acquisition,
     actions::Action,
-    app_host::Authority,
     authority_view,
+    bootstrap_process::CleanupFailure,
     installation_descriptor::Failure,
     owner_chain::{
         self, ModelAdapter, SharedHostChain, acquisition_exception, prepared_source_from,
     },
+    owner_compiler::{Compiler, Observation, SharedCompiler},
     owner_driver::{DemoRuns, DemoView, Timing, fresh_identity},
+    owner_observation::{self, ChainHost, ChainView, target},
     owner_ports::{self, OwnerPorts, RunFields, RunHost, RunView},
     persistent::RelayState,
     preferences::resource_policy,
@@ -34,7 +39,7 @@ use owner_run::{chain::StepError, steps::model::Reverify};
 use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -42,6 +47,11 @@ use std::{
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+/// The managed control owner this host binds on its owner's seed (`api::owner_observation`).
+pub type Managed = owner_observation::Managed<PackagedRun>;
+/// The packaged host's owner authority: its seed runtime carries this host's managed owner.
+pub type Authority = api::app_host::Authority<Managed>;
 
 /// The run's composition seams and its shared handle: the composition fills it once the host
 /// installed the run; the window's status and Quit read it.
@@ -81,8 +91,22 @@ pub struct ModelHooks {
     pub reverify: Box<dyn Fn() -> Reverify + Send + Sync>,
 }
 
-/// The packaged host as `api::owner_ports::RunHost`: its authority, the network beside it (relay,
-/// `_left`), the node service's shutdown fence (`DemoApp.closed`) and the run's own fields.
+/// The owner's bootstrap custody beside the run's fields (the headless launcher keeps the same
+/// fields in its Core): the contributor incarnation a bootstrap reservation belongs to, the owner's
+/// own local target worker, a bootstrap whose cleanup is still unproven, the run's compiler as the
+/// compile status reaches it, and the managed-control exchanges' shared resource verdict.
+#[derive(Default)]
+struct Custody {
+    incarnation: Arc<()>,
+    bootstrap: Option<target::Worker>,
+    failure: Option<CleanupFailure>,
+    compiler: Option<Weak<Mutex<Compiler<PackagedRun>>>>,
+    exchange_resource: Option<(Instant, Option<&'static str>)>,
+}
+
+/// The packaged host as `api::owner_ports::RunHost` and `api::owner_observation::ChainHost`: its
+/// authority, the network beside it (relay, `_left`, `_leave_fence`), the node service's shutdown
+/// fence (`DemoApp.closed`), the run's own fields and the owner's bootstrap custody.
 #[derive(Clone)]
 pub struct PackagedRun {
     authority: Arc<Mutex<Authority>>,
@@ -91,6 +115,20 @@ pub struct PackagedRun {
     model: Arc<ModelHooks>,
     run: Arc<Mutex<RunFields>>,
     lifecycle: Arc<Mutex<()>>,
+    custody: Arc<Mutex<Custody>>,
+    sidecar: Option<PathBuf>,
+}
+/// [`PackagedRun`] without keeping its state alive: the seed-owned managed owner and the
+/// observation/compile ports retain only this (no cycle through the seed runtime).
+#[derive(Clone)]
+pub struct WeakRun {
+    authority: Weak<Mutex<Authority>>,
+    network: Weak<Network>,
+    node: NodeService,
+    model: Weak<ModelHooks>,
+    run: Weak<Mutex<RunFields>>,
+    lifecycle: Weak<Mutex<()>>,
+    custody: Weak<Mutex<Custody>>,
     sidecar: Option<PathBuf>,
 }
 impl PackagedRun {
@@ -108,12 +146,13 @@ impl PackagedRun {
             model: Arc::new(model),
             run: Arc::default(),
             lifecycle: Arc::default(),
+            custody: Arc::default(),
             sidecar,
         }
     }
 }
 impl RunHost for PackagedRun {
-    type Managed = api::app_host::Unmanaged;
+    type Managed = Managed;
     /// The network and the fence are read first, then the authority and the run's fields are held
     /// together (order: authority -> run fields, everywhere).
     fn with<R>(&self, f: impl FnOnce(&mut RunView<'_, Self::Managed>) -> R) -> R {
@@ -136,14 +175,14 @@ impl RunHost for PackagedRun {
     fn membership_current(&self) -> bool {
         crate::packaged_network::membership_state(&self.authority).as_deref() == Some("current")
     }
-    /// This host never starts the contributor's native bootstrap (no observation producer is
-    /// composed here), so there is no bootstrap stage whose cleanup a Start would have to wait for.
-    fn admit_contributor(&self, _root: &Path) -> Result<(), PublicError> {
-        Ok(())
+    /// Durable admission: no unsettled native bootstrap stage of an earlier contributor
+    /// (`api::owner_observation::target::admit_cleanup_free`, as the headless launcher).
+    fn admit_contributor(&self, root: &Path) -> Result<(), PublicError> {
+        target::admit_cleanup_free(root).map_err(|e| PublicError::new(409, e.0))
     }
-    /// Nothing native is owned by the contributor here (see [`Self::admit_contributor`]).
+    /// Close the contributor's own hello worker (the caller holds the bootstrap lifecycle).
     fn close_contributor(&self) -> Result<(), PublicError> {
-        Ok(())
+        target::close_locked(self).map_err(|e| PublicError::new(409, e.0))
     }
     fn resource_check(&self) -> Option<&'static str> {
         (self.model.resource_check)()
@@ -151,12 +190,95 @@ impl RunHost for PackagedRun {
     fn acquisition(&self) -> Option<Acquisition> {
         (self.model.acquisition)()
     }
-    /// The member's staged hello needs the observation producer this host does not compose yet.
-    fn bootstrap(&self, _: &str, _: &str, _: &str, _: &str) -> Result<(), Failure> {
-        Err(Failure::new("RuntimeError", "managed_owner_unavailable"))
+    /// The owner's own contributor stages its hello for the run's bootstrap offer over the
+    /// owner's mailbox (`api::owner_observation::bootstrap`, demo_target.py:494-514).
+    fn bootstrap(
+        &self,
+        node: &str,
+        run: &str,
+        deployment: &str,
+        offer: &str,
+    ) -> Result<(), Failure> {
+        owner_observation::bootstrap(self, node, run, deployment, offer)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
     }
     fn sidecar(&self) -> Result<PathBuf, Failure> {
         owner_ports::installed_sidecar(self.sidecar.clone())
+    }
+}
+impl ChainHost for PackagedRun {
+    type Weak = WeakRun;
+    fn downgrade(&self) -> WeakRun {
+        WeakRun {
+            authority: Arc::downgrade(&self.authority),
+            network: Arc::downgrade(&self.network),
+            node: self.node.clone(),
+            model: Arc::downgrade(&self.model),
+            run: Arc::downgrade(&self.run),
+            lifecycle: Arc::downgrade(&self.lifecycle),
+            custody: Arc::downgrade(&self.custody),
+            sidecar: self.sidecar.clone(),
+        }
+    }
+    fn upgrade(weak: &WeakRun) -> Option<Self> {
+        Some(Self {
+            authority: weak.authority.upgrade()?,
+            network: weak.network.upgrade()?,
+            node: weak.node.clone(),
+            model: weak.model.upgrade()?,
+            run: weak.run.upgrade()?,
+            lifecycle: weak.lifecycle.upgrade()?,
+            custody: weak.custody.upgrade()?,
+            sidecar: weak.sidecar.clone(),
+        })
+    }
+    /// One snapshot: the fence and the acquisition are read first, then the authority, the run's
+    /// fields and the custody are held together (order: authority -> run fields -> custody); a
+    /// poisoned lock is `None` (the moved callers keep their own refusal codes).
+    fn try_with<R>(&self, f: impl FnOnce(&mut ChainView<'_, Self>) -> R) -> Option<R> {
+        let closed = self.node.closed().unwrap_or(true);
+        let acquisition = (self.model.acquisition)();
+        let mut authority = self.authority.lock().ok()?;
+        let mut run = self.run.lock().ok()?;
+        let mut custody = self.custody.lock().ok()?;
+        let Custody {
+            incarnation,
+            bootstrap,
+            failure,
+            compiler,
+            ..
+        } = &mut *custody;
+        Some(f(&mut ChainView {
+            authority: &mut authority,
+            run: &mut run,
+            closed,
+            acquisition: &acquisition,
+            bootstrap_lifecycle: &self.lifecycle,
+            bootstrap_incarnation: incarnation,
+            bootstrap,
+            bootstrap_failure: failure,
+            compiler,
+        }))
+    }
+    /// The resource gate the owner's own target checks on every managed-control exchange, as the
+    /// headless launcher's: a leave fence refuses at once; otherwise the exchanges of one policy
+    /// interval (`DemoApp._policy_loop`, app.py:1009) share one probe's verdict (v0.1.4's control
+    /// pump checks only the member binding per poll, control_pump.py:203).
+    fn exchange_resource_check(&self) -> Option<&'static str> {
+        if self.network.fenced() {
+            return Some("owner_stop");
+        }
+        let interval = BudgetId::PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009
+            .span(Entries::ZERO)
+            .map_or(Duration::ZERO, |span| Duration::from_millis(span.millis()));
+        if let Some((at, verdict)) = lock(&self.custody).exchange_resource
+            && at.elapsed() < interval
+        {
+            return verdict;
+        }
+        let verdict = self.resource_check();
+        lock(&self.custody).exchange_resource = Some((Instant::now(), verdict));
+        verdict
     }
 }
 
@@ -207,20 +329,63 @@ impl owner_chain::ChainPorts for ModelPorts {
     }
 }
 
-/// The chain's ports for one run: model, contributor and descriptors; observe and compile absent.
+/// The chain's ports for one run: model, contributor, descriptors, observe and compile (each
+/// temporary borrow uses adapters over the host's own state, as the headless launcher's); the
+/// work phase stays absent (PH3b S4c).
 struct PackagedChainPorts {
     model: ModelAdapter<ModelPorts>,
     contributor: OwnerPorts<PackagedRun>,
     reports: OwnerPorts<PackagedRun>,
+    observation: Observation<PackagedRun>,
+    compiler: SharedCompiler<PackagedRun>,
+}
+impl PackagedChainPorts {
+    fn new(host: &PackagedRun) -> Self {
+        let observation = Observation(Arc::new(Mutex::new(owner_observation::adapter(
+            host.downgrade(),
+        ))));
+        let compiler = Arc::new(Mutex::new(Compiler::new(
+            host.downgrade(),
+            observation.clone(),
+        )));
+        lock(&host.custody).compiler = Some(Arc::downgrade(&compiler));
+        let ports = OwnerPorts::new(host.clone());
+        Self {
+            model: ModelAdapter::new(ModelPorts(host.clone())),
+            contributor: ports.clone(),
+            reports: ports,
+            observation,
+            compiler: SharedCompiler(compiler),
+        }
+    }
 }
 impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
+    /// `chain.teardown`: the compiler's worker first, then the bootstrap offers' cleanup and
+    /// retirement (`api::owner_observation::Backend::teardown`).
+    fn teardown(&mut self, _: bool, _: &mut dyn owner_run::chain::StepEnv) -> Result<(), String> {
+        let compilation = self
+            .compiler
+            .0
+            .lock()
+            .map_err(|_| "compiler_state_unavailable".to_owned())?
+            .teardown();
+        let observation = self
+            .observation
+            .0
+            .lock()
+            .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
+            .host_mut()
+            .backend
+            .teardown();
+        compilation.and(observation)
+    }
     fn ports(&mut self) -> owner_run::owner_chain::Ports<'_> {
         owner_run::owner_chain::Ports {
             model: &mut self.model,
             contributor: Some(&mut self.contributor),
             reports: Some(&mut self.reports),
-            observe: None,
-            compile: None,
+            observe: Some(&mut self.observation),
+            compile: Some(&mut self.compiler),
         }
     }
 }
@@ -237,12 +402,7 @@ impl OwnerRun {
         let chain_host = host.clone();
         let runs = DemoRuns::new(
             Box::new(move || {
-                let ports = OwnerPorts::new(chain_host.clone());
-                Box::new(SharedHostChain::new(PackagedChainPorts {
-                    model: ModelAdapter::new(ModelPorts(chain_host.clone())),
-                    contributor: ports.clone(),
-                    reports: ports,
-                }))
+                Box::new(SharedHostChain::new(PackagedChainPorts::new(&chain_host)))
             }),
             Box::new(|| {
                 fresh_identity(api::app_host::now()).unwrap_or_else(|_| {

@@ -18,11 +18,12 @@
 //! (app.py:1377-1399 @ f4e366e9; `{compilation: null, serving: null, route_ready: false}` until a
 //! chain compile starts, chain_compile.py:197), executed on the real packaged process in
 //! `test-support/journeys/fixtures/python-v014-boundaries.json` (`no_model_no_execution_proposal`).
+use crate::packaged_run::Authority;
 use crate::service::NodeService;
 use api::{
     acquisition::{Acquisition, HttpTransport, Transport},
     actions::{Action, Backend as _},
-    app_host::{self, AcquisitionSite, AcquisitionView, Authority},
+    app_host::{self, AcquisitionSite, AcquisitionView},
     persistent::{Host, TOKEN_PATH_ENV},
     preferences::{fast_mode, resource_policy, run_model},
     resources::{self, Observation, Observer, ProbeObserver},

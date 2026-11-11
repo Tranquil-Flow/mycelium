@@ -15,10 +15,14 @@
 //!   Web-PKI path); a test points the member at the owner's loopback relay proxy and local seed.
 //! * `_renew_loop` for a joined target (app.py:911-927, `RemoteMacMember.renew`), skipped once the
 //!   Mac left (`_left`), and the member leave's steps (`member_leave.app_steps`, member_leave.py:192-260).
-use crate::{app_host::ModelSource, router_port::ServingActions};
+use crate::{
+    app_host::ModelSource,
+    packaged_run::{Authority, Managed},
+    router_port::ServingActions,
+};
 use api::{
     actions::{Action, Backend},
-    app_host::{self, Authority, Cell, HostView, NETWORK_FILE, RelayOrigin, Unmanaged, cap},
+    app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
     joined_member,
     persistent::RelayState,
     preferences::private_state,
@@ -247,15 +251,15 @@ pub struct PackagedCell<'a> {
     network: &'a Network,
 }
 impl Cell for PackagedCell<'_> {
-    type Managed = Unmanaged;
-    fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, Unmanaged>) -> R) -> R {
+    type Managed = Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> R {
         // The relay's lock is released before the authority's is taken.
         let origin = Origin(self.network.origin());
         let left = self.network.left();
         let mut authority = lock(self.authority);
         f(&mut HostView::new(&mut authority, &origin, false, left))
     }
-    fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, Unmanaged>) -> R) -> Option<R> {
+    fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> Option<R> {
         let origin = Origin(self.network.origin());
         let left = self.network.left();
         let mut authority = self.authority.lock().ok()?;
@@ -321,7 +325,7 @@ impl EndpointHost for Endpoint<'_> {
     /// `_bind_public_routes`: the pairing windows, the member-report inbox and the link probe.
     fn bind_public_routes(&mut self, proxy: &Arc<Proxy>) {
         let authority = self.authority.clone();
-        proxy.bind_local(Some(joined_member::public_route::<Unmanaged>(Arc::new(
+        proxy.bind_local(Some(joined_member::public_route::<Managed>(Arc::new(
             move || {
                 let a = lock(&authority);
                 (a.windows.clone(), a.seed.clone())

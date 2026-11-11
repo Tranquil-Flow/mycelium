@@ -220,7 +220,7 @@ pub struct DesktopServices {
     product: Arc<dyn api::desktop::ProductRoutes>,
     /// The packaged host's network and authority, for the status (`crate::packaged_network`).
     network: Arc<crate::packaged_network::Network>,
-    authority: Option<Arc<Mutex<api::app_host::Authority>>>,
+    authority: Option<Arc<Mutex<crate::packaged_run::Authority>>>,
     /// The packaged host's owner run, for the status's `owner_run` (`crate::packaged_run`).
     run: crate::packaged_run::RunConfig,
     gate: Arc<Mutex<Gate>>,

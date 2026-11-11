@@ -32,9 +32,8 @@
 //!   has no `recovery_public_projection`, so its recovery source is `None` (supervisor.py:2148,
 //!   :2202-2207) and the projector publishes `recovery_source_missing` (projector.py:510-516): the
 //!   application's default here too.
-use crate::{router_port::Serving, service::NodeService};
+use crate::{packaged_run::Authority, router_port::Serving, service::NodeService};
 use api::{
-    app_host::Authority,
     desktop::ProductRoutes,
     http,
     product_app::{PATHS, RESET_PATH, SourceError},
