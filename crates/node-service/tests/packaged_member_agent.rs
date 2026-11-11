@@ -102,3 +102,48 @@ fn a_joined_packaged_mac_answers_the_owner_exchange_and_shows_its_member_card() 
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// Withdrawing standing consent (`/api/consent/standing/withdraw`, app.py:1730-1737) stops the
+/// standing loop's work for this Mac: `auto_poll_step` returns `standing_consent_withdrawn`
+/// before `auto_accept` and the agent (standing_consent.py:351-352), so the member no longer
+/// answers the owner's exchange, its card keeps its last state (the shipped loop never ticks
+/// the agent again: `waiting_for_consent` is not reached), and the membership stays.
+#[test]
+fn a_withdrawn_standing_consent_stops_the_members_answers_and_keeps_its_membership() {
+    let base = state_root("member-withdraw");
+    let owner = owner(&base);
+    let member = member(&base, &owner);
+    let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    approve_and_join(&owner, &member);
+    let node = member_node(&owner.mac);
+    owner.mac.until(
+        "the owner observed the member's signed exchange calls",
+        |o| json!(exchange_samples(o, &node)),
+        |v| v.as_u64().is_some_and(|n| n >= 2),
+    );
+    let withdrawn = member.post("/api/consent/standing/withdraw", json!({"confirm": true}));
+    assert_eq!(withdrawn.0, 200, "withdraw: {}", withdrawn.1);
+    assert_eq!(withdrawn.1["state"], "withdrawn", "{}", withdrawn.1);
+    std::thread::sleep(millis(STANDING) * 2);
+    let settled = exchange_samples(&owner.mac, &node);
+    std::thread::sleep(millis(STANDING) * 3);
+    assert_eq!(
+        exchange_samples(&owner.mac, &node),
+        settled,
+        "a member whose standing consent is withdrawn still answers the owner's exchange"
+    );
+    let status = member.status();
+    assert_eq!(status["demo_target"]["state"], "joined", "{status}");
+    assert_eq!(
+        status["join_flow"]["standing_consent"]["state"], "withdrawn",
+        "{status}"
+    );
+    assert_eq!(
+        status["authority"]["membership_state"], "current",
+        "{status}"
+    );
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
