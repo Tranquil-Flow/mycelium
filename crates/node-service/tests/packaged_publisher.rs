@@ -351,3 +351,26 @@ fn packaged_quit_leaves_a_tick_held_in_a_directory_exchange_at_the_close_deadlin
     drop(directory);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+/// The roots `state_root()` makes are removed with their contents when the test ends, also when it
+/// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
+#[test]
+fn a_test_root_is_removed_when_its_test_ends() {
+    let root = state_root();
+    let path = root.to_path_buf();
+    std::fs::write(path.join("left.json"), b"{}").unwrap();
+    drop(root);
+    assert!(!path.exists(), "{path:?} was left behind");
+    let mut failing = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let root = state_root();
+        failing = Some(root.to_path_buf());
+        panic!("a failing test");
+    }));
+    assert!(unwound.is_err());
+    let failing = failing.unwrap();
+    assert!(
+        !failing.exists(),
+        "{failing:?} was left behind by a failing test"
+    );
+}

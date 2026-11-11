@@ -950,3 +950,26 @@ fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
     };
     assert_eq!(verdict, Ok(Poll::Verified));
 }
+
+/// The roots `private()` makes are removed with their contents when the test ends, also when it
+/// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
+#[test]
+fn a_test_root_is_removed_when_its_test_ends() {
+    let root = private();
+    let path = root.to_path_buf();
+    std::fs::write(path.join("left.json"), b"{}").unwrap();
+    drop(root);
+    assert!(!path.exists(), "{path:?} was left behind");
+    let mut failing = None;
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let root = private();
+        failing = Some(root.to_path_buf());
+        panic!("a failing test");
+    }));
+    assert!(unwound.is_err());
+    let failing = failing.unwrap();
+    assert!(
+        !failing.exists(),
+        "{failing:?} was left behind by a failing test"
+    );
+}
