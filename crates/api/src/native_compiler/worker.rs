@@ -442,6 +442,13 @@ impl Worker {
     pub(crate) fn guard_samples(&self) -> u64 {
         self.guard.as_ref().map_or(0, guard::Guard::samples)
     }
+    /// NOT BUILT (lane MG item 4, design in REPORT-laneMG.md): v0.1.4's disk
+    /// guard (worker.py:820-844) has no v0.2 counterpart yet. Test-only stub so
+    /// the ignored RED compiles; it watches nothing.
+    #[cfg(test)]
+    pub(crate) fn guard_disk(&mut self, _root: &Path, _max_disk_bytes: u64) -> Result<()> {
+        Ok(())
+    }
     /// Test-only: wait (bounded) for the guard's verdict.
     #[cfg(test)]
     pub(crate) fn guard_wait_until(&self, deadline: Instant) -> Option<guard::Failure> {

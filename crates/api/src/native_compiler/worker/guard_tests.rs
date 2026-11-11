@@ -275,3 +275,32 @@ fn a_real_child_over_the_cap_is_killed_and_reaped() {
     assert_gone(pid);
     assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
 }
+
+/// Lane MG item 4 RED (ignored: not built; design in REPORT-laneMG.md). v0.1.4
+/// walks the worker's artifact root every 0.25 s and stops the worker with
+/// `worker_disk_limit_exceeded` once its regular files exceed `max_disk_bytes`
+/// (worker.py:820-844). v0.2 checks the shard size only once, at admission.
+#[test]
+#[ignore = "lane MG item 4 RED: the disk guard is not built yet (see REPORT-laneMG.md)"]
+fn a_custody_root_grown_over_the_storage_cap_stops_the_worker() {
+    let root = std::env::temp_dir().join(format!(
+        "mg-disk-{}-{}",
+        std::process::id(),
+        crate::app_host::hex(&crate::app_host::random(8).unwrap())
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let (child, client) = idle_child();
+    let pid = child.id();
+    let (mut worker, readings) = guarded(child, client);
+    worker.guard_disk(&root, 1024).unwrap();
+    std::fs::write(root.join("grown.bin"), vec![0_u8; 2048]).unwrap();
+    for bytes in [LIMIT / 2, LIMIT / 2] {
+        assert!(readings.send(Ok(bytes)).is_ok() || worker.guard_failure().is_some());
+    }
+    drop(readings);
+    let failure =
+        worker.guard_wait_until(Instant::now() + duration(BudgetId::ModelSelection).unwrap());
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(failure.map(|f| f.code), Some("worker_disk_limit_exceeded"));
+    assert_gone(pid);
+}
