@@ -15,8 +15,8 @@ use desktop::lifecycle::Poll;
 use macs::{
     Mac, approve_and_join, consent, join_body, member, owner, private, state_root, test_network,
 };
-use serde_json::{Value, json};
 use node_service::packaged_network::NetworkConfig;
+use serde_json::{Value, json};
 use std::{
     os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt},
     path::Path,

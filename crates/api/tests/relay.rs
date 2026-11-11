@@ -894,8 +894,13 @@ fn a_relay_closed_while_its_tunnel_is_set_up_spawns_no_client() {
         Some(script.clone())
     }));
     let started = Arc::new(
-        Relay::new(&root.join("relay"), &json!("cloudflare"), &Map::new(), hooks)
-            .expect("relay"),
+        Relay::new(
+            &root.join("relay"),
+            &json!("cloudflare"),
+            &Map::new(),
+            hooks,
+        )
+        .expect("relay"),
     );
     relay.set(Arc::downgrade(&started)).expect("set once");
     let answer = started.start(&json!(true), &json!(1800));
@@ -966,6 +971,9 @@ fn close_ends_a_start_that_waits_for_its_origin() {
         "the Start must end once the relay closed (tunnel pid {pid})"
     );
     start.join().expect("start thread");
-    assert!(running.is_empty(), "the closed relay left {running:?} running");
+    assert!(
+        running.is_empty(),
+        "the closed relay left {running:?} running"
+    );
     std::fs::remove_dir_all(&root).unwrap_or(());
 }
