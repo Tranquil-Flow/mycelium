@@ -719,6 +719,9 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
         };
         Ok((!body["offer"].is_null()).then(|| body["offer"].clone()))
     }
+    fn member_caps(&mut self) -> Result<Value, Failure> {
+        standing_member_caps(&self.root)
+    }
     fn sink(&mut self, report: &Value) -> Result<(), ExchangeUnavailable> {
         let sent = locked(&self.client)
             .map_err(|_| ExchangeUnavailable)?
@@ -730,6 +733,36 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
     }
     fn clock(&mut self) -> f64 {
         now()
+    }
+}
+
+/// The caps a joined Mac's announced share must fit. Not wired yet: like the moved agent, it
+/// knows none (`{}`).
+pub fn standing_member_caps(_root: &Path) -> Result<Value, Failure> {
+    Ok(json!({}))
+}
+/// A joined Mac's automatic work acceptance (`DemoApp.auto_accept`). Not wired yet: it never
+/// handles an offer.
+pub struct MemberAcceptor {
+    _root: PathBuf,
+    _announcement: Arc<Mutex<Value>>,
+}
+impl MemberAcceptor {
+    pub fn new(root: PathBuf, announcement: Arc<Mutex<Value>>) -> Self {
+        Self {
+            _root: root,
+            _announcement: announcement,
+        }
+    }
+    pub fn tick(
+        &mut self,
+        _work: &mut dyn crate::standing_acceptor::WorkAcceptance,
+        _policy: Option<&Value>,
+        _binding: Option<&Value>,
+        _holds_offer: bool,
+        _resource_check: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<Option<Value>, crate::standing_acceptor::AcceptFailure> {
+        Ok(None)
     }
 }
 
