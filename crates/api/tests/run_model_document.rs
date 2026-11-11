@@ -177,7 +177,10 @@ fn choose_matches_choose_run_model_for_every_oracle_trial() {
         };
         let body = case["body"].as_object().cloned().unwrap_or_default();
         let mut opened = 0;
-        let got = run_model::choose(dir_arg, &facts, &body, &mut || opened += 1);
+        let got = run_model::choose(dir_arg, &facts, &body, &mut || {
+            opened += 1;
+            Ok(())
+        });
         assert_eq!(outcome(got), expected(case), "{}", case["label"]);
         assert_eq!(
             opened,

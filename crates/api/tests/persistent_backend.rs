@@ -36,6 +36,8 @@ struct State {
     env: Vec<(String, String)>,
     memory: Option<u64>,
     trace: Vec<String>,
+    /// This Mac's member node id (`authority.member.node_id`).
+    member: Option<String>,
 }
 #[derive(Clone, Default)]
 struct FakeHost(Arc<Mutex<State>>);
@@ -74,11 +76,26 @@ impl Host for FakeHost {
     fn fast_mode_changed(&mut self) {
         self.with(|s| s.trace.push("host:fast_mode_changed".into()));
     }
-    fn run_model_saved(&mut self) {
+    fn run_model_saved(&mut self) -> Result<(), PublicError> {
         self.with(|s| s.trace.push("host:run_model_saved".into()));
+        Ok(())
+    }
+    fn cancel_acquisition(&mut self) {
+        self.with(|s| s.trace.push("host:cancel_acquisition".into()));
+    }
+    fn membership_binding(&self) -> Option<api::member::Binding> {
+        self.with(|s| {
+            s.member.clone().map(|node_id| api::member::Binding {
+                swarm_id: "swarm".into(),
+                node_id,
+                seed_key_digest: "digest".into(),
+            })
+        })
     }
 }
 struct Inner(Arc<Mutex<Vec<String>>>);
+/// The inner trace's mark that makes the inner backend refuse every later action.
+const REFUSE: &str = "test:refuse";
 impl Backend for Inner {
     fn prepare(&mut self, action: Action, _: &Map<String, Value>) -> Result<(), PublicError> {
         self.0
@@ -88,10 +105,12 @@ impl Backend for Inner {
         Ok(())
     }
     fn execute(&mut self, action: Action, _: &Map<String, Value>) -> Result<Value, PublicError> {
-        self.0
-            .lock()
-            .unwrap()
-            .push(format!("inner:execute:{action:?}"));
+        let mut trace = self.0.lock().unwrap();
+        trace.push(format!("inner:execute:{action:?}"));
+        // Once the test marked it, the inner backend refuses its actions (no effect).
+        if trace.iter().any(|t| t == REFUSE) {
+            return Err(PublicError::new(409, "action_not_completed"));
+        }
         Ok(json!({"state": "stopped", "route_ready": false}))
     }
     fn publish(&mut self) -> Result<(), PublicError> {
@@ -443,5 +462,65 @@ fn preference_observations_persist_over_real_rust_http() {
     assert_eq!(
         fs::read(dir.join("fast-mode.json")).unwrap(),
         br#"{"enabled":false,"protocol":"mycelium.a13_fast_mode.v1"}"#
+    );
+}
+
+/// `/api/revoke-self` and `/api/revoke` of this Mac (app.py:1645-1660 @ f4e366e9): once the
+/// revocation itself succeeded, `self._cancel_acquisition()` stops this Mac's download (a revoked
+/// member keeps no grant to fetch with); revoking another member, or a revocation that was
+/// refused, cancels nothing.
+#[test]
+fn revoking_this_mac_cancels_its_acquisition_after_the_revocation() {
+    let (c, host, _dir, inner) = build("revoke");
+    host.with(|s| s.member = Some("this-mac".into()));
+    let cancels = |host: &FakeHost| {
+        host.with(|s| {
+            let seen = s
+                .trace
+                .iter()
+                .filter(|t| *t == "host:cancel_acquisition")
+                .count();
+            s.trace.clear();
+            seen
+        })
+    };
+    c.action("/api/revoke-self", &body(json!({"confirm": true})))
+        .unwrap();
+    assert!(
+        inner
+            .lock()
+            .unwrap()
+            .contains(&"inner:execute:RevokeSelf".to_owned())
+    );
+    assert_eq!(cancels(&host), 1, "revoke-self did not cancel the download");
+    c.action(
+        "/api/revoke",
+        &body(json!({"node_id": "another-mac", "generation": 1})),
+    )
+    .unwrap();
+    assert_eq!(
+        cancels(&host),
+        0,
+        "revoking another member cancelled this Mac's download"
+    );
+    c.action(
+        "/api/revoke",
+        &body(json!({"node_id": "this-mac", "generation": 1})),
+    )
+    .unwrap();
+    assert_eq!(
+        cancels(&host),
+        1,
+        "revoking this Mac did not cancel its download"
+    );
+    inner.lock().unwrap().push(REFUSE.into());
+    assert_eq!(
+        refused(c.action("/api/revoke-self", &body(json!({"confirm": true})))),
+        (409, "action_not_completed")
+    );
+    assert_eq!(
+        cancels(&host),
+        0,
+        "a refused revocation cancelled the download"
     );
 }
