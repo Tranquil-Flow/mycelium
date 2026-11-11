@@ -147,3 +147,58 @@ fn a_withdrawn_standing_consent_stops_the_members_answers_and_keeps_its_membersh
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// S4c-a item 5 (REVIEW-lanePH3B-S2 F3): before anything is reported to an owner, the standing
+/// pass checks that this Mac is a current member and that its standing consent is bound to THIS
+/// membership (`auto_poll_step`, standing_consent.py:357-361 @ f4e366e9: no binding -> `not_member`,
+/// another binding -> `standing_consent_owner_mismatch`, both before `auto_report`, `auto_accept`
+/// and `auto_steps`; reached from `_standing_loop` app.py:1201-1212 -> `_standing_tick` :1195-1199).
+/// Here the grant on disk names another owner's seed key: the member stops answering the owner's
+/// exchange (it never sends a signed `waiting_for_consent` report) and keeps its membership.
+#[test]
+fn a_standing_consent_bound_to_another_owner_keeps_the_member_silent() {
+    use api::preferences::{private_state, standing_consent};
+    let base = state_root("member-mismatch");
+    let owner = owner(&base);
+    let member = member(&base, &owner);
+    let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    approve_and_join(&owner, &member);
+    let node = member_node(&owner.mac);
+    owner.mac.until(
+        "the owner observed the member's signed exchange calls",
+        |o| json!(exchange_samples(o, &node)),
+        |v| v.as_u64().is_some_and(|n| n >= 2),
+    );
+    let root = private(&member.state);
+    let mut grant = standing_consent::load(&root).unwrap().unwrap();
+    assert_eq!(grant["state"], "granted", "{grant:?}");
+    grant["binding"]["seed_key_digest"] = json!(format!("sha256:{}", "cd".repeat(32)));
+    private_state::store(
+        &root.join(standing_consent::FILE),
+        &Value::Object(grant),
+        private_state::private_json_limit().unwrap(),
+    )
+    .unwrap();
+    // One pass in flight at the rewrite may still land; after that nothing does.
+    std::thread::sleep(millis(STANDING) * 2);
+    let settled = exchange_samples(&owner.mac, &node);
+    std::thread::sleep(millis(STANDING) * 3);
+    assert_eq!(
+        exchange_samples(&owner.mac, &node),
+        settled,
+        "a member whose standing consent is bound to another owner still answers this one"
+    );
+    let status = member.status();
+    assert_eq!(
+        status["authority"]["membership_state"], "current",
+        "{status}"
+    );
+    assert_ne!(
+        status["demo_target"]["state"], "waiting_for_consent",
+        "the shipped loop never ticks the agent here: {status}"
+    );
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
