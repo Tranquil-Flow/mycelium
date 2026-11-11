@@ -1238,3 +1238,47 @@ fn the_renewal_thread_keeps_its_schedule_through_failed_passes_and_ends_only_on_
     );
     drop(front);
 }
+
+/// RED (GRF2 F12): a member fenced by a final refusal recovers when it resumes, as the shipped app
+/// does. v0.1.4 `/api/stop` + `/api/start` (app.py:1626-1634) -> `TargetApplication.start`
+/// (target_app.py:76-78) -> `RemoteMacMember.start` -> `_resume` (peer.py:327-375, 932-1018), which
+/// clears the recorded disposition (peer.py:1018) and installs the new session; `_renew_loop`
+/// (app.py:911-927) never ended, so its next pass renews the new generation.
+#[test]
+fn a_fenced_member_that_resumes_is_current_again_and_its_schedule_renews() {
+    let mut rig = Rig::new();
+    let member = Ticked::new(&rig);
+    rig.seed_down();
+    let front = Front::up(&rig, Answer::Refused("seed_member_generation_stale"));
+    rig.time.advance(pass_seconds());
+    assert_eq!(
+        member.pass(),
+        membership::Beat::Pass(Err("peer_generation_stale".to_owned()))
+    );
+    assert_eq!(member.next(), membership::Beat::Ended);
+    assert_eq!(
+        member.member.current(&rig.signer).unwrap_err().0,
+        "member_renewal_failed"
+    );
+    drop(front);
+    rig.seed_up();
+    rig.time.advance(1);
+    member
+        .member
+        .resume(&rig.signer)
+        .expect("the seed accepts the resume");
+    assert!(
+        member.member.current(&rig.signer).is_ok(),
+        "a resumed member is current again: {:?}",
+        member.member.current(&rig.signer)
+    );
+    let resumed = member_lease(&member.member);
+    rig.time.advance(pass_seconds());
+    assert_eq!(
+        member.pass(),
+        membership::Beat::Pass(Ok(())),
+        "the resumed member's renewal schedule runs again"
+    );
+    let after = member_lease(&member.member);
+    assert!(after > resumed, "renewed lease {after} > {resumed}");
+}
