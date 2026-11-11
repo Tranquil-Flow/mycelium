@@ -8,8 +8,10 @@
 //! acquisition lifecycle marker and process lifetime. It does NOT contain a swarm authority,
 //! relay, TLS seed, pairing-window store, encrypted handoff, leave workflow, planner or model
 //! runtime: those host seams answer `409 action_not_completed` (see `crates/api/README.md`).
-//! State lives under `$HOME/Library/Application Support/Mycelium A13 macOS Demo`
-//! (`--state-root` overrides), exactly where the L3 harness expects it.
+//! State lives under v0.2's own data folder, `$HOME/Library/Application
+//! Support/org.mycelium.app/state` (rulings 20 and 25: never the v0.1.4 demo's folder);
+//! `--state-root` overrides it, as every test does; the L3 journey harness launches without it
+//! under a scratch HOME and reads this default (test-support/journeys `Target::state_folder`).
 //! The owner-authority seams (create, authority start/stop, pairing request/approve/accept, the
 //! owner's pairing windows) are `api::app_host`, the same code the packaged executable runs.
 use api::{
@@ -1978,7 +1980,7 @@ fn state_root() -> Result<PathBuf, String> {
         }
     }
     let home = std::env::var_os("HOME").ok_or("HOME_missing")?;
-    Ok(PathBuf::from(home).join("Library/Application Support/Mycelium A13 macOS Demo"))
+    Ok(PathBuf::from(home).join("Library/Application Support/org.mycelium.app/state"))
 }
 fn load_core(root: PathBuf) -> Result<Core, String> {
     fs::create_dir_all(&root).map_err(|e| format!("state_root:{e}"))?;

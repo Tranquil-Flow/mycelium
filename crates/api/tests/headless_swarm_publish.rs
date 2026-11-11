@@ -181,8 +181,17 @@ fn leave_unconfirmed_listing(root: &Path, directory: &str) {
     let status = offline.tick(past, &facts).unwrap().unwrap();
     assert!(status.swarm_id.is_some(), "the record is durable");
 }
-/// The installation becomes a member of another swarm (the role record `/api/join/*` writes).
+/// The installation becomes a member of another swarm: what `/api/join/*` persists before the
+/// role changes (`DemoApp._become_target`, app.py:1101-1111 @ f4e366e9; `become_target`), the
+/// saved resource consent first, then the role record. A target role without that consent is a
+/// state no join leaves behind, refused at start (`target_consent_missing`, app.py:603-604).
 fn become_member(root: &Path) {
+    let consent = json!({
+        "peer_visibility": true, "power": "ac_only", "storage_bytes": 4_000_000_000_u64,
+        "network": "unmetered_only", "background": false, "diagnostics": false,
+        "thermal": "stop_on_serious",
+    });
+    api::preferences::resource_policy::write(root, &consent).unwrap();
     api::preferences::private_state::store(
         &root.join("installation-role.json"),
         &json!({"protocol": "mycelium.a13_installation_role.v1", "role": "target"}),

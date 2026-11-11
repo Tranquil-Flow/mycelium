@@ -719,6 +719,10 @@ impl Drop for Swarm {
     }
 }
 fn swarm() -> Swarm {
+    swarm_clocked(Box::new(app_host::now))
+}
+/// [`swarm`] whose seed coordinator reads `clock`.
+fn swarm_clocked(clock: seed::Clock) -> Swarm {
     let root = std::env::temp_dir().join(format!(
         "b8-lan-{}-{}",
         std::process::id(),
@@ -728,7 +732,9 @@ fn swarm() -> Swarm {
     let root = std::fs::canonicalize(root).unwrap();
     let owner = root.join("owner");
     std::fs::create_dir(&owner).unwrap();
-    let seed = app_host::start_seed::<app_host::Unmanaged>(&owner, "b8-lan-swarm", None).unwrap();
+    let seed =
+        app_host::start_seed_clocked::<app_host::Unmanaged>(&owner, "b8-lan-swarm", None, clock)
+            .unwrap();
     let (seed_signer, _, _) = app_host::identity_in(&owner, app_host::SEED_IDENTITY_FILE).unwrap();
     let fixture: Value = serde_json::from_str(include_str!(
         "../../planner/tests/fixtures/source-slices.json"
@@ -2572,4 +2578,216 @@ fn a_member_ends_its_epoch_at_the_signed_route_expiry() {
         );
     }
     r.finish();
+}
+
+/// The PRODUCTION seed view (`Epoch::open` -> `epoch::seed_members` over the real coordinator,
+/// SL review F1 / mutant M8): a swarm seed whose own clock the test moves (real time plus an
+/// offset, as v0.1.4's `set_test_clock_offset`), two members whose last renewal set their seed
+/// lease; one goes silent mid-answer; once the seed's clock passes its lease plus the members'
+/// clock tolerance, the epoch's own pump settles it from the seed row and the chat stream ends
+/// `failed` `joined_route_member_stale` before the hop deadline could.
+#[test]
+fn product_epoch_reads_member_leases_from_the_real_seed() {
+    let offset = Arc::new(AtomicU64::new(0f64.to_bits()));
+    let seed_offset = offset.clone();
+    let s = swarm_clocked(Box::new(move || {
+        app_host::now() + f64::from_bits(seed_offset.load(Ordering::SeqCst))
+    }));
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (open, script) = silent_at(2);
+    let (members, verified) = s.serve_lan_scripts(loopback, &policy, [Script::default(), script]);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let nodes: Vec<String> = (0..2)
+        .map(|i| s.live(i)["node_id"].as_str().unwrap().to_owned())
+        .collect();
+    let epoch = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+    )
+    .unwrap();
+    let (_, rx, reader) = chat(&epoch, 32);
+    let mut all = until_terminal(&rx, 2);
+    // Both leases still run: no evidence from the real seed rows.
+    assert!(
+        epoch
+            .handle()
+            .state
+            .lock()
+            .unwrap()
+            .stages
+            .iter()
+            .all(|stage| stage.death_evidence.is_none()),
+        "evidence while both leases run"
+    );
+    // The seed's clock passes a full lease plus the members' clock tolerance: no renewal can land.
+    offset.store((lease() + clock_skew() + 1.0).to_bits(), Ordering::SeqCst);
+    // Collect for less than the hop deadline: only the seed can end it in time.
+    let end = Instant::now() + hop_deadline();
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let Ok((event, _)) = rx.recv_timeout(left) else {
+            break;
+        };
+        let done = matches!(
+            event["type"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        );
+        all.push(event);
+        if done {
+            break;
+        }
+    }
+    let last = all.last().unwrap().clone();
+    assert_eq!(last["type"], "failed", "{all:?}");
+    assert_eq!(last["code"], "joined_route_member_stale", "{all:?}");
+    reader.join().unwrap();
+    let o = epoch.handle().state.lock().unwrap();
+    assert!(o.settled());
+    let evidence = o.stages[1].death_evidence.clone().unwrap();
+    drop(o);
+    assert_eq!(evidence["source"], "seed_member_lease", "{evidence}");
+    assert_eq!(evidence["node_id"], nodes[1].as_str(), "{evidence}");
+    assert_eq!(evidence["generation"], 1, "{evidence}");
+    epoch.close();
+    open.send(()).unwrap();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+}
+
+/// SL review finding 7: the product pump reads the seed's member leases on a bounded cadence (one
+/// owner poll), not on every wake. A pump woken per token would take the seed coordinator's lock
+/// and parse its table once per token; v0.1.4's owner checks a member's lease per command poll
+/// (`control_session.py:315-326`), and a lease is 300 s long. Counted through an injected view:
+/// a fast answer of many tokens reads each stage's lease at most once per owner poll (+1 for the
+/// first pass and +1 for a pass in flight at the end).
+#[test]
+fn product_epoch_reads_member_leases_once_per_owner_poll() {
+    let s = swarm();
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let tokens: Vec<u32> = (1..=48).collect();
+    let (members, verified) =
+        s.serve_lan_scripts(loopback, &policy, [Script::default(), scripted(&tokens)]);
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let nodes: Vec<String> = (0..2)
+        .map(|i| s.live(i)["node_id"].as_str().unwrap().to_owned())
+        .collect();
+    let view = SeedView::fresh(&[nodes[0].as_str(), nodes[1].as_str()]);
+    let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted: SeedMembers = {
+        let (inner, reads) = (view.members(), reads.clone());
+        Arc::new(move |node: &str| {
+            reads.fetch_add(1, Ordering::SeqCst);
+            inner(node)
+        })
+    };
+    let began = Instant::now();
+    let epoch = Epoch::open_watched(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+        counted,
+    )
+    .unwrap();
+    let (_, rx, reader) = chat(&epoch, tokens.len() as u64);
+    let all = until_terminal(&rx, tokens.len() + 1);
+    let read = reads.load(Ordering::SeqCst);
+    let elapsed = began.elapsed();
+    reader.join().unwrap();
+    epoch.close();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+    assert_eq!(all.last().unwrap()["type"], "completed", "{all:?}");
+    let polls = (elapsed.as_millis() / span(B::OwnerPoll).as_millis()) as usize;
+    assert!(
+        read <= 2 * (polls + 2),
+        "{read} lease reads for {} tokens in {elapsed:?} ({polls} owner polls)",
+        tokens.len()
+    );
+}
+
+/// A seed that cannot answer a lease read is recorded by its code (the epoch's refusals), not
+/// dropped: here the seed's own clock becomes invalid (`seed_clock_invalid`).
+#[test]
+fn product_epoch_records_a_seed_lease_read_failure() {
+    let offset = Arc::new(AtomicU64::new(0f64.to_bits()));
+    let seed_offset = offset.clone();
+    let s = swarm_clocked(Box::new(move || {
+        app_host::now() + f64::from_bits(seed_offset.load(Ordering::SeqCst))
+    }));
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    let policy = LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let (members, verified) = s.serve_lan_scripts(
+        loopback,
+        &policy,
+        [Script::default(), scripted(&[5, 9, 3, 7])],
+    );
+    let owner = iroh::SecretKey::generate();
+    let envelope = s.signed(
+        &members.iter().map(|m| m.endpoint).collect::<Vec<_>>(),
+        &owner,
+    );
+    for m in &members {
+        m.route.send(envelope.clone()).unwrap();
+    }
+    let epoch = Epoch::open(
+        s.seed.coordinator.clone(),
+        envelope,
+        owner,
+        Carriers::Lan {
+            interface: loopback,
+            policy,
+            verified,
+        },
+        Arc::new(Text),
+    )
+    .unwrap();
+    offset.store(f64::NAN.to_bits(), Ordering::SeqCst);
+    let end = Instant::now() + span(B::OwnerPoll) * 8;
+    let mut seen = Vec::new();
+    while Instant::now() < end {
+        seen = epoch.refusals();
+        if seen.iter().any(|code| code == "seed_clock_invalid") {
+            break;
+        }
+        std::thread::sleep(span(B::OwnerPoll) / 5);
+    }
+    offset.store(0f64.to_bits(), Ordering::SeqCst);
+    epoch.close();
+    for m in members {
+        m.thread.join().unwrap().unwrap();
+    }
+    assert!(
+        seen.iter().any(|code| code == "seed_clock_invalid"),
+        "refusals: {seen:?}"
+    );
 }

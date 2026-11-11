@@ -40,6 +40,16 @@ fn lower_hex(raw: &str, length: usize) -> bool {
             .all(|v| v.is_ascii_digit() || (b'a'..=b'f').contains(&v))
 }
 impl Target {
+    /// Where the target keeps its state under the scratch HOME when it is launched without
+    /// `--state-root`: v0.1.4's own folder for the certified Python oracle, v0.2's own
+    /// `org.mycelium.app/state` for the Rust launcher (rulings 20/25; it never uses v0.1.4's).
+    pub fn state_folder(&self) -> &'static str {
+        if self.implementation == "python-v0.1.4" {
+            "Library/Application Support/Mycelium A13 macOS Demo"
+        } else {
+            "Library/Application Support/org.mycelium.app/state"
+        }
+    }
     pub fn verify(&self) -> Result<()> {
         require(lower_hex(&self.source_sha, 40), "target:invalid_source_sha")?;
         require(
@@ -328,7 +338,8 @@ impl App {
     ) -> Result<Self> {
         target.verify()?; // Every launch, including restarts, hashes original executable bytes.
         require(cfg!(target_os = "macos"), "BLOCKED:macos_sandbox_required")?;
-        let scratch = Scratch::new(real_home, previous)?;
+        let mut scratch = Scratch::new(real_home, previous)?;
+        scratch.state = scratch.home.join(target.state_folder());
         let policy = sandbox_profile(real_home, &scratch.root)?;
         let profile = scratch.root.join("isolation.sb");
         fs::write(&profile, &policy).map_err(|e| io("sandbox:write", e))?;

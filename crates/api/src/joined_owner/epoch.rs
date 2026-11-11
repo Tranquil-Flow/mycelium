@@ -65,14 +65,37 @@ pub fn currentness(coordinator: &Arc<seed::Coordinator>) -> Currentness {
 }
 
 /// The seed's current member rows at its own clock, for the lease death source.
-/// A row whose durable state is unstable reads as `None` (no evidence).
+/// A row whose durable state is unstable reads as `None` (no evidence); the seed's refusal code
+/// is written to stderr (`joined_owner_seed_lease_unread`).
 pub fn seed_members(coordinator: &Arc<seed::Coordinator>) -> SeedMembers {
+    seed_members_recorded(
+        coordinator,
+        Arc::new(|code: &str| eprintln!("joined_owner_seed_lease_unread: {code}")),
+    )
+}
+/// [`seed_members`] that hands the code of every lease read the seed refused to `record` (that
+/// pass has no evidence for the stage; SL review finding 7: recorded, never dropped).
+pub fn seed_members_recorded(
+    coordinator: &Arc<seed::Coordinator>,
+    record: Arc<dyn Fn(&str) + Send + Sync>,
+) -> SeedMembers {
     let coordinator = coordinator.clone();
     Arc::new(move |node: &str| {
-        coordinator
-            .with_current_member(node, |row, now| Ok((row.clone(), now)))
-            .ok()
+        match coordinator.with_current_member(node, |row, now| Ok((row.clone(), now))) {
+            Ok(view) => Some(view),
+            Err(error) => {
+                record(&error.code);
+                None
+            }
+        }
     })
+}
+/// Distinct codes in first-seen order: bounded by the code set, however long the epoch runs.
+fn record_code(refusals: &Mutex<Vec<String>>, code: &str) {
+    let mut r = refusals.lock().unwrap_or_else(|p| p.into_inner());
+    if !r.iter().any(|seen| seen == code) {
+        r.push(code.to_owned());
+    }
 }
 
 impl Epoch {
@@ -86,8 +109,22 @@ impl Epoch {
         carriers: Carriers,
         codec: Arc<dyn Codec>,
     ) -> Result<Self, PublicError> {
-        let seed = seed_members(&coordinator);
-        Self::open_watched(coordinator, envelope, owner, carriers, codec, seed)
+        // A lease read the seed refused is one of the epoch's refusals.
+        let refusals: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = refusals.clone();
+        let seed = seed_members_recorded(
+            &coordinator,
+            Arc::new(move |code: &str| record_code(&seen, code)),
+        );
+        Self::open_with(
+            coordinator,
+            envelope,
+            owner,
+            carriers,
+            codec,
+            seed,
+            refusals,
+        )
     }
     /// [`Epoch::open`] with the seed view the pump reads member leases from.
     pub fn open_watched(
@@ -97,6 +134,26 @@ impl Epoch {
         carriers: Carriers,
         codec: Arc<dyn Codec>,
         seed: SeedMembers,
+    ) -> Result<Self, PublicError> {
+        Self::open_with(
+            coordinator,
+            envelope,
+            owner,
+            carriers,
+            codec,
+            seed,
+            Arc::default(),
+        )
+    }
+    /// [`Epoch::open_watched`] whose refusals start in `refusals` (shared with the seed view).
+    fn open_with(
+        coordinator: Arc<seed::Coordinator>,
+        envelope: Value,
+        owner: iroh::SecretKey,
+        carriers: Carriers,
+        codec: Arc<dyn Codec>,
+        seed: SeedMembers,
+        refusals: Arc<Mutex<Vec<String>>>,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
@@ -164,7 +221,6 @@ impl Epoch {
             .local_addr()
             .map_err(|_| fail("joined_owner_gateway_bind_failed"))?;
         let stop = Arc::new(AtomicBool::new(false));
-        let refusals = Arc::new(Mutex::new(Vec::new()));
         let mut epoch = Self {
             service,
             handle,
@@ -267,7 +323,9 @@ impl Epoch {
             .map_err(|_| fail("joined_owner_thread_failed"))?;
         epoch.threads.push(gateway);
         // Pump: event-driven by carrier changes, bounded by the owner poll.
-        // Each pass first reads the seed's member leases (cross-host death).
+        // The seed's member leases (cross-host death) are read at most once per
+        // owner poll, not on every wake (a wake per token would take the seed
+        // lock and parse its table per token; a lease runs 300 s).
         let (service, stop, handle, refusals) = (
             epoch.service.clone(),
             epoch.stop.clone(),
@@ -286,9 +344,13 @@ impl Epoch {
                         r.push(code.to_owned());
                     }
                 };
+                let mut observed: Option<std::time::Instant> = None;
                 while !stop.load(Ordering::SeqCst) {
-                    if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed) {
-                        record(e.code);
+                    if observed.is_none_or(|at| at.elapsed() >= poll) {
+                        observed = Some(std::time::Instant::now());
+                        if let Err(e) = m16_route::observe_member_leases(&handle, &message, &seed) {
+                            record(e.code);
+                        }
                     }
                     if let Err(e) = service.tick() {
                         record(e.code);
