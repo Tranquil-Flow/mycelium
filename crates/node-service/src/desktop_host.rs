@@ -5,7 +5,7 @@
 //! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
 use crate::{
-    app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost},
+    app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost, Publishing},
     router_port::{self, Serving, ServingActions},
     service::NodeService,
 };
@@ -206,6 +206,8 @@ pub struct DesktopServices {
     /// The packaged host's own loops (its `_policy_loop`): Quit stops them as it fences
     /// admission and proves them ended and joined before the services verify.
     loops: Vec<Arc<HostLoop>>,
+    /// The packaged host's listing custody, closed by the packaged Quit (not by these services).
+    publishing: Option<Publishing>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -265,6 +267,24 @@ impl DesktopServices {
         let qualification = development_source(&node);
         Self::with_host(node, capacity, private, host, qualification)
     }
+    /// The packaged executable's services: [`DesktopServices::with_model_source`] with the
+    /// owner's listing custody over `publisher` (`PackagedHost::with_publisher`).
+    pub fn packaged(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+        publisher: Arc<api::swarm::publisher::app::AppPublisher>,
+    ) -> Self {
+        let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
+            .with_publisher(publisher);
+        let qualification = development_source(&node);
+        Self::with_host(node, capacity, private, host, qualification)
+    }
+    /// The listing custody these services' host keeps (none outside the packaged executable).
+    pub fn publishing(&self) -> Option<Publishing> {
+        self.publishing.clone()
+    }
     /// Every `/chat/*` request first asks `gate` (on its request thread, never the window's):
     /// the packaged executable's chat waits for its native service over a prepared model.
     pub fn gated(mut self, gate: Arc<dyn ModelGate>) -> Self {
@@ -283,6 +303,7 @@ impl DesktopServices {
             .map(Arc::new);
         let fast_mode = host.fast_mode_process();
         let loops = host.loops();
+        let publishing = host.publishing();
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
@@ -292,6 +313,7 @@ impl DesktopServices {
             serving,
             fast_mode,
             loops,
+            publishing,
             node,
             model: None,
             gate: Arc::new(Mutex::new(Gate {

@@ -27,6 +27,7 @@ use api::{
     preferences::{fast_mode, resource_policy, run_model},
     resources::{self, Observation, Observer, ProbeObserver},
     schema::PublicError,
+    swarm::publisher::app::{AppPublisher, OwnerFacts},
     wire::Json,
 };
 use budgets::{BudgetId, Entries};
@@ -148,6 +149,13 @@ impl ModelSource {
             .observation
             .clone()
             .unwrap_or_else(Observation::unknown)
+    }
+    /// The run model's id of the open acquisition (`self.acquisition.model`), none before one.
+    fn model_id(&self) -> Option<&'static str> {
+        self.lock()
+            .acquisition
+            .as_ref()
+            .map(|acquisition| acquisition.model().model_id)
     }
     /// `app.acquisition_policy_error`: the resource guard's last refusal, cleared by a started
     /// attempt or a run-model choice.
@@ -311,12 +319,16 @@ pub struct HostLoop {
     /// Dropped to wake the loop (`self.closed.wait(1)` returning).
     stop: Mutex<Option<mpsc::Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Dropping the last handle joins the loop. Off for a loop whose pass may wait on another
+    /// process (a directory exchange): it is stopped and left to end on its own.
+    join_on_drop: bool,
 }
 impl HostLoop {
     fn start(
         name: &str,
         period: BudgetId,
         node: &NodeService,
+        join_on_drop: bool,
         mut tick: impl FnMut() + Send + 'static,
     ) -> Result<Arc<Self>, &'static str> {
         let period = period
@@ -340,6 +352,7 @@ impl HostLoop {
         Ok(Arc::new(Self {
             stop: Mutex::new(Some(stop)),
             thread: Mutex::new(Some(thread)),
+            join_on_drop,
         }))
     }
     /// Wake the loop and end it; a pass in progress finishes first.
@@ -376,12 +389,27 @@ impl Drop for HostLoop {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(thread) = thread
+        if let Some(thread) = thread.filter(|t| self.join_on_drop || t.is_finished())
             && thread.join().is_err()
         {
             eprintln!("packaged host loop: host_loop_panicked");
         }
     }
+}
+
+/// The owner's listing custody (`DemoApp.swarm_publisher`, `swarm_publish.py` @ f4e366e9, as
+/// `api`'s `AppPublisher`) and its own tick loop (`SwarmPublisher.start`, swarm_publish.py:437-448).
+/// Quit closes the custody (`close(now, 5 s)`) and waits for the loop only until that deadline.
+#[derive(Clone)]
+pub struct Publishing {
+    pub publisher: Arc<AppPublisher>,
+    pub ticks: Arc<HostLoop>,
+}
+/// Whole seconds of wall time for the signed directory documents.
+pub fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// The packaged process as `persistent::Host`. It holds the same [`NodeService`] that is the
@@ -405,6 +433,8 @@ pub struct PackagedHost {
     /// `DemoApp.acquisition` over the state root's model sources. `None`: this host was built
     /// without one, and every acquisition seam keeps the trait default.
     model: Option<ModelSource>,
+    /// The owner's listing custody. `None`: the swarm routes keep the trait default.
+    publishing: Option<Publishing>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -512,6 +542,7 @@ impl PackagedHost {
             _renewal: renewal,
             authority,
             model: None,
+            publishing: None,
         };
         host.refresh_fast_mode();
         host
@@ -536,6 +567,7 @@ impl PackagedHost {
                 "packaged-acquisition-policy",
                 BudgetId::PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009,
                 &host.node,
+                true,
                 move || source.policy_tick(&root, authority.as_deref()),
             )
         };
@@ -547,6 +579,44 @@ impl PackagedHost {
             Err(code) => eprintln!("model source: {code}"),
         }
         host
+    }
+    /// This host with the owner's listing custody over `publisher` (its state file in the private
+    /// root): retained opt-in and withdrawal debt reopen now (`swarm_publish.resume`; a failure is
+    /// on stderr and in the custody's status, never a refused start), and its tick loop starts,
+    /// one bounded pass every `OwnerPoll` with no lock of this host held across it. The packaged
+    /// process has no owner run and no relay, so the facts it ticks with never make a listing
+    /// public (`run_state` empty, no route); while the owner never opted in a pass does nothing
+    /// (no state, no network). It has no relay either, so `listing_enabled` has no caller here.
+    pub fn with_publisher(mut self, publisher: Arc<AppPublisher>) -> Self {
+        if let Err(error) = publisher.resume() {
+            eprintln!("swarm_publish_resume_failed: {}", error.code);
+        }
+        let ticks = {
+            let (publisher, source) = (publisher.clone(), self.model.clone());
+            HostLoop::start(
+                "packaged-swarm-publish",
+                BudgetId::OwnerPoll,
+                &self.node,
+                false,
+                move || {
+                    let model = source.as_ref().and_then(ModelSource::model_id);
+                    let facts = OwnerFacts::from_owner_run(true, None, model, None);
+                    if let Err(error) = publisher.tick(unix_seconds(), &facts) {
+                        // Also shown as `swarm.error_code`; the next pass retries.
+                        eprintln!("swarm_publish_tick_failed: {}", error.code);
+                    }
+                },
+            )
+        };
+        match ticks {
+            Ok(ticks) => self.publishing = Some(Publishing { publisher, ticks }),
+            Err(code) => eprintln!("swarm_publish_unavailable: {code}"),
+        }
+        self
+    }
+    /// The owner's listing custody, for the window's Quit to close.
+    pub fn publishing(&self) -> Option<Publishing> {
+        self.publishing.clone()
     }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {
@@ -728,6 +798,32 @@ impl Host for PackagedHost {
         body: &Map<String, Value>,
     ) -> Result<Json, PublicError> {
         app_host::owner_window(self.authority()?, action, body)
+    }
+    /// `POST /api/swarm/publish` (`swarm_publish.action`, app mode): the explicit opt-in.
+    fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
+        let Some(publishing) = &self.publishing else {
+            return Err(PublicError::new(400, "unknown_action"));
+        };
+        if self.closed() {
+            return Err(PublicError::new(400, "application_closed"));
+        }
+        publishing
+            .publisher
+            .publish(self.owner(), body)
+            .map(Json::from)
+    }
+    /// `POST /api/swarm/unpublish`: the opt-out; the next pass withdraws a listing.
+    fn swarm_unpublish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {
+        let Some(publishing) = &self.publishing else {
+            return Err(PublicError::new(400, "unknown_action"));
+        };
+        if self.closed() {
+            return Err(PublicError::new(400, "application_closed"));
+        }
+        publishing
+            .publisher
+            .unpublish(self.owner(), body)
+            .map(Json::from)
     }
     fn live_pairing_windows(&self) -> usize {
         self.loaded().map_or(0, app_host::live_pairing_windows)

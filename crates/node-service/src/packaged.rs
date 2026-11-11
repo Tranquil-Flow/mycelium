@@ -8,16 +8,19 @@
 //! `_open_acquisition`, app.py:649-672 @ f4e366e9) downloads it into that same layout. The window
 //! always opens on the packaged action root; until the pinned snapshot is there the chat answers
 //! 503 `model_not_installed`, and once this process's acquisition prepared it the native service
-//! is composed over it on demand, without a relaunch. Quit closes the acquisition
-//! (`DemoApp.close`, app.py:1845-1847), so the next launch answers `closed`. The node service is
+//! is composed over it on demand, without a relaunch. The owner's swarm listing custody
+//! (`swarm_publish.py`, opt-in only) lives beside the private state. Quit closes the custody and
+//! the acquisition (`DemoApp.close`, app.py:1815-1847), so the next launch answers `closed`, and
+//! reports the first step that failed after every step ran. The node service is
 //! SLICE-1's: operator-fixture consent, development qualification identity, local 127.0.0.1 Iroh
 //! only. It is a real native service, not a certified release core.
 use crate::{
-    app_host::ModelSource,
+    app_host::{ModelSource, Publishing},
     desktop_host::{DesktopServices, ModelGate},
     service::{Driver, Job, NodeService},
 };
 use api::{acquisition::Transport, resources::Observer, schema::PublicError};
+use budgets::{BudgetId, Entries};
 use desktop::{
     core::Core,
     lifecycle::{Cleanup, CleanupError, Poll},
@@ -29,6 +32,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 /// The four page endpoints (`state`, `send`, `events`, `stop`) the slice smoke served with;
@@ -141,19 +145,22 @@ impl ModelGate for NativeOnDemand {
     }
 }
 pub enum AppCleanup {
-    /// The window's services, then the run model's acquisition.
+    /// The window's services, then the owner's listing custody and the run model's acquisition.
     Service(Box<WindowQuit>),
     Nothing,
 }
-/// Quit's steps over the window's services and the run model's acquisition, run as v0.1.4's
-/// `DemoApp.close` runs its own (app.py:1835-1847 @ f4e366e9): a step that fails records the
-/// failure (`cleanup_error = ...`) and the next step still runs. The attempt is asked to stop as
-/// Quit begins, whatever the services answered; the acquisition is closed once the services
-/// finished, verified or failed; Quit then reports the first failure (exit 3), else `Verified`.
+/// Quit's steps over the window's services, the owner's listing custody and the run model's
+/// acquisition, run as v0.1.4's `DemoApp.close` runs its own (app.py:1815-1847 @ f4e366e9): a
+/// step that fails records the failure (`cleanup_error = ...`) and the next step still runs. The
+/// attempt is asked to stop and the listing's tick loop to end as Quit begins, whatever the
+/// services answered; once the services finished, verified or failed, the custody is closed
+/// (`swarm_publish.close`) and the acquisition is closed, each on its own thread; Quit then
+/// reports the first failure in that order (exit 3), else `Verified`.
 pub struct WindowQuit {
     services: ServiceCleanup<DesktopServices>,
     /// The services' cleanup has its result (verified or failed): nothing polls them again.
     services_done: bool,
+    swarm: Option<SwarmClose>,
     model: ModelClose,
     /// The first step that failed, reported once every step ran.
     failed: Option<CleanupError>,
@@ -180,6 +187,9 @@ impl Cleanup for AppCleanup {
                     quit.keep(error);
                     quit.services_done = true;
                 }
+                if let Some(swarm) = &quit.swarm {
+                    swarm.publishing.ticks.stop();
+                }
                 quit.model.begin();
                 Ok(())
             }
@@ -199,13 +209,130 @@ impl Cleanup for AppCleanup {
                         }
                     }
                 }
-                match quit.model.poll() {
-                    Ok(Poll::Pending) => Ok(Poll::Pending),
-                    Ok(Poll::Verified) => quit.failed.map_or(Ok(Poll::Verified), Err),
-                    Err(error) => Err(quit.failed.unwrap_or(error)),
+                // Both close on their own threads at once; neither waits for the other.
+                let swarm = quit.swarm.as_mut().map_or(Some(Ok(())), SwarmClose::poll);
+                let model = quit.model.poll();
+                let Some(swarm) = swarm else {
+                    return Ok(Poll::Pending);
+                };
+                if model == Ok(Poll::Pending) {
+                    return Ok(Poll::Pending);
                 }
+                for step in [swarm.map(|()| Poll::Verified), model] {
+                    if let Err(error) = step {
+                        quit.keep(error);
+                    }
+                }
+                quit.failed.map_or(Ok(Poll::Verified), Err)
             }
             Self::Nothing => Ok(Poll::Verified),
+        }
+    }
+}
+/// Quit's listing step, `swarm_publish.close` (swarm_publish.py:450-455 @ f4e366e9, called from
+/// `DemoApp.close` before the acquisition, app.py:1824-1829), as the headless launcher runs it
+/// (reconcile/laneB12f.md): `close(now, budget)` on its own thread (no new exchange starts, a live
+/// listing becomes durable withdrawal debt, one withdrawal attempt bounded by the budget,
+/// `SwarmpublisherCloseSelfThreadJoin` 5 s); its result is kept; the tick loop is reaped once it
+/// ended, waited for only until the close deadline, and one still inside a directory exchange is
+/// left to the process exit (its state is durable before the exchange). Only a storage failure
+/// fails the close (stderr `swarm_publish_stop_failed: <code>`).
+struct SwarmClose {
+    publishing: Publishing,
+    closing: SwarmClosing,
+}
+enum SwarmClosing {
+    NotStarted,
+    Running {
+        worker: JoinHandle<Result<(), String>>,
+        until: Instant,
+    },
+    /// The close has its result; the tick loop is awaited until `until`.
+    Waiting {
+        result: Result<(), CleanupError>,
+        until: Instant,
+    },
+    Done(Result<(), CleanupError>),
+}
+impl SwarmClose {
+    /// `None` while pending, else the step's result (kept: every later poll answers it again).
+    fn poll(&mut self) -> Option<Result<(), CleanupError>> {
+        match std::mem::replace(&mut self.closing, SwarmClosing::Done(Ok(()))) {
+            SwarmClosing::NotStarted => {
+                let budget = match BudgetId::PyMyceliumA13MacosSwarmPublishSwarmpublisherCloseSelfThreadJoinL453
+                    .span(Entries::ZERO)
+                {
+                    Ok(budget) => Duration::from_millis(budget.millis()),
+                    Err(_) => {
+                        eprintln!("swarm_publish_stop_failed: swarm_close_budget_invalid");
+                        self.closing = SwarmClosing::Done(Err(CleanupError::InvalidBudget));
+                        return Some(Err(CleanupError::InvalidBudget));
+                    }
+                };
+                let until = Instant::now() + budget;
+                let publisher = self.publishing.publisher.clone();
+                match std::thread::Builder::new()
+                    .name("packaged-swarm-close".into())
+                    .spawn(move || {
+                        publisher
+                            .close(crate::app_host::unix_seconds(), budget)
+                            .map(|_closed| ())
+                            .map_err(|error| error.code)
+                    }) {
+                    Ok(worker) => {
+                        self.closing = SwarmClosing::Running { worker, until };
+                        None
+                    }
+                    Err(_) => {
+                        eprintln!("swarm_publish_stop_failed: swarm_close_thread_unavailable");
+                        self.closing = SwarmClosing::Waiting {
+                            result: Err(CleanupError::Poll),
+                            until,
+                        };
+                        None
+                    }
+                }
+            }
+            SwarmClosing::Running { worker, until } if !worker.is_finished() => {
+                self.closing = SwarmClosing::Running { worker, until };
+                None
+            }
+            SwarmClosing::Running { worker, until } => {
+                let result = match worker.join() {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(code)) => {
+                        eprintln!("swarm_publish_stop_failed: {code}");
+                        Err(CleanupError::Poll)
+                    }
+                    Err(_) => {
+                        eprintln!("swarm_publish_stop_failed: swarm_close_panicked");
+                        Err(CleanupError::Poll)
+                    }
+                };
+                self.closing = SwarmClosing::Waiting { result, until };
+                self.poll()
+            }
+            SwarmClosing::Waiting { result, until } => match self.publishing.ticks.poll_join() {
+                Ok(false) if Instant::now() < until => {
+                    self.closing = SwarmClosing::Waiting { result, until };
+                    None
+                }
+                // Ended and joined, or still inside an exchange at the deadline: left to exit.
+                Ok(_) => {
+                    self.closing = SwarmClosing::Done(result);
+                    Some(result)
+                }
+                Err(code) => {
+                    eprintln!("swarm_publish_stop_failed: {code}");
+                    let result = result.and(Err(CleanupError::Poll));
+                    self.closing = SwarmClosing::Done(result);
+                    Some(result)
+                }
+            },
+            SwarmClosing::Done(result) => {
+                self.closing = SwarmClosing::Done(result);
+                Some(result)
+            }
         }
     }
 }
@@ -323,21 +450,33 @@ fn compose(state_root: &Path, source: ModelSource) -> Result<(Arc<dyn Core>, App
         crate::service::random_id().map_err(|e| format!("compose:{}", e.code))?,
         crate::native::development_qualification().map_err(|e| format!("compose:{e}"))?,
     );
-    let services =
-        DesktopServices::with_model_source(node, CALLBACK_CAPACITY, &private, source.clone())
-            .gated(native);
+    // `DemoApp.swarm_publisher`: the listing custody's state beside the owner's private state.
+    let publisher = Arc::new(api::swarm::publisher::app::AppPublisher::new(&private));
+    let services = DesktopServices::packaged(
+        node,
+        CALLBACK_CAPACITY,
+        &private,
+        source.clone(),
+        publisher,
+    )
+    .gated(native);
     Ok(assemble(services, source))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`
 /// (the same source the services' packaged host was given): the composition's last step, also
 /// what a test runs over services it composed with its own driver.
 pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core>, AppCleanup) {
+    let swarm = services.publishing().map(|publishing| SwarmClose {
+        publishing,
+        closing: SwarmClosing::NotStarted,
+    });
     let (core, cleanup) = desktop::services::adapt(Arc::new(services), SERVICE_CAPACITY);
     (
         core,
         AppCleanup::Service(Box::new(WindowQuit {
             services: cleanup,
             services_done: false,
+            swarm,
             model: ModelClose::new(source),
             failed: None,
         })),
