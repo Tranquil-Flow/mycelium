@@ -466,35 +466,96 @@ fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
-/// Rulings 20/25: no v0.2 file under v0.1.4's app folder (`Mycelium A13 macOS Demo`).
-fn v014_folder(path: &Path) -> bool {
+fn timing_refused() -> PublicError {
+    PublicError::new(500, "chat_timing_path_refused")
+}
+/// A path's names as the default (case-insensitive) macOS volume compares them.
+fn folded(path: &Path) -> Vec<String> {
     path.components()
-        .any(|c| c.as_os_str().to_string_lossy().starts_with("Mycelium A13"))
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect()
+}
+/// Rulings 20/25: v0.1.4's folders in any letter case: its state `Mycelium A13 macOS Demo`
+/// (__main__.py:67, installer.py:121 @ f4e366e9; also its app bundle's name) and its programs
+/// `Mycelium/programs` (installer.py:117, launch_location.py:30).
+fn v014_folder(path: &Path) -> bool {
+    let names = folded(path);
+    names.iter().any(|n| n.starts_with("mycelium a13"))
+        || names
+            .windows(2)
+            .any(|w| w[0] == "mycelium" && w[1] == "programs")
+}
+/// `path` with its deepest existing ancestor canonicalized (every symlink resolved); what does not
+/// exist yet must be plain names. `None`: a relative path, `..` below a missing folder, or an
+/// ancestor that cannot be resolved.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut existing = path.to_path_buf();
+    let mut missing = Vec::new();
+    loop {
+        match existing.canonicalize() {
+            Ok(mut out) => {
+                out.extend(missing.iter().rev());
+                return Some(out);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(existing.file_name()?.to_owned());
+                if !existing.pop() {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    }
 }
 /// The owner's per-chat timing file (JSONL, appended), admitted under the state root the host was
-/// built with and never under v0.1.4's folders (rulings 20/25).
+/// built with and never under v0.1.4's folders (rulings 20/25; REVIEW-lanePH3B-S5 F4).
 #[derive(Clone, Debug)]
 pub struct TimingFile {
+    /// The canonical state root.
+    root: PathBuf,
+    /// The canonical file path.
     path: PathBuf,
 }
 impl TimingFile {
-    /// `path` as the timing file of a host whose state root is `root`.
-    pub fn under(_root: &Path, path: &Path) -> Result<Self, PublicError> {
-        if v014_folder(path) {
-            return Err(PublicError::new(500, "chat_timing_path_refused"));
-        }
-        Ok(Self {
-            path: path.to_owned(),
-        })
+    /// `path` as the timing file of a host whose state root is `root`: refused unless its
+    /// canonical path (symlinks resolved, names compared case-insensitively) lies under `root`'s,
+    /// outside v0.1.4's folders, and its last name is not a symlink.
+    pub fn under(root: &Path, path: &Path) -> Result<Self, PublicError> {
+        let root = root.canonicalize().map_err(|_| timing_refused())?;
+        let path = Self::admitted(&root, path)?;
+        Ok(Self { root, path })
     }
-    /// Append one JSON line (a failure is reported on stderr; it never fails the chat).
+    fn admitted(root: &Path, path: &Path) -> Result<PathBuf, PublicError> {
+        let resolved = resolved(path).ok_or_else(timing_refused)?;
+        let (inner, outer) = (folded(&resolved), folded(root));
+        let inside = inner.len() > outer.len() && inner.starts_with(&outer);
+        // An append would follow a symlink at the last name.
+        let link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+        if !inside || link || v014_folder(root) || v014_folder(&resolved) {
+            return Err(timing_refused());
+        }
+        Ok(resolved)
+    }
+    /// Append one JSON line, admitted again and opened without following a symlink (a failure is
+    /// reported on stderr; it never fails the chat).
     fn append(&self, line: &Value) {
         use std::os::unix::fs::OpenOptionsExt;
+        let admitted = match Self::admitted(&self.root, &self.path) {
+            Ok(path) if path == self.path => path,
+            Ok(_) | Err(_) => {
+                eprintln!("chat: timing record not written: chat_timing_path_refused");
+                return;
+            }
+        };
         let written = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .mode(0o600)
-            .open(&self.path)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(admitted)
             .and_then(|mut file| file.write_all(format!("{line}\n").as_bytes()));
         if let Err(e) = written {
             eprintln!("chat: timing record not written: {:?}", e.kind());
