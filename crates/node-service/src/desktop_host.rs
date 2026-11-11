@@ -208,6 +208,8 @@ pub struct DesktopServices {
     loops: Vec<Arc<HostLoop>>,
     /// The packaged host's listing custody, closed by the packaged Quit (not by these services).
     publishing: Option<Publishing>,
+    /// The product evidence routes over the packaged host's owner seed (`crate::packaged_product`).
+    product: Arc<dyn api::desktop::ProductRoutes>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -304,6 +306,8 @@ impl DesktopServices {
         let fast_mode = host.fast_mode_process();
         let loops = host.loops();
         let publishing = host.publishing();
+        let product =
+            crate::packaged_product::routes(host.authority_handle(), node.clone(), serving.clone());
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
@@ -314,6 +318,7 @@ impl DesktopServices {
             fast_mode,
             loops,
             publishing,
+            product,
             node,
             model: None,
             gate: Arc::new(Mutex::new(Gate {
@@ -374,8 +379,16 @@ impl DesktopServices {
             serde_json::from_slice(&request.body)
                 .map_err(|_| PublicError::new(400, "invalid_json"))?
         };
+        if let Some(reply) = crate::packaged_product::dispatch(&*self.product, &request, &body) {
+            return reply;
+        }
         match (request.method.as_str(), request.target.as_str()) {
-            ("GET", "/api/status") => Self::json(self.node.published_status()?),
+            ("GET", "/api/status") => {
+                // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
+                let mut status = self.node.published_status()?;
+                status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                Self::json(status)
+            }
             ("POST", "/chat/api/state") if body == json!({}) => {
                 let closed = self
                     .gate

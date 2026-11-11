@@ -57,6 +57,13 @@ pub struct Unavailable;
 /// an admitted request is revalidated (a source may scope authority per request), `None` at admission.
 pub trait QualificationSource: Send + Sync {
     fn current(&self, request_id: Option<&str>) -> Result<Option<Qualification>, Unavailable>;
+    /// The current record as its public `mycelium.route_qualification.v1` document, as the product
+    /// application reads it (`route_qualification_to_dict(qualification_source.current())`,
+    /// supervisor.py:2166-2168 @ f4e366e9). Default: the current record is read (a source that
+    /// cannot be read answers `Unavailable`) and has no such document (`None`).
+    fn record(&self) -> Result<Option<Value>, Unavailable> {
+        self.current(None).map(|_| None)
+    }
 }
 /// `InferenceSubmission` (the parts the host reads).
 #[derive(Clone, Debug)]

@@ -2741,7 +2741,7 @@ fn run() -> Result<(), String> {
             published.clone(),
             session,
         )
-        .with_product(Arc::new(product::Routes::new(core.clone()))),
+        .with_product(Arc::new(product::routes(core.clone()))),
     );
     publish(&core, &published).map_err(|e| e.to_string())?;
     private_write(

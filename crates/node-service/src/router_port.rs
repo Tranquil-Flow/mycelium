@@ -593,6 +593,11 @@ impl Serving {
     pub fn ledger(&self) -> Ledger {
         self.port.ledger.clone()
     }
+    /// The qualification source's current record as `mycelium.route_qualification.v1`
+    /// ([`QualificationSource::record`]), for the product application's qualification source.
+    pub fn qualification_record(&self) -> Result<Option<Value>, Unavailable> {
+        self.source.record()
+    }
     /// The packaged send after the chat edge: the chat client reads the current record and
     /// submits its binding (chat.py:111-124), the gateway captures and admits (service.py:440-507).
     /// Returns once the request reached its driver job (or ended without one), so the run is the

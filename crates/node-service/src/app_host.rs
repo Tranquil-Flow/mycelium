@@ -405,6 +405,16 @@ pub struct Publishing {
     pub publisher: Arc<AppPublisher>,
     pub ticks: Arc<HostLoop>,
 }
+/// The status's `swarm` field (`_swarm_status`, app.py:430-436, and `swarm_publish.status`,
+/// swarm_publish.py:524-530 @ f4e366e9) of this process, which is always the owner
+/// ([`PackagedHost`]'s `owner`): the custody's own status, or `{enabled: false, mode: null}` for a
+/// host without one. Never blocks on directory work.
+pub fn swarm_status(publishing: Option<&Publishing>) -> Value {
+    publishing.map_or_else(
+        || serde_json::json!({"enabled": false, "mode": null}),
+        |publishing| publishing.publisher.status_json(),
+    )
+}
 /// Whole seconds of wall time for the signed directory documents.
 pub fn unix_seconds() -> i64 {
     std::time::SystemTime::now()
@@ -617,6 +627,11 @@ impl PackagedHost {
     /// The owner's listing custody, for the window's Quit to close.
     pub fn publishing(&self) -> Option<Publishing> {
         self.publishing.clone()
+    }
+    /// The owner authority this host loaded (`None`: its state was refused at bind), for the
+    /// product routes to read the owner's seed (`crate::packaged_product`).
+    pub fn authority_handle(&self) -> Option<Arc<Mutex<Authority>>> {
+        self.authority.as_ref().ok().cloned()
     }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {

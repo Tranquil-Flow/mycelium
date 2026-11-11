@@ -28,6 +28,8 @@ pub mod native_selection;
 pub mod owner_chain;
 #[cfg(any(feature = "desktop-shell", feature = "packaged"))]
 pub mod packaged;
+#[cfg(any(feature = "desktop-shell", feature = "packaged"))]
+pub mod packaged_product;
 pub mod phase;
 pub mod planning;
 pub mod private_state;
