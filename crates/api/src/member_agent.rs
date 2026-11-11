@@ -21,7 +21,7 @@
 use crate::{
     acquisition::Acquisition,
     app_host::{IDENTITY_FILE, hex, identity, now, random},
-    bootstrap_process::{CleanupFailure, TrustedBootstrap},
+    bootstrap_process::{CleanupFailure, ProcessControl, TrustedBootstrap},
     bootstrap_stage::BootstrapStage,
     installation_descriptor::{self, Failure, Member as DescriptorMember, Paths, Source},
     local_agent::{AgentHost, ExchangeUnavailable, LocalAgent, WholeModel},
@@ -30,10 +30,10 @@ use crate::{
     preferences::{private_state, standing_consent},
     run_exchange_client::{ClientError, ExchangeClient, Membership},
     seed::{SeedClient, SeedOptions},
-    target_pump::{TargetHost, TargetPump},
+    target_pump::{StepOutcome, TargetHost, TargetPump},
 };
 use base64::Engine as _;
-use budgets::{BudgetId, Entries, MonoInstant};
+use budgets::{BudgetId, Entries, MonoInstant, Span};
 use protocol::identity::Identity;
 use runtime::managed_owner::OwnerError;
 use serde_json::{Map, Value, json};
@@ -41,6 +41,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    thread::JoinHandle,
 };
 use transport::Clock as _;
 
@@ -340,6 +341,11 @@ impl<H: MemberHost> MemberAgent<H> {
             root,
         };
         agent.tick(&mut view);
+    }
+
+    /// The agent's card after its last completed pass (`status_snapshot`); none before the first.
+    pub fn status(&self) -> Option<Value> {
+        self.agent.as_ref().map(LocalAgent::status)
     }
 
     /// Leave / quit: no worker survives this Mac's membership.
@@ -1054,4 +1060,269 @@ impl<H: MemberHost> TargetHost for RemoteTarget<H> {
         }
         self.current(!removed).map_err(|e| e.0)
     }
+}
+
+// ---- a target pump worker for hosts without their own (the packaged host). The same cadence as
+// the headless launcher's `observation::target` worker (f4 managed_runtime.py:155,447-479).
+
+const DELIVERY_WAKE: BudgetId = BudgetId::PyManagedRuntimeDeliveryWakeCeilingL461C16;
+
+/// A member pump's delivery wake (nothing notifies a member pump but its own Stop).
+#[derive(Default)]
+struct Wake {
+    generation: Mutex<u64>,
+    changed: std::sync::Condvar,
+}
+impl Wake {
+    fn notify(&self) -> OResult<()> {
+        let updated = locked(&self.generation).map(|mut g| *g = g.wrapping_add(1));
+        self.changed.notify_all();
+        updated
+    }
+    fn generation(&self) -> OResult<u64> {
+        Ok(*locked(&self.generation)?)
+    }
+    fn wait(&self, generation: u64, fence: &TargetFence) -> OResult<()> {
+        let g = locked(&self.generation)?;
+        let ceiling = DELIVERY_WAKE
+            .span(Entries::ZERO)
+            .map_err(|_| OwnerError("budget_unavailable"))?;
+        let (g, _) = self
+            .changed
+            .wait_timeout_while(g, std::time::Duration::from_millis(ceiling.millis()), |g| {
+                *g == generation && fence.check().is_ok()
+            })
+            .map_err(|_| OwnerError("target_wake_poisoned"))?;
+        drop(g);
+        fence.check()
+    }
+}
+struct Cadence {
+    retry: Span,
+}
+impl Cadence {
+    fn new() -> OResult<Self> {
+        Ok(Self {
+            retry: Self::span(
+                BudgetId::PyFinalMyceliumA13MacosManagedRuntimeSelfOutboundRetryBackoffL155C8,
+            )?,
+        })
+    }
+    fn span(id: BudgetId) -> OResult<Span> {
+        id.span(Entries::ZERO)
+            .map_err(|_| OwnerError("budget_unavailable"))
+    }
+    fn delay(&mut self, retryable: bool) -> OResult<Span> {
+        if retryable {
+            let budgets::table::Value::Ratio(ratio) =
+                BudgetId::PyManagedRuntimeOutboundRetryMultiplierL463C93
+                    .entry()
+                    .value
+            else {
+                return Err(OwnerError("budget_unavailable"));
+            };
+            self.retry = self
+                .retry
+                .checked_mul(ratio.get())
+                .and_then(|v| v.checked_div(1000))
+                .map_err(|_| OwnerError("budget_unavailable"))?
+                .max(Self::span(
+                    BudgetId::PyFinalMyceliumA13MacosManagedRuntimeL463C61ComparisonLower,
+                )?)
+                .min(Self::span(
+                    BudgetId::PyFinalMyceliumA13MacosManagedRuntimeL463C53CeilingOperand,
+                )?);
+            Ok(self.retry)
+        } else {
+            self.retry = Self::span(
+                BudgetId::PyFinalMyceliumA13MacosManagedRuntimeSelfOutboundRetryBackoffL471C20,
+            )?;
+            Self::span(DELIVERY_WAKE)
+        }
+    }
+    fn wait(
+        &mut self,
+        outcome: StepOutcome,
+        wake: &Wake,
+        generation: u64,
+        fence: &TargetFence,
+    ) -> OResult<()> {
+        let retryable = matches!(outcome, StepOutcome::OutboundRetryable { .. });
+        let delay = self.delay(retryable)?;
+        if retryable {
+            // Source469: ONLY Stop can shorten this wait, never delivery wake.
+            fence.wait_for(delay)
+        } else {
+            wake.wait(generation, fence)
+        }
+    }
+}
+/// A member's started pump driven on its own thread ([`spawn_pump`]).
+pub struct PumpWorker {
+    scope: Value,
+    fence: TargetFence,
+    process: ProcessControl,
+    wake: Arc<Wake>,
+    join: Option<JoinHandle<Result<(), CleanupFailure>>>,
+    failure: Option<CleanupFailure>,
+}
+impl MemberWorker for PumpWorker {
+    fn running(&self) -> bool {
+        self.join.as_ref().is_some_and(|j| !j.is_finished())
+    }
+    fn scope(&self) -> &Value {
+        &self.scope
+    }
+    fn close(&mut self) -> OResult<()> {
+        let cancelled = self.fence.cancel();
+        let notified = self.wake.notify();
+        let stopped = self.process.cancel().map_err(OwnerError);
+        // A failure returned by this join has already attempted cleanup. Retry
+        // it only on the next explicit close, never twice in one invocation.
+        let retrying = self.join.is_none();
+        let joined = match self.join.take() {
+            Some(join) => match join
+                .join()
+                .map_err(|_| OwnerError("target_worker_panicked"))?
+            {
+                Ok(()) => Ok(()),
+                Err(failure) => {
+                    let code = failure.code();
+                    self.failure = Some(failure);
+                    Err(OwnerError(code))
+                }
+            },
+            None => Ok(()),
+        };
+        let retried = if retrying {
+            match self.failure.as_mut() {
+                Some(failure) => failure.retry().map_err(OwnerError),
+                None => Ok(()),
+            }
+        } else {
+            Ok(())
+        };
+        if retrying && retried.is_ok() {
+            self.failure.take();
+        }
+        cancelled
+            .and(notified)
+            .and(stopped)
+            .and(joined)
+            .and(retried)
+    }
+}
+impl Drop for PumpWorker {
+    fn drop(&mut self) {
+        if let Err(e) = MemberWorker::close(self) {
+            eprintln!("member target worker close: {}", e.0);
+        }
+    }
+}
+/// Drive a started pump on its own thread until Stop (or its stop command) and close it there.
+pub fn spawn_pump<T: TargetHost + 'static>(
+    mut pump: TargetPump<T>,
+    fence: TargetFence,
+    scope: Value,
+) -> PumpWorker {
+    let wake = Arc::new(Wake::default());
+    let process = pump.process_control();
+    let worker_fence = fence.clone();
+    let owner_wake = wake.clone();
+    let join = std::thread::spawn(move || {
+        let result: OResult<()> = (|| {
+            let mut cadence = Cadence::new()?;
+            loop {
+                let generation = wake.generation()?;
+                let outcome = pump.step_outcome().map_err(OwnerError)?;
+                if matches!(outcome, StepOutcome::Completed { stopped: true }) {
+                    while worker_fence.check().is_ok() {
+                        let g = wake.generation()?;
+                        wake.wait(g, &worker_fence)?;
+                    }
+                    break;
+                }
+                cadence.wait(outcome, &wake, generation, &worker_fence)?;
+            }
+            Ok(())
+        })();
+        let recorded = if let Err(e) = &result {
+            pump.record_failure(e.0)
+        } else {
+            Ok(())
+        };
+        if let Err(cleanup) = pump.close() {
+            let control = pump.process_control();
+            return Err(CleanupFailure::owned(
+                cleanup,
+                cleanup,
+                control,
+                move || pump.close(),
+            ));
+        }
+        recorded.map_err(CleanupFailure::from)?;
+        if worker_fence.check().is_err() {
+            Ok(())
+        } else {
+            result.map_err(|e| CleanupFailure::from(e.0))
+        }
+    });
+    PumpWorker {
+        scope,
+        fence,
+        process,
+        wake: owner_wake,
+        join: Some(join),
+        failure: None,
+    }
+}
+/// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
+pub fn bootstrap_program(root: &Path) -> OResult<TrustedBootstrap> {
+    let config = private_state::load(
+        &root.join("bootstrap-program.json"),
+        private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
+    )
+    .map_err(|e| OwnerError(e.0))?
+    .ok_or(OwnerError("native_bootstrap_unavailable"))?;
+    let config = Value::Object(config);
+    if config.as_object().is_none_or(|o| o.len() != 4)
+        || config["protocol"] != "mycelium.bootstrap_program.v1"
+    {
+        return Err(OwnerError("native_bootstrap_configuration_invalid"));
+    }
+    let text = |k: &str| {
+        config[k]
+            .as_str()
+            .ok_or(OwnerError("native_bootstrap_configuration_invalid"))
+    };
+    TrustedBootstrap::open(
+        Path::new(text("path")?),
+        text("sha256")?,
+        text("source_sha")?,
+    )
+    .map_err(OwnerError)
+}
+#[allow(unsafe_code)] // geteuid(2) has no preconditions
+fn effective_uid() -> u32 {
+    unsafe { libc::geteuid() }
+}
+/// `installed_sidecar()` (`native_runtime.py:8-22`): the native sidecar beside the executable
+/// (`<exe dir>/native/mycelium-iroh-sidecar`), a regular file this user owns, executable and not
+/// writable by others.
+pub fn installed_sidecar() -> Result<PathBuf, Failure> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let invalid = || Failure::new("ValueError", "native_sidecar_installation_invalid");
+    let candidate = std::env::current_exe()
+        .map_err(|_| invalid())?
+        .parent()
+        .ok_or_else(invalid)?
+        .join("native")
+        .join("mycelium-iroh-sidecar");
+    let path = fs::canonicalize(candidate).map_err(|_| invalid())?;
+    let meta = fs::symlink_metadata(&path).map_err(|_| invalid())?;
+    let mode = meta.permissions().mode();
+    if !meta.is_file() || meta.uid() != effective_uid() || mode & 0o100 == 0 || mode & 0o022 != 0 {
+        return Err(invalid());
+    }
+    Ok(path)
 }

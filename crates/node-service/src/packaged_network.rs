@@ -88,6 +88,8 @@ pub struct Network {
     seams: JoinSeams,
     fenced: AtomicBool,
     left: AtomicBool,
+    /// `DemoApp.demo_target`'s last card (`status_snapshot`), written by the standing loop.
+    demo_target: Mutex<Option<Value>>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -110,6 +112,7 @@ impl Network {
             seams: config.seams,
             fenced: AtomicBool::new(false),
             left: AtomicBool::new(false),
+            demo_target: Mutex::default(),
         })
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
@@ -649,4 +652,183 @@ impl RelayClose {
             }
         }
     }
+}
+
+// ---- PH3b S2: the joined Mac's standing loop (`DemoApp.standing_thread`) and its member card.
+
+/// `app._resource_check()`'s verdict for the private root it is given.
+pub type ResourceGate = Box<dyn Fn(&Path) -> Option<&'static str> + Send + Sync>;
+/// What the packaged member agent reads from its host besides the authority and the network.
+pub struct MemberSeams {
+    /// `self.closed`: Quit's fence (the node service's shutdown).
+    pub closed: Box<dyn Fn() -> bool + Send + Sync>,
+    /// `app._resource_check()`'s observation of this Mac against the saved policy of `root`.
+    pub resource: ResourceGate,
+    /// `DemoApp.acquisition`.
+    pub acquisition: Box<dyn Fn() -> Option<api::acquisition::Acquisition> + Send + Sync>,
+}
+/// The member's one bootstrap worker slot (`app.authority`'s control worker on a joined Mac).
+#[derive(Default)]
+struct MemberSlot {
+    worker: Option<api::member_agent::PumpWorker>,
+    failure: Option<api::bootstrap_process::CleanupFailure>,
+    incarnation: Arc<()>,
+}
+/// The packaged host as `api::member_agent`'s host: the authority's role, `running` and live
+/// lease, the network's `_left`/`_leave_fence` and seed path, the node's Quit fence, the model
+/// source's resource gate and acquisition, and the member's own bootstrap worker.
+pub struct PackagedMember {
+    authority: Arc<Mutex<Authority>>,
+    network: Arc<Network>,
+    seams: MemberSeams,
+    lifecycle: Arc<Mutex<()>>,
+    slot: Mutex<MemberSlot>,
+}
+impl PackagedMember {
+    pub fn new(
+        authority: Arc<Mutex<Authority>>,
+        network: Arc<Network>,
+        seams: MemberSeams,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            authority,
+            network,
+            seams,
+            lifecycle: Arc::default(),
+            slot: Mutex::default(),
+        })
+    }
+    fn state(&self) -> api::member_agent::HostState {
+        let (root, target, running) = {
+            let a = lock(&self.authority);
+            (a.root.clone(), a.target, a.running)
+        };
+        api::member_agent::HostState {
+            root,
+            target,
+            running,
+            left: self.network.left(),
+            closed: (self.seams.closed)(),
+        }
+    }
+}
+impl api::member_agent::MemberHost for PackagedMember {
+    type Worker = api::member_agent::PumpWorker;
+    fn state(&self) -> api::member_agent::OResult<api::member_agent::HostState> {
+        Ok(PackagedMember::state(self))
+    }
+    fn lease(&self) -> Option<f64> {
+        let a = lock(&self.authority);
+        a.session_view.and_then(|(_, lease)| lease).or_else(|| {
+            a.session
+                .as_ref()
+                .and_then(api::member::Session::lease_expires_at)
+        })
+    }
+    /// `DemoApp._resource_check` (app.py:929-947): a member leave fence refuses first.
+    fn resource_check(&self) -> Option<String> {
+        if self.network.fenced() {
+            return Some("owner_stop".into());
+        }
+        let root = lock(&self.authority).root.clone();
+        (self.seams.resource)(&root).map(str::to_owned)
+    }
+    fn acquisition(&self) -> Option<api::acquisition::Acquisition> {
+        (self.seams.acquisition)()
+    }
+    fn member_seed_options(&self) -> SeedOptions {
+        self.network.seams.member_seed.clone()
+    }
+    fn installed_sidecar(&self) -> Result<PathBuf, api::installation_descriptor::Failure> {
+        api::member_agent::installed_sidecar()
+    }
+    fn lifecycle(&self) -> api::member_agent::OResult<Arc<Mutex<()>>> {
+        Ok(self.lifecycle.clone())
+    }
+    fn slot<R>(
+        &self,
+        f: impl FnOnce(api::member_agent::Slot<'_, Self::Worker>) -> R,
+    ) -> api::member_agent::OResult<R> {
+        let mut slot = lock(&self.slot);
+        let state = PackagedMember::state(self);
+        let MemberSlot {
+            worker,
+            failure,
+            incarnation,
+        } = &mut *slot;
+        Ok(f(api::member_agent::Slot {
+            worker,
+            failure,
+            incarnation,
+            state,
+        }))
+    }
+    fn program(
+        &self,
+        root: &Path,
+    ) -> api::member_agent::OResult<api::bootstrap_process::TrustedBootstrap> {
+        api::member_agent::bootstrap_program(root)
+    }
+    fn spawn(
+        &self,
+        pump: api::target_pump::TargetPump<api::member_agent::RemoteTarget<Self>>,
+        fence: api::managed_carrier::TargetFence,
+        scope: Value,
+    ) -> Self::Worker {
+        api::member_agent::spawn_pump(pump, fence, scope)
+    }
+}
+
+/// One `_standing_loop` (app.py:1201-1212 @ f4e366e9): the member's agent passes and the card
+/// they leave; the agent is closed when the loop ends (`demo_app.close` -> `agent.close()`).
+struct Standing {
+    member: Arc<PackagedMember>,
+    agent: api::member_agent::MemberAgent<PackagedMember>,
+}
+impl Standing {
+    fn pass(&mut self) {
+        self.agent.tick(&self.member);
+        // `_record_status`: the card shows the last completed pass.
+        if let Some(card) = self.agent.status() {
+            *lock(&self.member.network.demo_target) = Some(card);
+        }
+    }
+}
+impl Drop for Standing {
+    fn drop(&mut self) {
+        self.agent.close(&self.member);
+    }
+}
+/// `DemoApp._standing_loop`'s pass for a joined Mac (`_standing_tick` -> `auto_poll_step` ->
+/// `demo_app.auto_step`, demo_app.py:168-173), as one closure for the host's own loop.
+pub fn standing_loop(member: Arc<PackagedMember>) -> impl FnMut() + Send + 'static {
+    let mut standing = Standing {
+        member,
+        agent: api::member_agent::MemberAgent::default(),
+    };
+    move || standing.pass()
+}
+/// `DemoApp.status()['demo_target']` (app.py:1279) = `demo_app.target_status` (demo_app.py:181-197
+/// @ f4e366e9) for a joined Mac: no agent yet -> `joined` / `not_joined` by the membership; else the
+/// agent's last card, `idle` shown as `joined` while the membership is current. An owner's card is
+/// its run's own contributor (none without a run).
+pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {
+    let Some(authority) = authority else {
+        return;
+    };
+    if !lock(authority).target {
+        return;
+    }
+    let current = membership_state(authority).as_deref() == Some("current");
+    let card = lock(&network.demo_target).clone();
+    status["demo_target"] = match card {
+        None => json!({"state": if current { "joined" } else { "not_joined" }, "detail": null,
+            "progress": null, "phase": null, "run_id": null, "model_id": null, "local": false}),
+        Some(mut card) => {
+            if card["state"] == "idle" && current {
+                card["state"] = json!("joined");
+            }
+            card
+        }
+    };
 }

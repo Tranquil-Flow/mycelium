@@ -443,6 +443,12 @@ impl DesktopServices {
                     self.authority.as_deref(),
                     &self.network,
                 );
+                // v0.1.4's `demo_target` member card (PH3b S2).
+                crate::packaged_network::member_status(
+                    &mut status,
+                    self.authority.as_deref(),
+                    &self.network,
+                );
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {

@@ -465,6 +465,9 @@ pub struct PackagedHost {
     /// `_renew_loop` for a joined target over the network's member cell (none before
     /// [`PackagedHost::with_network`]). Quit stops and reaps it with the host's other loops.
     member_renewal: Option<Arc<HostLoop>>,
+    /// `DemoApp.standing_thread` (`_standing_loop`) for a joined target (none before
+    /// [`PackagedHost::with_member_agent`]). Quit stops and reaps it with the host's other loops.
+    member_agent: Option<Arc<HostLoop>>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -579,6 +582,7 @@ impl PackagedHost {
                 crate::packaged_network::NetworkConfig::default(),
             ),
             member_renewal: None,
+            member_agent: None,
         };
         host.refresh_fast_mode();
         host
@@ -676,6 +680,58 @@ impl PackagedHost {
                 Err(code) => eprintln!("member renewal: {code}"),
             }
         }
+        self.with_member_agent()
+    }
+    /// `DemoApp.standing_thread` (app.py:642 @ f4e366e9): `_standing_loop` (app.py:1201-1212) every
+    /// `StandingLoopSelfClosedWait` (2 s) as one of the host's loops, over this host's authority,
+    /// network and model source (`crate::packaged_network::standing_loop`): a joined target's
+    /// agent reads the owner's announcement and answers with its own signed report. The agent is
+    /// closed when the loop ends (Quit, `demo_app.close` -> `agent.close()`, demo_app.py:205-207).
+    pub fn with_member_agent(mut self) -> Self {
+        let Ok(authority) = &self.authority else {
+            return self;
+        };
+        let node = self.node.clone();
+        let (resource, acquisition) = (self.model.clone(), self.model.clone());
+        let seams = crate::packaged_network::MemberSeams {
+            closed: Box::new(move || node.closed().unwrap_or(true)),
+            // `app._resource_check()`: this Mac observed now against the saved policy; without
+            // a model source the bundled probe observes it (unknown fails closed).
+            resource: Box::new(move |root| match &resource {
+                Some(source) => source.resource_violation(root),
+                None => {
+                    let policy = resource_policy::read(root)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| Value::Object(Map::new()));
+                    resources::policy_violation(
+                        &policy,
+                        &ProbeObserver::beside_executable().observe(),
+                    )
+                }
+            }),
+            acquisition: Box::new(move || {
+                acquisition
+                    .as_ref()
+                    .and_then(|source| source.lock().acquisition.clone())
+            }),
+        };
+        let member = crate::packaged_network::PackagedMember::new(
+            authority.clone(),
+            self.network.clone(),
+            seams,
+        );
+        let pass = crate::packaged_network::standing_loop(member);
+        match HostLoop::start(
+            "packaged-member-standing",
+            BudgetId::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203,
+            &self.node,
+            true,
+            pass,
+        ) {
+            Ok(standing) => self.member_agent = Some(standing),
+            Err(code) => eprintln!("member agent: {code}"),
+        }
         self
     }
     /// The host's network (relay, pending windows, join seams), for the action root and the Quit.
@@ -700,6 +756,7 @@ impl PackagedHost {
         self.policy
             .iter()
             .chain(self.member_renewal.iter())
+            .chain(self.member_agent.iter())
             .cloned()
             .collect()
     }
