@@ -1131,3 +1131,110 @@ fn a_final_renewal_refusal_fences_the_member_at_once() {
         drop(front);
     }
 }
+
+/// The B7 member with the binary's renewal thread and loop, each pass run on a tick from the test
+/// and reported back with the schedule's end. Fields drop in order: the ticks stop first, then the
+/// member joins its thread.
+struct Ticked {
+    tick: mpsc::Sender<()>,
+    beats: mpsc::Receiver<membership::Beat>,
+    member: membership::Membership,
+}
+impl Ticked {
+    fn new(rig: &Rig) -> Self {
+        let time = rig.time.clone();
+        let (tick, ticks) = mpsc::channel();
+        let (sent, beats) = mpsc::channel();
+        let member = membership::Membership::ticked(
+            rig.session.clone(),
+            rig.member_root.clone(),
+            &rig.signer,
+            rig.options.clone(),
+            Arc::new(move || time.now()),
+            ticks,
+            sent,
+        )
+        .unwrap();
+        Self {
+            tick,
+            beats,
+            member,
+        }
+    }
+    /// One tick: what the thread reports next (the pass it ran, or that its schedule had ended).
+    fn pass(&self) -> membership::Beat {
+        let sent = self.tick.send(()).is_ok();
+        let beat = self.next();
+        assert!(
+            sent || beat == membership::Beat::Ended,
+            "a tick is refused only once the schedule has ended: {beat:?}"
+        );
+        beat
+    }
+    /// The thread's next report: a pass is one seed request, bounded by the seed client's timeout.
+    fn next(&self) -> membership::Beat {
+        let pass = B::PyMyceliumSeedHttpSeedhttpclientInitTimeoutL831
+            .span(Entries::ZERO)
+            .unwrap();
+        self.beats
+            .recv_timeout(Duration::from_millis(pass.millis()))
+            .expect("the renewal thread reports each pass and the end of its schedule")
+    }
+}
+
+/// GRF2 F5: the binary's renewal THREAD (not only one pass) keeps its schedule through failed
+/// passes of every kind and ends only on a final refusal: v0.1.4's `_renew_loop` never stops on a
+/// failure (app.py:911-927: it records `renewal_unavailable` and waits for the next pass). The
+/// passes run on the real loop and stop rule of `shard_member` (`run_schedule`, `ends_schedule`).
+#[test]
+fn the_renewal_thread_keeps_its_schedule_through_failed_passes_and_ends_only_on_a_final_refusal() {
+    let mut rig = Rig::new();
+    let member = Ticked::new(&rig);
+    let before = member_lease(&member.member);
+    rig.seed_down();
+    for (answer, code) in [
+        (Answer::BadGateway, "seed_http_remote_error"),
+        (Answer::SeedInternal, "seed_http_internal_error"),
+        (Answer::Truncated, "action_not_completed"),
+    ] {
+        let front = Front::up(&rig, answer);
+        rig.time.advance(pass_seconds());
+        assert_eq!(
+            member.pass(),
+            membership::Beat::Pass(Err(code.to_owned())),
+            "{answer:?}: the thread runs this pass after the failed ones before it"
+        );
+        assert!(
+            member.member.current(&rig.signer).is_ok(),
+            "{answer:?}: still current while its own lease lasts"
+        );
+        drop(front);
+    }
+    rig.seed_up();
+    rig.time.advance(pass_seconds());
+    assert_eq!(
+        member.pass(),
+        membership::Beat::Pass(Ok(())),
+        "after three failed passes the same schedule renews"
+    );
+    let after = member_lease(&member.member);
+    assert!(after > before, "renewed lease {after} > {before}");
+    assert!(member.member.current(&rig.signer).is_ok());
+    rig.seed_down();
+    let front = Front::up(&rig, Answer::Refused("seed_member_lifecycle_ineligible"));
+    rig.time.advance(pass_seconds());
+    assert_eq!(
+        member.pass(),
+        membership::Beat::Pass(Err("peer_member_revoked".to_owned()))
+    );
+    assert_eq!(
+        member.next(),
+        membership::Beat::Ended,
+        "a final refusal ends the schedule"
+    );
+    assert_eq!(
+        member.member.current(&rig.signer).unwrap_err().0,
+        "member_renewal_failed"
+    );
+    drop(front);
+}
