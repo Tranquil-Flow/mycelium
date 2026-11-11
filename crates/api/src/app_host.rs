@@ -801,10 +801,18 @@ pub fn stop_authority(cell: &impl Cell) {
         seed.close();
     }
 }
-/// `self.authority.start(); self.running = True`: an owner with a swarm brings its seed back.
+/// `self.authority.start(); self.running = True`: an owner with a swarm brings its seed back. An
+/// owner without one, beside what a failed `create_swarm` prepared, refuses
+/// `authority_partial_state` before anything starts (`authority.start()`, authority.py:386-391 @
+/// f4e366e9), as its relaunch does ([`Authority::load`]).
 pub fn start_authority(cell: &impl Cell) -> Result<(), PublicError> {
     if resumable(cell) {
         return open_owner_seed(cell);
+    }
+    if cell
+        .with(|c| !c.target && c.swarm.is_none() && c.legacy.is_none() && prepared_state(&c.root))
+    {
+        return Err(PublicError::new(409, "authority_partial_state").raised_by(Raised::Authority));
     }
     cell.with(|c| c.running = true);
     Ok(())
