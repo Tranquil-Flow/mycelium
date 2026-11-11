@@ -449,7 +449,7 @@ fn closed(r: &Refusal) -> String {
 enum Command {
     /// Publish: prepare the transferred stages; routes expire at `expires_at`.
     Prepare { expires_at: f64 },
-    /// Open the next epoch (activation, and again after each spent request).
+    /// Activation: open the run's ONE route epoch.
     Open,
 }
 struct Start {
@@ -478,6 +478,9 @@ pub struct OwnerWork {
     cancels: Vec<Cancel>,
     /// Set once the worker reached its exit tail (it cancels on its own from there).
     exiting: Arc<AtomicBool>,
+    /// Set while the worker serves the run's open epoch: the members' only operations are their
+    /// `serve`s, which the epoch's close ends (a Stop never cancels them first).
+    serving: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
     /// Member links handed back by teardown.
     returned: Vec<WorkMember>,
@@ -543,6 +546,7 @@ impl OwnerWork {
             stop: Arc::new(AtomicBool::new(false)),
             cancels,
             exiting: Arc::new(AtomicBool::new(false)),
+            serving: Arc::new(AtomicBool::new(false)),
             thread: None,
             returned: Vec::new(),
             admission: Some(admission),
@@ -585,15 +589,6 @@ impl OwnerWork {
     /// The open epoch's loopback gateway `{addr, bearer, qualification}`.
     pub fn gateway(&self) -> Option<Value> {
         self.shared.lock().gateway.clone()
-    }
-    /// The open epoch is single-use (U5, per-request epochs): after its
-    /// request settled, retire it and open the next one over freshly prepared
-    /// stages.
-    pub fn next_epoch(&self) -> Result<(), Refusal> {
-        if self.shared.lock().state != RUNNING {
-            return Err(refusal("route_not_serving"));
-        }
-        self.send(Command::Open)
     }
     fn send(&self, command: Command) -> Result<(), Refusal> {
         self.commands
@@ -678,7 +673,7 @@ impl OwnerWork {
                 eprintln!("owner work stop: {} (one cancel round only)", e.code);
             }
             loop {
-                if !self.exiting.load(Ordering::SeqCst) {
+                if !self.exiting.load(Ordering::SeqCst) && !self.serving.load(Ordering::SeqCst) {
                     for cancel in &self.cancels {
                         cancel();
                     }
@@ -699,12 +694,19 @@ impl OwnerWork {
     /// flight; the step then ends `Stopped` and `teardown` follows. Callable
     /// from any thread (the owner run's Stop, owner_run.py:275-283).
     pub fn stopper(&self) -> impl Fn() + Send + Sync + 'static {
-        let (stop, cancels, shared) =
-            (self.stop.clone(), self.cancels.clone(), self.shared.clone());
+        let (stop, cancels, shared, serving) = (
+            self.stop.clone(),
+            self.cancels.clone(),
+            self.shared.clone(),
+            self.serving.clone(),
+        );
         move || {
             stop.store(true, Ordering::SeqCst);
-            for cancel in &cancels {
-                cancel();
+            // While serving, the epoch's close (teardown) ends the members' serves.
+            if !serving.load(Ordering::SeqCst) {
+                for cancel in &cancels {
+                    cancel();
+                }
             }
             shared.changed.notify_all();
         }
@@ -737,9 +739,9 @@ impl OwnerWork {
             admission,
             stop: self.stop.clone(),
             exiting: self.exiting.clone(),
+            serving: self.serving.clone(),
             inbox,
             within,
-            serve_within: Duration::from_secs(wall),
             stop_allowance,
         };
         let thread = std::thread::Builder::new()
@@ -952,11 +954,10 @@ struct Worker {
     admission: Box<dyn Admission>,
     stop: Arc<AtomicBool>,
     exiting: Arc<AtomicBool>,
+    serving: Arc<AtomicBool>,
     inbox: mpsc::Receiver<Command>,
     /// Member operation wait (transfer, prepare, control calls).
     within: Duration,
-    /// The members' worker wall: how long a member may serve one route.
-    serve_within: Duration,
     /// How long the exit waits for the members' stage release.
     stop_allowance: Duration,
 }
@@ -968,18 +969,16 @@ impl Worker {
         // (whatever the interrupted member operation answered).
         let stopping = self.stop.load(Ordering::SeqCst);
         self.exiting.store(true, Ordering::SeqCst);
-        // F4: on the exit an open epoch's members answer within the stop allowance.
-        let released = match open.take() {
-            Some(epoch) => self.retire(epoch, self.stop_allowance),
-            None => Ok(()),
-        };
+        // EP2: an open epoch is closed FIRST (a v2 member serves until the owner closes it),
+        // then each member's serve reply is collected; then R1's release.
+        if let Some(epoch) = open.take() {
+            self.close_epoch(epoch);
+        }
         // R1: every exit releases what the members hold.
-        let discarded = self.release_members();
-        // A teardown failure is kept on its own even when the work failed first.
-        let cleanup = released.as_ref().err().map(closed).or(discarded);
+        let cleanup = self.release_members();
         let failure = match stopping {
             true => None,
-            false => worked.err().or(released.err()),
+            false => worked.err(),
         };
         self.shared.update(|f| {
             f.route = None;
@@ -1078,68 +1077,69 @@ impl Worker {
         self.stopped()?;
         self.shared.set(STAGING);
         self.prepare(&offers)?;
-        let mut prepared = true;
         self.shared.set(AWAITING);
-        let mut number = 0;
-        while let Ok(command) = self.inbox.recv() {
-            if !matches!(command, Command::Open) {
-                return Err(refusal("managed_workflow_not_startable"));
-            }
-            self.stopped()?;
-            if let Some(spent) = open.take() {
-                self.retire(spent, self.serve_within)?;
-            }
-            if !prepared {
-                self.shared.set(STAGING);
-                self.prepare(&offers)?;
-            }
-            self.stopped()?;
-            self.shared.set(STARTING);
-            number += 1;
-            let owner = iroh::SecretKey::generate();
-            let envelope = self.admission.issue(&RouteOrder {
-                protocol: route::ROUTE,
-                model: &self.plan.model,
-                deployment_id: &self.plan.deployment_id,
-                epoch: number,
-                owner_endpoint_id: &owner.public().to_string(),
-                now: app_host::now(),
-                expires_at,
-            })?;
-            // Single-use: the next epoch re-prepares (U5).
-            prepared = false;
-            let mut stages: Vec<EpochStage<'_>> = self
-                .members
-                .iter_mut()
-                .zip(&offers)
-                .map(|(m, offer)| EpochStage {
-                    node_id: &m.node_id,
-                    link: &mut m.link,
-                    offer,
-                })
-                .collect();
-            let epoch = deliver(
-                &self.coordinator,
-                envelope,
-                owner,
-                &mut stages,
-                &self.network,
-                self.codec.clone(),
-                self.within,
-            )?;
-            let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
-                "qualification":epoch.qualification().ok(),
-                "route_expires_at":epoch.host().message()["expires_at"]});
-            let handle = epoch.handle().clone();
-            *open = Some(epoch);
-            self.shared.update(|f| {
-                f.route = Some(handle);
-                f.gateway = Some(gateway);
-                f.epoch = number;
-                f.state = RUNNING;
-            });
+        match self.inbox.recv() {
+            Ok(Command::Open) => {}
+            Ok(Command::Prepare { .. }) => return Err(refusal("managed_workflow_not_startable")),
+            Err(_) => return Ok(()),
         }
-        Ok(())
+        self.stopped()?;
+        self.shared.set(STARTING);
+        // The run's ONE epoch (v0.1.4: one route per run, run_registry_server serves it until
+        // the stop event, supervisor.py:4427-4428), a multi-request route expiring with the
+        // members' worker wall counted from publish.
+        let owner = iroh::SecretKey::generate();
+        let envelope = self.admission.issue(&RouteOrder {
+            protocol: route::ROUTE_V2,
+            model: &self.plan.model,
+            deployment_id: &self.plan.deployment_id,
+            epoch: 1,
+            owner_endpoint_id: &owner.public().to_string(),
+            now: app_host::now(),
+            expires_at,
+        })?;
+        let mut stages: Vec<EpochStage<'_>> = self
+            .members
+            .iter_mut()
+            .zip(&offers)
+            .map(|(m, offer)| EpochStage {
+                node_id: &m.node_id,
+                link: &mut m.link,
+                offer,
+            })
+            .collect();
+        let epoch = deliver(
+            &self.coordinator,
+            envelope,
+            owner,
+            &mut stages,
+            &self.network,
+            self.codec.clone(),
+            self.within,
+        )?;
+        let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
+            "qualification":epoch.qualification().ok(),
+            "route_expires_at":epoch.host().message()["expires_at"],
+            "worker_pids":epoch.worker_pids()});
+        let handle = epoch.handle().clone();
+        *open = Some(epoch);
+        self.serving.store(true, Ordering::SeqCst);
+        self.shared.update(|f| {
+            f.route = Some(handle);
+            f.gateway = Some(gateway);
+            f.epoch = 1;
+            f.state = RUNNING;
+        });
+        // Every chat of the run is a request on this epoch. A retired epoch (death evidence, a
+        // revoke or generation change, a carrier failure, a failed session reset) is NEVER
+        // re-opened or re-prepared: its gateway refuses later chats and the run serves on until
+        // Stop, rollover, the ceiling or the monitor ends it (shipped app: `route_not_open`
+        // route.py:4614-4620 -> chat 503 `chat_route_not_qualified` chat.py:113-120; no recovery,
+        // ruling 23). The work ends when the run closes its command channel (teardown).
+        match self.inbox.recv() {
+            Ok(_) => Err(refusal("managed_workflow_not_startable")),
+            Err(_) => Ok(()),
+        }
     }
     fn transfer_all(&mut self, source: &ShardSource) -> Result<Vec<Value>, Refusal> {
         let mut offers = Vec::new();
@@ -1184,35 +1184,21 @@ impl Worker {
             self.within,
         )
     }
-    /// Retire an epoch: a settled request gets its members' signed serve
-    /// reports and worker-gone proofs; an idle one is closed first, after
-    /// which each member ends its serve (its compute released) and reports.
-    fn retire(&mut self, epoch: Epoch, within: Duration) -> Result<(), Refusal> {
-        let settled = epoch
-            .handle()
-            .state
-            .lock()
-            .map_err(|_| refusal("carrier_state_poisoned"))?
-            .teardown_finished;
-        let mut reports = Vec::new();
-        if settled {
-            let mut stages: Vec<SettleStage<'_>> = self
-                .members
-                .iter_mut()
-                .map(|m| SettleStage {
-                    node_id: &m.node_id,
-                    link: &mut m.link,
-                })
-                .collect();
-            reports = settle_members(&epoch, &mut stages, within)?.0;
-        }
+    /// Close the run's epoch on the exit, FIRST: the carrier closes (each member's serve ends with
+    /// its compute closed: `owner_closed`, or the retirement teardown of a request still open),
+    /// then each member's serve reply is collected within the stop allowance. A member that does
+    /// not answer keeps its `serve` outstanding: the release step cancels and drains it.
+    fn close_epoch(&mut self, epoch: Epoch) {
+        let end = Instant::now() + self.stop_allowance;
         let refusals = epoch.close();
-        if !settled {
-            for m in self.members.iter_mut() {
-                let report = m.link.finish(within)?;
-                reports.push(json!({"node_id":m.node_id,"teardown":report["teardown"],
-                    "failure":report["failure"]}));
-            }
+        let mut reports = Vec::new();
+        for m in self.members.iter_mut().filter(|m| m.link.outstanding > 0) {
+            let left = end.saturating_duration_since(Instant::now());
+            reports.push(match m.link.finish(left) {
+                Ok(report) => json!({"node_id":m.node_id,"teardown":report["teardown"],
+                    "failure":report["failure"],"requests_served":report["requests_served"]}),
+                Err(Refusal(code)) => json!({"node_id":m.node_id,"serve_error":code}),
+            });
         }
         self.shared.update(|f| {
             f.route = None;
@@ -1221,7 +1207,6 @@ impl Worker {
             f.serve_reports
                 .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
         });
-        Ok(())
     }
 }
 

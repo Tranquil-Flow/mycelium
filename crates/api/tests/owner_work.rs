@@ -1775,7 +1775,9 @@ fn a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member() {
 fn a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_receives() {
     let mut s = swarm(2);
     let plan = s.serving_plan();
-    let next = s.serving_plan();
+    // The next run (rollover, or the next Start) has its own run id.
+    let mut next = s.serving_plan();
+    next.run_id = "s4a-run-next".into();
     let (entered, held) = mpsc::channel();
     let (open, gate) = mpsc::channel();
     let mut scripts = stage_scripts();

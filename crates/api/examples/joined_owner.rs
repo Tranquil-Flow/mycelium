@@ -14,8 +14,8 @@
 //! `close`. Replies: `{ok:true,result}` or `{ok:false,code}`.
 //! The owner work port (`joined_owner::work::OwnerWork`, PH3b S4a) instead of
 //! transfer/prepare/open: `work {tokens, worker_wall_seconds}` (start serving,
-//! activate) -> workflow state with the epoch gateway; `work_next` (the next
-//! single-use epoch); `work_stop` (teardown; member links come back).
+//! activate) -> workflow state with the run's ONE epoch gateway (every chat of
+//! the run on it, lane EP2); `work_stop` (teardown; member links come back).
 //!
 //! Rehearsal limits (named seams, not product claims): the swarm seed listens
 //! on loopback and a bounded forwarder exposes it on the explicit LAN
@@ -663,27 +663,6 @@ impl Owner {
             "ms":begun.elapsed().as_secs_f64()*1000.0}),
         )
     }
-    /// Retire the spent epoch and open the next one (single-use epochs).
-    fn work_next(&mut self) -> Result<Value> {
-        let port = self.work.as_mut().ok_or("owner_work_absent")?;
-        let before = port.state()["epoch"].as_u64().unwrap_or(0);
-        let begun = Instant::now();
-        port.next_epoch().map_err(code)?;
-        let next = port.wait_state(
-            |s| {
-                s["state"] == "failed"
-                    || (s["state"] == "api_running" && s["epoch"].as_u64() > Some(before))
-            },
-            self.wall,
-        );
-        if next["state"] != "api_running" {
-            return Err(next["error_code"]
-                .as_str()
-                .unwrap_or("owner_work_not_serving")
-                .into());
-        }
-        Ok(json!({"state":next,"ms":begun.elapsed().as_secs_f64()*1000.0}))
-    }
     /// Teardown: close the open epoch and the source; member links come back.
     fn work_stop(&mut self) -> Result<Value> {
         let mut port = self.work.take().ok_or("owner_work_absent")?;
@@ -822,7 +801,6 @@ fn run() -> Result<()> {
             "open" => owner.open(&request),
             "settle" => owner.settle(),
             "work" => owner.work(&request),
-            "work_next" => owner.work_next(),
             "work_stop" => owner.work_stop(),
             "leave" => owner.leave(&request),
             "close" => {
