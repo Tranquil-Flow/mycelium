@@ -161,6 +161,65 @@ impl ModelSource {
         self.lock().observation = Some(observation.clone());
         observation
     }
+    /// `app._resource_check()` (app.py:929-947 @ f4e366e9): this Mac observed now, against the
+    /// saved resource policy of the owner whose private root is `root` (`read_resource_policy(
+    /// self.root) or {}`), by `resources::policy_violation` (resources.py:152-181).
+    fn resource_violation(&self, root: &Path) -> Option<&'static str> {
+        let observation = self.observe();
+        let policy = resource_policy::read(root)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        resources::policy_violation(&policy, &observation)
+    }
+    /// One pass of `DemoApp._policy_loop` (app.py:1007-1030 @ f4e366e9) for the owner whose
+    /// private root is `root`, over `authority` (none: its state was refused at bind, so there
+    /// is no membership). Only an active attempt is judged (`api::app_host`'s shared verdict): an
+    /// ended one clears the flag; a lost membership or this Mac no longer satisfying the saved
+    /// consent cancels the real worker and keeps the reason as `acquisition_policy_error`. The
+    /// membership and this Mac are read with no lock of this source held; the verdict is applied
+    /// only to the attempt it judged, if it is still the active one.
+    fn policy_tick(&self, root: &Path, authority: Option<&Mutex<Authority>>) {
+        let attempt = {
+            let state = self.lock();
+            state.acquisition.clone().filter(|_| state.active)
+        };
+        let Some(attempt) = attempt else {
+            return;
+        };
+        let verdict = app_host::acquisition_policy_verdict(
+            &attempt.status().state,
+            || {
+                authority.is_some_and(|authority| {
+                    app_host::running(authority)
+                        && app_host::membership_state(authority).as_deref() == Some("current")
+                })
+            },
+            || self.resource_violation(root),
+        );
+        let mut state = self.lock();
+        let judged = state.active
+            && state
+                .acquisition
+                .as_ref()
+                .is_some_and(|current| current.state_root() == attempt.state_root());
+        if judged {
+            let Acquisitions {
+                acquisition,
+                active,
+                policy_error,
+                ..
+            } = &mut *state;
+            app_host::apply_policy_verdict(
+                &mut AcquisitionView {
+                    acquisition,
+                    active,
+                    policy_error,
+                },
+                verdict,
+            );
+        }
+    }
     /// Quit's first step, at once: the running attempt is asked to stop, as `close()` sets the
     /// attempt's cancel event before it joins (acquisition.py:1527-1534); `_acquisition_active`
     /// is cleared (`_cancel_acquisition`). Nothing waits here.
@@ -227,8 +286,8 @@ impl ModelSource {
             &site,
         )
     }
-    /// `app._acquisition_active`. This process has no `_policy_loop`: its first half, a finished
-    /// attempt clears the flag (app.py:1016-1018), runs when the flag is read.
+    /// `app._acquisition_active`. A finished attempt also clears the flag when it is read, so an
+    /// answer never waits for the next policy pass (app.py:1016-1018).
     fn active(&self) -> bool {
         let mut state = self.lock();
         let finished = state.acquisition.as_ref().is_some_and(|acquisition| {
@@ -244,6 +303,87 @@ impl ModelSource {
     }
 }
 
+/// One of the packaged host's own loops on its named thread (`DemoApp.policy_thread`): `tick`
+/// every `period` until it is stopped or the node service's shutdown fence (`self.closed`) is
+/// set. The window's Quit stops it at once and reaps it without blocking; dropping the last
+/// handle stops and joins it.
+pub struct HostLoop {
+    /// Dropped to wake the loop (`self.closed.wait(1)` returning).
+    stop: Mutex<Option<mpsc::Sender<()>>>,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+impl HostLoop {
+    fn start(
+        name: &str,
+        period: BudgetId,
+        node: &NodeService,
+        mut tick: impl FnMut() + Send + 'static,
+    ) -> Result<Arc<Self>, &'static str> {
+        let period = period
+            .span(Entries::ZERO)
+            .map_err(|_| "host_loop_budget_invalid")?;
+        let period = Duration::from_millis(period.millis());
+        let (stop, stopped) = mpsc::channel::<()>();
+        let node = node.clone();
+        let thread = std::thread::Builder::new()
+            .name(name.into())
+            .spawn(move || {
+                while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(period) {
+                    // Quit's fence; a poisoned node counts as closed.
+                    if node.closed().unwrap_or(true) {
+                        break;
+                    }
+                    tick();
+                }
+            })
+            .map_err(|_| "host_loop_thread_unavailable")?;
+        Ok(Arc::new(Self {
+            stop: Mutex::new(Some(stop)),
+            thread: Mutex::new(Some(thread)),
+        }))
+    }
+    /// Wake the loop and end it; a pass in progress finishes first.
+    pub fn stop(&self) {
+        drop(
+            self.stop
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(),
+        );
+    }
+    /// Reap the loop without blocking: `Ok(true)` once it ended and was joined, `Ok(false)`
+    /// while it still runs, the code when it panicked.
+    pub fn poll_join(&self) -> Result<bool, &'static str> {
+        let mut thread = self.thread.lock().unwrap_or_else(PoisonError::into_inner);
+        match thread.take() {
+            None => Ok(true),
+            Some(running) if !running.is_finished() => {
+                *thread = Some(running);
+                Ok(false)
+            }
+            Some(ended) => ended
+                .join()
+                .map(|()| true)
+                .map_err(|_| "host_loop_panicked"),
+        }
+    }
+}
+impl Drop for HostLoop {
+    fn drop(&mut self) {
+        self.stop();
+        let thread = self
+            .thread
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(thread) = thread
+            && thread.join().is_err()
+        {
+            eprintln!("packaged host loop: host_loop_panicked");
+        }
+    }
+}
+
 /// The packaged process as `persistent::Host`. It holds the same [`NodeService`] that is the
 /// backend's inner delegate (one shared state), the private state root, the fast-mode default,
 /// the owner authority over that root and the loop that keeps the owner's lease renewed.
@@ -251,6 +391,9 @@ pub struct PackagedHost {
     node: NodeService,
     root: PathBuf,
     fast_mode: FastModeProcess,
+    /// `DemoApp.policy_thread` (`_policy_loop`) over the model source, shared with the window's
+    /// Quit (which stops and reaps it). Declared before the authority, like the renewal.
+    policy: Option<Arc<HostLoop>>,
     /// `DemoApp.renew_thread` over the authority below, held for its drop. Declared before the
     /// authority: dropping the host ends and joins the loop before the authority (and the seed it
     /// keeps) is released.
@@ -365,6 +508,7 @@ impl PackagedHost {
                 value: Ok("off"),
                 refreshes: 0,
             }))),
+            policy: None,
             _renewal: renewal,
             authority,
             model: None,
@@ -375,14 +519,38 @@ impl PackagedHost {
     /// [`PackagedHost::new`] with the run model's acquisition over `source`, opened as
     /// `DemoApp.start` does once the authority started (`self._open_acquisition()`, app.py:627).
     /// An acquisition that cannot be opened keeps its code on stderr and answers as none.
+    ///
+    /// The policy loop starts with it (`DemoApp.start` -> `policy_thread.start()`, app.py:640),
+    /// every `PolicyLoopSelfClosedWait`. A host whose loop cannot start keeps no model source
+    /// (fail closed: no download runs unguarded; every acquisition seam keeps its default).
     pub fn with_model_source(node: NodeService, root: PathBuf, source: ModelSource) -> Self {
         let mut host = Self::new(node, root);
         let env = host.environment(run_model::ENV);
         if let Err(error) = source.step(&host.root, env.as_deref(), app_host::open_acquisition) {
             eprintln!("model source: {}", error.code);
         }
-        host.model = Some(source);
+        let policy = {
+            let (source, root) = (source.clone(), host.root.clone());
+            let authority = host.authority.as_ref().ok().cloned();
+            HostLoop::start(
+                "packaged-acquisition-policy",
+                BudgetId::PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009,
+                &host.node,
+                move || source.policy_tick(&root, authority.as_deref()),
+            )
+        };
+        match policy {
+            Ok(policy) => {
+                host.policy = Some(policy);
+                host.model = Some(source);
+            }
+            Err(code) => eprintln!("model source: {code}"),
+        }
         host
+    }
+    /// The host's own loops, for the window's Quit to stop and reap.
+    pub fn loops(&self) -> Vec<Arc<HostLoop>> {
+        self.policy.iter().cloned().collect()
     }
     /// One acquisition step over this host's model source, `None` without one.
     fn acquisition<R>(
@@ -460,12 +628,7 @@ impl Host for PackagedHost {
     /// admission. A host without a model source observes nothing: its download keeps the trait
     /// default answer.
     fn resource_check(&mut self) -> Option<&'static str> {
-        let observation = self.model.as_ref()?.observe();
-        let policy = resource_policy::read(&self.root)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| Value::Object(Map::new()));
-        resources::policy_violation(&policy, &observation)
+        self.model.as_ref()?.resource_violation(&self.root)
     }
     /// `app.owner_run.active()`: the node service's run still owns its driver.
     fn owner_run_active(&self) -> bool {

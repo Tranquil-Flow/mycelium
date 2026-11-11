@@ -1239,6 +1239,48 @@ pub fn cancel_acquisition(view: &mut AcquisitionView<'_>) {
     }
     *view.active = false;
 }
+/// What one pass of `DemoApp._policy_loop` (app.py:1007-1030 @ f4e366e9) decides for an active
+/// attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyVerdict {
+    /// The attempt ended (`prepared`, `cancelled`, `failed`): `_acquisition_active = False`.
+    Finished,
+    /// This Mac and its membership still satisfy the saved consent: nothing changes.
+    Keep,
+    /// `acquisition_policy_error = reason; _cancel_acquisition()`: the real worker is cancelled.
+    Cancel(&'static str),
+}
+/// `_policy_loop`'s decision for an active attempt in `state` (its status's `state`): an ended
+/// attempt only clears the flag; a lost membership (`not self.running or membership_state !=
+/// 'current'`) cancels with `membership_required` before this Mac is observed; otherwise the
+/// resource guard's refusal (`_resource_check`) cancels with its code. Shared by every host that
+/// downloads (the headless launcher and the packaged executable).
+pub fn acquisition_policy_verdict(
+    state: &str,
+    membership_current: impl FnOnce() -> bool,
+    resource_check: impl FnOnce() -> Option<&'static str>,
+) -> PolicyVerdict {
+    if matches!(state, "prepared" | "cancelled" | "failed") {
+        return PolicyVerdict::Finished;
+    }
+    let reason = if membership_current() {
+        resource_check()
+    } else {
+        Some("membership_required")
+    };
+    reason.map_or(PolicyVerdict::Keep, PolicyVerdict::Cancel)
+}
+/// Apply a [`PolicyVerdict`] to the host's acquisition fields (`_policy_loop`'s writes).
+pub fn apply_policy_verdict(view: &mut AcquisitionView<'_>, verdict: PolicyVerdict) {
+    match verdict {
+        PolicyVerdict::Finished => *view.active = false,
+        PolicyVerdict::Keep => {}
+        PolicyVerdict::Cancel(reason) => {
+            *view.policy_error = Some(reason);
+            cancel_acquisition(view);
+        }
+    }
+}
 /// `if acquisition is None or its state_root differs: self._open_acquisition()`.
 ///
 /// An open acquisition keeps its root's physical path (`acquisition::Acquisition::state_root`,

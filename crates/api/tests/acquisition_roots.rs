@@ -137,3 +137,37 @@ fn app_host_reopen_keeps_the_open_acquisition_below_a_symlinked_ancestor() {
     );
     reopened.close().unwrap();
 }
+
+/// `_policy_loop`'s decision (app.py:1007-1030 @ f4e366e9), shared by the headless launcher and
+/// the packaged executable: an ended attempt only clears the flag and observes nothing; a lost
+/// membership cancels with `membership_required` before this Mac is observed; otherwise the
+/// resource guard's code cancels, and a satisfied guard keeps the attempt.
+#[test]
+fn the_policy_verdict_follows_the_attempt_the_membership_then_this_mac() {
+    use api::app_host::{PolicyVerdict, acquisition_policy_verdict};
+    let unreachable = || -> bool { panic!("an ended attempt reads no membership") };
+    for ended in ["prepared", "cancelled", "failed"] {
+        assert_eq!(
+            acquisition_policy_verdict(ended, unreachable, || panic!("nor observes this Mac")),
+            PolicyVerdict::Finished,
+            "{ended}"
+        );
+    }
+    for running in ["starting", "resolving_metadata", "downloading", "verifying"] {
+        assert_eq!(
+            acquisition_policy_verdict(running, || false, || panic!("membership first")),
+            PolicyVerdict::Cancel("membership_required"),
+            "{running}"
+        );
+        assert_eq!(
+            acquisition_policy_verdict(running, || true, || Some("resource_power_policy_violation")),
+            PolicyVerdict::Cancel("resource_power_policy_violation"),
+            "{running}"
+        );
+        assert_eq!(
+            acquisition_policy_verdict(running, || true, || None),
+            PolicyVerdict::Keep,
+            "{running}"
+        );
+    }
+}

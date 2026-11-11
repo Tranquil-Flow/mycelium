@@ -2464,30 +2464,28 @@ fn acquisition_policy_tick(core: &Shared) {
     let Some(acquisition) = acquisition.filter(|_| active) else {
         return;
     };
-    if matches!(
-        acquisition.status().state.as_str(),
-        "prepared" | "cancelled" | "failed"
-    ) {
-        if let Ok(mut c) = core.lock() {
-            c.acquisition_active = false;
-        }
-        return;
-    }
     let host = HeadlessHost {
         core: core.clone(),
         runs: None,
     };
-    let membership_lost = !host.running() || host.membership_state().as_deref() != Some("current");
-    let reason = if membership_lost {
-        Some("membership_required")
-    } else {
-        resource_check(core)
-    };
-    if let Some(reason) = reason {
-        acquisition.cancel();
-        if let Ok(mut c) = core.lock() {
-            c.acquisition_policy_error = Some(reason);
-            c.acquisition_active = false;
+    // The verdict shared with the packaged executable (`app_host::acquisition_policy_verdict`).
+    match app_host::acquisition_policy_verdict(
+        &acquisition.status().state,
+        || host.running() && host.membership_state().as_deref() == Some("current"),
+        || resource_check(core),
+    ) {
+        app_host::PolicyVerdict::Keep => {}
+        app_host::PolicyVerdict::Finished => {
+            if let Ok(mut c) = core.lock() {
+                c.acquisition_active = false;
+            }
+        }
+        app_host::PolicyVerdict::Cancel(reason) => {
+            acquisition.cancel();
+            if let Ok(mut c) = core.lock() {
+                c.acquisition_policy_error = Some(reason);
+                c.acquisition_active = false;
+            }
         }
     }
 }

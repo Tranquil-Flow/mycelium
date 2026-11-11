@@ -5,7 +5,7 @@
 //! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
 use crate::{
-    app_host::{FastModeDefault, FastModeProcess, PackagedHost},
+    app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost},
     router_port::{self, Serving, ServingActions},
     service::NodeService,
 };
@@ -183,6 +183,9 @@ pub struct DesktopServices {
     /// Every `POST /api/*`, in one action transaction at a time (v0.1.4's `app.guard`).
     actions: Arc<Actions>,
     fast_mode: FastModeProcess,
+    /// The packaged host's own loops (its `_policy_loop`): Quit stops them as it fences
+    /// admission and proves them ended and joined before the services verify.
+    loops: Vec<Arc<HostLoop>>,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
@@ -259,6 +262,7 @@ impl DesktopServices {
             .and_then(|source| Serving::new(node.clone(), source))
             .map(Arc::new);
         let fast_mode = host.fast_mode_process();
+        let loops = host.loops();
         Self {
             actions: Arc::new(Control::new(PersistentBackend::new(
                 private.to_owned(),
@@ -267,6 +271,7 @@ impl DesktopServices {
             ))),
             serving,
             fast_mode,
+            loops,
             node,
             model: None,
             gate: Arc::new(Mutex::new(Gate {
@@ -625,6 +630,9 @@ impl Services for DesktopServices {
     }
     fn begin_shutdown(&self, _: std::time::Instant) -> Result<(), CleanupError> {
         self.gate.lock().map_err(|_| CleanupError::Begin)?.closing = true;
+        for host_loop in &self.loops {
+            host_loop.stop();
+        }
         if let Ok(serving) = &self.serving {
             serving.begin_shutdown();
         }
@@ -647,6 +655,18 @@ impl Services for DesktopServices {
         }
         if gate.failed {
             return Err(CleanupError::Poll);
+        }
+        // The host's loops end after their pass in progress (one observation at most).
+        for host_loop in &self.loops {
+            match host_loop.poll_join() {
+                Ok(true) => {}
+                Ok(false) => return Ok(Poll::Pending),
+                Err(code) => {
+                    eprintln!("desktop shutdown: {code}");
+                    gate.failed = true;
+                    return Err(CleanupError::Poll);
+                }
+            }
         }
         // The live request's gateway worker ends after its driver job (or its refusal).
         if self.serving.as_ref().is_ok_and(|s| !s.settled()) {
