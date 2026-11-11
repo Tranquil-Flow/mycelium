@@ -629,8 +629,12 @@ fn packaged_owner_create_unreadable_membership_after_stop_refuses() {
 /// configuration, authority.py:526-527; executed `oracle-seed-url.json`: the url moves) while the
 /// approval stored before the relaunch (authority.py:903-915) pins the old seed url (seed
 /// http.py:957-960). This seed keeps answering for its first url (`run_seed`, `seed-url.json`), so
-/// the stored approval still matches and the retry re-enrols the same swarm. Not aligned here:
-/// changing the kept url is a decision of its own, not this commit boundary.
+/// the stored approval still matches and the retry re-enrols the same swarm. The difference rests
+/// on the admitted seam SE-L10-SEED-PORT (the oracle's loopback seed port moves at every start;
+/// this seed keeps its first url) and on nothing else: the a2 review's executed oracle trace
+/// (`workers/rv-s1-owner-create-failed-join-retry-a2/evidence/.../oracle-probes.json`, cases
+/// `accept_native_port` and `accept_fixed_port`) answers exactly the list below once only the
+/// seed port is held fixed. Not aligned here: changing the kept url is that seam's decision.
 #[test]
 fn packaged_owner_create_accept_failure_relaunch_retry() {
     let root = private_root();
