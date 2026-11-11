@@ -23,13 +23,14 @@ use api::{
     app_host, compiler_inputs,
     joined_owner::{
         codec::NativeCodec,
-        epoch::{Carriers, Epoch},
+        epoch::Epoch,
         link::{self, MemberLink, Refusal, Stage},
         remote::RemoteMember,
-        source::{ShardSource, transfer},
+        source::ShardSource,
+        work::{self, EpochStage, SettleStage},
     },
-    joined_shard::{carrier, native, route},
-    m16_route::{Codec, RouteHost, StagePeer},
+    joined_shard::native,
+    m16_route::{Codec, RouteHost},
 };
 use budgets::{BudgetId as B, Entries};
 use runtime::iroh_host::LanPolicy;
@@ -425,14 +426,14 @@ impl Owner {
         let mut out = Vec::new();
         for (i, m) in self.members.iter_mut().enumerate() {
             let began = Instant::now();
-            let done = transfer(
+            let done = work::transfer_stage(
                 &source,
                 &self.seed.coordinator,
                 &mut m.link,
                 &m.registration,
+                &m.node_id,
+                &compiled.document,
                 &format!("b16-transfer-{i}"),
-                &compiled.document["node_files"][&m.node_id][0],
-                &compiled.document["node_slice_plans"][&m.node_id],
                 self.wall,
             )
             .map_err(code)?;
@@ -490,85 +491,32 @@ impl Owner {
         let compiled = self.compiled.as_ref().ok_or("owner_not_compiled")?;
         let model = json!({"model_id":MODEL_ID,"resolved_commit":RESOLVED_COMMIT,
             "manifest_digest":compiled.manifest_digest});
-        let owner = iroh::SecretKey::generate();
         let admitted = std::mem::take(&mut self.admitted);
-        let envelope = route::issue(
+        let mut stages = Vec::new();
+        for m in self.members.iter_mut() {
+            stages.push(EpochStage {
+                node_id: &m.node_id,
+                offer: m
+                    .offer
+                    .as_ref()
+                    .ok_or(api::compiler_inputs::Error("owner_not_transferred"))
+                    .map_err(|e| e.0.to_owned())?,
+                link: &mut m.link,
+            });
+        }
+        let codec: Arc<dyn Codec> = self.codec.clone();
+        let opened = work::open_epoch(
             &self.seed.coordinator,
             &model,
             DEPLOYMENT,
             epoch,
-            &owner.public().to_string(),
             &admitted,
-            app_host::now(),
-        )
-        .map_err(|e| e.0.to_owned())?;
-        let mut addresses = Vec::new();
-        for m in self.members.iter_mut() {
-            addresses.push(
-                m.link
-                    .call(json!({"command":"carrier_address"}), self.wall)
-                    .map_err(code)?,
-            );
-        }
-        let carriers = match &self.lan {
-            Some((interface, policy)) => Carriers::Lan {
-                verified: self
-                    .members
-                    .iter()
-                    .zip(&addresses)
-                    .map(|(m, a)| {
-                        carrier::verify(
-                            &self.seed.coordinator,
-                            m.offer
-                                .as_ref()
-                                .ok_or(api::compiler_inputs::Error("owner_not_transferred"))?,
-                            &a["advert"],
-                            policy,
-                            app_host::now(),
-                        )
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(|e| e.0.to_owned())?,
-                interface: *interface,
-                policy: policy.clone(),
-            },
-            None => Carriers::Loopback(
-                self.members
-                    .iter()
-                    .zip(&addresses)
-                    .enumerate()
-                    .map(|(i, (m, a))| {
-                        Ok(StagePeer {
-                            node_id: m.node_id.clone(),
-                            endpoint: a["endpoint_id"]
-                                .as_str()
-                                .and_then(|e| e.parse().ok())
-                                .ok_or("carrier_address_invalid")?,
-                            socket: serde_json::from_value(a["socket"].clone())
-                                .map_err(|_| "carrier_address_invalid")?,
-                            generation: envelope["message"]["stages"][i]["member"]["generation"]
-                                .as_u64()
-                                .ok_or("route_invalid")?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            ),
-        };
-        // Deliver the signed route; each member serves until the epoch ends.
-        for m in self.members.iter_mut() {
-            m.link
-                .begin(json!({"command":"serve","route":envelope}))
-                .map_err(code)?;
-        }
-        let codec: Arc<dyn Codec> = self.codec.clone();
-        let opened = Epoch::open(
-            self.seed.coordinator.clone(),
-            envelope,
-            owner,
-            carriers,
+            &mut stages,
+            &self.lan,
             codec,
+            self.wall,
         )
-        .map_err(|e| e.code.to_owned())?;
+        .map_err(code)?;
         let reply = json!({"gateway":opened.addr(),"bearer":opened.bearer(),
             "qualification":opened.qualification().map_err(|e| e.code.to_owned())?,
             "worker_pids":opened.worker_pids(),"route_ready":false});
@@ -581,52 +529,19 @@ impl Owner {
     /// epoch (threads joined, port freed).
     fn settle(&mut self) -> Result<Value> {
         let epoch = self.epoch.take().ok_or("owner_epoch_absent")?;
-        let mut seen = 0;
-        let end = Instant::now() + span(B::WorkerStartup)?;
-        while !epoch
-            .handle()
-            .state
-            .lock()
-            .map_err(|_| "carrier_state_poisoned")?
-            .teardown_finished
-        {
-            if Instant::now() >= end {
-                self.epoch = Some(epoch);
-                return Err("owner_epoch_not_settled".into());
-            }
-            seen = epoch.handle().wait(seen, span(B::OwnerPoll)?);
+        if let Err(e) = work::wait_settled(&epoch) {
+            self.epoch = Some(epoch);
+            return Err(code(e));
         }
-        let pids = epoch.worker_pids();
-        let mut reports = Vec::new();
-        for (m, pid) in self.members.iter_mut().zip(&pids) {
-            let report = m.link.finish(self.wall).map_err(code)?;
-            let close = Instant::now() + span(B::RouterClose)?;
-            loop {
-                let probe = m
-                    .link
-                    .call(json!({"command":"status","probe_pids":[pid]}), self.wall)
-                    .map_err(code)?;
-                if probe["probe_alive"][pid.to_string()] == false {
-                    break;
-                }
-                if Instant::now() >= close {
-                    return Err("member_worker_still_alive".into());
-                }
-            }
-            reports.push(
-                json!({"node_id":m.node_id,"ack_delivered":report["ack_delivered"],
-                "teardown":report["teardown"],"failure":report["failure"],"worker_gone":true}),
-            );
-        }
-        let acks: Vec<Option<f64>> = epoch
-            .handle()
-            .state
-            .lock()
-            .map_err(|_| "carrier_state_poisoned")?
-            .stages
-            .iter()
-            .map(|s| s.acknowledged_ms)
+        let mut stages: Vec<SettleStage<'_>> = self
+            .members
+            .iter_mut()
+            .map(|m| SettleStage {
+                node_id: &m.node_id,
+                link: &mut m.link,
+            })
             .collect();
+        let (reports, acks) = work::settle_members(&epoch, &mut stages, self.wall).map_err(code)?;
         let refusals = epoch.close();
         Ok(json!({"reports":reports,"stage_ack_ms":acks,"pump_refusals":refusals}))
     }

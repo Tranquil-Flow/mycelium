@@ -421,3 +421,60 @@ impl Slot {
         }
     }
 }
+
+/// One stage's carrier inputs: its member's held offer and `carrier_address` reply.
+pub struct StageCarrier<'a> {
+    pub node_id: &'a str,
+    pub offer: &'a Value,
+    pub address: &'a Value,
+}
+/// The epoch's carriers for the caller's network choice, handed through
+/// unchanged (moved from the owner example): direct LAN dials only the
+/// member-signed, owner-verified advertisements; loopback dials the reported
+/// endpoint at the generation the route signed.
+pub fn carriers_for(
+    network: &Option<(IpAddr, LanPolicy)>,
+    coordinator: &seed::Coordinator,
+    envelope: &Value,
+    stages: &[StageCarrier<'_>],
+) -> Result<Carriers, crate::compiler_inputs::Error> {
+    use crate::compiler_inputs::Error;
+    Ok(match network {
+        Some((interface, policy)) => Carriers::Lan {
+            verified: stages
+                .iter()
+                .map(|s| {
+                    crate::joined_shard::carrier::verify(
+                        coordinator,
+                        s.offer,
+                        &s.address["advert"],
+                        policy,
+                        crate::app_host::now(),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            interface: *interface,
+            policy: policy.clone(),
+        },
+        None => Carriers::Loopback(
+            stages
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    Ok(StagePeer {
+                        node_id: s.node_id.to_owned(),
+                        endpoint: s.address["endpoint_id"]
+                            .as_str()
+                            .and_then(|e| e.parse().ok())
+                            .ok_or(Error("carrier_address_invalid"))?,
+                        socket: serde_json::from_value(s.address["socket"].clone())
+                            .map_err(|_| Error("carrier_address_invalid"))?,
+                        generation: envelope["message"]["stages"][i]["member"]["generation"]
+                            .as_u64()
+                            .ok_or(Error("route_invalid"))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?,
+        ),
+    })
+}
