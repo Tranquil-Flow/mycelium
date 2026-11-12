@@ -630,8 +630,8 @@ fn a_breach_is_acted_on_within_one_sampling_period() {
     let pid = child.id();
     // Buffered by one: a guard that waits twice per sample cannot deadlock the
     // test; the virtual clock below catches it instead.
-    let (readings, script) = sync_channel(1);
-    let (pace, periods, clock) = ticked(Duration::ZERO);
+    let (sender, script) = sync_channel(1);
+    let (pace, requested, clock) = ticked(Duration::ZERO);
     let worker = Worker::from_child_paced(
         child,
         client,
@@ -642,6 +642,9 @@ fn a_breach_is_acted_on_within_one_sampling_period() {
         Box::new(pace),
     )
     .unwrap();
+    // Declared after the worker, so a failing assertion drops them first and
+    // the guard (joined by the worker's drop) is never left blocked on them.
+    let (readings, periods) = (sender, requested);
     for _ in 0..3 {
         assert_eq!(
             periods.recv_timeout(bound),
@@ -688,8 +691,8 @@ fn a_storage_walk_that_overruns_one_period_fails_closed() {
     ] {
         let (child, client) = idle_child();
         let pid = child.id();
-        let (readings, script) = sync_channel(1);
-        let (pace, periods, _clock) = ticked(step);
+        let (sender, script) = sync_channel(1);
+        let (pace, requested, _clock) = ticked(step);
         let worker = Worker::from_child_paced(
             child,
             client,
@@ -700,6 +703,8 @@ fn a_storage_walk_that_overruns_one_period_fails_closed() {
             Box::new(pace),
         )
         .unwrap();
+        // Dropped before the worker on a failing assertion (see above).
+        let (readings, periods) = (sender, requested);
         readings.send(Ok(0)).unwrap();
         assert_eq!(periods.recv_timeout(bound), Ok(row));
         // The second request proves the first sample was judged; after a
