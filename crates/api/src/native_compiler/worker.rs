@@ -102,13 +102,15 @@ impl Worker {
     /// exchange (the worker keeps its own flag for later close-class commands),
     /// and a failed start kills and reaps the exact child before returning. A
     /// returned error therefore proves no child remains, unless the code is
-    /// `native_cleanup_unproven` (kill/reap itself failed).
+    /// `native_cleanup_unproven` (kill/reap itself failed). The guard holds the
+    /// worker to the prepare's `memory` and its staging folder to `disk`.
     pub(crate) fn start_scoped_until(
         config: &Config,
         prepare: &Value,
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
+        disk: guard::Disk,
     ) -> std::result::Result<Self, StartError> {
         Self::start_scoped_probed_until(
             config,
@@ -116,6 +118,7 @@ impl Worker {
             cancel,
             source,
             deadline,
+            Some(disk),
             Box::new(guard::HostProbe),
         )
     }
@@ -127,6 +130,7 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
+        disk: Option<guard::Disk>,
         probe: Box<dyn guard::MemoryProbe>,
     ) -> std::result::Result<Self, StartError> {
         config.verify()?;
@@ -158,11 +162,12 @@ impl Worker {
             .stdout(Stdio::from(OwnedFd::from(server)))
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
-        let mut worker = Self::from_child_guarded(
+        let mut worker = Self::from_child_watched(
             child,
             client,
             Arc::new(AtomicBool::new(false)),
             memory,
+            disk,
             probe,
         )
         .map_err(|e| match e.0 {
@@ -432,10 +437,22 @@ impl Worker {
         memory_limit: u64,
         probe: Box<dyn guard::MemoryProbe>,
     ) -> Result<Self> {
+        Self::from_child_watched(child, client, cancel, memory_limit, None, probe)
+    }
+    /// As `from_child_guarded`; with `disk`, the guard also walks the staging
+    /// folder every sample (lane MG2, v0.1.4 worker.py:820-844).
+    pub(crate) fn from_child_watched(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        disk: Option<guard::Disk>,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> Result<Self> {
         let mut worker = Self::from_child(child, client, cancel)?;
-        let started = worker
-            .pid()
-            .and_then(|pid| guard::Guard::start(worker.child.clone(), pid, memory_limit, probe));
+        let started = worker.pid().and_then(|pid| {
+            guard::Guard::start(worker.child.clone(), pid, memory_limit, disk, probe)
+        });
         match started {
             Ok(guard) => {
                 worker.guard = Some(guard);

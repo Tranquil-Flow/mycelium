@@ -32,6 +32,11 @@ impl Pair {
     }
     /// A real pairing whose member consented to `cap` bytes of memory.
     fn with_cap(cap: u64) -> Self {
+        Self::with_caps(cap, 4_000_000_000)
+    }
+    /// A real pairing whose member consented to `cap` bytes of memory and
+    /// `storage` bytes of storage.
+    fn with_caps(cap: u64, storage: u64) -> Self {
         let root = std::env::temp_dir().join(format!(
             "mg-cap-{}-{}",
             std::process::id(),
@@ -74,7 +79,7 @@ impl Pair {
         let session = accepted.session.unwrap();
         let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
         resource_policy::write(&member_root, &policy).unwrap();
-        standing_consent::grant(&member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":cap,"max_wall_seconds":600,"max_commands":1000}}), &policy, app_host::now(), Some(16_000_000_000)).unwrap();
+        standing_consent::grant(&member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":storage,"max_memory_bytes":cap,"max_wall_seconds":600,"max_commands":1000}}), &policy, app_host::now(), Some(16_000_000_000)).unwrap();
         let binding = session.binding().unwrap();
         standing_consent::bind(&member_root, &json!({"swarm_id":binding.swarm_id,"node_id":binding.node_id,"seed_key_digest":binding.seed_key_digest}), app_host::now()).unwrap();
         let endpoint = iroh::SecretKey::generate().public().to_string();
@@ -262,10 +267,20 @@ fn hog() {
     std::mem::forget(std::hint::black_box(bytes));
 }
 
+/// Where the `grow_disk` fake writes: beside the shard, in the custody's
+/// staging folder (`chain-runs/<run>/stage-shards`).
+fn grown_path(prepare: &Value) -> PathBuf {
+    std::path::Path::new(prepare["checkpoint"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .join("grown.bin")
+}
+
 /// The fake worker. Mode (file `mode` in the record dir): `hog_after_reply`
 /// accepts the prepare, then holds memory during the resident-proof exchange;
 /// `hog_during_prepare` holds memory and never answers the prepare;
-/// `refuse_proof` accepts the prepare and answers the proof with `ok:false`.
+/// `refuse_proof` accepts the prepare and answers the proof with `ok:false`;
+/// `grow_disk` accepts the prepare, then grows the custody folder.
 #[test]
 #[ignore = "fake native worker, run only by the pinned script of run_child"]
 fn fake_native_worker() {
@@ -282,6 +297,16 @@ fn fake_native_worker() {
         serde_json::to_vec(&prepare).unwrap(),
     )
     .unwrap();
+    if mode == "grow_disk" {
+        // Accepts the prepare, then grows the custody folder (a sparse file:
+        // its length counts, as v0.1.4's st_size) and never answers the proof.
+        write_frame(&mut link, &json!({"ok":true}));
+        let _proof = read_frame(&mut link);
+        let file = fs::File::create(grown_path(&prepare)).unwrap();
+        file.set_len(GROWN_BYTES).unwrap();
+        while read_frame(&mut link).is_some() {}
+        return;
+    }
     if mode == "hog_during_prepare" {
         // Never answers the prepare: the breach lands while it is in flight.
         hog();
@@ -514,5 +539,91 @@ fn kill_during_prepare_child() {
         Some(SMALL_CAP),
         "the numbers of a kill during prepare"
     );
+    native.discard().unwrap();
+}
+
+// ---- Lane MG2 item 1: the storage the member consented to ----
+
+/// The smallest storage a member can consent to (protocol consent `storage_bytes`).
+const STORAGE_CAP: u64 = 100_000_000;
+/// The `grow_disk` fake's sparse file: above `STORAGE_CAP` and every share below it.
+const GROWN_BYTES: u64 = 150_000_000;
+
+/// The guard's storage verdict numbers once it stopped the worker.
+fn guarded_storage(native: &joined_shard::native::NativeShard) -> Option<u64> {
+    let failure = native.worker_failure()?;
+    assert_eq!(failure["code"], "worker_disk_limit_exceeded");
+    let detail = &failure["limit_detail"];
+    let (observed, limit) = (
+        detail["observed_disk_bytes"].as_u64()?,
+        detail["max_disk_bytes"].as_u64()?,
+    );
+    assert!(observed > limit);
+    assert_eq!(detail["overshoot_bytes"], observed - limit);
+    assert_eq!(detail.as_object().map(serde_json::Map::len), Some(3));
+    Some(limit)
+}
+/// Remove what the fake grew, so the custody can be discarded.
+fn remove_grown() {
+    let prepare: Value =
+        serde_json::from_slice(&fs::read(fake_dir().join("prepare.json")).unwrap()).unwrap();
+    fs::remove_file(grown_path(&prepare)).unwrap();
+}
+
+/// MG2 item 1: the production start path (`NativeShard::prepare_until` ->
+/// `Worker::start_scoped_until`) walks the custody's staging folder and stops a
+/// worker that grows it past the member's OWN consent `storage_bytes`, or past
+/// a tighter owner share; a share above the cap is refused and loosens nothing.
+/// v0.1.4: `standing_limits` (standing_consent.py:241,252-260) -> `WorkerLimits`
+/// -> `ManagedWorker._check` (worker.py:820-844) on `staging_root`
+/// (managed_runtime.py:229).
+#[test]
+fn the_custody_folder_is_guarded_at_the_members_own_storage_cap() {
+    run_child("storage_guarded_child");
+}
+#[test]
+#[ignore = "child of the_custody_folder_is_guarded_at_the_members_own_storage_cap"]
+fn storage_guarded_child() {
+    let p = Pair::with_caps(CAP, STORAGE_CAP);
+    let mut native = p.custody("mg2-disk");
+    assert_eq!(native.storage_limit().map_err(|e| e.0), Ok(STORAGE_CAP));
+    set_mode("grow_disk");
+    assert_eq!(p.prepare(&mut native), Err("worker_disk_limit_exceeded"));
+    assert_eq!(
+        guarded_storage(&native),
+        Some(STORAGE_CAP),
+        "the guard's storage limit"
+    );
+    remove_grown();
+    native.abort().unwrap();
+    native.discard().unwrap();
+    // A share above the cap is refused and loosens nothing; a tighter share
+    // tightens the guard; a later larger one does not raise it.
+    let mut native = p.custody("mg2-disk-share");
+    assert_eq!(
+        native.limit_storage_to(STORAGE_CAP + 1).map_err(|e| e.0),
+        Err("member_storage_cap_below_share")
+    );
+    assert_eq!(
+        native.limit_storage_to(0).map_err(|e| e.0),
+        Err("member_resources_invalid")
+    );
+    assert_eq!(native.storage_limit().map_err(|e| e.0), Ok(STORAGE_CAP));
+    let share = STORAGE_CAP / 2;
+    assert_eq!(native.limit_storage_to(share).map_err(|e| e.0), Ok(share));
+    assert_eq!(
+        native.limit_storage_to(STORAGE_CAP).map_err(|e| e.0),
+        Ok(share)
+    );
+    assert_eq!(native.storage_limit().map_err(|e| e.0), Ok(share));
+    set_mode("grow_disk");
+    assert_eq!(p.prepare(&mut native), Err("worker_disk_limit_exceeded"));
+    assert_eq!(
+        guarded_storage(&native),
+        Some(share),
+        "the guard's storage limit"
+    );
+    remove_grown();
+    native.abort().unwrap();
     native.discard().unwrap();
 }

@@ -11,11 +11,12 @@ use budgets::BudgetId;
 use std::{
     io::{BufRead, BufReader},
     os::{fd::OwnedFd, unix::net::UnixStream},
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
         Arc,
         atomic::AtomicBool,
-        mpsc::{Receiver, sync_channel},
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
     time::Instant,
 };
@@ -190,6 +191,7 @@ fn the_member_start_path_guards_the_worker_at_the_prepared_memory() {
         flag(),
         &root.join("source"),
         Instant::now() + duration(BudgetId::ModelSelection).unwrap(),
+        None,
         Box::new(Scripted(script)),
     );
     assert!(feeder.join().unwrap(), "the guard must take both readings");
@@ -291,12 +293,11 @@ fn a_real_child_over_the_cap_is_killed_and_reaped() {
     assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
 }
 
-/// Lane MG item 4 RED (ignored: not built; design in REPORT-laneMG.md). v0.1.4
+/// Lane MG item 4 RED (un-ignored by lane MG2). v0.1.4
 /// walks the worker's artifact root every 0.25 s and stops the worker with
 /// `worker_disk_limit_exceeded` once its regular files exceed `max_disk_bytes`
-/// (worker.py:820-844). v0.2 checks the shard size only once, at admission.
+/// (worker.py:820-844). v0.2 checked the shard size only once, at admission.
 #[test]
-#[ignore = "lane MG item 4 RED: the disk guard is not built yet (see REPORT-laneMG.md)"]
 fn a_custody_root_grown_over_the_storage_cap_stops_the_worker() {
     let root = std::env::temp_dir().join(format!(
         "mg-disk-{}-{}",
@@ -318,4 +319,246 @@ fn a_custody_root_grown_over_the_storage_cap_stops_the_worker() {
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(failure.map(|f| f.code), Some("worker_disk_limit_exceeded"));
     assert_gone(pid);
+}
+
+// ---- Lane MG2 item 1: the storage walk (v0.1.4 `ManagedWorker._check`,
+// worker.py:820-844 @ f4e366e9). The staging folder is walked every sample
+// BEFORE the memory reading, so the guard taking reading k+1 proves the walk
+// of sample k was judged; a verdict on the walk takes no reading at all.
+
+fn temp_root(tag: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "mg2-{tag}-{}-{}",
+        std::process::id(),
+        crate::app_host::hex(&crate::app_host::random(8).unwrap())
+    ));
+    std::fs::create_dir(&root).unwrap();
+    std::fs::canonicalize(root).unwrap()
+}
+/// An idle owned child guarded from construction on with `disk` (the member
+/// start path's order), its memory readings scripted.
+fn disk_guarded(disk: Disk) -> (Worker, SyncSender<Reading>, u32) {
+    let (child, client) = idle_child();
+    let pid = child.id();
+    let (readings, script) = sync_channel(0);
+    let worker = Worker::from_child_watched(
+        child,
+        client,
+        flag(),
+        LIMIT,
+        Some(disk),
+        Box::new(Scripted(script)),
+    )
+    .unwrap();
+    (worker, readings, pid)
+}
+/// The guard's verdict on the folder `root` held to `max` (opened now), with
+/// idle memory readings; the worker is checked gone after a verdict.
+fn storage_verdict(root: &Path, max: u64) -> Option<Failure> {
+    storage_verdict_of(Disk::open(root, max).unwrap())
+}
+fn storage_verdict_of(disk: Disk) -> Option<Failure> {
+    let (worker, readings, pid) = disk_guarded(disk);
+    // A verdict on the walk ends the guard: the next reading is never taken.
+    for _ in 0..3 {
+        if readings.send(Ok(0)).is_err() {
+            break;
+        }
+    }
+    drop(readings);
+    let failure =
+        worker.guard_wait_until(Instant::now() + duration(BudgetId::ModelSelection).unwrap());
+    if failure.is_some() {
+        assert_gone(pid);
+    }
+    assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
+    failure
+}
+fn write(path: &Path, bytes: usize) {
+    std::fs::write(path, vec![0_u8; bytes]).unwrap();
+}
+
+/// At the cap (regular files in the folder and below it, summed) nothing
+/// happens: v0.1.4 refuses only `total > max_disk_bytes` (worker.py:841).
+#[test]
+fn storage_at_or_under_the_cap_leaves_the_worker_running() {
+    let root = temp_root("under");
+    write(&root.join("shard.safetensors"), 1000);
+    std::fs::create_dir(root.join("nested")).unwrap();
+    write(&root.join("nested").join("part"), 24);
+    let (worker, readings, pid) = disk_guarded(Disk::open(&root, 1024).unwrap());
+    for _ in 0..4 {
+        assert!(
+            readings.send(Ok(0)).is_ok(),
+            "the guard must take every reading"
+        );
+    }
+    assert!(worker.guard_samples() >= 3);
+    assert_eq!(worker.guard_failure(), None);
+    assert_eq!(
+        rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid as i32).unwrap()),
+        Ok(())
+    );
+    drop(readings);
+    assert_eq!(worker.kill_and_reap().unwrap()["killed"], true);
+    assert_gone(pid);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// Over the cap: the first walk stops the worker by name, kills and reaps it,
+/// and reports the three numbers as the memory guard does (v0.1.4 records
+/// none for disk: additive, lane MG2).
+#[test]
+fn storage_over_the_cap_kills_reaps_and_reports_the_numbers() {
+    let root = temp_root("over");
+    write(&root.join("shard.safetensors"), 1000);
+    std::fs::create_dir(root.join("nested")).unwrap();
+    write(&root.join("nested").join("part"), 25);
+    let (mut worker, readings, pid) = disk_guarded(Disk::open(&root, 1024).unwrap());
+    let taken = readings.send(Ok(0)).is_ok();
+    let failure =
+        worker.guard_wait_until(Instant::now() + duration(BudgetId::ModelSelection).unwrap());
+    assert!(!taken, "the walk is judged before the memory reading");
+    assert_eq!(
+        failure,
+        Some(Failure {
+            code: DISK_LIMIT_EXCEEDED,
+            limit_detail: json!({"observed_disk_bytes":1025,"max_disk_bytes":1024,"overshoot_bytes":1}),
+            samples: 1,
+        })
+    );
+    assert_gone(pid);
+    assert_eq!(step(&mut worker), Err(DISK_LIMIT_EXCEEDED));
+    assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A folder the guard cannot observe stops the worker (fail closed), as
+/// v0.1.4: root swapped or gone (identity kept at start, worker.py:705-709,
+/// 823-828), unreadable, a non-regular entry (840), more entries than the
+/// budgets row (835), or deeper than the walk's depth bound.
+#[test]
+fn an_unobservable_storage_root_fails_closed() {
+    let closed = Some(STORAGE_OBSERVATION_FAILED);
+    let code = |f: Option<Failure>| {
+        f.map(|f| {
+            assert_eq!(f.limit_detail, Value::Null);
+            f.code
+        })
+    };
+    // Swapped after the guard took its identity.
+    let root = temp_root("swapped");
+    let disk = Disk::open(&root, 1024).unwrap();
+    let moved = root.with_extension("moved");
+    std::fs::rename(&root, &moved).unwrap();
+    std::fs::create_dir(&root).unwrap();
+    assert_eq!(code(storage_verdict_of(disk)), closed, "swapped root");
+    std::fs::remove_dir_all(&root).unwrap();
+    std::fs::remove_dir_all(&moved).unwrap();
+    // Gone.
+    let root = temp_root("gone");
+    let disk = Disk::open(&root, 1024).unwrap();
+    std::fs::remove_dir(&root).unwrap();
+    assert_eq!(code(storage_verdict_of(disk)), closed, "removed root");
+    // Unreadable.
+    use std::os::unix::fs::PermissionsExt;
+    let root = temp_root("unreadable");
+    std::fs::create_dir(root.join("locked")).unwrap();
+    std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    let verdict = storage_verdict(&root, 1024);
+    std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(code(verdict), closed, "unreadable directory");
+    std::fs::remove_dir_all(&root).unwrap();
+    // A socket: neither a regular file nor a directory.
+    let root = temp_root("socket");
+    let _listener = std::os::unix::net::UnixListener::bind(root.join("s")).unwrap();
+    assert_eq!(code(storage_verdict(&root, 1024)), closed, "socket entry");
+    std::fs::remove_dir_all(&root).unwrap();
+    // One entry more than the budgets row allows (empty files: no size).
+    let cap = BudgetId::PyMyceliumA13MacosWorkerManagedworkerCheckCountL835
+        .count()
+        .unwrap()
+        .get();
+    let root = temp_root("entries");
+    for i in 0..=cap {
+        std::fs::File::create(root.join(i.to_string())).unwrap();
+    }
+    assert_eq!(code(storage_verdict(&root, 1024)), closed, "entry count");
+    std::fs::remove_dir_all(&root).unwrap();
+    // One level deeper than the walk descends.
+    let root = temp_root("deep");
+    let mut deep = root.clone();
+    for _ in 0..=WALK_DEPTH {
+        deep = deep.join("d");
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    assert_eq!(code(storage_verdict(&root, 1024)), closed, "depth");
+    std::fs::remove_dir_all(&root).unwrap();
+    // At the depth bound the walk completes.
+    let root = temp_root("depth-bound");
+    let mut deep = root.clone();
+    for _ in 0..WALK_DEPTH {
+        deep = deep.join("d");
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    assert_eq!(
+        code(storage_verdict(&root, 1024)),
+        None,
+        "at the depth bound"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A symlink in the folder is neither followed nor counted: v0.1.4 lstats
+/// every entry and fails closed on a link (worker.py:829-836), so a link to a
+/// large tree outside the folder is `worker_storage_observation_failed`, never
+/// `worker_disk_limit_exceeded` (which following it would report).
+#[test]
+fn a_symlink_to_a_large_outside_tree_is_neither_followed_nor_counted() {
+    let outside = temp_root("outside");
+    std::fs::create_dir(outside.join("tree")).unwrap();
+    write(&outside.join("tree").join("big"), 4096);
+    for (name, target) in [
+        ("dir", outside.join("tree")),
+        ("file", outside.join("tree").join("big")),
+    ] {
+        let root = temp_root(name);
+        write(&root.join("shard.safetensors"), 10);
+        std::os::unix::fs::symlink(&target, root.join("escape")).unwrap();
+        let verdict = storage_verdict(&root, 1024);
+        assert_eq!(
+            verdict.map(|f| (f.code, f.limit_detail)),
+            Some((STORAGE_OBSERVATION_FAILED, Value::Null)),
+            "a symlink to the outside {name}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+    // The outside tree is untouched.
+    assert_eq!(
+        std::fs::metadata(outside.join("tree").join("big"))
+            .unwrap()
+            .len(),
+        4096
+    );
+    std::fs::remove_dir_all(&outside).unwrap();
+}
+
+/// The folder must be a real directory when the guard starts (v0.1.4
+/// `worker_artifact_root_invalid`, worker.py:705-707).
+#[test]
+fn the_storage_root_must_be_a_real_directory() {
+    let root = temp_root("root-kind");
+    write(&root.join("file"), 1);
+    std::os::unix::fs::symlink(&root, root.join("link")).unwrap();
+    for path in [root.join("file"), root.join("link"), root.join("absent")] {
+        assert_eq!(
+            Disk::open(&path, 1024).map(|_| ()).map_err(|e| e.0),
+            Err("worker_artifact_root_invalid")
+        );
+    }
+    assert_eq!(
+        Disk::open(&root, 0).map(|_| ()).map_err(|e| e.0),
+        Err("worker_limits_invalid")
+    );
+    std::fs::remove_dir_all(&root).unwrap();
 }

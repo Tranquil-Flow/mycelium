@@ -349,6 +349,16 @@ impl NativeShard {
         let config = native_compiler::Config::from_environment()
             .map_err(native)?
             .ok_or(fail("native_binary_pin_required"))?;
+        // MG2: the guard also holds the custody's staging folder to the
+        // member's storage cap (v0.1.4 worker.py:820-844, standing_consent.py:241,260).
+        let shard_path = self.received.path();
+        let disk = native_compiler::worker::guard::Disk::open(
+            shard_path
+                .parent()
+                .ok_or(fail("joined_native_prepare_invalid"))?,
+            self.storage_limit()?,
+        )
+        .map_err(native)?;
         self.check(current)?;
         checkpoint()?;
         self.cleanup_proven = false;
@@ -358,6 +368,7 @@ impl NativeShard {
             cancel.clone(),
             forbidden_source,
             deadline,
+            disk,
         ) {
             Ok(worker) => self.worker = Some(worker),
             Err(started) => {
@@ -536,6 +547,20 @@ impl NativeShard {
                 .map_or(share_rss_bytes, |held| held.min(share_rss_bytes)),
         );
         self.memory_limit()
+    }
+    /// The storage the worker guard holds the custody's staging folder to
+    /// (lane MG2): the member's own consent `storage_bytes`, or a tighter share
+    /// set by `limit_storage_to`. NOT BUILT YET (MG2 RED): the consent cap only.
+    pub fn storage_limit(&self) -> Result<u64> {
+        self.consent["caps"]["storage_bytes"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(fail("joined_native_consent_invalid"))
+    }
+    /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-258):
+    /// NOT BUILT YET (MG2 RED): accepts and ignores the share.
+    pub fn limit_storage_to(&mut self, share_disk_bytes: u64) -> Result<u64> {
+        Ok(share_disk_bytes)
     }
     /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
     /// guard stopped the worker; the later errors carry the code only.

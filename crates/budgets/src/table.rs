@@ -743,6 +743,7 @@ table! {
     PyMyceliumA13MacosWorkerManagedworkerObservationTimeoutSL667 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:667 @ f5bfb709")),
     PyMyceliumA13MacosWorkerManagedworkerObservationBackoffSL669 => (Duration(Span::from_millis(50)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:669 @ f5bfb709")),
     PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460 => (Duration(Span::from_millis(250)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:1460 @ f5bfb709")),
+    PyMyceliumA13MacosWorkerManagedworkerCheckCountL835 => (Count(Entries::new(10000)), Resource, Source("mycelium_a13_macos/worker.py:835 @ f4e366e9; entries the worker guard's storage walk of the staging root may lstat before it fails closed with worker_storage_observation_failed")),
     PyMyceliumA13MacosWorkerManagedworkerCloseTimeoutL1621 => (Duration(Span::from_millis(5_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:1621 @ f5bfb709")),
     PyMyceliumA13MacosWorkflowBootIdObservationBudgetSecondsL38 => (Duration(Span::from_millis(180_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/workflow.py:38 @ f5bfb709")),
     PyMyceliumA13MacosWorkflowBootIdObservationInitialRetrySecondsL39 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/workflow.py:39 @ f5bfb709")),

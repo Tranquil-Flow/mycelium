@@ -12,6 +12,7 @@ use super::{Error, Result, duration};
 use budgets::BudgetId;
 use serde_json::{Value, json};
 use std::{
+    path::{Path, PathBuf},
     process::Child,
     sync::{Arc, Condvar, Mutex},
     thread::JoinHandle,
@@ -26,6 +27,29 @@ mod tests;
 pub(crate) const MEMORY_LIMIT_EXCEEDED: &str = "worker_memory_limit_exceeded";
 /// v0.1.4 `WorkerError("worker_memory_observation_failed")` (worker.py:907, 921, 923).
 pub(crate) const MEMORY_OBSERVATION_FAILED: &str = "worker_memory_observation_failed";
+
+/// v0.1.4 `WorkerError("worker_disk_limit_exceeded")` (worker.py:842).
+pub(crate) const DISK_LIMIT_EXCEEDED: &str = "worker_disk_limit_exceeded";
+/// v0.1.4 `WorkerError("worker_storage_observation_failed")` (worker.py:827, 836, 840, 844).
+pub(crate) const STORAGE_OBSERVATION_FAILED: &str = "worker_storage_observation_failed";
+/// Directory levels the storage walk may descend below the staging root.
+pub(crate) const WALK_DEPTH: usize = 32;
+
+/// The staging folder the guard walks and the storage it may hold (lane MG2).
+#[derive(Clone, Debug)]
+pub(crate) struct Disk {
+    root: PathBuf,
+    max_bytes: u64,
+}
+impl Disk {
+    /// NOT BUILT YET (lane MG2 RED): records the folder; nothing walks it.
+    pub(crate) fn open(root: &Path, max_bytes: u64) -> Result<Self> {
+        Ok(Self {
+            root: root.into(),
+            max_bytes,
+        })
+    }
+}
 
 /// The owned child, shared by the worker and its guard.
 pub(crate) type Slot = Arc<Mutex<Option<Child>>>;
@@ -94,8 +118,10 @@ impl Guard {
         child: Slot,
         pid: u32,
         limit: u64,
+        disk: Option<Disk>,
         probe: Box<dyn MemoryProbe>,
     ) -> Result<Self> {
+        drop(disk);
         let cadence =
             duration(BudgetId::PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460)?;
         let shared: Shared = Arc::default();
