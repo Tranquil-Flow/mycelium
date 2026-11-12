@@ -20,6 +20,18 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .millis(),
     ))
 }
+/// A failed serving-worker start: the error, and the guard's verdict when the
+/// guard stopped the worker during prepare (lane MGF F4: its numbers are kept).
+#[derive(Debug)]
+pub(crate) struct StartError {
+    pub(crate) error: Error,
+    pub(crate) guard: Option<guard::Failure>,
+}
+impl From<Error> for StartError {
+    fn from(error: Error) -> Self {
+        Self { error, guard: None }
+    }
+}
 pub(crate) struct Worker {
     child: guard::Slot,
     link: Link,
@@ -97,7 +109,7 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, StartError> {
         Self::start_scoped_probed_until(
             config,
             prepare,
@@ -116,13 +128,13 @@ impl Worker {
         source: &Path,
         deadline: Instant,
         probe: Box<dyn guard::MemoryProbe>,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, StartError> {
         config.verify()?;
         if Instant::now() >= deadline {
-            return Err(Error("native_worker_deadline"));
+            return Err(Error("native_worker_deadline").into());
         }
         if cancel.load(Ordering::SeqCst) {
-            return Err(Error("compiler_stopped"));
+            return Err(Error("compiler_stopped").into());
         }
         // The guard holds the worker to the prepare's `memory`: the member's
         // consent cap or a tighter share (NativeShard::memory_limit).
@@ -170,10 +182,16 @@ impl Worker {
             });
         match started {
             Ok(()) => Ok(worker),
-            Err(error) => match worker.kill_and_reap() {
-                Ok(_) => Err(error),
-                Err(_) => Err(Error("native_cleanup_unproven")),
-            },
+            Err(error) => {
+                let guard = worker.guard_failure();
+                match worker.kill_and_reap() {
+                    Ok(_) => Err(StartError { error, guard }),
+                    Err(_) => Err(StartError {
+                        error: Error("native_cleanup_unproven"),
+                        guard,
+                    }),
+                }
+            }
         }
     }
     fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {

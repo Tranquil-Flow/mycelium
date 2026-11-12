@@ -360,7 +360,12 @@ impl NativeShard {
             deadline,
         ) {
             Ok(worker) => self.worker = Some(worker),
-            Err(e) => {
+            Err(started) => {
+                // F4: a guard kill during prepare keeps its verdict and numbers.
+                if let Some(failure) = started.guard {
+                    self.guard_failure = Some(failure.document());
+                }
+                let e = started.error;
                 // A failed start already killed and reaped its exact child; only
                 // a failed kill/reap leaves the release unproven (debt retained).
                 self.cleanup_proven = e.0 != "native_cleanup_unproven";

@@ -194,8 +194,15 @@ fn the_member_start_path_guards_the_worker_at_the_prepared_memory() {
     );
     assert!(feeder.join().unwrap(), "the guard must take both readings");
     assert_eq!(
-        started.map(|_| ()).map_err(|e| e.0),
+        started.as_ref().map(|_| ()).map_err(|e| e.error.0),
         Err(MEMORY_LIMIT_EXCEEDED)
+    );
+    // MGF F4: the failed start hands back the guard's numbers.
+    assert_eq!(
+        started.err().and_then(|e| e.guard).map(|f| f.limit_detail),
+        Some(
+            json!({"observed_group_rss_bytes":LIMIT + 1,"max_rss_bytes":LIMIT,"overshoot_bytes":1})
+        )
     );
     std::fs::remove_dir_all(&root).unwrap();
 }
