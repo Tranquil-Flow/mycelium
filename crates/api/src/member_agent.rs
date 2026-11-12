@@ -192,6 +192,10 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
         Ok(None)
     }
     fn close_work(&self) {}
+    /// A composed work service's actual custody report; None keeps legacy agents unchanged.
+    fn work_report(&self) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
     /// `preview_work(actor, offer, stage_acknowledged=True, limits=, resource_policy=)`: no member
     /// work service is composed by default (it is the member work service's, S4b/S4c).
     fn work_preview(
@@ -465,6 +469,22 @@ impl<H: MemberHost> MemberAgent<H> {
                     "member standing acceptor: {}",
                     failure.code.as_deref().unwrap_or("standing_accept_failed")
                 );
+                return;
+            }
+        }
+        match host.work_report() {
+            Ok(Some(report)) => {
+                let sent = locked(&client)
+                    .and_then(|mut c| c.report(&report).map(drop).map_err(client_error));
+                if let Err(e) = sent {
+                    eprintln!("member_work_report_failed:{}", e.0);
+                }
+                return;
+            }
+            Ok(None) => {}
+            Err(code) => {
+                host.close_work();
+                eprintln!("member_work_report_failed:{code}");
                 return;
             }
         }

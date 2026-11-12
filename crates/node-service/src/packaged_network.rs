@@ -928,6 +928,11 @@ impl api::member_agent::MemberHost for PackagedMember {
     fn close_work(&self) {
         self.network.close_work();
     }
+    fn work_report(&self) -> Result<Option<Value>, String> {
+        lock(&self.network.work)
+            .as_ref()
+            .map_or(Ok(None), crate::packaged_work::Service::report)
+    }
     fn work_preview(
         &self,
         offer: &Value,

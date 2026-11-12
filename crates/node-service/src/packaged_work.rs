@@ -52,6 +52,7 @@ struct Shared {
     announcement: Mutex<VerifiedAnnouncement>,
     pins: work::Pins,
     dispatcher: Arc<work::Dispatcher>,
+    status: work::Status,
     stop: AtomicBool,
 }
 impl Shared {
@@ -143,6 +144,9 @@ impl Service {
             announcement: Mutex::new(announcement),
             pins,
             dispatcher,
+            status: work::Live::new(
+                json!({"joined":true,"native_owned":false,"shard_owned":false,"route_ready":false}),
+            ),
             stop: AtomicBool::new(false),
         });
         shared.live()?; // refusal precedes sockets, threads, custody and native work
@@ -167,6 +171,38 @@ impl Service {
         );
         service.address = Some(address);
         Ok(service)
+    }
+    /// The existing report format, projected only from real resident custody. Never claims a
+    /// descriptor, native proof or serving route. Observation reports remain on their old path.
+    pub fn report(&self) -> Result<Option<Value>> {
+        self.shared.live()?;
+        let announcement = self
+            .shared
+            .announcement
+            .lock()
+            .map_err(|_| "member_announcement_poisoned")?;
+        let a = announcement.announcement();
+        if a["phase"] != "work" {
+            return Ok(None);
+        }
+        let s = self
+            .shared
+            .status
+            .lock()
+            .map_err(|_| "member_status_poisoned")?;
+        let state = if s["last_error"].is_string() {
+            "error"
+        } else if s["native_owned"] == true {
+            "work_running"
+        } else if s["shard_owned"] == true {
+            "slice_ready"
+        } else {
+            "idle"
+        };
+        Ok(Some(json!({"protocol":api::run_exchange::MEMBER_REPORT,
+            "run_id":a["run_id"],"deployment_id":a["deployment_id"],"state":state,
+            "detail":s["last_error"],"model":{"model_id":a["model"]["model_id"],"resolved_commit":a["model"]["resolved_commit"]},
+            "progress":null,"descriptor":null,"issued_at":app_host::now()})))
     }
     pub fn registration(&self) -> Result<Value> {
         self.shared.live()?;
@@ -328,9 +364,7 @@ fn drive(
                 Identity::from_secret(&endpoint.to_string(), &shared.signer.secret_bytes())
                     .map_err(|_| "member_work_identity_invalid")?;
             let trust = work::OwnerTrust::Announced(shared.pins.clone());
-            let status = work::Live::new(
-                json!({"joined":true,"native_owned":false,"shard_owned":false,"route_ready":false}),
-            );
+            let status = shared.status.clone();
             std::thread::scope(|scope| -> Result<()> {
                 let control_thread = std::thread::Builder::new()
                     .name("mycelium-packaged-work-control".into())
@@ -429,6 +463,12 @@ fn operations(
                 Err(code) => json!({"ok":false,"code":code}),
             };
             work.record(status, true, command, &operation, &out);
+            status.lock().map_err(|_| "member_status_poisoned")?["last_error"] =
+                if out["ok"] == false {
+                    out["code"].clone()
+                } else {
+                    Value::Null
+                };
             shared.dispatcher.complete(&operation, out, |_| {
                 Err("member_work_origin_invalid".into())
             })?;

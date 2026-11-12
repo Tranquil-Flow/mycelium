@@ -431,6 +431,10 @@ impl Work {
             drop(members);
             let state = work.state();
             if let Some(code) = state["cleanup_error"].as_str() {
+                eprintln!(
+                    "owner_work_cleanup_failed:{code}:{}",
+                    state["member_cleanup"]
+                );
                 result = Err(code.into());
             }
         }
@@ -530,7 +534,37 @@ impl ReportsPort for Reports {
         self.inner.clock_skew(nodes)
     }
     fn tick_local(&mut self) {
-        self.inner.tick_local();
+        let report = lock(&self.work.resident)
+            .local
+            .as_ref()
+            .map_or(Ok(None), crate::packaged_work::Service::report);
+        match report {
+            Ok(Some(report)) => {
+                let sent = self.work.host.with(|c| {
+                    let seed = c
+                        .authority
+                        .seed
+                        .as_ref()
+                        .ok_or("owner_exchange_unavailable")?;
+                    let node = c
+                        .run
+                        .contributor
+                        .as_ref()
+                        .ok_or("member_work_unavailable")?;
+                    seed.exchange
+                        .submit_local(&node.node, &report)
+                        .map_err(|_| "member_work_report_failed")
+                });
+                if let Err(code) = sent {
+                    eprintln!("member_work_report_failed:{code}");
+                }
+            }
+            Ok(None) => self.inner.tick_local(),
+            Err(code) => {
+                self.work.host.stop_work();
+                eprintln!("member_work_report_failed:{code}");
+            }
+        }
     }
 }
 /// Intercepts only composition, never a step implementation or plan. The shared chain continues
