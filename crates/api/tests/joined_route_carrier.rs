@@ -3033,9 +3033,10 @@ fn a_revoke_seen_while_idle_retires_the_epoch_without_a_next_request() {
 
 /// Runs `owner` (a raw owner over the real member) on its own thread; returns
 /// its verdict (sent from inside the owner's body) and then its result.
+type RawOutcome = (Value, Vec<(&'static str, u64)>);
 fn bounded_owner<V: Send + 'static>(
-    owner: impl FnOnce(mpsc::Sender<V>) -> (Value, Vec<(&'static str, u64)>) + Send + 'static,
-) -> (V, impl FnOnce() -> (Value, Vec<(&'static str, u64)>)) {
+    owner: impl FnOnce(mpsc::Sender<V>) -> RawOutcome + Send + 'static,
+) -> (V, impl FnOnce() -> RawOutcome) {
     let (verdict_tx, verdict) = mpsc::channel();
     let (out_tx, out) = mpsc::channel();
     let thread = std::thread::spawn(move || {
