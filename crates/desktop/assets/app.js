@@ -1,5 +1,18 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
+// The packaged webview is WKWebView, which does not implement window.confirm: it returns false
+// without drawing anything. Every action gated on it was therefore silently skipped - creating a
+// swarm with the relay, starting the public relay, and using your own address - which left the
+// whole two-Mac join path unreachable with no error. Ask with a real in-page dialog instead.
+function ask(message) {
+  const dialog = $('ask-dialog');
+  $('ask-text').textContent = message;
+  dialog.returnValue = 'cancel';
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), {once: true});
+    dialog.showModal();
+  });
+}
 let busy = false;
 let connected = false;
 let latest = null;
@@ -254,8 +267,8 @@ function render(value) {
     const label=document.createElement('span');
     label.textContent=`${member.label ?? member.node_id ?? member.member_id} · generation ${member.generation ?? member.membership_generation} · ${member.lifecycle_state ?? member.state ?? 'unknown'}`;
     const button=document.createElement('button'); button.type='button';button.className='secondary';button.textContent='Revoke member';
-    button.addEventListener('click',()=>{
-      if (!window.confirm('Revoke this membership? It cannot accept future work. Local identity and evidence are retained.')) return;
+    button.addEventListener('click',async()=>{
+      if (!(await ask('Revoke this membership? It cannot accept future work. Local identity and evidence are retained.'))) return;
       void perform('/api/revoke',{node_id:member.node_id ?? member.member_id,generation:member.generation ?? member.membership_generation},'Membership revoked.');
     });
     row.append(label,button);$('members').append(row);
@@ -293,7 +306,7 @@ $('create-form').addEventListener('submit',async(event)=>{
   event.preventDefault();
   const join=event.submitter?.id==='join';
   const withRelay=!join && $('create-with-relay').checked;
-  if(withRelay && !window.confirm('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.'))return;
+  if(withRelay && !(await ask('Start a temporary Cloudflare quick tunnel, then create the swarm? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.')))return;
   const result=await perform(join?'/api/join/request':'/api/create',{consent:{peer_visibility:$('visibility').checked,power:$('power').value,
     storage_bytes:Number($('storage').value),network:$('network').value,background:false,diagnostics:false,
     thermal:'stop_on_serious'},...(withRelay?{relay_acknowledged:true,max_seconds:1800}:{}),adaptive_sharing:$('adaptive-sharing-consent').checked},join?'Target identity created. Send the public request to the owner. No seed was created on this Mac.':
@@ -560,15 +573,15 @@ function currentConsent(){
   return {peer_visibility:$('visibility').checked,power:$('power').value,storage_bytes:Number($('storage').value),
     network:$('network').value,background:false,diagnostics:false,thermal:'stop_on_serious'};
 }
-$('own-start').addEventListener('click',()=>{
+$('own-start').addEventListener('click',async()=>{
   const origin=$('own-origin').value.trim(),port=Number($('own-port').value);
   if(!origin||!Number.isInteger(port)){notice('Enter your https address and the local port first.');return;}
-  if(!window.confirm('Use '+origin+' for this swarm? Mycelium starts no tunnel: you must point this hostname at 127.0.0.1:'+port+' on this Mac yourself (for example a Cloudflare named tunnel). The front you use terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.'))return;
+  if(!(await ask('Use '+origin+' for this swarm? Mycelium starts no tunnel: you must point this hostname at 127.0.0.1:'+port+' on this Mac yourself (for example a Cloudflare named tunnel). The front you use terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh.')))return;
   void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800,provider:'external',public_origin:origin,proxy_port:port,
     ...($('own-cloudflare').checked?{cloudflare_front:true}:{})},'Relay started on your own address. Make sure your hostname points at this Mac; then open a code and approve each Mac when it appears.');
 });
-$('relay-start').addEventListener('click',()=>{
-  if(!window.confirm('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.'))return;
+$('relay-start').addEventListener('click',async()=>{
+  if(!(await ask('Start a temporary Cloudflare quick tunnel? The relay terminates HTTPS and can observe control traffic, visitor IP addresses and timing, and web chat prompts and replies; only inference between the Macs stays on Iroh. The temporary relay keeps running while your swarm is serving (renewed every 30 minutes, at most 24 hours); it stops when the swarm stops. Once no longer serving, it closes at the current window’s deadline. A published swarm stays reachable while idle.')))return;
   void perform('/api/network/start',{relay_acknowledged:true,max_seconds:1800},'Public relay started. Codes you asked for are now ready to share; approve each Mac when it appears.');
 });
 $('window-open').addEventListener('click',()=>void perform('/api/pair/window/open',{ttl_seconds:Number($('window-ttl').value)},latest?.network?.public_origin?'Join code opened. Show it to one person; approve their Mac when it appears.':'Code requested. It is ready to share once the relay starts: press “Start public relay”.'));
@@ -583,8 +596,8 @@ $('join-with-code').addEventListener('click',()=>{
     'Request sent through the owner’s relay. Waiting for one-click approval.');
 });
 $('join-cancel').addEventListener('click',()=>void perform('/api/join/window/cancel',{},'Join cancelled on this Mac.'));
-$('standing-withdraw').addEventListener('click',()=>{
-  if(!window.confirm('Withdraw standing consent? Automatic acceptance and running work stop now. Membership is kept.'))return;
+$('standing-withdraw').addEventListener('click',async()=>{
+  if(!(await ask('Withdraw standing consent? Automatic acceptance and running work stop now. Membership is kept.')))return;
   void perform('/api/consent/standing/withdraw',{confirm:true},'Standing consent withdrawn. Running work stopped.');
 });
 let joinPolling=false;

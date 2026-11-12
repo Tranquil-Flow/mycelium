@@ -41,6 +41,23 @@ fn asset(path: &str) -> Option<Reply> {
         "/run.js" => ("text/javascript", include_bytes!("../assets/run.js")),
         "/swarm.js" => ("text/javascript", include_bytes!("../assets/swarm.js")),
         "/style.css" => ("text/css", include_bytes!("../assets/style.css")),
+        "/mycelium-boot.js" => (
+            "text/javascript",
+            include_bytes!("../assets/mycelium-boot.js"),
+        ),
+        "/mycelium-geometry.js" => (
+            "text/javascript",
+            include_bytes!("../assets/mycelium-geometry.js"),
+        ),
+        "/mycelium-hero.js" => ("text/javascript", include_bytes!("../assets/mycelium-hero.js")),
+        "/mycelium-field.js" => (
+            "text/javascript",
+            include_bytes!("../assets/mycelium-field.js"),
+        ),
+        "/fraunces-latin-wght-normal.woff2" => (
+            "font/woff2",
+            include_bytes!("../assets/fraunces-latin-wght-normal.woff2"),
+        ),
         "/chat" => (
             "text/html; charset=utf-8",
             include_bytes!("../assets/chat.html"),

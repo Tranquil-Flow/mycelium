@@ -131,4 +131,4 @@ pub fn navigation_allowed(uri: &str) -> bool {
 
 /// No inline script, remote requests, frames, popups, forms, objects or workers.
 /// The legacy bytes are served verbatim, CSP delivered as a response header.
-pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'none'; child-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
+pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'none'; child-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'";
