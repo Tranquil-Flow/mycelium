@@ -326,6 +326,14 @@ fn self_driven() -> bool {
 ///    queued behind the close datagram has been answered.
 ///
 /// Bounded by `RouterClose`. This does not wait for the 3·PTO drain.
+///
+/// Known gap (REVIEW-laneB20f (1)): the close frame is counted when noq writes
+/// it into a datagram (`poll_transmit`), before the socket send. If that send
+/// hits `WouldBlock` (a full socket send buffer), noq keeps the datagram in its
+/// `buffered_transmit` and this returns with the close still unsent; the next
+/// `block_on` on this runtime sends it. Unlikely on loopback and LAN, and not
+/// reproducible deterministically here (it needs the kernel's send buffer full
+/// at that instant), so no test names it.
 pub(crate) async fn flush_close(
     endpoint: &Endpoint,
     closed: &iroh::endpoint::WeakConnectionHandle,
@@ -362,6 +370,15 @@ pub(crate) async fn flush_finished(send: &iroh::endpoint::SendStream) -> Result<
         .await
         .map(drop)
         .map_err(|_| Error::CleanupUnproven)
+}
+/// The error a call returns for a connection that completed after its
+/// deadline: always that deadline error (REVIEW-laneB20f (2)). A close that
+/// could not be proven is recorded, never put in the deadline error's place.
+fn late_outcome(deadline: Error, closed: Result<(), Error>) -> Error {
+    if let Err(cleanup) = closed {
+        eprintln!("late connection close unproven: {cleanup:?} (returning {deadline:?})");
+    }
+    deadline
 }
 pub(crate) fn allowance(clock: &impl Clock, deadline: MonoInstant) -> Result<Duration, Error> {
     let now = clock.monotonic();
@@ -689,8 +706,7 @@ impl<'a> LoopbackHost<'a> {
             }
         };
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
@@ -990,8 +1006,7 @@ impl<'a> LoopbackHost<'a> {
                 .map_err(|_| Error::Unavailable)
         })?;
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
@@ -1041,5 +1056,25 @@ impl<'a> LoopbackHost<'a> {
         wait?;
         allowance(clock, deadline)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod late_close_tests {
+    use super::{Error, late_outcome};
+
+    /// REVIEW-laneB20f (2): a connection that completed after the caller's deadline is closed and
+    /// flushed before the call returns, and the call reports the DEADLINE error even when that close
+    /// could not be proven; the cleanup failure must not replace it.
+    #[test]
+    fn a_late_connection_returns_the_deadline_error_even_when_its_close_is_unproven() {
+        for deadline in [Error::Expired, Error::ClockDomain] {
+            assert_eq!(late_outcome(deadline, Ok(())), deadline);
+            assert_eq!(
+                late_outcome(deadline, Err(Error::CleanupUnproven)),
+                deadline,
+                "the late close's cleanup error replaced the deadline error"
+            );
+        }
     }
 }

@@ -8,6 +8,8 @@
 //! newest 3, B15). The routes sit behind the packaged window channel exactly like `/api/status`
 //! (GET) and every other owner action (POST).
 #![cfg(feature = "desktop-shell")]
+#[path = "support/packaged_macs.rs"]
+mod macs;
 use api::{
     gateway::{Qualification, QualificationSource, Unavailable},
     resources::{Observation, Observer},
@@ -336,10 +338,11 @@ fn window_request(window: &str, method: &str, path: &str, headers: &[(&str, &str
 #[test]
 fn packaged_product_routes_follow_the_window_rules_of_status_and_actions() {
     let state = state_root("window");
-    let (core, mut cleanup) = node_service::packaged::core_with(
+    let (core, mut cleanup) = node_service::packaged::core_with_network(
         &state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        macs::test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
@@ -784,10 +787,11 @@ fn the_packaged_status_shows_the_swarm_listing_custody() {
         "http://127.0.0.1:{}",
         directory.local_addr().unwrap().port()
     );
-    let (core, mut cleanup) = node_service::packaged::core_with(
+    let (core, mut cleanup) = node_service::packaged::core_with_network(
         &state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        macs::test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();

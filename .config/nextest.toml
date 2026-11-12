@@ -70,7 +70,8 @@ setup = "headless-release"
 #    the catalogue tests do their full check instead of failing early on a stale pin): the RU-053 admitted
 #    closure (289 s), the launch-graph fixpoint (156 s) and its census table (7 s), and the sixteen
 #    admission_catalogue_ru053_refuses_* tests (5-75 s each, selected by name prefix so a new one is covered).
-#    With several lanes building, nine of them crossed the 60 s limit in every quick run.
+#    With several lanes building, nine of them timed out at the 60 s limit in one no-fail-fast quick run (the
+#    fail-fast runs stopped at the first, and the slowest alone timed out in 2 of 5 reruns; REVIEW-batch2-small F1).
 # A test that still passes the filter but runs for 60 s (15 s period x 4) is killed and fails the run.
 [profile.quick]
 fail-fast = true
@@ -233,8 +234,16 @@ not (
 )
 '''
 
+# A test that never ends (a deadlock: a failure message that locks a mutex its own test holds hung a gate for
+# more than 300 s) is killed after 90 minutes (60 s period x 90) and fails the run instead of hanging it.
+# Sized from the slowest passing tests on record, both on a loaded host (load about 20): 843 s in the
+# whole-workspace run of batch 3 (budget-model::inventory_partition_b_families
+# b_families_require_the_exact_source_target_and_same_unit_provenance) and 1087.5 s for an ignored real-model
+# test run under this profile (node-service session_reset_frees_kv_and_keeps_weights), so the kill is about 5x
+# the slowest. nightly inherits it. Re-size it when a passing test gets within a quarter of it.
 [profile.merge]
 fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 90 }
 
 [profile.merge.junit]
 path = "junit.xml"

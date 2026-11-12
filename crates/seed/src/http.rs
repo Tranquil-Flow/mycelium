@@ -31,7 +31,17 @@ pub trait RouteExtension: Send + Sync {
         path: &str,
         body: &Value,
     ) -> Option<Result<Value, SeedError>>;
+    /// Called for a POST to a path the seed does not serve itself, after its request line and
+    /// headers and BEFORE its body is read (v0.1.4 `CombinedSeedHandler.do_POST`,
+    /// `mycelium_a13_macos/tls.py:438-441`, takes its slot first). `Ok(None)`: nothing to hold.
+    /// `Ok(Some(ticket))`: the ticket is held until the answer is built. `Err`: answered at once
+    /// with that error, the body unread and the connection closed.
+    fn admit(&self, _path: &str) -> Result<Option<Ticket>, SeedError> {
+        Ok(None)
+    }
 }
+/// What [`RouteExtension::admit`] holds for one request; dropping it releases it.
+pub type Ticket = Box<dyn std::any::Any + Send>;
 
 pub const SEED_JOIN_HTTP_PROTOCOL: &str = "mycelium.seed.join_http.v1";
 pub const SEED_RESUME_HTTP_PROTOCOL: &str = "mycelium.seed.resume_http.v1";
@@ -668,6 +678,21 @@ fn handle<R: BufRead>(
             _ => fail_reply(&Fail::with_status("seed_http_route_unknown", 404)),
         },
         "POST" => {
+            let seed_route = matches!(
+                request.path.as_str(),
+                "/seed/join" | "/seed/resume" | "/seed/message"
+            );
+            let _ticket = match routes.filter(|_| !seed_route) {
+                Some(routes) => match routes.admit(&request.path) {
+                    Ok(ticket) => ticket,
+                    Err(error) => {
+                        // The body was never read: nothing else can follow on this connection.
+                        *close = true;
+                        return fail_reply(&Fail::from_seed(&error));
+                    }
+                },
+                None => None,
+            };
             let outcome = read_body(request, reader, close)
                 .and_then(|body| post_route(coordinator, routes, request, &body));
             match outcome {

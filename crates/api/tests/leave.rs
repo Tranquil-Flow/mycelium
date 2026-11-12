@@ -133,15 +133,21 @@ impl Clock for Fixed {
 }
 /// The probe joins `app._leave_thread` before it reads anything: wait (bounded) until the
 /// background leave has persisted its final `left` record, if one is running.
+/// A leave still running at the bound fails here, by name, instead of letting the caller compare an
+/// unsettled state with the oracle (LB2 item 6).
 fn settle(leave: &MemberLeave) {
     let started = std::time::Instant::now();
-    while started.elapsed() < duration(BudgetId::WorkerStartup).unwrap() {
+    loop {
         let state = status_view(leave)
             .ok()
             .and_then(|v| v["state"].as_str().map(str::to_owned));
         if state.as_deref() != Some("draining") && state.as_deref() != Some("withdrawing") {
             return;
         }
+        assert!(
+            started.elapsed() < duration(BudgetId::WorkerStartup).unwrap(),
+            "the background leave is still {state:?} at the WorkerStartup bound"
+        );
         std::thread::sleep(
             duration(
                 BudgetId::PyMyceliumA6ProductFaultSeamsLiveproductfaulttargetInitPollSecondsL193,
