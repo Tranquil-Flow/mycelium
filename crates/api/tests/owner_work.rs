@@ -447,6 +447,22 @@ impl TestMember {
             return Err(Refusal("test_member_not_prepared".into()));
         };
         let serve_for = script.serve_for.unwrap_or(span(B::MemberChosenWall));
+        if script.old_member {
+            let row = self
+                .session
+                .shard_identity(&self.signer, app_host::now())
+                .map_err(|_| Refusal("test_member_invalid".into()))?;
+            let checked = route::verify_member(
+                &command["route"],
+                &row,
+                &offer,
+                &protocol::canonical::digest(&proof).unwrap(),
+                app_host::now(),
+            );
+            let report = checked.map(|_| json!({})).map_err(|e| e.0.to_owned());
+            self.seen.lock().unwrap_or_else(|p| p.into_inner()).served = Some(report.clone());
+            return report.map_err(Refusal);
+        }
         let mut compute = Controlled {
             offer,
             owned: true,
@@ -493,6 +509,9 @@ struct Serving {
     /// The member's own serve deadline (its consent wall ending while the epoch is idle);
     /// default: the member's chosen wall.
     serve_for: Option<Duration>,
+    /// A member of a build before EP1: its serve runs only the v1 route check
+    /// (`route::verify_member`, unchanged) and answers its refusal.
+    old_member: bool,
 }
 const VOCAB: usize = 64;
 /// Controlled final-stage logits: argmax at `token` (MYAC header of the native link).
@@ -2196,4 +2215,54 @@ fn readiness_after_a_completed_then_retired_epoch_agrees_with_the_refused_submis
     assert!(refused.to_string().contains("route_dropped"), "{refused}");
     work.teardown().unwrap();
     assert_eq!(work.state()["state"], "stopped");
+}
+
+/// EP2 item 3 (REVIEW-laneEP F4): an OLD member (a build before EP1) paired with this owner's v2
+/// route refuses it at its v1 route check (`joined_shard_signature_invalid`) and never accepts the
+/// owner's carrier dial; the activation fails when the carrier's connect deadline runs out. The
+/// owner names the cause: the run fails `joined_route_member_v2_unsupported` (the owner signed the
+/// route itself, so a member's signature refusal of it means the member cannot read v2), and the
+/// member's own code stays in the serve report.
+#[test]
+fn an_old_member_paired_with_a_v2_route_fails_the_activation_with_a_named_owner_code() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    scripts[0].old_member = true;
+    // The new member's serve waits for the owner's dial until its own deadline (its setup does
+    // not observe the cancel: member side, joined_shard/serve.rs); bounded here so the test ends.
+    scripts[1].serve_for = Some(span(B::WorkerStartup));
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let proposal = json!({"max_wall_seconds":60});
+    assert!(work.start_serving(&proposal).is_ok());
+    let staged = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(staged["state"], "awaiting_activation", "{staged}");
+    let began = Instant::now();
+    let activated = ActivationPort::activate(&mut work, &proposal);
+    assert!(activated.is_ok(), "{activated:?}");
+    let ended = work.wait_state(
+        |s| matches!(s["state"].as_str(), Some("api_running" | "failed" | "stopped")),
+        span(B::WorkerStartup) * 6,
+    );
+    eprintln!("old member: activation ended {:?} after {:?}", ended["state"], began.elapsed());
+    let (seen, _, _) = &members[0];
+    assert_eq!(
+        seen.lock().unwrap().served.clone(),
+        Some(Err("joined_shard_signature_invalid".to_owned()))
+    );
+    assert_eq!(ended["state"], "failed", "{ended}");
+    assert_eq!(ended["error_code"], "joined_route_member_v2_unsupported", "{ended}");
+    assert!(
+        ended["serve_reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["serve_error"] == "joined_shard_signature_invalid"),
+        "{ended}"
+    );
+    eprintln!("old member: cleanup {}", ended["member_cleanup"]);
+    let torn = Instant::now();
+    work.teardown().unwrap();
+    eprintln!("old member: teardown after the failure took {:?}", torn.elapsed());
 }
