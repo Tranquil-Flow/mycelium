@@ -360,9 +360,14 @@ impl owner_chain::ChainPorts for ModelPorts {
         self.0.with(|c| c.authority.owner_authority().is_some())
     }
     fn acquisition_state(&self) -> String {
-        self.0
+        let state = self
+            .0
             .acquisition()
-            .map_or_else(String::new, |a| a.status().state)
+            .map_or_else(String::new, |a| a.status().state);
+        if state.is_empty() {
+            eprintln!("l11_acq_state:empty");
+        }
+        state
     }
     fn reverify(&self) -> Reverify {
         (self.0.model.reverify)()

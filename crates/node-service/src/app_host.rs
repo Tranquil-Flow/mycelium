@@ -767,6 +767,7 @@ impl PackagedHost {
                 Box::new(move || {
                     use owner_run::steps::model::Reverify;
                     let Some(model) = model.as_ref() else {
+                        eprintln!("l11_reverify_gate:no_model");
                         return Reverify::Failed;
                     };
                     let policy = resource_policy::read(&root).ok().flatten();
