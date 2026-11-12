@@ -460,6 +460,11 @@ pub struct PackagedHost {
     model: Option<ModelSource>,
     /// The owner's listing custody. `None`: the swarm routes keep the trait default.
     publishing: Option<Publishing>,
+    /// `DemoApp.public_relay`, the pending windows and the join seams (`crate::packaged_network`).
+    network: Arc<crate::packaged_network::Network>,
+    /// `_renew_loop` for a joined target over the network's member cell (none before
+    /// [`PackagedHost::with_network`]). Quit stops and reaps it with the host's other loops.
+    member_renewal: Option<Arc<HostLoop>>,
 }
 /// `DemoApp.renew_thread` (app.py:638-639) running `_renew_loop` (app.py:911-927 @ f4e366e9) for
 /// the packaged owner: every period (`RenewLoopSelfClosedWait`, app.py:917) the owner pass
@@ -556,6 +561,7 @@ impl PackagedHost {
             Ok(authority)
         });
         let renewal = Renewal::start(authority.as_ref().ok(), &node, period);
+        let root_for_network = root.clone();
         let host = Self {
             node,
             root,
@@ -568,6 +574,11 @@ impl PackagedHost {
             authority,
             model: None,
             publishing: None,
+            network: crate::packaged_network::Network::new(
+                &root_for_network,
+                crate::packaged_network::NetworkConfig::default(),
+            ),
+            member_renewal: None,
         };
         host.refresh_fast_mode();
         host
@@ -639,6 +650,42 @@ impl PackagedHost {
         }
         self
     }
+    /// This host with its network over `config` (the relay's hooks and the join seams) in place of
+    /// the app's own (`crate::packaged_network`); before the host is handed to its services.
+    ///
+    /// A joined Mac's own lease renewal starts with it (`_renew_loop` for a target, app.py:911-927
+    /// @ f4e366e9), every `config.renewal`, as one of the host's loops (Quit stops and reaps it).
+    pub fn with_network(mut self, config: crate::packaged_network::NetworkConfig) -> Self {
+        let renewal = config.renewal;
+        self.network = crate::packaged_network::Network::new(&self.root, config);
+        if let Ok(authority) = &self.authority {
+            // `authority.start()` of a joined target (app.py:613-626): its retained membership
+            // resumes over the member's seed path; then `_resume_leave` (app.py:644): a completed
+            // leave stays fenced and left (no renewal), an interrupted one is finished.
+            crate::packaged_network::resume_membership(&self.network, authority);
+            crate::packaged_network::resume_leave(&self.network, authority, self.model.clone());
+            let (network, authority) = (self.network.clone(), authority.clone());
+            match HostLoop::start(
+                "packaged-member-renewal",
+                renewal,
+                &self.node,
+                true,
+                move || network.renew_member(&authority),
+            ) {
+                Ok(renewing) => self.member_renewal = Some(renewing),
+                Err(code) => eprintln!("member renewal: {code}"),
+            }
+        }
+        self
+    }
+    /// The host's network (relay, pending windows, join seams), for the action root and the Quit.
+    pub fn network(&self) -> Arc<crate::packaged_network::Network> {
+        self.network.clone()
+    }
+    /// The authority, or the code its state was refused with at bind (the relay's Start answers it).
+    pub fn authority_result(&self) -> Result<Arc<Mutex<Authority>>, &'static str> {
+        self.authority.clone()
+    }
     /// The owner's listing custody, for the window's Quit to close.
     pub fn publishing(&self) -> Option<Publishing> {
         self.publishing.clone()
@@ -650,7 +697,11 @@ impl PackagedHost {
     }
     /// The host's own loops, for the window's Quit to stop and reap.
     pub fn loops(&self) -> Vec<Arc<HostLoop>> {
-        self.policy.iter().cloned().collect()
+        self.policy
+            .iter()
+            .chain(self.member_renewal.iter())
+            .cloned()
+            .collect()
     }
     /// One acquisition step over this host's model source, `None` without one.
     fn acquisition<R>(
@@ -688,10 +739,17 @@ impl Host for PackagedHost {
         self.node.closed().unwrap_or(true)
     }
     /// `installation_role == 'owner'`. v0.1.4 starts as owner (app.py:537) unless
-    /// `installation-role.json` selects a target (app.py:595-611). The packaged process has no
-    /// target role yet (joining is a later S1 step) and publishes `installation_role: owner`.
+    /// `installation-role.json` selects a target (app.py:595-611), as the joined Mac's does once it
+    /// joined (`_become_target`, app.py:1106-1116; `crate::packaged_network`). A state refused at
+    /// bind has no role file read: it answers as the owner it starts as (each authority action
+    /// then answers the refusal's code). A poisoned authority is no owner (fail closed).
     fn owner(&self) -> bool {
-        true
+        self.loaded()
+            .is_none_or(|authority| authority.lock().is_ok_and(|a| !a.target))
+    }
+    /// The code the state was refused with at bind (`Authority::load`).
+    fn installation_refused(&self) -> Option<&'static str> {
+        self.authority.as_ref().err().copied()
     }
     /// `os.environ.get(name)`. A value that is not UTF-8 stays set (Python decodes it with
     /// `surrogateescape`), so it is never mistaken for an unset variable.
@@ -794,8 +852,10 @@ impl Host for PackagedHost {
     fn swarm_created(&self) -> bool {
         self.loaded().is_some_and(app_host::swarm_created)
     }
+    /// `authority.status().get('membership_state')`: a joined Mac's own (`crate::packaged_network`).
     fn membership_state(&self) -> Option<String> {
-        self.loaded().and_then(app_host::membership_state)
+        self.loaded()
+            .and_then(crate::packaged_network::membership_state)
     }
     fn running(&self) -> bool {
         self.loaded().is_some_and(app_host::running)
@@ -819,17 +879,100 @@ impl Host for PackagedHost {
     ) -> Result<Json, PublicError> {
         app_host::pair_approve(self.authority()?, request, ttl_seconds, quota)
     }
+    /// `RemoteMacMember.membership_binding()` of this Mac's live membership session.
+    fn membership_binding(&self) -> Option<api::member::Binding> {
+        self.loaded().and_then(app_host::membership_binding)
+    }
+    /// `accept_pairing` over the member's seed path (`crate::packaged_network`'s join seams).
     fn pair_accept(&mut self, handoff: &Value) -> Result<Json, PublicError> {
-        app_host::pair_accept(self.authority()?, handoff)
+        app_host::pair_accept(&self.network.cell(self.authority()?), handoff)
     }
     /// The owner's window store. Without a relay origin the persistent backend answers `open`
-    /// itself (a pending window, `_open_pending_window`); list/approve/revoke are the store's.
+    /// itself (a pending window, `_open_pending_window`); list/approve/revoke are the store's,
+    /// and a code opened while the relay runs is a window on its origin.
     fn owner_window(
         &mut self,
         action: Action,
         body: &Map<String, Value>,
     ) -> Result<Json, PublicError> {
-        app_host::owner_window(self.authority()?, action, body)
+        app_host::owner_window(&self.network.cell(self.authority()?), action, body)
+    }
+    // ---- the network window and the join (lane PH3a, `crate::packaged_network`) ----
+    /// The joined Mac's side of one member leave (`member_leave.app_steps`): `crate::packaged_network`.
+    fn leave_worker(&mut self) -> Box<dyn api::leave::LeaveWorker> {
+        Box::new(crate::packaged_network::PackagedLeave {
+            network: self.network.clone(),
+            model: self.model.clone(),
+        })
+    }
+    /// `resume_leave` / a smooth leave's begin: `_leave_fence = True` and, once left, `_left = True`.
+    fn leave_mark(&mut self, fence: bool, left: bool) {
+        self.network.mark(fence, left);
+    }
+    fn relay_state(&self) -> api::persistent::RelayState {
+        self.network.state()
+    }
+    fn close_stopped_relay(&mut self) {
+        self.network.close();
+    }
+    fn relay_origin(&self) -> Option<String> {
+        self.network.origin()
+    }
+    fn configured_public_origin(&self) -> Option<String> {
+        self.loaded().and_then(app_host::configured_public_origin)
+    }
+    /// `/api/create` with `{relay_acknowledged, max_seconds}`: the relay precedes the swarm.
+    fn start_public_relay(
+        &mut self,
+        relay_acknowledged: &Value,
+        max_seconds: &Value,
+    ) -> Result<(), PublicError> {
+        let body: Map<String, Value> = [
+            ("relay_acknowledged".to_owned(), relay_acknowledged.clone()),
+            ("max_seconds".to_owned(), max_seconds.clone()),
+        ]
+        .into_iter()
+        .collect();
+        let authority = self
+            .authority
+            .clone()
+            .map_err(|code| PublicError::new(409, code))?;
+        self.network.start(&authority, &body).map(drop)
+    }
+    fn abort_public_relay(&mut self) {
+        self.network.close();
+    }
+    fn bind_relay_seed(&mut self) {
+        if let Some(authority) = self.loaded() {
+            self.network.bind_seed(authority);
+        }
+    }
+    /// `installation_role = 'target'` (the role file is written by the backend first).
+    fn adopt_target_role(&mut self) -> Result<(), PublicError> {
+        crate::packaged_network::adopt_target_role(self.authority()?);
+        self.refresh_fast_mode();
+        Ok(())
+    }
+    fn join_submit(
+        &mut self,
+        link: &api::persistent::JoinLink,
+        request: &Value,
+        quota: &Value,
+    ) -> Result<(Value, Vec<Value>), PublicError> {
+        let base = self.network.seams().join_base.clone();
+        api::joined_member::join_submit(&self.root, base.as_deref(), link, request, quota)
+    }
+    fn join_poll(&mut self, state: &Map<String, Value>) -> Result<Value, PublicError> {
+        api::joined_member::join_poll(state, self.network.seams().join_base.as_deref())
+    }
+    fn join_accept(
+        &mut self,
+        handoff: &Value,
+        seed_key_digest: Option<&str>,
+    ) -> Result<api::persistent::JoinAccepted, PublicError> {
+        let base = self.network.seams().join_base.clone();
+        let cell = self.network.cell(self.authority()?);
+        api::joined_member::join_accept(&cell, handoff, seed_key_digest, base.as_deref())
     }
     /// `POST /api/swarm/publish` (`swarm_publish.action`, app mode): the explicit opt-in.
     fn swarm_publish(&mut self, body: &Map<String, Value>) -> Result<Json, PublicError> {

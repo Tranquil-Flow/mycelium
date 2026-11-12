@@ -142,6 +142,12 @@ fn a_seventeenth_concurrent_managed_control_request_is_refused_before_the_mailbo
         Err("managed_control_capacity_exhausted"),
         "a 17th concurrent managed-control request: {refused:?}"
     );
+    // Ruling 16: the capacity refusal answers 503 as v0.1.4 (tls.py:441).
+    assert_eq!(
+        refused.as_ref().err().and_then(|e| e.status),
+        Some(503),
+        "{refused:?}"
+    );
     assert_eq!(
         gate.entered(),
         HELD,

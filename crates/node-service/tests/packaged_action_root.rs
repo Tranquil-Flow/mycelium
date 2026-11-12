@@ -380,24 +380,13 @@ fn packaged_action_root_stop_and_rebuild_reach_node_service() {
 fn packaged_action_root_unported_host_action_is_host_refusal() {
     let root = private_root();
     let (host, _) = compose(Arc::new(MustNotRun), &root);
-    let consent = json!({
-        "peer_visibility": true, "power": "ac_only",
-        "storage_bytes": api::model_catalog::storage_consent_ceiling(),
-        "network": "unmetered_only", "background": false, "diagnostics": false,
-        "thermal": "stop_on_serious",
-    });
     let refused = json!({"error": "action_not_completed"});
     // (path, body, status, answer): each unported seam answers its `persistent::Host` default.
     // `/api/create`, `/api/pair/request` and `/api/start` are the owner authority's now
     // (`api::app_host`); their answers are pinned in `tests/packaged_owner_create.rs`. Joining
-    // is not: the role change it needs (`adopt_target_role`) is still the host default.
+    // (`/api/join/request`, `/api/join/window`) is ported too (lane PH3a: `adopt_target_role`,
+    // the join seams); its answers and refusals are pinned in `tests/packaged_join.rs`.
     let cases = [
-        (
-            "/api/join/request",
-            json!({"consent": consent}),
-            409,
-            refused.clone(),
-        ),
         ("/api/demo/start", json!({}), 409, refused.clone()),
         ("/api/model/cancel", json!({}), 409, refused.clone()),
         (
@@ -457,6 +446,20 @@ fn packaged_action_root_unported_host_action_is_host_refusal() {
     for (pointer, value) in observed["fields"].as_object().unwrap() {
         assert_eq!(answer.pointer(pointer), Some(value), "{pointer}: {answer}");
     }
+    // `/api/join/request` is ported (lane PH3a): a fresh owner becomes a target and answers its
+    // signed pairing request (`_become_target` + `authority.pair_request()`, app.py:1580-1584).
+    let consent = json!({
+        "peer_visibility": true, "power": "ac_only",
+        "storage_bytes": api::model_catalog::storage_consent_ceiling(),
+        "network": "unmetered_only", "background": false, "diagnostics": false,
+        "thermal": "stop_on_serious",
+    });
+    let (status, request) = post(&host, "/api/join/request", json!({"consent": consent}));
+    assert_eq!(
+        (status, &request["protocol"]),
+        (200, &json!("mycelium.pairing_request.v1")),
+        "{request}"
+    );
 }
 
 /// The host's run and close facts are the node service's, not constants.

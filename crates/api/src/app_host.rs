@@ -312,12 +312,63 @@ pub fn start_seed<M: ManagedSlot>(
 ) -> Result<SeedRuntime<M>, PublicError> {
     run_seed(prepare_seed(root, swarm_id)?, origin)
 }
+/// [`start_seed`] over a seed whose coordinator reads `clock` (a test moves the seed's own clock,
+/// as v0.1.4's `set_test_clock_offset` does, app.py:1336-1341).
+pub fn start_seed_clocked<M: ManagedSlot>(
+    root: &Path,
+    swarm_id: &str,
+    origin: Option<&str>,
+    clock: ::seed::Clock,
+) -> Result<SeedRuntime<M>, PublicError> {
+    run_seed(prepare_seed_clocked(root, swarm_id, clock)?, origin)
+}
 /// What `create_swarm` makes before it commits the metadata (authority.py:412-446 @ f4e366e9): the
 /// seed's key, its local TLS material and the coordinator that binds its database to the swarm.
 pub struct PreparedSeed {
     dir: PathBuf,
     material: ::seed::tls::Material,
     coordinator: Arc<::seed::Coordinator>,
+}
+/// `DemoApp.start`'s role selection (app.py:595-611 @ f4e366e9): `true` for a target. A role file
+/// must be exactly `{"protocol": "mycelium.a13_installation_role.v1", "role": "target"}`
+/// (`installation_role_invalid`); a target must not sit over an owner's authority state (v0.1.4
+/// `root/authority` non-empty; here also the owner's swarm record and seed,
+/// `installation_role_conflict`) and needs its saved resource consent (`target_consent_missing`).
+/// Without a role file, a target's own state (v0.1.4 `root/target`; here the joined member's peer
+/// files, which this layout keeps in the private root) is `installation_role_missing`.
+fn installation_role(
+    root: &Path,
+    selection: Option<Map<String, Value>>,
+) -> Result<bool, &'static str> {
+    let Some(selection) = selection else {
+        let target_state = ["accepted.json", "membership.state.json"]
+            .iter()
+            .any(|name| fs::symlink_metadata(root.join(name)).is_ok());
+        if target_state {
+            return Err("installation_role_missing");
+        }
+        return Ok(false);
+    };
+    if Value::Object(selection)
+        != json!({"protocol": "mycelium.a13_installation_role.v1", "role": "target"})
+    {
+        return Err("installation_role_invalid");
+    }
+    let owner_root = root.join("authority");
+    let owner_state = fs::read_dir(&owner_root).is_ok_and(|mut entries| entries.next().is_some())
+        || fs::symlink_metadata(&owner_root).is_ok_and(|m| !m.is_dir())
+        || fs::symlink_metadata(root.join(SWARM_FILE)).is_ok()
+        || prepared_state(root);
+    if owner_state {
+        return Err("installation_role_conflict");
+    }
+    if crate::preferences::resource_policy::read(root)
+        .map_err(|e| e.code)?
+        .is_none()
+    {
+        return Err("target_consent_missing");
+    }
+    Ok(true)
 }
 /// Whether that prepared state is there (`any(p.name != 'network.json' for p in
 /// state_root.iterdir())` without metadata, authority.py:390,410): the seed's directory (made
@@ -334,6 +385,14 @@ fn prepared_state(root: &Path) -> bool {
 /// `create_swarm`'s preparation in its order: the seed key, the TLS material (its own code is the
 /// answer, `LocalTLSError`), then the coordinator over the seed database bound to `swarm_id`.
 pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicError> {
+    prepare_seed_clocked(root, swarm_id, Box::new(now))
+}
+/// [`prepare_seed`] with the coordinator's clock given.
+fn prepare_seed_clocked(
+    root: &Path,
+    swarm_id: &str,
+    clock: ::seed::Clock,
+) -> Result<PreparedSeed, PublicError> {
     let dir = root.join("seed-rs");
     fs::create_dir_all(&dir).map_err(|_| failure())?;
     fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
@@ -361,7 +420,7 @@ pub fn prepare_seed(root: &Path, swarm_id: &str) -> Result<PreparedSeed, PublicE
             &dir.join("seed.sqlite"),
             signer,
             options,
-            Box::new(now),
+            clock,
             Box::new(uuid4),
         )
         .map_err(|e| seed_failure(&e))?,
@@ -536,7 +595,7 @@ impl<M: ManagedSlot> Authority<M> {
         let root = root.canonicalize().map_err(|_| "state_root_invalid")?;
         let role =
             private_state::load(&root.join("installation-role.json"), 4096).map_err(|e| e.0)?;
-        let target = role.is_some_and(|m| m.get("role") == Some(&json!("target")));
+        let target = installation_role(&root, role)?;
         let swarm = private_state::load(&root.join(SWARM_FILE), cap())
             .map_err(|e| e.0)?
             .map(Value::Object);
@@ -728,6 +787,15 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
         return cell.try_with(|c| c.running = true).ok_or_else(failure);
     };
     let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
+    // `_start_runtime` loads the seed key bound to the seed database (`load_bound_seed_signer`,
+    // mycelium_seed/authority.py:113-139 @ f4e366e9): a lost key is `seed_authority_key_missing`,
+    // never a fresh, unbound key (which `prepare_seed` would create).
+    if matches!(
+        fs::symlink_metadata(root.join(SEED_IDENTITY_FILE)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ) {
+        return Err(PublicError::new(409, "seed_authority_key_missing"));
+    }
     // `_start_runtime`: existing metadata makes a missing TLS root a fail-closed identity loss,
     // never fresh material (authority.py:508-512 @ f4e366e9); an existing empty directory is
     // still filled (`ensure_local_tls_material`).
@@ -738,6 +806,12 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
     }
     let runtime = Arc::new(start_seed(&root, &swarm_id, origin.as_deref())?);
     let dir = root.join("authority").join("member");
+    // `_resume` pins the owner's own member to the seed's current address (a relay origin attached
+    // since the last start, authority.py:578-604 @ f4e366e9).
+    if let Err(error) = crate::peer::repin_owner_seed_url(&dir, &runtime.seed_url) {
+        runtime.close();
+        return Err(error);
+    }
     let (signer, _, _) = identity(&root)?;
     let options = runtime.options();
     let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
@@ -859,6 +933,44 @@ pub fn renew_owner(cell: &impl Cell) {
     cell.try_with(|c| {
         if c.owner_session.is_none() && c.seed.is_some() {
             c.owner_session = Some(session);
+        }
+    });
+}
+/// One pass of `DemoApp._renew_loop` for a joined TARGET (`authority.renew()` is
+/// `RemoteMacMember.renew()`, app.py:911-927 @ f4e366e9): the live membership session is taken out
+/// of the host while the heartbeat is on the wire (its generation and lease stay visible through
+/// `session_view`), over the member's own seed path ([`Cell::member_seed_options`]). A closed, left,
+/// stopped or owner host renews nothing. A failure is logged and tried again at the next pass (the
+/// oracle sets `renewal_error = 'renewal_unavailable'`).
+pub fn renew_member(cell: &impl Cell) {
+    let Some(Some((root, session))) = cell.try_with(|c| {
+        if c.closed || !c.running || c.left || !c.target {
+            return None;
+        }
+        let session = c.session.take()?;
+        c.session_view = Some((session.generation(), session.lease_expires_at()));
+        Some((c.root.clone(), session))
+    }) else {
+        return;
+    };
+    let mut session = session;
+    if let Ok((signer, _, _)) = identity(&root) {
+        let options = cell.member_seed_options();
+        let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+        let env = crate::peer::JoinEnv {
+            signer: &signer,
+            clock: &now,
+            random_hex: &random_hex,
+            seed: &options,
+        };
+        if let Err(error) = crate::peer::renew(&root, true, Some(&mut session), &env) {
+            eprintln!("member renew: {}", error.code);
+        }
+    }
+    cell.try_with(|c| {
+        c.session_view = None;
+        if c.session.is_none() {
+            c.session = Some(session);
         }
     });
 }
