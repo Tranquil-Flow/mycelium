@@ -3,6 +3,46 @@
 use super::*;
 use std::{ops::Deref, thread::JoinHandle, time::Duration};
 
+/// One tokenizer operation's original deadline, capped by the run's first
+/// Stop end. Cancellation is readable without the helper or service-state lock.
+#[derive(Clone)]
+pub struct CodecLimit {
+    end: Instant,
+    route: Option<RouteHandle>,
+}
+impl CodecLimit {
+    pub fn new(end: Instant) -> Self {
+        Self { end, route: None }
+    }
+    pub(crate) fn for_route(route: Option<RouteHandle>) -> Result<Self, PublicError> {
+        let wait = B::ModelSelection
+            .span(Entries::ZERO)
+            .map_err(|_| error("budget_unavailable"))?;
+        Ok(Self {
+            end: Instant::now() + Duration::from_millis(wait.millis()),
+            route,
+        })
+    }
+    pub fn end(&self) -> Instant {
+        self.route
+            .as_ref()
+            .map_or(self.end, |r| r.shutdown.bound(self.end))
+    }
+    pub fn check(&self) -> Result<(), PublicError> {
+        if self
+            .route
+            .as_ref()
+            .is_some_and(|r| r.shutdown.setup_stopped())
+        {
+            Err(PublicError::new(503, "tokenizer_cancelled"))
+        } else if Instant::now() >= self.end() {
+            Err(PublicError::new(503, "tokenizer_deadline"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// The owner's existing first-Stop timestamp and allowance, never a renewed timer.
 #[derive(Clone)]
 pub struct StopLimit {

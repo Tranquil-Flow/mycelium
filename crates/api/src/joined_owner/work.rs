@@ -499,6 +499,10 @@ pub struct OwnerWork {
     /// When the run's Stop was first signalled: the exit's ONE deadline is counted from it.
     stop_at: Arc<Mutex<Option<Instant>>>,
     thread: Option<std::thread::JoinHandle<Vec<WorkMember>>>,
+    /// Retained even after the worker exits: interrupted helper cleanup may need retry.
+    codec: Arc<dyn Codec>,
+    codec_cleanup_pending: bool,
+    stop_allowance: Option<Duration>,
     /// Member links handed back by teardown.
     returned: Vec<WorkMember>,
     /// The run's stage admission (taken by the worker at start).
@@ -553,6 +557,9 @@ impl OwnerWork {
                 }),
                 changed: Condvar::new(),
             }),
+            codec: codec.clone(),
+            codec_cleanup_pending: false,
+            stop_allowance: None,
             start: Some(Start {
                 members,
                 plan,
@@ -680,33 +687,61 @@ impl OwnerWork {
     /// reaches only an admitted operation, until the worker reached its exit
     /// tail), close the open epoch and the shard source, release the members'
     /// stage (R1, bounded by the stop allowance) and join the worker. Idempotent.
+    /// On unproven expiry this SAME OwnerWork remains the cleanup/retry owner;
+    /// do not replace/drop it to simulate successful Stop. Drop synchronously
+    /// joins as a final custody safeguard and is not a bounded Stop API.
     pub fn teardown(&mut self) -> Result<(), String> {
         signal_stop(&self.stop, &self.stop_at);
         self.commands.take();
         if let Some(start) = self.start.take() {
             self.returned.extend(start.members);
         }
-        if let Some(t) = self.thread.take() {
-            let poll = super::span(B::OwnerPoll);
-            if let Err(e) = &poll {
-                eprintln!("owner work stop: {} (one cancel round only)", e.code);
+        let Some(allowance) = self.stop_allowance else {
+            return Ok(());
+        };
+        let end =
+            crate::m16_route::StopLimit::new(self.stop.clone(), self.stop_at.clone(), allowance)
+                .end()
+                .ok_or_else(|| "owner_stop_end_unavailable".to_owned())?;
+        let poll = super::span(B::OwnerPoll).map_err(|e| e.code.to_owned())?;
+        while let Some(t) = self.thread.as_ref() {
+            if t.is_finished() {
+                break;
             }
-            loop {
-                if !self.exiting.load(Ordering::SeqCst) && !self.serving.load(Ordering::SeqCst) {
-                    for cancel in &self.cancels {
-                        cancel();
-                    }
-                }
-                let Ok(poll) = poll else { break };
-                if t.is_finished() || self.exiting.load(Ordering::SeqCst) {
-                    break;
-                }
-                self.wait_state(|s| s["state"] == FAILED || s["state"] == STOPPED, poll);
+            if Instant::now() >= end {
+                self.shared
+                    .update(|f| f.cleanup_error = Some(CLEANUP_UNPROVEN.into()));
+                return Err(CLEANUP_UNPROVEN.into());
             }
-            let members = t.join().map_err(|_| "ThreadPanicked".to_owned())?;
-            self.returned.extend(members);
+            if !self.exiting.load(Ordering::SeqCst) && !self.serving.load(Ordering::SeqCst) {
+                for cancel in &self.cancels {
+                    cancel();
+                }
+            }
+            self.wait_state(
+                |s| s["state"] == FAILED || s["state"] == STOPPED,
+                poll.min(end.saturating_duration_since(Instant::now())),
+            );
+            std::thread::yield_now();
         }
+        if let Some(t) = self.thread.take() {
+            self.returned
+                .extend(t.join().map_err(|_| "ThreadPanicked".to_owned())?);
+        }
+        self.codec_cleanup_pending = true;
+        self.codec.settle_until(end).map_err(|e| {
+            eprintln!("owner_codec_cleanup_pending: {}", e.code);
+            self.shared
+                .update(|f| f.cleanup_error = Some(CLEANUP_UNPROVEN.into()));
+            CLEANUP_UNPROVEN.to_owned()
+        })?;
+        self.codec_cleanup_pending = false;
         Ok(())
+    }
+    /// Retained thread/helper custody, including a finished worker not yet joined.
+    /// `take_members` cannot hand out still-owned links; a new run cannot reuse them.
+    pub fn cleanup_pending(&self) -> bool {
+        self.thread.is_some() || self.codec_cleanup_pending
     }
     /// The Stop the host signals while a step blocks in this port (the slices
     /// step's push, F5): stops the work and cancels the member operation in
@@ -749,6 +784,7 @@ impl OwnerWork {
         let poll = super::span(B::OwnerPoll)?;
         let stop_allowance = stop_allowance(wall, start.members.len())
             .ok_or_else(|| refusal("budget_unavailable"))?;
+        self.stop_allowance = Some(stop_allowance);
         let (commands, inbox) = mpsc::channel();
         let worker = Worker {
             shared: self.shared.clone(),
@@ -821,7 +857,13 @@ impl OwnerWork {
 impl Drop for OwnerWork {
     fn drop(&mut self) {
         if let Err(e) = self.teardown() {
-            eprintln!("owner work teardown: {e}");
+            eprintln!("owner work teardown: {e}; Drop retains synchronous join custody");
+            if let Some(t) = self.thread.take() {
+                match t.join() {
+                    Ok(members) => self.returned.extend(members),
+                    Err(_) => eprintln!("owner_work_drop_thread_panicked"),
+                }
+            }
         }
     }
 }
@@ -1324,7 +1366,14 @@ impl Worker {
         };
         let published = match &current {
             None => true,
-            Some(id) => matches!(epoch.service().terminal(id), Ok(Some(_))),
+            Some(id) => match epoch.service().try_terminal(id) {
+                Ok(value) => value.is_some(),
+                Err(e) if e.code == "m16_owner_busy" => false,
+                Err(e) => {
+                    eprintln!("joined_owner_terminal_unread: {}", e.code);
+                    false
+                }
+            },
         };
         let code = {
             let Ok(mut o) = epoch.handle().state.lock() else {

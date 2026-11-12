@@ -1619,10 +1619,12 @@ impl Admission for ControlledAdmission {
         )
     }
 }
-#[path = "support/tokenizer_helper.rs"]
-mod tokenizer_helper;
+#[path = "support/owner_codec_custody.rs"]
+mod codec_custody;
 #[path = "support/owner_codec_stop.rs"]
 mod codec_stop;
+#[path = "support/tokenizer_helper.rs"]
+mod tokenizer_helper;
 
 /// Model-free prompt codec of the serving tests (token ids are carrier test values).
 struct Prompt;
@@ -1643,7 +1645,12 @@ impl Swarm {
     fn serving(&mut self, plan: Plan, scripts: Vec<Serving>) -> (OwnerWork, Vec<Watched>) {
         self.serving_with_codec(plan, scripts, Arc::new(Prompt))
     }
-    fn serving_with_codec(&mut self, plan: Plan, scripts: Vec<Serving>, codec: Arc<dyn Codec>) -> (OwnerWork, Vec<Watched>) {
+    fn serving_with_codec(
+        &mut self,
+        plan: Plan,
+        scripts: Vec<Serving>,
+        codec: Arc<dyn Codec>,
+    ) -> (OwnerWork, Vec<Watched>) {
         let (seed, _, _) =
             app_host::identity_in(&self.owner, app_host::SEED_IDENTITY_FILE).unwrap();
         let mut taken = Vec::new();

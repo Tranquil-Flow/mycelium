@@ -48,7 +48,7 @@ use std::{
 use transport::{Channel, Clock, ConnectionFence, Exchange};
 #[path = "m16_route_stop.rs"]
 mod stop;
-pub use stop::{StopLimit, begin_close_until, close_until};
+pub use stop::{CodecLimit, StopLimit, begin_close_until, close_until};
 
 fn uint(value: &PyReal) -> Option<u64> {
     match value {
@@ -62,10 +62,30 @@ fn uint(value: &PyReal) -> Option<u64> {
 fn error(code: &'static str) -> PublicError {
     PublicError::new(409, code)
 }
-/// Product tokenizer seam: the host's selected local model tokenizer.
+/// Product tokenizer seam. Legacy callbacks must be bounded/nonblocking;
+/// Rust cannot preempt arbitrary extension code. Blocking implementations must
+/// override the bounded methods and observe `limit` throughout their I/O.
+/// OwnerWork retains its exact worker/codec on an unproven bounded teardown.
 pub trait Codec: Send + Sync {
     fn encode(&self, text: &str) -> Result<Vec<u32>, PublicError>;
     fn decode(&self, token: u32) -> Result<String, PublicError>;
+    fn encode_until(&self, text: &str, limit: &CodecLimit) -> Result<Vec<u32>, PublicError> {
+        limit.check()?;
+        let result = self.encode(text)?;
+        limit.check()?;
+        Ok(result)
+    }
+    fn decode_until(&self, token: u32, limit: &CodecLimit) -> Result<String, PublicError> {
+        limit.check()?;
+        let result = self.decode(token)?;
+        limit.check()?;
+        Ok(result)
+    }
+    /// Settle any interrupted helper under the SAME end; retain custody on Err.
+    /// A healthy reusable tokenizer need not be closed when a route ends.
+    fn settle_until(&self, _end: Instant) -> Result<(), PublicError> {
+        Ok(())
+    }
 }
 /// Current member generation from the seed (None = no longer current).
 pub type Currentness = Arc<dyn Fn(&str) -> Option<u64> + Send + Sync>;
@@ -653,7 +673,8 @@ impl Executor for RouteExecutor {
         self.pending.extend(fresh);
         if let Some(token) = self.pending.pop_front() {
             // Count only tokens actually handed to M16.
-            let text = self.codec.decode(token)?;
+            let limit = CodecLimit::for_route(Some(self.observed.clone()))?;
+            let text = self.codec.decode_until(token, &limit)?;
             return Ok(Execution::Token {
                 token_id: token,
                 text,
@@ -2131,7 +2152,13 @@ impl Host for RouteHost {
         let prompt = submission["prompt"]
             .as_str()
             .ok_or(error("invalid_prompt"))?;
-        let ids = self.codec.encode(prompt)?;
+        let carrier = self
+            .carrier
+            .lock()
+            .map_err(|_| error("joined_route_poisoned"))?
+            .clone();
+        let limit = CodecLimit::for_route(carrier)?;
+        let ids = self.codec.encode_until(prompt, &limit)?;
         let max_new = submission["max_new_tokens"]
             .as_u64()
             .ok_or(error("invalid_max_new_tokens"))?;
