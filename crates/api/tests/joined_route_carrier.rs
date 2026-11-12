@@ -37,6 +37,8 @@ use std::{
     time::{Duration, Instant},
 };
 use transport::Clock as _;
+#[path = "support/carrier_setup.rs"]
+mod setup;
 
 fn span(id: B) -> Duration {
     Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())

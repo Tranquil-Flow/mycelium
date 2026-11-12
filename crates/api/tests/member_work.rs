@@ -34,6 +34,8 @@ use std::{
 };
 use transport::Clock;
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[path = "support/member_setup.rs"]
+mod setup;
 /// A paired member of a real seed (as `joined_shard.rs`'s pair), with a policy but no consent.
 struct Joined {
     root: PathBuf,
