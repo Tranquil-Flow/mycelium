@@ -738,6 +738,15 @@ impl OwnerWork {
         self.codec_cleanup_pending = false;
         Ok(())
     }
+    /// A command host's owned slot: on unproven cleanup keep the exact port in
+    /// the slot, blocking replacement. Taking it before a fallible teardown
+    /// would run synchronous Drop on Err and hide the bounded Stop reply.
+    pub fn take_stopped(slot: &mut Option<Self>) -> Result<Self, String> {
+        slot.as_mut()
+            .ok_or_else(|| "owner_work_absent".to_owned())?
+            .teardown()?;
+        slot.take().ok_or_else(|| "owner_work_absent".to_owned())
+    }
     /// Retained thread/helper custody, including a finished worker not yet joined.
     /// `take_members` cannot hand out still-owned links; a new run cannot reuse them.
     pub fn cleanup_pending(&self) -> bool {

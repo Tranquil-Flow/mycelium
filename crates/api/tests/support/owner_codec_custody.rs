@@ -61,9 +61,14 @@ fn ep2h_legacy_held_callback_retains_same_owner_and_never_renews_stop() {
     let mut work = thread.join().unwrap();
     let pending_before_release = work.cleanup_pending();
     let replacement_blocked = work.take_members().is_empty();
+    let mut slot = Some(work);
     let again = Instant::now();
-    let retry = work.teardown();
+    let retry = OwnerWork::take_stopped(&mut slot).map(|_| ());
     let retry_elapsed = again.elapsed();
+    let slot_retained = slot.is_some();
+    let mut work = slot
+        .take()
+        .expect("same host slot must retain its retry owner");
     if result.is_ok() {
         release.send(()).unwrap();
     }
@@ -89,6 +94,10 @@ fn ep2h_legacy_held_callback_retains_same_owner_and_never_renews_stop() {
     assert_eq!(answer.unwrap_err(), "owner_target_cleanup_unproven");
     assert_eq!(state["cleanup_error"], "owner_target_cleanup_unproven");
     assert!(pending_before_release && replacement_blocked && siblings);
+    assert!(
+        slot_retained,
+        "command host cannot drop/replace the retry owner"
+    );
     assert_eq!(retry.unwrap_err(), "owner_target_cleanup_unproven");
     assert!(
         retry_elapsed < span(B::OwnerPoll),

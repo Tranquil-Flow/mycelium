@@ -80,13 +80,14 @@ impl NativeCodec {
             match self.0.try_lock() {
                 Ok(h) => return Ok(h),
                 Err(TryLockError::Poisoned(_)) => return Err(unavailable()),
-                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::WouldBlock) => {
+                    check()?;
+                    if Instant::now() >= end() {
+                        return Err(fail("tokenizer_exit_unproven"));
+                    }
+                    pause(end())?;
+                }
             }
-            check()?;
-            if Instant::now() >= end() {
-                return Err(fail("tokenizer_exit_unproven"));
-            }
-            pause(end())?;
         }
     }
     fn call(&self, request: Value, limit: &CodecLimit) -> Result<Value, PublicError> {

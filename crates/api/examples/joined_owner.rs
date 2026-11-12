@@ -665,8 +665,7 @@ impl Owner {
     }
     /// Teardown: close the open epoch and the source; member links come back.
     fn work_stop(&mut self) -> Result<Value> {
-        let mut port = self.work.take().ok_or("owner_work_absent")?;
-        port.teardown()?;
+        let mut port = OwnerWork::take_stopped(&mut self.work)?;
         let state = port.state();
         let mut back = port.take_members();
         for (node_id, pid, range) in std::mem::take(&mut self.parked) {

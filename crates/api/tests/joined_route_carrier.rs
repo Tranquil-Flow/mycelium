@@ -2849,6 +2849,7 @@ fn product_epoch_records_a_seed_lease_read_failure() {
 // :985-1000) -> _expire (:1453-1457); _watch (:1066, :1459) -> _check
 // (:800-818: membership current, wall).
 
+type RawHop<'a> = Box<dyn FnMut(&str, u64) -> bool + 'a>;
 /// A raw owner's operations on ONE member's real v2 stage server.
 struct Raw<'a> {
     /// A request-scoped PathCancellation of this request (control link): ACKed?
@@ -2858,7 +2859,7 @@ struct Raw<'a> {
     /// The PREFILL of this request (data link): ACKed (queued for compute)?
     prefill: Box<dyn FnMut(&str) -> bool + 'a>,
     /// EP2H: arbitrary request id and token index, including a DECODE before admission.
-    hop: Box<dyn FnMut(&str, u64) -> bool + 'a>,
+    hop: RawHop<'a>,
     /// EPF2: a PathCancellation of this request sent on the DATA link (the
     /// member's data receiver accepts one too): ACKed?
     cancel_on_data: Box<dyn FnMut(&str) -> bool + 'a>,
