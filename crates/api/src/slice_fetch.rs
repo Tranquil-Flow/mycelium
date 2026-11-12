@@ -380,14 +380,7 @@ fn clone_verified(row: &Value, root: &Path, transport: &mut dyn SliceTransport) 
         }
         // `_clone_file(fd, partial)`: an APFS clone of the file just opened and checked, never the
         // path again (CLONE_NOFOLLOW); no clone falls back to fetching. The digest below decides.
-        if rustix::fs::fclonefileat(
-            &source,
-            rustix::fs::CWD,
-            &partial,
-            rustix::fs::CloneFlags::NOFOLLOW,
-        )
-        .is_err()
-        {
+        if clone_file(&source, &partial).is_err() {
             return Ok(false);
         }
         let meta = fs::symlink_metadata(&partial)?;
@@ -412,6 +405,42 @@ fn clone_verified(row: &Value, root: &Path, transport: &mut dyn SliceTransport) 
     let published = parent.is_ok() && verified && fs::rename(&partial, &final_path).is_ok();
     remove_tree(&work);
     parent.map(|()| published)
+}
+
+/// `_clone_file` (`slice_acquisition.py:390-402`): `fclonefileat(fd, AT_FDCWD, destination,
+/// CLONE_NOFOLLOW)` on the open, checked `source`. Apple-only API.
+#[cfg(target_vendor = "apple")]
+fn clone_file(source: &fs::File, destination: &Path) -> std::io::Result<()> {
+    rustix::fs::fclonefileat(
+        source,
+        rustix::fs::CWD,
+        destination,
+        rustix::fs::CloneFlags::NOFOLLOW,
+    )
+    .map_err(std::io::Error::from)
+}
+/// Where `fclonefileat` does not exist (v0.1.4 then returns False and fetches): a plain copy of
+/// the same open file, so a build for another platform compiles and still reuses a local copy.
+#[cfg(not(target_vendor = "apple"))]
+fn clone_file(source: &fs::File, destination: &Path) -> std::io::Result<()> {
+    copy_open_file(source, destination)
+}
+/// A plain copy of the open `source` (from its start) into a NEW private file at `destination`,
+/// which is never followed (`O_NOFOLLOW`, `create_new`). The caller still checks its size, link
+/// count and digest.
+#[cfg(any(test, not(target_vendor = "apple")))]
+fn copy_open_file(source: &fs::File, destination: &Path) -> std::io::Result<()> {
+    use std::io::{Seek, SeekFrom};
+    let mut target = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(destination)?;
+    let mut reader = source;
+    reader.seek(SeekFrom::Start(0))?;
+    std::io::copy(&mut reader, &mut target)?;
+    target.sync_all()
 }
 
 /// `_fetch_segment`: one digest-verified segment; (data, range requests, bytes received).
@@ -665,4 +694,50 @@ pub fn slice_progress(node_plan: &Value, root: &Path) -> Option<Value> {
         }
     }
     Some(json!({"done_bytes": done.min(total), "total_bytes": total}))
+}
+
+#[cfg(test)]
+mod clone_fallback_tests {
+    use super::copy_open_file;
+    use std::{
+        fs,
+        os::unix::fs::{MetadataExt, PermissionsExt},
+    };
+
+    /// The non-Apple fallback of `clone_file` (REVIEW-laneB21 (3)): it copies the open file's bytes
+    /// into a new private file, and never writes through an existing name or a symlink.
+    #[test]
+    fn the_plain_copy_fallback_copies_the_open_file_and_never_follows_the_destination() {
+        let dir = std::env::temp_dir().join(format!("lb2-clone-fallback-{}", std::process::id()));
+        fs::remove_dir_all(&dir).unwrap_or_default();
+        fs::create_dir_all(&dir).unwrap();
+        let (source, copy, other, link) = (
+            dir.join("source"),
+            dir.join("copy"),
+            dir.join("other"),
+            dir.join("link"),
+        );
+        fs::write(&source, b"slice bytes").unwrap();
+        fs::write(&other, b"untouched").unwrap();
+        std::os::unix::fs::symlink(&other, &link).unwrap();
+        let open = fs::File::open(&source).unwrap();
+
+        copy_open_file(&open, &copy).unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), b"slice bytes");
+        let meta = fs::symlink_metadata(&copy).unwrap();
+        assert!(meta.is_file());
+        assert_eq!(meta.nlink(), 1);
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+
+        assert_eq!(
+            copy_open_file(&open, &copy).map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::AlreadyExists)
+        );
+        assert!(
+            copy_open_file(&open, &link).is_err(),
+            "a symlink destination was followed"
+        );
+        assert_eq!(fs::read(&other).unwrap(), b"untouched");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
