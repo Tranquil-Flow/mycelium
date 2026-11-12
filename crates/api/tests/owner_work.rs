@@ -145,6 +145,13 @@ impl Control {
         drop(ops);
         self.changed.notify_all();
     }
+    /// Publish a serve outcome under the same lock as `wait`, then wake its observer.
+    fn served(&self, seen: &Mutex<Seen>, report: Result<Value, String>) {
+        let ops = self.lock();
+        seen.lock().unwrap_or_else(|p| p.into_inner()).served = Some(report);
+        drop(ops);
+        self.changed.notify_all();
+    }
     /// Wait (bounded) until `done` holds for what the member saw.
     fn wait(&self, seen: &Mutex<Seen>, done: impl Fn(&Seen) -> bool, within: Duration) -> bool {
         let end = Instant::now() + within;
@@ -460,7 +467,7 @@ impl TestMember {
                 app_host::now(),
             );
             let report = checked.map(|_| json!({})).map_err(|e| e.0.to_owned());
-            self.seen.lock().unwrap_or_else(|p| p.into_inner()).served = Some(report.clone());
+            self.control.served(&self.seen, report.clone());
             return report.map_err(Refusal);
         }
         let mut compute = Controlled {
@@ -491,7 +498,7 @@ impl TestMember {
             &command["route"],
             &protocol::canonical::digest(&proof).unwrap(),
         );
-        self.seen.lock().unwrap_or_else(|p| p.into_inner()).served = Some(report.clone());
+        self.control.served(&self.seen, report.clone());
         report.map_err(Refusal)
     }
 }
