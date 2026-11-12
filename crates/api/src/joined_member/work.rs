@@ -636,6 +636,20 @@ pub struct Work {
     /// Native work needs the announced share of the offer's own run (an announced owner);
     /// `false` for the operator-driven member (`Work::operator`).
     require_share: bool,
+    /// First prepare plus this member's then-consented wall; never renewed by another prepare.
+    consent_deadline: Option<Instant>,
+}
+fn consent_end(root: &Path, began: Instant) -> Result<Instant> {
+    let consent = standing_consent::load(root)
+        .map_err(|_| "joined_shard_consent_required")?
+        .ok_or("joined_shard_consent_required")?;
+    let wall = consent["caps"]["max_wall_seconds"]
+        .as_u64()
+        .filter(|w| *w > 0)
+        .ok_or("joined_native_consent_invalid")?;
+    began
+        .checked_add(Duration::from_secs(wall))
+        .ok_or_else(|| "joined_native_consent_invalid".into())
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
@@ -647,6 +661,7 @@ impl Work {
             left: false,
             announced: None,
             require_share: true,
+            consent_deadline: None,
         }
     }
     /// A member driven by its local operator (the example's CLI-pinned owner, no announcement):
@@ -775,6 +790,7 @@ impl Work {
         if self.shard.is_some() || self.native.is_some() {
             return Err("shard_already_owned".into());
         }
+        self.consent_deadline = None;
         let session = session.ok_or("not_joined")?;
         let offer = &request["offer"];
         let source: iroh::EndpointId = request["source_id"]
@@ -958,6 +974,9 @@ impl Work {
                 .as_str()
                 .ok_or("source_invalid")?,
         );
+        if self.consent_deadline.is_none() {
+            self.consent_deadline = Some(consent_end(&self.root, Instant::now())?);
+        }
         let signed = self
             .native
             .as_mut()
@@ -1030,6 +1049,7 @@ impl Work {
             receive.discard().map_err(|e| e.0.to_owned())?;
         }
         self.shard = None;
+        self.consent_deadline = None;
         Ok(json!({"inert_bytes_discarded":true,"route_ready":false}))
     }
     /// `serve`: one owner-signed route epoch through the library stage server
@@ -1049,13 +1069,13 @@ impl Work {
             .as_deref()
             .ok_or("native_proof_required")?;
         let current = || member.current(signer);
-        // EP2: ONE serve is the run's whole epoch: it ends at the route's signed expiry (the
-        // owner's publish + the smallest consented wall), not at the dispatcher's one-operation
-        // wall. The serve loop checks the signed expiry itself (ending `route_expired`); the
-        // operation bound is only its backstop, one RouterClose past it. The member's OWN consent (wall from the first prepare, command allowance,
-        // membership current, consent unchanged) ends it earlier: the serve loop checks it on
-        // every pass through `StageCompute::live` (lane EPF), not duplicated here. An
-        // unverifiable expiry is refused by the route check inside `serve`.
+        // One epoch per run, but never beyond this member's own wall. Carrier setup does not
+        // poll live consent until both owner connections arrive, so its accept deadline MUST
+        // retain this independent bound. Re-preparing cannot extend the first prepare's wall.
+        let consented = match self.consent_deadline {
+            Some(end) => end,
+            None => consent_end(&self.root, Instant::now())?,
+        };
         let close = budgets::BudgetId::RouterClose
             .span(budgets::Entries::ZERO)
             .map_err(|_| "budget_unavailable")?;
@@ -1073,7 +1093,7 @@ impl Work {
                 clock: carrier_side.clock,
                 current: &current,
                 cancelled: operation.cancelled.clone(),
-                deadline: expiry,
+                deadline: expiry.min(consented),
             },
             native,
             &operation.request["route"],
