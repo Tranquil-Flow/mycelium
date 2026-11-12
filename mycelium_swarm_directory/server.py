@@ -76,7 +76,8 @@ ASSETS = {'/': ('apex.html', 'text/html; charset=utf-8'),
           '/swarms/': ('index.html', 'text/html; charset=utf-8'),
           '/swarms/swarms.js': ('swarms.js', 'text/javascript; charset=utf-8'),
           '/swarms/swarms.css': ('swarms.css', 'text/css; charset=utf-8'),
-          '/swarms/site.css': ('site.css', 'text/css; charset=utf-8')}
+          '/swarms/site.css': ('site.css', 'text/css; charset=utf-8'),
+          '/swarms/fonts/fraunces-latin-wght-normal.woff2': ('fonts/fraunces-latin-wght-normal.woff2', 'font/woff2')}
 # The vision page was renamed About (owner, 9 Nov 2026): the old path is a
 # permanent redirect (browsers keep any #fragment across it).
 REDIRECTS = {'/vision': '/about'}
@@ -89,7 +90,7 @@ _CHUNK = re.compile(rb'[0-9A-Fa-f]{1,8}\r\n')
 
 def csp(allow_loopback: bool) -> str:
     connect = "'self' https:" + (' http://127.0.0.1:*' if allow_loopback else '')
-    return ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src %s; "
+    return ("default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src %s; "
             "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" % connect)
 
 

@@ -100,9 +100,22 @@ a {
   font-weight: 600;
   letter-spacing: -1px;
 }
+/* Fraunces on headlines (owner pick, 12 Nov): self-hosted, same-origin, so the
+   CSP's font-src 'self' covers it; SIL OFL 1.1 in web/fonts/OFL-Fraunces.txt.
+   font-display:optional keeps the CLS gate honest - the preload in each shell
+   means it is already there when first paint happens, and if it ever is not,
+   the page keeps the system fallback for that view instead of rewrapping. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("/swarms/fonts/fraunces-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: optional;
+}
 h1,
 h2,
 h3 {
+  font-family: "Fraunces", Georgia, serif;
   font-weight: 550;
   letter-spacing: -0.035em;
 }
