@@ -1321,6 +1321,11 @@ impl Worker {
             .inspect(|code| o.epoch_failure = Some(code))
         };
         if let Some(code) = code {
+            // The state lock has been released. Retiring only the observed state refuses chats
+            // but leaves the other members resident; the existing carrier close owns teardown.
+            if let Err(error) = crate::m16_route::close(epoch.handle()) {
+                eprintln!("joined_owner_retire_close_failed: {}", error.code);
+            }
             self.shared.update(|f| f.retired = Some(code));
         }
     }
