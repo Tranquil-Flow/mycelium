@@ -96,13 +96,15 @@ pub(super) struct Work {
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
+        let local_session = Arc::new(Mutex::new(None));
+        lock(&host.custody).work_session = Some(local_session.clone());
         Self {
             host,
             owner: iroh::SecretKey::generate(),
             resident: Arc::new(Mutex::new(Resident {
                 work: None,
                 local: None,
-                local_session: Arc::new(Mutex::new(None)),
+                local_session,
                 nodes: Vec::new(),
             })),
             stopped: Arc::new(AtomicBool::new(false)),
@@ -169,7 +171,6 @@ impl Work {
         let announcement = VerifiedAnnouncement::read(&mut client)
             .map_err(|_| refused("owner_pin_announcement_unverified"))?;
         let mut resident = lock(&self.resident);
-        *lock(&resident.local_session) = Some(session);
         if let Some(service) = &mut resident.local {
             service.update(announcement).map_err(|e| refused(&e))?;
         } else {

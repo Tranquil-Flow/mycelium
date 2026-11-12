@@ -128,6 +128,7 @@ struct Custody {
     failure: Option<CleanupFailure>,
     compiler: Option<Weak<Mutex<Compiler<PackagedRun>>>>,
     work_stop: Option<api::joined_owner::work::Cancel>,
+    work_session: Option<crate::packaged_work::SessionCell>,
     exchange_resource: Option<(Instant, Option<&'static str>)>,
 }
 
@@ -188,13 +189,26 @@ impl RunHost for PackagedRun {
         let relay_absent = matches!(self.network.state(), RelayState::Absent);
         let mut authority = lock(&self.authority);
         let mut run = lock(&self.run);
-        f(&mut RunView {
+        let result = f(&mut RunView {
             authority: &mut authority,
             run: &mut run,
             closed,
             left,
             relay_absent,
-        })
+        });
+        // Every contributor mutation (including the renewal's take/restore) passes this host.
+        // Keep the preceding lease-bounded snapshot only while its Session is in flight.
+        if let Some(cell) = &lock(&self.custody).work_session {
+            let mut held = lock(cell);
+            if closed || left || !authority.running || authority.target || run.contributor.is_none()
+            {
+                *held = None;
+            } else if let Some(session) = run.contributor.as_ref().and_then(|m| m.session.as_ref())
+            {
+                *held = Some(session.clone());
+            }
+        }
+        result
     }
     fn bootstrap_lifecycle(&self) -> Arc<Mutex<()>> {
         self.lifecycle.clone()
