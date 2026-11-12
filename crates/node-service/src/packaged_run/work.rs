@@ -70,12 +70,11 @@ pub(super) fn settle_debt(host: &PackagedRun) -> Result<(), String> {
     }
     if failure.is_none()
         && let Some(mut service) = debt.local.take()
+        && let Err(code) = service.close()
     {
-        if let Err(code) = service.close() {
-            eprintln!("member_work_custody_cleanup_failed:{code}");
-            debt.local = Some(service);
-            failure = Some(code);
-        }
+        eprintln!("member_work_custody_cleanup_failed:{code}");
+        debt.local = Some(service);
+        failure = Some(code);
     }
     if let Some(code) = failure {
         lock(&host.custody).work_debt = Some(debt);
@@ -525,12 +524,12 @@ impl Work {
             // now (dropping a link never proves cleanup, so it is never the exit's substitute).
             drop(work.take_members());
         }
-        if let Some(mut service) = resident.local.take() {
-            if let Err(code) = service.close() {
-                eprintln!("member_work_custody_cleanup_failed:{code}");
-                retain_debt(&self.host, None, Some(service));
-                return Err(code);
-            }
+        if let Some(mut service) = resident.local.take()
+            && let Err(code) = service.close()
+        {
+            eprintln!("member_work_custody_cleanup_failed:{code}");
+            retain_debt(&self.host, None, Some(service));
+            return Err(code);
         }
         lock(&self.host.custody).work_stop = None;
         if let Some(seed) = self.host.with(|c| c.authority.seed.clone()) {
