@@ -20,6 +20,7 @@ use crate::{
     packaged_run::{Authority, Managed},
     router_port::ServingActions,
 };
+mod work;
 use api::{
     actions::{Action, Backend},
     app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
@@ -71,6 +72,8 @@ pub struct NetworkConfig {
     /// v0.1.4's `_device_memory_bytes()` test seam (app.py:1123-1126 @ f4e366e9): the RAM that
     /// bounds this Mac's per-run memory consent. `None` (the app's own): this Mac's `hw.memsize`.
     pub device_memory_bytes: Option<u64>,
+    /// Explicit permitted work transport: LocalOnly by default, or a caller-admitted LAN.
+    pub work_network: crate::packaged_work::NetworkChoice,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -87,6 +90,7 @@ impl Default for NetworkConfig {
             seams: JoinSeams::default(),
             sidecar: None,
             device_memory_bytes: None,
+            work_network: crate::packaged_work::NetworkChoice::default(),
         }
     }
 }
@@ -113,6 +117,10 @@ pub struct Network {
     /// it, peer.py:1037-1060); the leave's `disconnect` waits for it.
     renewing: Mutex<bool>,
     renewed: std::sync::Condvar,
+    work: Mutex<Option<crate::packaged_work::Service>>,
+    work_session: crate::packaged_work::SessionCell,
+    work_network: crate::packaged_work::NetworkChoice,
+    work_closed: AtomicBool,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -143,6 +151,10 @@ impl Network {
             start_guard: StartGuard::default(),
             renewing: Mutex::new(false),
             renewed: std::sync::Condvar::new(),
+            work: Mutex::default(),
+            work_session: Arc::new(Mutex::new(None)),
+            work_network: config.work_network,
+            work_closed: AtomicBool::new(false),
         })
     }
     /// `_device_memory_bytes()` (app.py:1123-1126 @ f4e366e9): the RAM that bounds this Mac's
@@ -191,6 +203,8 @@ impl Network {
     /// bringing up is closed at once and no later Start brings one up (`application_closed`),
     /// then the relay this host keeps is closed.
     pub fn quit(&self) {
+        self.work_closed.store(true, Ordering::SeqCst);
+        self.close_work();
         self.start_guard.close();
         self.close();
     }
@@ -209,6 +223,9 @@ impl Network {
         if left {
             self.left.store(true, Ordering::SeqCst);
         }
+        if fence || left {
+            self.close_work();
+        }
     }
     /// `self.public_relay.proxy.bind_seed(self.authority.seed_server)` once the swarm exists
     /// (app.py:1612-1613) or the authority started again (app.py:1636-1637).
@@ -226,6 +243,10 @@ impl Network {
         // waits for it, or this pass sees `_left` and does not start.
         *lock(&self.renewing) = true;
         app_host::renew_member(&self.cell(authority));
+        self.sync_work_session(authority);
+        if membership_state(authority).as_deref() != Some("current") {
+            self.close_work();
+        }
         *lock(&self.renewing) = false;
         self.renewed.notify_all();
     }
@@ -894,6 +915,42 @@ impl api::member_agent::MemberHost for PackagedMember {
         lock(&self.authority)
             .recorded
             .reported(record, std::time::Instant::now());
+    }
+    fn work_enabled(&self) -> bool {
+        true
+    }
+    fn work_announcement(
+        &self,
+        announcement: api::run_exchange::owner_pin::VerifiedAnnouncement,
+    ) -> Result<Option<Value>, String> {
+        self.announce_work(announcement)
+    }
+    fn close_work(&self) {
+        self.network.close_work();
+    }
+    fn work_preview(
+        &self,
+        offer: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<Value, api::standing_acceptor::AcceptFailure> {
+        lock(&self.network.work)
+            .as_ref()
+            .ok_or_else(|| api::standing_acceptor::AcceptFailure::code("member_work_unavailable"))?
+            .preview(offer, limits, policy)
+            .map_err(|code| api::standing_acceptor::AcceptFailure::code(&code))
+    }
+    fn work_accept(
+        &self,
+        preview: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<(), api::standing_acceptor::AcceptFailure> {
+        lock(&self.network.work)
+            .as_ref()
+            .ok_or_else(|| api::standing_acceptor::AcceptFailure::code("member_work_unavailable"))?
+            .accept(preview, limits, policy)
+            .map_err(|code| api::standing_acceptor::AcceptFailure::code(&code))
     }
     fn spawn(
         &self,

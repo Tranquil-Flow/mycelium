@@ -203,6 +203,39 @@ impl Service {
         }
         Ok(())
     }
+    /// Standing acceptance is preflight only: no owner-authored consent and no native launch.
+    /// The resident dispatcher repeats this admission when the signed prepare command arrives.
+    pub fn preview(&self, offer: &Value, limits: &Value, policy: &Value) -> Result<Value> {
+        self.shared.live()?;
+        let saved = api::preferences::resource_policy::read(&self.shared.root)
+            .map_err(|e| e.code.to_owned())?;
+        if saved.as_ref() != Some(policy) {
+            return Err("resource_policy_changed".into());
+        }
+        let mut work = work::Work::new(self.shared.root.clone());
+        work.announced(
+            &*self
+                .shared
+                .announcement
+                .lock()
+                .map_err(|_| "member_announcement_poisoned")?,
+        );
+        let admitted = work
+            .admit_share_for(Some(&*self.shared), offer, true)?
+            .ok_or("member_share_unannounced")?;
+        if &admitted != limits {
+            return Err("member_share_limits_mismatch".into());
+        }
+        Ok(
+            json!({"protocol":"mycelium.packaged_member_work_preview.v1", "offer":offer, "limits":limits}),
+        )
+    }
+    pub fn accept(&self, preview: &Value, limits: &Value, policy: &Value) -> Result<()> {
+        if self.preview(&preview["offer"], limits, policy)? != *preview {
+            return Err("member_work_preview_changed".into());
+        }
+        Ok(())
+    }
     pub fn close(&mut self) -> Result<()> {
         self.shared.stop.store(true, Ordering::SeqCst);
         let cancel = self.shared.dispatcher.cancel_active();

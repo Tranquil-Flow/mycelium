@@ -83,8 +83,18 @@ fn rendezvous_reaches_owner_over_existing_seed_tls_without_pairing() {
         p.seed.coordinator.signer().public_key_record()
     );
     joined::inbox::publish(&p.client(), &d).unwrap();
-    let received = p.seed.work_members.get(&p.seed.coordinator, p.session.node_id(), p.owner.public(),
-        "run-s4cb2", "dep-s4cb2", &|a| a.ip().is_loopback()).unwrap();
+    let received = p
+        .seed
+        .work_members
+        .get(
+            &p.seed.coordinator,
+            p.session.node_id(),
+            p.owner.public(),
+            "run-s4cb2",
+            "dep-s4cb2",
+            &|a| a.ip().is_loopback(),
+        )
+        .unwrap();
     assert_eq!(received.registration(), &d["message"]["registration"]);
 }
 #[test]

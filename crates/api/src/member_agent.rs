@@ -180,6 +180,18 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
     /// The end of `_auto_report` (app.py:1161-1162): `self.last_report = record` (shown in
     /// `join_flow.last_report`) and the next periodic report 300 s on.
     fn reported(&self, _record: Value) {}
+    /// A packaged member owns an already-enrolled work endpoint. Other hosts keep their
+    /// existing behavior; this is not permission to run an operator pairing flow.
+    fn work_enabled(&self) -> bool {
+        false
+    }
+    fn work_announcement(
+        &self,
+        _announcement: crate::run_exchange::owner_pin::VerifiedAnnouncement,
+    ) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    fn close_work(&self) {}
     /// `preview_work(actor, offer, stage_acknowledged=True, limits=, resource_policy=)`: no member
     /// work service is composed by default (it is the member work service's, S4b/S4c).
     fn work_preview(
@@ -370,6 +382,7 @@ impl<H: MemberHost> MemberAgent<H> {
             .as_ref()
             .is_some_and(|g| g.get("state") == Some(&json!("granted")));
         if !target || !running || left || closed || !granted {
+            host.close_work();
             if left || closed {
                 self.close(host);
             }
@@ -382,9 +395,11 @@ impl<H: MemberHost> MemberAgent<H> {
         // acceptor context (the headless launcher's) keeps its own gates.
         if let Some(context) = &context {
             let Some(binding) = &context.binding else {
+                host.close_work();
                 return;
             };
             if grant.as_ref().and_then(|g| g.get("binding")) != Some(binding) {
+                host.close_work();
                 return;
             }
         }
@@ -395,6 +410,26 @@ impl<H: MemberHost> MemberAgent<H> {
                 return;
             }
         };
+        if host.work_enabled() {
+            let publication = match client.lock() {
+                Ok(mut exchange) => {
+                    crate::run_exchange::owner_pin::VerifiedAnnouncement::read(&mut exchange)
+                        .map_err(|e| e.0)
+                        .and_then(|a| host.work_announcement(a))
+                        .and_then(|d| match d {
+                            Some(d) => crate::member_control::joined::inbox::publish(&exchange, &d)
+                                .map_err(|e| e.code.to_owned()),
+                            None => Ok(()),
+                        })
+                }
+                Err(_) => Err("member_work_exchange_poisoned".into()),
+            };
+            if let Err(code) = publication {
+                host.close_work();
+                eprintln!("member_work_publication:{code}");
+                return;
+            }
+        }
         // `if report_due: outcome['report'] = app.auto_report('periodic')` (standing_consent.py:
         // 362-363), past the gates above, before the acceptor and the agent; `_auto_report` never
         // raises (app.py:1138-1163).
@@ -450,6 +485,7 @@ impl<H: MemberHost> MemberAgent<H> {
 
     /// Leave / quit: no worker survives this Mac's membership.
     pub fn close(&mut self, host: &Arc<H>) {
+        host.close_work();
         if let Some(agent) = self.agent.as_mut() {
             agent.close();
         }

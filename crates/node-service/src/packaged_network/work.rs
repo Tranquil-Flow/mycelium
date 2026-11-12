@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Work endpoint custody belongs to the network lifecycle, not to the observer's HelloSession.
+use super::*;
+use api::{
+    member_agent::MemberHost,
+    run_exchange::owner_pin::{OwnerPin, VerifiedAnnouncement},
+};
+impl Network {
+    pub fn close_work(&self) {
+        if let Some(mut work) = lock(&self.work).take()
+            && let Err(code) = work.close()
+        {
+            eprintln!("packaged_work_cleanup_unproven:{code}");
+        }
+    }
+    pub fn sync_work_session(&self, authority: &Mutex<Authority>) {
+        let a = lock(authority);
+        // A renewal temporarily moves the Session out. Retain the preceding snapshot only
+        // during that flight; its lease still bounds the resident dispatch admission.
+        if a.session.is_some() || a.session_view.is_none() {
+            *lock(&self.work_session) = a.session.clone();
+        }
+    }
+}
+impl PackagedMember {
+    pub(super) fn announce_work(
+        &self,
+        announcement: VerifiedAnnouncement,
+    ) -> Result<Option<Value>, String> {
+        if (self.seams.closed)()
+            || self.network.work_closed.load(Ordering::SeqCst)
+            || self.network.fenced()
+        {
+            self.network.close_work();
+            return Ok(None);
+        }
+        self.network.sync_work_session(&self.authority);
+        if announcement.announcement()["owner_control"].is_null() {
+            self.network.close_work();
+            return Ok(None);
+        }
+        OwnerPin::from_announcement(&announcement).map_err(|e| e.0.to_owned())?;
+        if let Some(code) = self.resource_check() {
+            self.network.close_work();
+            return Err(code);
+        }
+        let mut slot = lock(&self.network.work);
+        if let Some(work) = slot.as_mut() {
+            if let Err(code) = work.update(announcement.clone()) {
+                // update has closed the old generation. Never retain that link for a new run.
+                *slot = None;
+                return Err(code);
+            }
+        } else {
+            let root = lock(&self.authority).root.clone();
+            let (identity, _, _) = app_host::identity(&root).map_err(|e| e.code.to_owned())?;
+            *slot = Some(crate::packaged_work::Service::on_network(
+                root,
+                self.network.work_session.clone(),
+                Arc::new(identity),
+                announcement,
+                self.network.work_network.clone(),
+            )?);
+        }
+        if self.network.work_closed.load(Ordering::SeqCst) || self.network.fenced() {
+            if let Some(mut service) = slot.take() {
+                service.close()?;
+            }
+            return Err("member_work_closed".into());
+        }
+        slot.as_ref()
+            .ok_or("member_work_unavailable")?
+            .registration()
+            .map(Some)
+    }
+}
