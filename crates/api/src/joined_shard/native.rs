@@ -288,6 +288,13 @@ impl NativeShard {
         };
         checkpoint()?;
         self.check(current)?;
+        // F2: once the guard killed a worker, this run is over on this member,
+        // as v0.1.4's runtime after a loaded worker died: `blocked`,
+        // `runtime_cold_restart_required`, no replacement (managed_runtime.py:336-345).
+        // Only a new offer (new custody, a new NativeShard) prepares again.
+        if self.guard_failure.is_some() {
+            return Err(fail("runtime_cold_restart_required"));
+        }
         // A fresh worker per serving epoch is allowed only after the previous one's
         // close/reap was proven. The consent wall and command budget keep running
         // from the FIRST prepare; a new worker never resets the granted lifetime.
