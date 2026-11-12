@@ -599,3 +599,175 @@ fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_
     drop(repository);
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// The owner mailbox's rows that would show a claimed, dispatched, acknowledged or replay-recorded
+/// request (`control-runtime` mailbox tables), dumped for a before/after comparison.
+fn mailbox_effects(owner: &Mac) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![private(&owner.state)];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.file_name().is_some_and(|n| n == "mailbox.sqlite") {
+                found.push(path);
+            }
+        }
+    }
+    assert_eq!(found.len(), 1, "one owner mailbox: {found:?}");
+    let db = rusqlite::Connection::open_with_flags(
+        &found[0],
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut rows = Vec::new();
+    for table in [
+        "managed_commands",
+        "managed_auth_requests",
+        "managed_replay_history",
+        "control_high_water",
+        "control_dispatch",
+        "control_dispatch_receipts",
+        "managed_stage_offers",
+        "managed_stage_history",
+    ] {
+        let Ok(mut query) = db.prepare(&format!("SELECT * FROM {table}")) else {
+            continue;
+        };
+        let columns = query.column_count();
+        let mut result = query.query([]).unwrap();
+        while let Some(row) = result.next().unwrap() {
+            let cells: Vec<String> = (0..columns)
+                .map(|i| format!("{:?}", row.get_ref(i).unwrap()))
+                .collect();
+            rows.push(format!("{table}: {}", cells.join(" | ")));
+        }
+    }
+    rows
+}
+/// POST one target poll for `node`'s binding, signed by `signer`, to the owner seed's
+/// `/managed-control/poll` (the route a joined Mac's pump uses); the seed's answer or its code.
+fn post_poll(
+    membership: &serde_json::Map<String, Value>,
+    seams: &JoinSeams,
+    node: &str,
+    signer: &protocol::identity::Identity,
+) -> Result<Value, String> {
+    let text = |k: &str| membership[k].as_str().unwrap().to_owned();
+    let records: Vec<Value> = membership["seed_key_records"].as_array().unwrap().clone();
+    let client = api::seed::SeedClient::new(
+        &text("seed_url"),
+        &text("swarm_id"),
+        &text("seed_key_digest"),
+        &records,
+        &seams.member_seed,
+    )
+    .unwrap();
+    let now = api::app_host::now();
+    let nonce = || api::app_host::hex(&api::app_host::random(16).unwrap());
+    let statement = json!({
+        "protocol": "mycelium.managed_control.target_poll.v1",
+        "swarm_id": text("swarm_id"),
+        "target_node_id": node,
+        "target_endpoint_id": signer.endpoint_id(),
+        "target_key_digest": signer.verification_key_digest(),
+        "membership_generation": membership["membership_generation"],
+        "member_incarnation": membership["incarnation"],
+        "run_id": "stage-discovery", "deployment_id": "stage-discovery",
+        "request_id": nonce(), "sequence": 1, "nonce": nonce(),
+        "issued_at": now, "expires_at": now + 30.0,
+    });
+    let envelope = json!({
+        "protocol": protocol::managed::SIGNED_ENVELOPE_PROTOCOL,
+        "signature": signer.sign(&statement).unwrap(),
+        "verification_key": signer.public_key_record(),
+        "statement": statement,
+    });
+    client
+        .post("/managed-control/poll", &envelope)
+        .map_err(|e| e.code)
+}
+
+/// REVIEW-lanePH3B-S3C F1 (security boundary): once the owner's run has bound its mailbox on the
+/// packaged seed's network routes, a target poll that does not come from a CURRENT member is
+/// refused before the mailbox, and nothing is claimed, dispatched, acknowledged or recorded.
+/// v0.1.4 @ f4e366e9: the seed's managed routes (`ManagedControlMailbox.handle_http`,
+/// managed_control.py:1895-1910, mounted by `run_registry_server` -> tls.py) authenticate every
+/// envelope against the current membership (`_current_member`: lifecycle NEW / CONFIGURED /
+/// RUNNING and an unexpired lease, else `managed_control_member_stale`).
+/// * a stranger (an identity that never joined) naming its own node: `managed_control_member_stale`;
+/// * the joined Mac's binding signed by a key that is not its own: refused;
+/// * the joined Mac once it stopped renewing (Quit; a Mac that LEFT does the same,
+///   member_leave.py:17-18) and its lease (300 s) ran out, with its own key and a foreign one:
+///   `managed_control_member_stale`. This test waits that lease out (about five minutes).
+#[test]
+fn after_observe_the_owners_mailbox_refuses_a_stranger_a_foreign_key_and_an_expired_member() {
+    let base = state_root("observe-mailbox-gate");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+    );
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let run = until_within(
+        "the run ended",
+        observe_patience() + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    assert_eq!(run["steps"][3]["state"], "done", "observe bound the mailbox: {run}");
+    let root = private(&member.state);
+    let membership = api::peer::load_membership_state(&root).unwrap().unwrap();
+    let node = membership["node_id"].as_str().unwrap().to_owned();
+    let (own, _, _) = api::app_host::identity(&root).unwrap();
+    let stranger = protocol::identity::Identity::from_secret(
+        "stranger-endpoint",
+        &api::app_host::random(32).unwrap().try_into().unwrap(),
+    )
+    .unwrap();
+    let before = mailbox_effects(&owner.mac);
+
+    let refused = post_poll(&membership, &owner.seams, "stranger-node", &stranger);
+    assert_eq!(refused, Err("managed_control_member_stale".to_owned()));
+    let refused = post_poll(&membership, &owner.seams, &node, &stranger);
+    assert!(refused.is_err(), "a foreign key for the member's binding: {refused:?}");
+    assert_eq!(mailbox_effects(&owner.mac), before);
+
+    // The joined Mac quits: it stops renewing, so its seed row stays RUNNING until its lease runs
+    // out (the shipped "left" too: member_leave.py:17-18; the packaged host has no `/api/revoke`,
+    // it answers `slice_action_unsupported`, and its seed no clock seam). Until then its own
+    // poll, a replay of a sequence its pump already used, is refused by the mailbox
+    // (`managed_control_sequence_replayed`); from then on by the member gate, before the mailbox.
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    let deadline = std::time::Instant::now()
+        + millis(B::PyFinalMyceliumSeedCoordinatorLeaseSecondsL180C31)
+        + millis(B::OwnerPoll) * 10;
+    loop {
+        let answer = post_poll(&membership, &owner.seams, &node, &own);
+        if answer == Err("managed_control_member_stale".to_owned()) {
+            break;
+        }
+        assert!(answer.is_err(), "a quit member's replayed poll: {answer:?}");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the member's lease never ran out: {answer:?}"
+        );
+        std::thread::sleep(millis(B::OwnerPoll));
+    }
+    // A foreign key for the expired member: the same.
+    let refused = post_poll(&membership, &owner.seams, &node, &stranger);
+    assert_eq!(refused, Err("managed_control_member_stale".to_owned()));
+    assert_eq!(mailbox_effects(&owner.mac), before);
+
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
