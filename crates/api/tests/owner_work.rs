@@ -1912,7 +1912,7 @@ fn a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_
     );
     let (status, accepted) = post(&gateway);
     assert_eq!(status, 202, "chat 2 refused: {accepted}");
-    let (_rx, _reader) = events(&gateway, &accepted);
+    let (_rx, reader) = events(&gateway, &accepted);
     assert!(
         held.recv_timeout(span(B::WorkerStartup)).is_ok(),
         "chat 2 runs on the run's epoch"
@@ -1954,6 +1954,7 @@ fn a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_
     }
     // The next run over the same members: each receives its shard again.
     let mut work = _stopper.join().unwrap();
+    reader.join().unwrap();
     let back = work.take_members();
     assert_eq!(back.len(), 2);
     let mut again = OwnerWork::new(
