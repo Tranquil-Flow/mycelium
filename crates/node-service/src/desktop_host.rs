@@ -227,6 +227,16 @@ pub struct DesktopServices {
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
     rate: Arc<Mutex<crate::chat_edge::RateWindow>>,
+    /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): once a run is
+    /// composed it answers every `/chat/*` route (lane S5F); without one the SLICE-1 native path
+    /// above answers.
+    chat_run: Option<api::chat_service::ChatService>,
+    /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
+    run_chats: Option<api::chat_service::RunChats>,
+    /// The node's state root these services were built with: `private`'s parent (`<state
+    /// root>/v02-node` in the packaged composition, packaged.rs:76-89). The chat timing file must
+    /// lie under it (lane S5F).
+    node_root: Option<std::path::PathBuf>,
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
@@ -361,6 +371,74 @@ impl DesktopServices {
         self.model = Some(gate);
         self
     }
+    /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): from now
+    /// on `/chat/api/{state,send,events}` always go through the shipped `ChatService`, which answers
+    /// `chat_not_ready` / `chat_warming_up` / `chat_switching_runs` itself while `run` does not serve
+    /// (lane S5F); `timing` is the owner's per-chat timing file (v0.2's own evidence folder, never
+    /// v0.1.4's).
+    pub fn with_chat_run(
+        mut self,
+        run: Arc<dyn api::chat_service::RunRoute>,
+        timing: Option<std::path::PathBuf>,
+    ) -> Result<Self, PublicError> {
+        let refused = PublicError::new(500, "chat_timing_path_refused");
+        let timing = match (timing, &self.node_root) {
+            (None, _) => None,
+            (Some(path), Some(root)) => Some(api::chat_service::TimingFile::under(root, &path)?),
+            (Some(_), None) => return Err(refused),
+        };
+        let chat = api::chat_service::ChatService::new(
+            run,
+            Arc::new(api::chat_service::MonotonicClock::default()),
+            timing,
+        )?;
+        self.run_chats = Some(api::chat_service::RunChats::new(Arc::new(chat.clone())));
+        self.chat_run = Some(chat);
+        Ok(self)
+    }
+    /// The handle the owner run's ports hold (lane S5F): its teardown, ceiling, rollover and
+    /// dead-member facts cancel the page's route chats with the shipped codes. `None` without
+    /// [`DesktopServices::with_chat_run`].
+    pub fn run_chats(&self) -> Option<api::chat_service::RunChats> {
+        self.run_chats.clone()
+    }
+    /// The route chat service once a run is composed: then it answers EVERY `/chat/*` route, as the
+    /// shipped app's only chat path does (`DemoApp.chat_route` app.py:1926 -> `chat.handle`
+    /// chat.py:553-584 -> `ChatService`; not serving -> its own 503 codes, chat.py:311-318). `None`:
+    /// no run is composed and the SLICE-1 native path answers. A host never has both paths, so a
+    /// native chat and a route chat can never run at once (lane S5F, REVIEW-lanePH3B-S5 F1/F3).
+    fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
+        self.chat_run.as_ref()
+    }
+    /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
+    /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
+    fn route_send(
+        &self,
+        chat: &api::chat_service::ChatService,
+        body: &Value,
+    ) -> Result<Value, api::chat::ChatError> {
+        let refused = |error: PublicError| api::chat::ChatError {
+            error,
+            retry_after: None,
+        };
+        let plan = crate::chat_edge::plan(body).map_err(refused)?;
+        if self
+            .gate
+            .lock()
+            .map_err(|_| refused(err("desktop_poisoned")))?
+            .closing
+        {
+            return Err(refused(err("application_closed")));
+        }
+        chat.send(
+            "local",
+            api::chat_service::Prompt {
+                text: plan.prompt,
+                max_new_tokens: plan.max_new_tokens,
+                clamped: plan.clamped,
+            },
+        )
+    }
     fn with_host(
         node: NodeService,
         capacity: NonZeroUsize,
@@ -406,6 +484,9 @@ impl DesktopServices {
             })),
             chat: Arc::new(Mutex::new(None)),
             rate: Arc::default(),
+            chat_run: None,
+            run_chats: None,
+            node_root: private.parent().map(Path::to_path_buf),
             started: std::time::Instant::now(),
             capacity,
         }
@@ -593,6 +674,13 @@ impl DesktopServices {
                     body.as_object()
                         .ok_or(PublicError::new(400, "invalid_request"))?,
                 )?;
+                // The run's Stop tears it down with `chat.cancel_all('chat_cancelled')`
+                // (demo_chain.py:1322-1335 @ f4e366e9); repeated by the run's own hook, a no-op.
+                if path == "/api/demo/stop"
+                    && let Some(chat) = &self.chat_run
+                {
+                    chat.cancel_all(api::chat_service::Teardown::Stopped.code());
+                }
                 Self::json(value)
             }
             _ => Err(PublicError::new(404, "not_found")),
@@ -715,6 +803,10 @@ impl DesktopServices {
                 }
                 "completed" => "completed",
                 "cancelled" => "cancelled",
+                // `/api/demo/stop` cancels the node service's job directly, which ends the
+                // request `failed` with `request_cancelled`; v0.1.4's Stop cancels through the
+                // gateway (`cancel_all`, demo_chain.py:1322-1335), a `cancelled` terminal.
+                "failed" if event.payload["code"] == "request_cancelled" => "cancelled",
                 "failed" => "failed",
                 // `accepted` (and any lifecycle event) carries nothing for the page.
                 _ => {
@@ -728,6 +820,11 @@ impl DesktopServices {
             };
             chat.done = true;
             chat.terminal = Some(terminal);
+            if terminal == "cancelled" {
+                // v0.1.4: `error = cancel_reason or 'chat_cancelled'` (chat.py:368-369); every
+                // cancel on this path is a Stop, whose reason is `chat_cancelled`.
+                chat.error = Some(api::chat_service::Teardown::Stopped.code().to_owned());
+            }
             if terminal == "failed" {
                 // v0.1.4: a failed terminal shows its code (chat.py:366-367).
                 chat.error = Some(
