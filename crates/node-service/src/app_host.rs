@@ -788,11 +788,13 @@ impl PackagedHost {
                         );
                     }
                     let acquisition = model.lock().acquisition.clone();
+                    let missing_acquisition = acquisition.is_none();
+                    let missing_policy = policy.is_none();
                     let (Some(policy), Some(acquisition), true) = (policy, acquisition, usable)
                     else {
-                        if acquisition.is_none() {
+                        if missing_acquisition {
                             eprintln!("l11_reverify_gate:no_acquisition");
-                        } else if policy.is_none() {
+                        } else if missing_policy {
                             eprintln!("l11_reverify_gate:no_policy");
                         }
                         return Reverify::Failed;
