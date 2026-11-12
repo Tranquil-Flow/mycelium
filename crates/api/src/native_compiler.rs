@@ -84,6 +84,8 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
     let mut bytes = 0;
     let mut buffer = vec![0; 64 * 1024];
     loop {
+        #[cfg(test)]
+        program_tests::hash_checkpoint(path);
         if stopped() {
             return Err(Error("compiler_stopped"));
         }

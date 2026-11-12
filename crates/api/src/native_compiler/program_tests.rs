@@ -2,6 +2,42 @@
 //! Model-free identity checks. Executable fixtures are data and never run.
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
+thread_local! {
+    static HASH_ARM: std::cell::RefCell<Option<(PathBuf, Arc<AtomicBool>, usize)>> = const { std::cell::RefCell::new(None) };
+}
+pub(super) fn hash_checkpoint(path: &Path) {
+    HASH_ARM.with(|arm| {
+        if let Some((watched, cancel, reads)) = arm.borrow_mut().as_mut() && watched == path {
+            *reads += 1;
+            if *reads == 2 { cancel.store(true, Ordering::SeqCst); }
+        }
+    });
+}
+fn pre_spawn_cancel(scoped: bool) {
+    {
+        let f = Fixture::new();
+        let config = ProgramSelection::Explicit(Some(f.program.clone())).resolve(&|| false).unwrap().unwrap();
+        let expected = config.pin.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        HASH_ARM.with(|arm| *arm.borrow_mut() = Some((config.binary.clone(), cancel.clone(), 0)));
+        let deadline = Instant::now() + std::time::Duration::from_millis(budgets::BudgetId::RouterClose.span(budgets::Entries::ZERO).unwrap().millis());
+        // The fixture is non-executable data despite its mode. Neither branch may reach spawn.
+        let outcome = if scoped {
+            worker::Worker::start_scoped_until(&config, &json!({}), cancel.clone(), &f.root, deadline).map_err(|e| e.error)
+        } else {
+            worker::Worker::start_until(&config, &json!({}), cancel.clone(), &f.root, deadline)
+        };
+        let reads = HASH_ARM.with(|arm| arm.borrow_mut().take().unwrap().2);
+        assert!(cancel.load(Ordering::SeqCst));
+        assert_eq!(outcome.err().unwrap().0, "compiler_stopped");
+        assert_eq!(reads, 2, "scoped={scoped}: real pre-spawn hash ignored the operation cancel after its first chunk");
+        assert_eq!((config.pin.bytes, &config.pin.sha256), (expected.bytes, &expected.sha256), "expected identity must not be remeasured");
+    }
+}
+#[test]
+fn real_pre_spawn_hash_observes_compile_operation_cancel() { pre_spawn_cancel(false); }
+#[test]
+fn real_pre_spawn_hash_observes_scoped_operation_cancel() { pre_spawn_cancel(true); }
 struct Fixture {
     root: PathBuf,
     program: NativeProgram,
