@@ -181,6 +181,10 @@ impl Fail {
 }
 
 fn internal() -> Fail {
+    // The wire code for an unlisted failure is deliberately generic, which hides the cause from
+    // the peer entirely. Leave the bytes alone and record the fact that this path fired so the
+    // owner's log can name the route that failed.
+    eprintln!("seed_http_internal_fired");
     Fail::with_status("seed_http_internal_error", 500)
 }
 
