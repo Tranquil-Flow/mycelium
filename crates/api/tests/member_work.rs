@@ -835,3 +835,83 @@ fn r1_nondialing_owner_cannot_hold_serve_or_leave_past_the_members_own_wall() {
 fn r1_nondialing_owner_is_bounded_by_an_earlier_signed_expiry() {
     nondialing_owner(false);
 }
+
+/// NaN/inf are not JSON numbers: exercise their public Value representation (null) and
+/// strings, plus finite numeric overflows which DO cross the signed-control JSON boundary.
+#[test]
+fn r2_invalid_route_expiries_refuse_without_panicking() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let mut work = idle_work(&member);
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = api::managed_carrier::HostClock::default();
+    let until = || {
+        clock
+            .monotonic()
+            .checked_add(B::RouterClose.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
+    let mut host = LoopbackHost::bind(&rt, &clock, until()).unwrap();
+    let endpoint = host.address().unwrap().id;
+    let mut failures = Vec::new();
+    for (label, expiry) in [
+        ("finite 1e300", json!(1e300)),
+        ("Instant overflow", json!(1e19)),
+        ("NaN Value", json!(f64::NAN)),
+        ("+inf Value", json!(f64::INFINITY)),
+        ("NaN string", json!("NaN")),
+        ("+inf string", json!("+inf")),
+        ("negative", json!(-1)),
+        ("zero", json!(0)),
+        ("malformed", json!({"seconds":1})),
+    ] {
+        for signed in [false, true] {
+            let route = if signed {
+                idle_route(&member, &work, endpoint, expiry.clone())
+            } else {
+                json!({"message":{"expires_at":expiry}})
+            };
+            let operation = Operation {
+                request: json!({"command":"serve","operation_id":3,"route":route}),
+                cancelled: Arc::new(AtomicBool::new(false)),
+                deadline: Instant::now() + test_span(B::RouterClose),
+                origin: Origin::Remote,
+                id: Some(3),
+            };
+            let began = Instant::now();
+            let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                work.serve(
+                    Some(&member),
+                    &Carrier {
+                        host: &host,
+                        runtime: &rt,
+                        clock: &clock,
+                        endpoint,
+                        lan: None,
+                    },
+                    &member.signer,
+                    &operation,
+                )
+            }));
+            let correct = matches!(&out, Ok(Err(code)) if code == "route_invalid");
+            eprintln!(
+                "EP2F R2 {label} signed={signed} elapsed={:?} result={out:?}",
+                began.elapsed()
+            );
+            if !correct {
+                failures.push(format!("{label} signed={signed}: {out:?}"));
+            }
+        }
+    }
+    host.close(&clock, until()).unwrap();
+    assert!(work.discard().is_ok());
+    assert!(
+        failures.is_empty(),
+        "invalid owner routes must refuse route_invalid without process death: {failures:#?}"
+    );
+}
