@@ -323,6 +323,7 @@ impl Service {
         cancel.and(input).and(joined).and(cleanup)
     }
     /// True while a failed close still owns member-side custody (a `close` retries it).
+    #[cfg(any(feature = "desktop-shell", feature = "packaged"))]
     pub(crate) fn cleanup_pending(&self) -> bool {
         self.cleanup
             .lock()
