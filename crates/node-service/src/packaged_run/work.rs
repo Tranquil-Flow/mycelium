@@ -226,33 +226,37 @@ impl Work {
                 .ok_or_else(|| refused("native_reference_invalid"))?
                 .len()
                 + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS;
+            let objects = objects::view(
+                artifact.root(),
+                artifact.stage_shards().map_err(|e| refused(e.0))?,
+            )?;
             (
-                Plan {
-                    run_id: state.run_id.clone(),
-                    deployment_id: state.deployment_id.clone(),
-                    model: json!({"model_id":model.model_id,"resolved_commit":model.resolved_commit,"manifest_digest":model.manifest_digest}),
-                    document: artifact.stage_shards().map_err(|e| refused(e.0))?.clone(),
-                    objects: objects::view(
-                        artifact.root(),
-                        artifact.stage_shards().map_err(|e| refused(e.0))?,
-                    )?,
-                    journal: artifact.root().join("work-source"),
-                    ranges: request
-                        .node_ids
-                        .iter()
-                        .cloned()
-                        .zip(
-                            request
-                                .managed_layer_ranges
-                                .iter()
-                                .map(|r| [r[0] as u64, r[1] as u64]),
-                        )
-                        .collect(),
-                    tokens,
-                    forbidden_source: artifact.source().source_root.clone(),
-                    worker_walls: state.worker_wall_limits.clone(),
-                    owner_root: self.host.with(|c| c.authority.root.clone()),
-                },
+                (
+                    Plan {
+                        run_id: state.run_id.clone(),
+                        deployment_id: state.deployment_id.clone(),
+                        model: json!({"model_id":model.model_id,"resolved_commit":model.resolved_commit,"manifest_digest":model.manifest_digest}),
+                        document: artifact.stage_shards().map_err(|e| refused(e.0))?.clone(),
+                        objects: objects.path,
+                        journal: artifact.root().join("work-source"),
+                        ranges: request
+                            .node_ids
+                            .iter()
+                            .cloned()
+                            .zip(
+                                request
+                                    .managed_layer_ranges
+                                    .iter()
+                                    .map(|r| [r[0] as u64, r[1] as u64]),
+                            )
+                            .collect(),
+                        tokens,
+                        forbidden_source: artifact.source().source_root.clone(),
+                        worker_walls: state.worker_wall_limits.clone(),
+                        owner_root: self.host.with(|c| c.authority.root.clone()),
+                    },
+                    objects.pinned,
+                ),
                 artifact.source().source_root.join("tokenizer.json"),
             )
         };
@@ -270,7 +274,7 @@ impl Work {
     fn compose(
         &self,
         state: &RunState,
-        plan: Plan,
+        (plan, objects): (Plan, Arc<runtime::artifact_journal::PinnedObjects>),
         codec: Arc<dyn Codec>,
         env: &mut dyn StepEnv,
     ) -> Result<(), StepError> {
@@ -353,7 +357,8 @@ impl Work {
                 wall: Arc::new(move || wall + at.elapsed().as_secs_f64()),
             },
         )
-        .map_err(|e| refused(&e.0))?;
+        .map_err(|e| refused(&e.0))?
+        .with_objects(objects);
         let stopper = Arc::new(work.stopper());
         let stopped = self.stopped.clone();
         lock(&self.host.custody).work_stop = Some(Arc::new(move || {

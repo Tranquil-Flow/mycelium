@@ -201,7 +201,7 @@ impl Fixture {
             remote,
         }
     }
-    fn plan(&self, state: &RunState) -> Plan {
+    fn plan(&self, state: &RunState) -> (Plan, Arc<runtime::artifact_journal::PinnedObjects>) {
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../../planner/tests/fixtures/source-slices.json"
         ))
@@ -231,24 +231,28 @@ impl Fixture {
             files.insert(node.clone(), json!([file]));
             plans.insert(node.clone(), recipe);
         }
-        Plan {
-            run_id: state.run_id.clone(),
-            deployment_id: state.deployment_id.clone(),
-            model: json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca","manifest_digest":"sha256:00"}),
-            document: json!({"node_files":files,"node_slice_plans":plans}),
-            objects: objects::view(&self.root, &json!({"node_files":files})).unwrap(),
-            journal: self.root.join("journal"),
-            ranges: state
-                .participants
-                .iter()
-                .enumerate()
-                .map(|(i, n)| (n.clone(), [14 * i as u64, 14 * (i as u64 + 1)]))
-                .collect(),
-            tokens: 32,
-            forbidden_source: self.root.join("snapshot"),
-            worker_walls: state.worker_wall_limits.clone(),
-            owner_root: self.root.join("owner"),
-        }
+        let objects = objects::view(&self.root, &json!({"node_files":files})).unwrap();
+        (
+            Plan {
+                run_id: state.run_id.clone(),
+                deployment_id: state.deployment_id.clone(),
+                model: json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca","manifest_digest":"sha256:00"}),
+                document: json!({"node_files":files,"node_slice_plans":plans}),
+                objects: objects.path,
+                journal: self.root.join("journal"),
+                ranges: state
+                    .participants
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.clone(), [14 * i as u64, 14 * (i as u64 + 1)]))
+                    .collect(),
+                tokens: 32,
+                forbidden_source: self.root.join("snapshot"),
+                worker_walls: state.worker_wall_limits.clone(),
+                owner_root: self.root.join("owner"),
+            },
+            objects.pinned,
+        )
     }
 }
 impl Drop for Fixture {

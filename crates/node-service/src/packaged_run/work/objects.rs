@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Content-addressed view of the compiler's named stage shards; no second byte allocation.
 use super::*;
-pub(super) fn view(root: &Path, document: &Value) -> Result<PathBuf, StepError> {
+pub(super) struct View {
+    pub path: PathBuf,
+    pub pinned: Arc<runtime::artifact_journal::PinnedObjects>,
+}
+pub(super) fn view(root: &Path, document: &Value) -> Result<View, StepError> {
     use std::{
         fs,
         os::unix::fs::{DirBuilderExt, MetadataExt, symlink},
@@ -17,6 +21,7 @@ pub(super) fn view(root: &Path, document: &Value) -> Result<PathBuf, StepError> 
         return Err(invalid());
     }
     let mut paths = BTreeMap::new();
+    let mut pinned = runtime::artifact_journal::PinnedObjects::new();
     for rows in nodes.values() {
         let rows = rows
             .as_array()
@@ -48,6 +53,9 @@ pub(super) fn view(root: &Path, document: &Value) -> Result<PathBuf, StepError> 
         if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.nlink() != 1 {
             return Err(invalid());
         }
+        pinned
+            .admit(hash, &source, row["size_bytes"].as_u64())
+            .map_err(|_| invalid())?;
         paths.entry(hash.to_owned()).or_insert(source);
     }
     let objects = root.join("work-objects");
@@ -76,9 +84,11 @@ pub(super) fn view(root: &Path, document: &Value) -> Result<PathBuf, StepError> 
             Err(_) => return Err(invalid()),
         }
     }
-    // ShardSource verifies each digest with its operation checkpoint before granting reads;
-    // the compiler retains the original run artifact until OwnerWork teardown finishes.
-    Ok(objects)
+    // The view retains original descriptors through OwnerWork and the repeated reader.
+    Ok(View {
+        path: objects,
+        pinned: Arc::new(pinned),
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -100,7 +110,7 @@ mod tests {
         let digest = protocol::canonical::sha256_prefixed(content);
         let document = json!({"node_files":{"node-0":[{"path":format!("deployment/{name}"),"content_digest":digest}]}});
         let objects = view(&root, &document).unwrap();
-        let alias = objects.join(digest.strip_prefix("sha256:").unwrap());
+        let alias = objects.path.join(digest.strip_prefix("sha256:").unwrap());
         assert_eq!(
             fs::read(&alias).ok().as_deref(),
             Some(content.as_slice()),

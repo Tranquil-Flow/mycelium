@@ -460,6 +460,7 @@ struct Start {
     plan: Plan,
     network: Network,
     codec: Arc<dyn Codec>,
+    objects: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
 }
 /// The owner's work port over the joined route for one run.
 pub struct OwnerWork {
@@ -546,6 +547,7 @@ impl OwnerWork {
                 plan,
                 network,
                 codec,
+                objects: None,
             }),
             proposal: None,
             commands: None,
@@ -558,6 +560,13 @@ impl OwnerWork {
             returned: Vec::new(),
             admission: Some(admission),
         })
+    }
+    /// Retain compiler admission-time objects until the source thread has joined.
+    pub fn with_objects(mut self, objects: Arc<runtime::artifact_journal::PinnedObjects>) -> Self {
+        if let Some(start) = &mut self.start {
+            start.objects = Some(objects);
+        }
+        self
     }
     /// Admit the run's stages through `admission` instead of [`Proven`].
     pub fn with_admission(mut self, admission: Box<dyn Admission>) -> Self {
@@ -747,6 +756,7 @@ impl OwnerWork {
                 .map(|m| Member::new(m, self.stop.clone(), poll))
                 .collect(),
             plan: start.plan,
+            objects: start.objects,
             network: start.network,
             codec: start.codec,
             admission,
@@ -999,6 +1009,7 @@ struct Worker {
     coordinator: Arc<seed::Coordinator>,
     members: Vec<Member>,
     plan: Plan,
+    objects: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
     network: Network,
     codec: Arc<dyn Codec>,
     admission: Box<dyn Admission>,
@@ -1160,11 +1171,12 @@ impl Worker {
         Ok(())
     }
     fn work(&mut self, open: &mut Option<Epoch>) -> Result<(), Refusal> {
-        let source = ShardSource::start(
+        let source = ShardSource::start_with_objects(
             self.coordinator.clone(),
             self.plan.objects.clone(),
             self.plan.journal.clone(),
             self.network.clone(),
+            self.objects.clone(),
         )?;
         let offers = self.transfer_all(&source);
         let released = source.close();

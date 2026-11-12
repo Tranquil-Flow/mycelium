@@ -87,6 +87,67 @@ fn review_source_parent_substitution_must_refuse_real_transfer() {
 }
 
 #[test]
+fn source_file_replacement_after_admission_refuses_transfer() {
+    source_replacement(false, false);
+}
+#[test]
+fn source_file_replacement_after_verification_refuses_transfer() {
+    source_replacement(false, true);
+}
+#[test]
+fn source_parent_escape_after_verification_refuses_transfer() {
+    source_replacement(true, true);
+}
+fn source_replacement(parent: bool, after_verification: bool) {
+    let (f, mut ports, state, mut env) = setup();
+    let _rescue = Rescue {
+        work: ports.work.clone(),
+        mode: None,
+    };
+    let plan = f.plan(&state);
+    let name = plan.0.document["node_files"][&state.participants[0]][0]["path"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("deployment/")
+        .unwrap()
+        .to_owned();
+    let root = f.root.clone();
+    let substitute = move || {
+        let shards = root.join("stage-shards");
+        if parent {
+            let escaped = root.join("private-escaped");
+            fs::rename(&shards, &escaped).unwrap();
+            std::os::unix::fs::symlink(&escaped, &shards).unwrap();
+        } else {
+            let path = shards.join(name);
+            let bytes = fs::read(&path).unwrap();
+            fs::rename(&path, root.join("original-retained")).unwrap();
+            fs::write(&path, bytes).unwrap();
+        }
+    };
+    ports
+        .work
+        .compose(&state, plan, Arc::new(NoCodec), &mut env)
+        .unwrap();
+    if after_verification {
+        lock(&ports.work.resident)
+            .local
+            .as_ref()
+            .unwrap()
+            .on_receive(Box::new(move |_| substitute()));
+    } else {
+        substitute();
+    }
+    let result = ports.work.node_slice_plans();
+    let closed = ports.close_work();
+    assert!(
+        result.is_err(),
+        "substituted source reached a real member: {result:?}"
+    );
+    closed.unwrap();
+}
+
+#[test]
 fn review_cleanup_failure_must_retain_retry_owner_and_not_become_success() {
     let (f, mut ports, state, mut env) = setup();
     let mut rescue = Rescue {

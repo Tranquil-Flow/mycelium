@@ -75,6 +75,16 @@ impl ShardSource {
         journal: PathBuf,
         lan: Option<(IpAddr, LanPolicy)>,
     ) -> Result<Self, Refusal> {
+        Self::start_with_objects(authority, objects, journal, lan, None)
+    }
+    /// Packaged compiler handoff: carry admission-time source custody into every read.
+    pub fn start_with_objects(
+        authority: Arc<seed::Coordinator>,
+        objects: PathBuf,
+        journal: PathBuf,
+        lan: Option<(IpAddr, LanPolicy)>,
+        pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
+    ) -> Result<Self, Refusal> {
         let wall = budget(B::MemberChosenWall)?;
         let close = budget(B::RouterClose)?;
         let fence = B::ArtifactMaxFence
@@ -163,7 +173,8 @@ impl ShardSource {
                                     clock_skew_ms: skew,
                                     now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
                                 })
-                                .map_err(|e| refusal(format!("source_store_failed:{}", e.0)))?;
+                                .map_err(|e| refusal(format!("source_store_failed:{}", e.0)))?
+                                .with_pinned(pinned.clone());
                                 let end = Instant::now() + Duration::from_millis(wall.millis());
                                 store
                                     .verify_bounded(&hash, &|| {
