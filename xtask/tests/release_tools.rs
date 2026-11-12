@@ -628,7 +628,8 @@ fn the_launch_smoke_is_an_operator_receipt_that_must_name_this_candidate() {
 fn a_receipt_cell_accepts_only_a_file_stating_its_pass_for_this_candidate() {
     let sandbox = Sandbox::new();
     let profile_path = sandbox.root.join("profile.json");
-    let mut profile: Value = serde_json::from_str(&fs::read_to_string(&profile_path).unwrap()).unwrap();
+    let mut profile: Value =
+        serde_json::from_str(&fs::read_to_string(&profile_path).unwrap()).unwrap();
     profile["cells"].as_array_mut().unwrap().push(
         json!({"id": "two-path-reproducibility", "state": "package", "claim": "CL-T-02",
         "bind": "bytes", "verify": {"runs": "receipt", "kind": "release_receipt",
@@ -681,14 +682,34 @@ fn a_receipt_cell_accepts_only_a_file_stating_its_pass_for_this_candidate() {
     );
     let mut wrong = Vec::new();
     for (what, artifact, code) in [
-        ("the summary that found REL-R1", &found_the_bug, "receipt_unbound"),
-        ("a PASS for another candidate", &other_candidate, "receipt_unbound"),
-        ("a FAIL for this candidate", &failed_here, "receipt_result_failed"),
-        ("a PASS and a failing line", &pass_and_fail, "receipt_result_failed"),
+        (
+            "the summary that found REL-R1",
+            &found_the_bug,
+            "receipt_unbound",
+        ),
+        (
+            "a PASS for another candidate",
+            &other_candidate,
+            "receipt_unbound",
+        ),
+        (
+            "a FAIL for this candidate",
+            &failed_here,
+            "receipt_result_failed",
+        ),
+        (
+            "a PASS and a failing line",
+            &pass_and_fail,
+            "receipt_result_failed",
+        ),
     ] {
         let out = emit(artifact);
         if out.status.code() != Some(2) || !text(&out).contains(code) {
-            wrong.push(format!("emit with {what}: {:?} {}", out.status.code(), text(&out)));
+            wrong.push(format!(
+                "emit with {what}: {:?} {}",
+                out.status.code(),
+                text(&out)
+            ));
         }
     }
     // The same receipts appended by hand (bypassing emit) for this candidate's bytes: RED.
@@ -706,8 +727,16 @@ fn a_receipt_cell_accepts_only_a_file_stating_its_pass_for_this_candidate() {
         sandbox.cell_line("two-path-reproducibility")
     };
     for (n, (what, artifact, code)) in [
-        ("the summary that found REL-R1", &found_the_bug, "receipt_unbound"),
-        ("a FAIL for this candidate", &failed_here, "receipt_result_failed"),
+        (
+            "the summary that found REL-R1",
+            &found_the_bug,
+            "receipt_unbound",
+        ),
+        (
+            "a FAIL for this candidate",
+            &failed_here,
+            "receipt_result_failed",
+        ),
     ]
     .into_iter()
     .enumerate()

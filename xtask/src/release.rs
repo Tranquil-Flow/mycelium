@@ -1226,6 +1226,11 @@ fn judge(env: &Env, cell: &Cell, record: &Record) -> Outcome {
     {
         return red("operator_receipt_unbound", id(), detail);
     }
+    if v.runs == Runs::Receipt
+        && let Err((code, detail)) = receipt_states_pass(env, v, record)
+    {
+        return red(code, id(), detail);
+    }
     Outcome::Green {
         ev: record.id.clone(),
         passed,
@@ -1289,6 +1294,79 @@ fn check_tool_run(env: &Env, cell: &Cell, record: &Record) -> Result<(), (&'stat
         ));
     }
     Ok(())
+}
+/// A receipt is green only on a file that states THIS cell's result for THIS frozen candidate
+/// (review RELF F14: plain receipts were self-asserted): the record's artifact files (or, for a
+/// record without artifacts, its log) must hold a line with `<name>: PASS manifest_sha256
+/// <manifest sha256>`, and no line `<name>: <result>` whose result is not `PASS`.
+fn receipt_states_pass(
+    env: &Env,
+    verify: &Verify,
+    record: &Record,
+) -> Result<(), (&'static str, String)> {
+    let mut files = Vec::new();
+    match record.value.get("artifacts").and_then(Value::as_array) {
+        Some(listed) => {
+            for entry in listed {
+                let path = entry.get("path").and_then(Value::as_str).unwrap_or("");
+                files.push(
+                    fs::read(path)
+                        .map_err(|e| ("artifact_missing", format!("{path}: {}", io_text(&e))))?,
+                );
+            }
+        }
+        None => {
+            let name = record
+                .value
+                .get("log")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let path = if Path::new(name).is_absolute() {
+                PathBuf::from(name)
+            } else {
+                env.log_base.join(name)
+            };
+            files.push(fs::read(&path).map_err(|e| {
+                (
+                    "log_missing",
+                    format!("{}: {}", path.display(), io_text(&e)),
+                )
+            })?);
+        }
+    }
+    receipt_result(env.manifest, verify.name.as_deref().unwrap_or(""), &files)
+}
+/// The result rule of [`receipt_states_pass`] over the receipt's file contents (`emit` applies it
+/// to the artifacts it is given before it writes a PASS).
+pub fn receipt_result(
+    manifest: &Manifest,
+    name: &str,
+    files: &[Vec<u8>],
+) -> Result<(), (&'static str, String)> {
+    let tag = format!("{name}: ");
+    let want = format!("{name}: PASS manifest_sha256 {}", manifest.sha256);
+    let mut stated = false;
+    for bytes in files {
+        for line in String::from_utf8_lossy(bytes).lines() {
+            if let Some((_, rest)) = line.split_once(&tag)
+                && rest.split_whitespace().next() != Some("PASS")
+            {
+                return Err((
+                    "receipt_result_failed",
+                    format!("the receipt states a result other than PASS: {line}"),
+                ));
+            }
+            stated |= line.contains(&want);
+        }
+    }
+    if stated {
+        Ok(())
+    } else {
+        Err((
+            "receipt_unbound",
+            format!("no file of this receipt states `{want}`"),
+        ))
+    }
 }
 /// One artifact file of an operator receipt names this candidate: its manifest sha256 and its exe
 /// sha256 both appear in the file.

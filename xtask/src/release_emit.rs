@@ -238,6 +238,15 @@ pub fn emit(args: &[String]) -> Result<u8, String> {
                 .map_err(|why| fail("operator_receipt_unbound", why))?;
             entries.push(("operator_receipt", Value::from(true)));
         }
+        // Every receipt states this cell's PASS for this candidate (review RELF F14).
+        let files = options
+            .artifacts
+            .iter()
+            .map(|p| {
+                fs::read(p).map_err(|e| fail("artifact_missing", format!("{p}: {}", io_text(&e))))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        release::receipt_result(&manifest, name, &files).map_err(|(code, why)| fail(code, why))?;
         entries.push(("artifacts", Value::from(artifacts)));
         entries.push(("candidate", manifest.candidate.to_json()));
         entries.push((

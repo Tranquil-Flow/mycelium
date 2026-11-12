@@ -173,7 +173,19 @@ impl Sandbox {
         }
         fs::write(path, text).unwrap();
         fs::create_dir_all(self.registry().join("logs")).unwrap();
-        fs::write(self.registry().join("logs/check.log"), "ok\n").unwrap();
+        // Each receipt states its own PASS for this candidate (review RELF F14).
+        let manifest_sha256 = format!(
+            "{:x}",
+            <sha2::Sha256 as sha2::Digest>::digest(
+                fs::read(self.root.join("manifest.json")).unwrap()
+            )
+        );
+        let log = self.registry().join("logs/check.log");
+        let mut lines = fs::read_to_string(&log).unwrap_or_else(|_| "ok\n".into());
+        for name in names {
+            lines.push_str(&format!("{name}: PASS manifest_sha256 {manifest_sha256}\n"));
+        }
+        fs::write(log, lines).unwrap();
     }
     fn release(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_xtask"))

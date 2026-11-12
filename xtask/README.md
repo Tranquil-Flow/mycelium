@@ -244,5 +244,11 @@ Such a cell (`argv_is_hint`) is green only on a record whose argv IS that comman
 manifest and whose log has the tool's `PASS manifest_sha256 <S>` line. The model-free launch smoke
 stays an **operator receipt** (`operator_receipt`, shown `[operator receipt]` by `status`): `emit`
 refuses it, and the machine keeps it red, unless one of its artifact files names this candidate's
-manifest sha256 and exe sha256. The ledger itself is still unsigned JSONL.
+manifest sha256 and exe sha256. **Every receipt cell (RELF2, review F14)** — two-path,
+minimum-OS, incident matrix, rehearsals, device cells, final soak and the launch smoke — is green
+only when its files (the artifacts, else the record's log) hold the line
+`<receipt name>: PASS manifest_sha256 <S>` for THIS frozen manifest and no line
+`<receipt name>: <result>` with a result other than `PASS`; `emit --pass` refuses anything else
+(`receipt_unbound`, `receipt_result_failed`), so a summary written for another candidate, or one
+reporting a failure, never turns a cell green. The ledger itself is still unsigned JSONL.
 `xtask retire check` is the R6 test-ID check: see `retirement/README.md`.
