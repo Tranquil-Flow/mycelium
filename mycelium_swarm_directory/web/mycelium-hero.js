@@ -1171,6 +1171,10 @@ function* buildGeometry(L, budget, out = {}) {
       };
       let M = null;
       for (let pass = 0; pass < 5; pass++) {
+        // r11.4: untrusted readback — the measured envelope is noise, so
+        // scaling strand attribution by it would smear the art (see
+        // readbackTrusted). Keep the deterministic weights instead.
+        if (!readbackTrusted()) break;
         M = yield* measure();
         // Target (raise only): the upper envelope seen from outside, falling
         // at least 4% per ring toward the rim; inner rings rise to it.
@@ -1213,6 +1217,12 @@ function* buildGeometry(L, budget, out = {}) {
         fc = { node: nd, fill };
       fills.set(c, fill);
       for (let pass = 0; pass < 5; pass++) {
+        // r11.4: the "giant circles" guard. With untrusted readback the
+        // measured need below is noise and every ring inflates to the 0.6
+        // alpha cap, turning the felt glow into a bright disc out to K*STEP.
+        // Leave fillA at zero: stops carry no signal and colonyFill draws
+        // nothing at all (see its stops guard) — correct, just unfilled.
+        if (!readbackTrusted()) break;
         fill.stops = Array.from(fillA, (a, k) => [((k + 0.5) * STEP) / (K * STEP), a]);
         x.setTransform(1, 0, 0, 1, 0, 0);
         x.globalCompositeOperation = "source-over";
@@ -1317,6 +1327,41 @@ function preBaseOf(P, paths, memo) {
   }
   memo?.set(P, pre);
   return pre;
+}
+/** r11.4: canvas readback integrity. Browsers that defend against canvas
+ * fingerprinting (LibreWolf, Firefox under resistFingerprinting, canvas-defence
+ * extensions) return randomised pixels from getImageData. Measured on LibreWolf
+ * 160: a solid #35df47 fill read back as (149,153,140), (148,110,137) and
+ * (194,129,116) on three consecutive reads, while Firefox returns the exact
+ * colour every time. The colony fill and the attribution passes below turn
+ * those reads into per-ring glow gains, so a lying browser inflates every ring
+ * to its alpha cap and paints giant green discs around the nodes — the
+ * reported "giant circles" bug (refresh re-rolls the noise, which is why a
+ * reload appeared to fix it). Probe once per document: draw a known colour,
+ * read it back twice, and require byte-identical, still-our-colour pixels.
+ * When untrusted the measurement corrections are skipped instead of fought:
+ * attribution weights and fill stops keep their deterministic defaults, so the
+ * page renders without the soft felt fill rather than with a garbage one. */
+let readbackTrust;
+function readbackTrusted() {
+  if (readbackTrust !== undefined) return readbackTrust;
+  if (typeof document === "undefined") return (readbackTrust = true);
+  try {
+    const probe = document.createElement("canvas");
+    probe.width = probe.height = 8;
+    const px = probe.getContext("2d");
+    px.fillStyle = "rgb(53,223,71)"; // #35df47
+    px.fillRect(0, 0, 8, 8);
+    const read = () => px.getImageData(0, 0, 8, 8).data;
+    const a = read(), b = read();
+    let identical = a.length === b.length;
+    for (let i = 0; identical && i < a.length; i++) identical = a[i] === b[i];
+    const near = (v, want) => Math.abs(v - want) <= 20; // display colour management
+    readbackTrust = identical && near(a[0], 53) && near(a[1], 223) && near(a[2], 71);
+  } catch {
+    readbackTrust = false;
+  }
+  return readbackTrust;
 }
 /** r11.2: a colony's soft radial felt glow (fills the residual dips of its
  * radial profile; stops in ring order, computed in monotoneColonies). */
@@ -2102,6 +2147,10 @@ export function createHero(canvas, { stage, state, reduce }) {
       // a 1920 colony after 8 passes).
       const PASSES = 6;
       for (let pass = 0; pass < PASSES; pass++) {
+        // r11.4: same guard as the colony fill — untrusted readback adds noise
+        // to every ring's gain (capped 0.35) and over-brightens the dips, so
+        // keep added at zero (no dip fill drawn).
+        if (!readbackTrusted()) break;
         tx.globalCompositeOperation = "copy";
         tx.setTransform(1, 0, 0, 1, 0, 0);
         tx.drawImage(off, 0, 0);
