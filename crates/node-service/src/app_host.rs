@@ -821,10 +821,37 @@ impl PackagedHost {
                         .unwrap_or(0);
                     match acquisition.reverify_closed_snapshot(storage) {
                         Ok(_) => {
+                            // The re-hash runs in the background, but the run step refuses at once unless
+                            // the status already reads `prepared` (neither prepared nor downloading).
+                            // Wait for the re-hash here so a relaunch does not make the owner download a
+                            // snapshot that is already on disk.
+                            let deadline =
+                                std::time::Instant::now() + std::time::Duration::from_secs(90);
+                            let mut seen = String::new();
+                            loop {
+                                let now = acquisition.status().state;
+                                if now != seen {
+                                    eprintln!("l11_reverify_gate:rehash_state={now}");
+                                    seen = now.clone();
+                                }
+                                if now == "prepared"
+                                    || now == "failed"
+                                    || now == "cancelled"
+                                    || std::time::Instant::now() >= deadline
+                                {
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                            }
+                            let final_state = acquisition.status().state;
                             let mut state = model.lock();
                             state.policy_error = None;
-                            state.active = true;
-                            Reverify::Done
+                            state.active = final_state == "prepared";
+                            if final_state == "prepared" {
+                                Reverify::Done
+                            } else {
+                                Reverify::Failed
+                            }
                         }
                         Err(error) => {
                             eprintln!("l11_reverify_gate:rehash={error:?}");
