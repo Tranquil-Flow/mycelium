@@ -7,6 +7,14 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
+fn share(document: &Value, announcement: &Value) -> Result<()> {
+    let expected = protocol::canonical::digest(&announcement["work_limits"])
+        .map_err(|_| fail("member_work_binding_invalid"))?;
+    if document["message"]["share_digest"] != expected {
+        return Err(fail("member_work_share_changed"));
+    }
+    Ok(())
+}
 pub struct Inbox {
     exchange: Arc<RunExchange>,
     documents: Mutex<BTreeMap<String, Value>>,
@@ -41,6 +49,7 @@ impl Inbox {
         {
             return Err(fail("member_work_run_changed"));
         }
+        share(&d, &a)?;
         verify(
             coordinator,
             &d,

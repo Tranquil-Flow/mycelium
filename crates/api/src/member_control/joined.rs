@@ -32,6 +32,7 @@ pub fn announce(
         "owner_endpoint_id":pin.endpoint().to_string(),
         "run_id":announcement.announcement()["run_id"],
         "deployment_id":announcement.announcement()["deployment_id"],
+        "share_digest":protocol::canonical::digest(announcement.work_limits().unwrap_or(&Value::Null)).map_err(|_| fail("member_work_binding_invalid"))?,
         "issued_at":now,"expires_at":now+window()?}),
     )
 }

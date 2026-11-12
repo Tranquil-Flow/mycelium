@@ -331,18 +331,69 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
         let work = resident.work.take().unwrap();
         resident.work = Some(work.with_admission(Box::new(RefusingCompute(called.clone()))));
     }
-    assert!(ports.slices().slices.node_slice_plans().unwrap().is_none());
+    let proposal = json!({"max_combined_rss_bytes":2_147_483_648u64,"max_additional_disk_bytes":4_000_000_000u64,"max_wall_seconds":wall});
+    state.proposal = Some(proposal.clone());
+    use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
+    state.model = Some(ModelStepOutput {
+        model_id: "Qwen/Qwen3-0.6B".into(),
+        resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+        manifest_digest: "sha256:00".into(),
+        slice_mode: true,
+        choice: None,
+        prepared: PreparedSource {
+            model: PreparedModel {
+                model_id: "Qwen/Qwen3-0.6B".into(),
+                resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+                architecture: "qwen3".into(),
+                label: "constructor-only inert source fixture".into(),
+                choice: None,
+                shape_registered: true,
+                owner_storage_need: 0,
+            },
+            manifest_digest: "sha256:00".into(),
+            source_bytes: json!(0),
+        },
+    });
+    let slices = ports.slices();
+    owner_run::steps::slices::run_slices_step(
+        &mut env,
+        slices.reports,
+        slices.slices,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    )
+    .unwrap();
+    assert!(
+        state.execution_clock_started_at.is_none(),
+        "slices do not start the serving clock"
+    );
+    assert_eq!(
+        ports.work.shares_ready().unwrap_err(),
+        "member_work_share_changed"
+    );
+    f.agent.tick(&f.member);
+    ports.work.shares_ready().unwrap();
     let flow = ports.work.workflow_state().unwrap();
     assert_eq!(flow["shards_transferred"], true);
     assert!(flow["route_expires_at"].is_null());
     assert_eq!(called.load(Ordering::SeqCst), 0);
     assert_eq!(flow["transferred"].as_array().unwrap().len(), 2);
-    let proposal = json!({"max_combined_rss_bytes":2_147_483_648u64,"max_additional_disk_bytes":4_000_000_000u64,"max_wall_seconds":wall});
-    ports
-        .publication()
-        .workflow
-        .start_serving(&proposal)
-        .unwrap();
+    let publication = ports.publication();
+    let outcome = owner_run::steps::publish::run_publish_step(
+        &mut env,
+        publication.reports,
+        publication.workflow,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    );
+    assert!(
+        matches!(outcome, Err(StepError::Refused(ref e)) if e.code == "test_native_compute_not_run"),
+        "{outcome:?}"
+    );
+    assert!(
+        state.execution_clock_started_at.is_some_and(|v| v >= 100.0),
+        "publish uses StepEnv origin"
+    );
     assert!(
         ports
             .publication()

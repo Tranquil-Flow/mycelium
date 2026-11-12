@@ -15,6 +15,7 @@ pub const FIELDS: &[&str] = &[
     "owner_endpoint_id",
     "run_id",
     "deployment_id",
+    "share_digest",
     "issued_at",
     "expires_at",
 ];

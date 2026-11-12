@@ -85,7 +85,8 @@ struct Resident {
     work: Option<OwnerWork>,
     local: Option<crate::packaged_work::Service>,
     local_session: crate::packaged_work::SessionCell,
-    nodes: Vec<String>,
+    bindings: Vec<joined::Verified>,
+    run: Option<(String, String)>,
 }
 #[derive(Clone)]
 pub(super) struct Work {
@@ -105,7 +106,8 @@ impl Work {
                 work: None,
                 local: None,
                 local_session,
-                nodes: Vec::new(),
+                bindings: Vec::new(),
+                run: None,
             })),
             stopped: Arc::new(AtomicBool::new(false)),
         }
@@ -317,7 +319,7 @@ impl Work {
             }
         };
         let mut members = Vec::new();
-        for (node, v) in state.participants.iter().zip(verified) {
+        for (node, v) in state.participants.iter().zip(&verified) {
             let link = RemoteMember::already_joined(
                 self.owner.clone(),
                 &seed.coordinator,
@@ -355,9 +357,68 @@ impl Work {
             stopper();
         }));
         let mut resident = lock(&self.resident);
-        resident.nodes = state.participants.clone();
+        resident.bindings = verified;
+        resident.run = Some((state.run_id.clone(), state.deployment_id.clone()));
         resident.work = Some(work);
         Ok(())
+    }
+    fn shares_ready(&self) -> Result<(), String> {
+        let seed = self
+            .host
+            .with(|c| c.authority.seed.clone())
+            .ok_or("owner_exchange_unavailable")?;
+        let resident = lock(&self.resident);
+        let (run, deployment) = resident.run.as_ref().ok_or("owner_work_unavailable")?;
+        for binding in &resident.bindings {
+            let announcement = seed
+                .exchange
+                .announcement(Some(binding.node_id()))
+                .to_value();
+            if announcement["phase"] != "work" || announcement["work_limits"].is_null() {
+                return Err("member_share_unannounced".into());
+            }
+            let current = seed
+                .work_members
+                .get(
+                    &seed.coordinator,
+                    binding.node_id(),
+                    self.owner.public(),
+                    run,
+                    deployment,
+                    &|a| self.host.network.work_network().allows(a),
+                )
+                .map_err(|e| e.code.to_owned())?;
+            if current.registration() != binding.registration()
+                || current.address() != binding.address()
+            {
+                return Err("member_work_binding_changed".into());
+            }
+        }
+        Ok(())
+    }
+    fn await_shares(&self) -> Result<(), PortError> {
+        let budget = span(BudgetId::Publish)
+            .map_err(|_| api::owner_compiler::failed("budget_unavailable"))?;
+        let poll = span(BudgetId::OwnerPoll)
+            .map_err(|_| api::owner_compiler::failed("budget_unavailable"))?;
+        let until = Instant::now() + budget;
+        loop {
+            if self.stopped.load(Ordering::SeqCst) {
+                return Err(api::owner_compiler::failed("owner_work_stopped"));
+            }
+            match self.shares_ready() {
+                Ok(()) => return Ok(()),
+                Err(code)
+                    if code == "member_work_share_changed" || code == "member_work_unavailable" =>
+                {
+                    if Instant::now() >= until {
+                        return Err(api::owner_compiler::failed("member_share_timeout"));
+                    }
+                    std::thread::sleep(poll.min(until.saturating_duration_since(Instant::now())));
+                }
+                Err(code) => return Err(api::owner_compiler::failed(&code)),
+            }
+        }
     }
     fn teardown(&self) -> Result<(), String> {
         let mut resident = lock(&self.resident);
@@ -408,6 +469,7 @@ impl WorkPort for Work {
             .install_cleanup_progress()
     }
     fn start_serving(&mut self, proposal: &Value) -> Result<Value, PortError> {
+        self.await_shares()?;
         lock(&self.resident)
             .work
             .as_mut()
