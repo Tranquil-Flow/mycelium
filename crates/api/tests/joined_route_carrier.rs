@@ -83,6 +83,8 @@ struct Script {
     consent_wall: Option<Instant>,
     /// EPF: set = the member's standing consent changed (liveness refuses).
     consent_changed: Option<Arc<AtomicBool>>,
+    /// EPF2: signalled once when a graceful close starts (before `close_gate`).
+    close_entered: Option<mpsc::Sender<()>>,
 }
 struct Controlled {
     offer: Value,
@@ -137,6 +139,11 @@ impl StageCompute for Controlled {
         ))
     }
     fn close(&mut self) -> Result<Value, Error> {
+        if let Some(entered) = self.script.close_entered.take()
+            && let Err(e) = entered.send(())
+        {
+            eprintln!("close entered: {e}");
+        }
         if let Some(gate) = self.script.close_gate.take() {
             gate.recv_timeout(span(B::WorkerStartup)).unwrap();
         }
@@ -2628,6 +2635,9 @@ struct Raw<'a> {
     cancel: Box<dyn FnMut(&str) -> bool + 'a>,
     /// The PREFILL of this request (data link): ACKed (queued for compute)?
     prefill: Box<dyn FnMut(&str) -> bool + 'a>,
+    /// EPF2: a PathCancellation of this request sent on the DATA link (the
+    /// member's data receiver accepts one too): ACKed?
+    cancel_on_data: Box<dyn FnMut(&str) -> bool + 'a>,
     /// Take the member's forwarded stage output and ACK it.
     forwarded: Box<dyn FnMut() -> bool + 'a>,
 }
@@ -2736,10 +2746,22 @@ fn raw_owner(
         remote_generation: 1,
     };
     let current = move || fence;
-    let mut to_data = IrohTransport::new(data.clone(), &rt, &clock, fence, current).unwrap();
+    let to_data = std::cell::RefCell::new(
+        IrohTransport::new(data.clone(), &rt, &clock, fence, current).unwrap(),
+    );
     let mut from_data = RouterReceiver::new(data.clone(), &rt, &clock, fence, current).unwrap();
     let mut to_control = IrohTransport::new(control.clone(), &rt, &clock, fence, current).unwrap();
-    let (mut data_ids, mut control_ids) = (0u128, 0u128);
+    let (data_ids, mut control_ids) = (std::cell::Cell::new(0u128), 0u128);
+    let data_send = |payload: Vec<u8>| {
+        data_ids.set(data_ids.get() + 1);
+        raw_send(
+            &mut *to_data.borrow_mut(),
+            &clock,
+            fence,
+            data_ids.get() - 1,
+            payload,
+        )
+    };
     {
         let (message, clock) = (&message, &clock);
         let mut raw = Raw {
@@ -2760,8 +2782,17 @@ fn raw_owner(
                     &route::entry_payload(&(0..35).collect::<Vec<u32>>()).unwrap(),
                 )
                 .unwrap();
-                data_ids += 1;
-                raw_send(&mut to_data, clock, fence, data_ids - 1, frame)
+                data_send(frame)
+            }),
+            cancel_on_data: Box::new(|id| {
+                data_send(
+                    protocol::router_wire::encode_frame(
+                        "PathCancellation",
+                        &route::cancellation(message, &raw_path(id)),
+                        &[],
+                    )
+                    .unwrap(),
+                )
             }),
             forwarded: Box::new(|| {
                 from_data
@@ -2991,4 +3022,135 @@ fn a_revoke_seen_while_idle_retires_the_epoch_without_a_next_request() {
         let events = log.lock().unwrap().events.clone();
         assert_eq!(events[4..], [("reset", 0), ("close", 0)], "{events:?}");
     }
+}
+
+// ---- EPF2 (REVIEW-laneEPF N1): a member whose epoch ends while a
+// PathCancellation is still QUEUED for its main loop (its receiver thread
+// waits for the verdict) still returns from its serve. Both links accept a
+// PathCancellation, so up to two can be queued. Each owner below runs on its
+// own thread, so a serve that never returns fails an assertion at its bound
+// instead of hanging the test.
+
+/// Runs `owner` (a raw owner over the real member) on its own thread; returns
+/// its verdict (sent from inside the owner's body) and then its result.
+fn bounded_owner<V: Send + 'static>(
+    owner: impl FnOnce(mpsc::Sender<V>) -> (Value, Vec<(&'static str, u64)>) + Send + 'static,
+) -> (V, impl FnOnce() -> (Value, Vec<(&'static str, u64)>)) {
+    let (verdict_tx, verdict) = mpsc::channel();
+    let (out_tx, out) = mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        if let Err(e) = out_tx.send(owner(verdict_tx)) {
+            eprintln!("raw owner result: {e}");
+        }
+    });
+    let v = verdict
+        .recv_timeout(span(B::WorkerStartup) * 2)
+        .expect("the raw owner reached its verdict");
+    (v, move || {
+        let result = out
+            .recv_timeout(span(B::WorkerStartup))
+            .expect("the raw owner closed");
+        thread.join().unwrap();
+        result
+    })
+}
+/// Waits at most `RouterClose` for the member's serve thread to finish.
+fn returned_within_router_close(entry: &Member) -> (bool, Duration) {
+    let began = Instant::now();
+    while !entry.thread.is_finished() && began.elapsed() < span(B::RouterClose) {
+        std::thread::sleep(span(B::OwnerPoll) / 4);
+    }
+    (entry.thread.is_finished(), began.elapsed())
+}
+
+/// ONE cancellation queued at the ending pass: the member's own consent wall
+/// ends its epoch and the pass is held inside its graceful close; a
+/// PathCancellation reaches the control receiver there and waits (until the
+/// owner's own exchange deadline); then the close is released. The serve must
+/// return within `RouterClose` of the release.
+#[test]
+fn a_member_returns_when_its_epoch_ends_with_one_cancellation_queued() {
+    let (entered_tx, entered) = mpsc::channel();
+    let (open, gate) = mpsc::channel();
+    let script = Script {
+        close_gate: Some(gate),
+        close_entered: Some(entered_tx),
+        consent_wall: Some(Instant::now() + span(B::OwnerPoll)),
+        ..Script::default()
+    };
+    let ((acked, (returned, after)), finish) = bounded_owner(move |verdict| {
+        raw_owner(span(B::MemberChosenWall), script, None, |_, entry, raw| {
+            entered
+                .recv_timeout(span(B::WorkerStartup))
+                .expect("the member's ending pass entered its graceful close");
+            let acked = (raw.cancel)("queued-0");
+            open.send(()).unwrap();
+            verdict
+                .send((acked, returned_within_router_close(entry)))
+                .unwrap();
+        })
+    });
+    assert!(
+        returned,
+        "N1: the member's serve has not returned {after:?} after its epoch ended with a \
+         PathCancellation still queued for its main loop"
+    );
+    assert!(
+        !acked,
+        "a cancellation queued at the ending pass is never ACKed"
+    );
+    let (report, events) = finish();
+    assert_eq!(report["teardown"], "member_consent_ended", "{report}");
+    assert_eq!(report["native"]["graceful"], true, "{report}");
+    assert_eq!(events, [("close", 0)]);
+}
+
+/// TWO cancellations queued (one per link) while a PREFILL step runs; the
+/// member's consent then changes and the step ends: the next pass takes ONE
+/// cancellation and ends the epoch at its check, the other is still queued.
+/// The serve must return within `RouterClose` of the step's release.
+#[test]
+fn a_member_returns_when_its_epoch_ends_with_two_cancellations_queued() {
+    let (open, gate) = mpsc::channel();
+    let changed = Arc::new(AtomicBool::new(false));
+    let script = Script {
+        tokens: vec![5],
+        step_gate: Some((0, gate)),
+        consent_changed: Some(changed.clone()),
+        ..Script::default()
+    };
+    let ((acked, (returned, after)), finish) = bounded_owner(move |verdict| {
+        raw_owner(span(B::MemberChosenWall), script, None, |_, entry, raw| {
+            assert!((raw.prefill)("route-7-0"), "PREFILL queued");
+            let began = Instant::now();
+            while !entry.log.lock().unwrap().events.contains(&("step", 0))
+                && began.elapsed() < span(B::WorkerStartup)
+            {
+                std::thread::sleep(span(B::OwnerPoll) / 4);
+            }
+            let acked = [(raw.cancel)("route-7-0"), (raw.cancel_on_data)("route-7-0")];
+            changed.store(true, Ordering::SeqCst);
+            open.send(()).unwrap();
+            verdict
+                .send((acked, returned_within_router_close(entry)))
+                .unwrap();
+        })
+    });
+    assert!(
+        returned,
+        "N1: the member's serve has not returned {after:?} after its epoch ended with a \
+         PathCancellation still queued on each link"
+    );
+    assert_eq!(
+        acked,
+        [false, false],
+        "queued cancellations are never ACKed"
+    );
+    let (report, events) = finish();
+    assert_eq!(report["teardown"], "member_consent_ended", "{report}");
+    assert_eq!(
+        report["failure"], "joined_native_consent_changed",
+        "{report}"
+    );
+    assert_eq!(events, [("step", 0), ("close", 0)]);
 }
