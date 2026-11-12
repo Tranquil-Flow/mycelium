@@ -172,7 +172,15 @@ impl<P: ChainPorts> OwnerChain<P> {
                         "SE-L10-LOCAL-CONTRIBUTOR",
                     )
                 })?;
-                state.local_node = Some(run_contributor_step(env, port)?);
+                // Log-only: the published code for this step is the closed `owner_run_step_failed`,
+                // so the step's own refusal/exception must be visible in the app log.
+                state.local_node = Some(match run_contributor_step(env, port) {
+                    Ok(local) => local,
+                    Err(error) => {
+                        eprintln!("owner_run_step2_failed:{error:?}");
+                        return Err(error);
+                    }
+                });
                 Ok(())
             }
             "descriptors" => {

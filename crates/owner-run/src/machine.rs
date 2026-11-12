@@ -79,6 +79,9 @@ impl OwnerRunError {
             code: if closed_code(code) {
                 code.to_owned()
             } else {
+                // Log-only: the published code stays the closed `owner_run_step_failed`, but the
+                // real one must be visible somewhere or a failing step is undiagnosable.
+                eprintln!("owner_run_step_code_masked:{code}");
                 STEP_FAILED.to_owned()
             },
             message: message

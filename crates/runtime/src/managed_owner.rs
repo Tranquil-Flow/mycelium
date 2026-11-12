@@ -189,14 +189,22 @@ fn shape(v: &Value, fields: &[&str]) -> bool {
         .is_some_and(|m| m.len() == fields.len() && fields.iter().all(|f| m.contains_key(*f)))
 }
 fn private_file(file: &File) -> Result<()> {
-    let m = file
-        .metadata()
-        .map_err(|_| OwnerError("authority_state_invalid"))?;
+    let m = file.metadata().map_err(|_| {
+        eprintln!("l11_auth_chk:meta");
+        OwnerError("authority_state_invalid")
+    })?;
     if !m.is_file()
         || m.nlink() != 1
         || m.uid() != rustix::process::getuid().as_raw()
         || m.mode() & 0o7777 != 0o600
     {
+        eprintln!(
+            "l11_auth_chk:mode file={} nlink={} uid={} mode={:o}",
+            m.is_file(),
+            m.nlink(),
+            m.uid(),
+            m.mode() & 0o7777
+        );
         return Err(OwnerError("authority_state_invalid"));
     }
     Ok(())
@@ -255,7 +263,10 @@ impl PrivateJournal {
         ) {
             Ok(fd) => fd,
             Err(rustix::io::Errno::NOENT) => return Ok(None),
-            Err(_) => return Err(OwnerError("authority_state_invalid")),
+            Err(_) => {
+                eprintln!("l11_auth_chk:open");
+                return Err(OwnerError("authority_state_invalid"));
+            }
         };
         let file: File = fd.into();
         private_file(&file)?;
@@ -264,15 +275,27 @@ impl PrivateJournal {
             .map_err(|_| OwnerError("authority_state_invalid"))?
             .len();
         if size == 0 || size > limit {
+            eprintln!("l11_auth_chk:size {size} limit {limit}");
             return Err(OwnerError("authority_state_invalid"));
         }
         let mut raw = Vec::new();
         file.take(limit + 1)
             .read_to_end(&mut raw)
             .map_err(|_| OwnerError("authority_state_invalid"))?;
-        let value = protocol::strict::object(&raw, limit as usize)
-            .map_err(|_| OwnerError("authority_state_invalid"))?;
-        if canonical::to_bytes(&value).map_err(|_| OwnerError("authority_state_invalid"))? != raw {
+        let value = protocol::strict::object(&raw, limit as usize).map_err(|e| {
+            eprintln!("l11_auth_chk:strict {e:?}");
+            OwnerError("authority_state_invalid")
+        })?;
+        let reencoded = canonical::to_bytes(&value).map_err(|_| {
+            eprintln!("l11_auth_chk:reencode");
+            OwnerError("authority_state_invalid")
+        })?;
+        if reencoded != raw {
+            eprintln!(
+                "l11_auth_chk:canon raw={} reencoded={}",
+                raw.len(),
+                reencoded.len()
+            );
             return Err(OwnerError("authority_state_invalid"));
         }
         Ok(Some(value))
