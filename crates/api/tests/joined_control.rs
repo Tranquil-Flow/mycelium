@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Already-joined admission: real seed/session, no second pairing and no native work.
+#[path = "support/work_member.rs"]
+mod fixture;
+use api::{app_host, member_control::joined};
+use protocol::identity::Identity;
+use serde_json::Value;
+fn document(p: &fixture::Joined) -> Value {
+    let carrier = Identity::from_secret(&iroh::SecretKey::generate().public().to_string(), &p.signer.secret_bytes()).unwrap();
+    let control = iroh::EndpointAddr::new(iroh::SecretKey::generate().public()).with_ip_addr("127.0.0.1:12345".parse().unwrap());
+    joined::announce(&p.session, &p.signer, &carrier, &control, &p.announced(), app_host::now()).unwrap()
+}
+#[test]
+fn an_existing_join_produces_a_signed_current_control_binding_without_pairing_again() {
+    let p = fixture::Joined::new();
+    let before = p.seed.coordinator.member(p.session.node_id()).unwrap();
+    let d = document(&p);
+    let result = joined::verify(&p.seed.coordinator, &d, p.owner.public(), "run-s4cb2", "dep-s4cb2", &|a| a.ip().is_loopback(), app_host::now());
+    assert!(result.is_ok(), "already-joined adoption refused: {result:?}");
+    let verified = result.unwrap();
+    assert_eq!(verified.node_id(), p.session.node_id());
+    assert_eq!(verified.registration(), &d["message"]["registration"]);
+    assert_eq!(p.seed.coordinator.member(p.session.node_id()).unwrap(), before, "adoption must not pair, resume or rewrite the seed");
+}
+#[test]
+fn stale_generation_and_wrong_signer_are_refused_before_adoption() {
+    let mut p = fixture::Joined::new();
+    let d = document(&p);
+    let mut forged = d.clone();
+    let stranger = Identity::from_secret(p.signer.endpoint_id(), &[41; 32]).unwrap();
+    forged["signature"] = stranger.sign(&forged["message"]).unwrap();
+    forged["verification_key"] = stranger.public_key_record();
+    let check = |p: &fixture::Joined, d: &Value| joined::verify(&p.seed.coordinator, d, p.owner.public(), "run-s4cb2", "dep-s4cb2", &|a| a.ip().is_loopback(), app_host::now());
+    assert_eq!(check(&p, &forged).unwrap_err().code, "member_control_reply_unenrolled");
+    p.resume();
+    assert_eq!(check(&p, &d).unwrap_err().code, "joined_shard_member_changed");
+}
