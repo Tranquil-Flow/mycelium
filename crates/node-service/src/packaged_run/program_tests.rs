@@ -63,7 +63,7 @@ fn compiler_verdict(root: &Path, program: Option<NativeProgram>) -> String {
     );
     let mut ports = PackagedChainPorts::new(&host, None, program);
     match ports.ports().compile.unwrap().poll_build() {
-        BuildPoll::Done(Err(error)) => error.code_or("missing_code").into(),
+        BuildPoll::Done(Err(error)) => error.code_or("missing_code"),
         _ => panic!("an admission-only compiler must not run or manufacture a proof"),
     }
 }

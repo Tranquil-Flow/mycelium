@@ -521,7 +521,9 @@ impl DesktopServices {
             &format!("{}:{}", request.method, request.target),
         );
         if request.target.starts_with("/chat/") {
-            if let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready()) {
+            if self.routed_chat().is_none()
+                && let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready())
+            {
                 Self::complete_error(complete, refusal);
                 return;
             }
