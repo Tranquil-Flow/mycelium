@@ -3216,3 +3216,39 @@ fn a_prefill_of_an_overlong_request_id_is_refused_before_it_runs() {
     assert_eq!(report["requests_served"], 0, "{report}");
     assert_eq!(events, [("close", 0)]);
 }
+
+// ---- EPF2 F10 (REVIEW-laneEPF R1 residue): one loop pass of a v2 member
+// (a PREFILL step plus its forwarding exchange) ends by the route's SIGNED
+// expiry, not only by the hop budget (WorkerStartup for a PREFILL).
+
+/// The owner admits a PREFILL just before the signed expiry and never takes
+/// the forwarded stage output: the member's forwarding exchange must give up
+/// at the expiry and close the compute, not hold it for the hop budget.
+#[test]
+fn a_forwarding_exchange_ends_at_the_signed_expiry() {
+    let (report, events) = raw_owner(
+        span(B::RouterClose),
+        Script::default(),
+        None,
+        |message, entry, raw| {
+            let expires = at_wall(message["expires_at"].as_f64().unwrap());
+            assert!((raw.prefill)("route-7-0"), "PREFILL queued");
+            let bound = expires + span(B::RouterClose);
+            while entry.released().is_none() && Instant::now() < bound {
+                std::thread::sleep(span(B::OwnerPoll) / 4);
+            }
+            let released = entry.released();
+            assert!(
+                released.is_some_and(|(at, _)| at <= bound),
+                "F10: the member still held its compute {:?} past the signed expiry \
+                 (released {:?} after it)",
+                span(B::RouterClose),
+                released.map(|(at, _)| at.saturating_duration_since(expires))
+            );
+        },
+    );
+    assert_eq!(report["teardown"], "route_expired", "{report}");
+    assert_eq!(report["native"]["graceful"], true, "{report}");
+    assert_eq!(report["deferred_ack"], true, "{report}");
+    assert_eq!(events, [("step", 0), ("close", 0)]);
+}
