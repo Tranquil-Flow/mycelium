@@ -777,18 +777,38 @@ impl PackagedHost {
                         && app_host::running(&*authority)
                         && current
                         && !model.active();
+                    if !usable {
+                        eprintln!(
+                            "l11_reverify_gate:usable=false closed={:?} policy={} running={} current={} active={}",
+                            node.closed(),
+                            policy.is_some(),
+                            app_host::running(&*authority),
+                            current,
+                            model.active()
+                        );
+                    }
                     let acquisition = model.lock().acquisition.clone();
                     let (Some(policy), Some(acquisition), true) = (policy, acquisition, usable)
                     else {
+                        if acquisition.is_none() {
+                            eprintln!("l11_reverify_gate:no_acquisition");
+                        } else if policy.is_none() {
+                            eprintln!("l11_reverify_gate:no_policy");
+                        }
                         return Reverify::Failed;
                     };
                     if !matches!(
                         acquisition.status().state.as_str(),
                         "closed" | "idle" | "failed" | "cancelled"
                     ) {
+                        eprintln!(
+                            "l11_reverify_gate:status={}",
+                            acquisition.status().state
+                        );
                         return Reverify::Failed;
                     }
                     if let Some(reason) = model.resource_violation(&root) {
+                        eprintln!("l11_reverify_gate:resource={reason}");
                         model.lock().policy_error = Some(reason);
                         return Reverify::Failed;
                     }
