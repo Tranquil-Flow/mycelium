@@ -39,8 +39,45 @@ impl Verified {
 }
 /// Verification precedes writes, dial or thread creation. A raw descriptor is
 /// not a rendezvous, and neither a seed row nor a valid signature alone enrolls it.
-pub fn verify(_coordinator: &seed::Coordinator, _document: &Value,
-    _owner: iroh::EndpointId, _run: &str, _deployment: &str,
-    _allowed: &dyn Fn(SocketAddr) -> bool, _now: f64) -> Result<Verified> {
-    Err(fail("member_work_unavailable"))
+pub fn verify(coordinator: &seed::Coordinator, document: &Value,
+    owner: iroh::EndpointId, run: &str, deployment: &str,
+    allowed: &dyn Fn(SocketAddr) -> bool, now: f64) -> Result<Verified> {
+    let message = open(document)?;
+    exact(message, contract::FIELDS)?;
+    if message["protocol"] != contract::PROTOCOL {
+        return Err(fail("member_work_version_unsupported"));
+    }
+    let registration = &message["registration"];
+    crate::joined_shard::verify_registration(coordinator, registration).map_err(|e| fail(e.0))?;
+    let member = &registration["message"]["member"];
+    if document["verification_key"]["verification_key_digest"] != member["verification_key_digest"]
+        || document["signature"]["signer_endpoint_id"] != member["endpoint_id"] {
+        return Err(fail("member_control_reply_unenrolled"));
+    }
+    if message["owner_endpoint_id"] != owner.to_string()
+        || message["run_id"] != run || message["deployment_id"] != deployment {
+        return Err(fail("member_work_run_changed"));
+    }
+    let issued = message["issued_at"].as_f64().ok_or(fail("member_work_binding_invalid"))?;
+    let expires = message["expires_at"].as_f64().ok_or(fail("member_work_binding_invalid"))?;
+    if !now.is_finite() || !issued.is_finite() || !expires.is_finite()
+        || expires <= issued || expires - issued > window()? || issued > now + skew()?
+        || expires <= now {
+        return Err(fail("member_work_binding_expired"));
+    }
+    let text = message["control_endpoint_id"].as_str().ok_or(fail("member_work_binding_invalid"))?;
+    let endpoint: iroh::EndpointId = text.parse().map_err(|_| fail("member_work_binding_invalid"))?;
+    if endpoint.to_string() != text {
+        return Err(fail("member_work_binding_invalid"));
+    }
+    let addrs = message["direct_addrs"].as_array().filter(|a| !a.is_empty() && a.len() <= 8)
+        .ok_or(fail("member_work_binding_invalid"))?;
+    let mut address = iroh::EndpointAddr::new(endpoint);
+    for addr in addrs {
+        let addr: SocketAddr = addr.as_str().and_then(|s| s.parse().ok())
+            .ok_or(fail("member_work_binding_invalid"))?;
+        if addr.port() == 0 || !allowed(addr) { return Err(fail("member_work_address_refused")); }
+        address = address.with_ip_addr(addr);
+    }
+    Ok(Verified { registration: registration.clone(), address, owner })
 }

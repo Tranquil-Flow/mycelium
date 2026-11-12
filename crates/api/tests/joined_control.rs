@@ -20,7 +20,13 @@ fn an_existing_join_produces_a_signed_current_control_binding_without_pairing_ag
     let verified = result.unwrap();
     assert_eq!(verified.node_id(), p.session.node_id());
     assert_eq!(verified.registration(), &d["message"]["registration"]);
-    assert_eq!(p.seed.coordinator.member(p.session.node_id()).unwrap(), before, "adoption must not pair, resume or rewrite the seed");
+    let mut after = p.seed.coordinator.member(p.session.node_id()).unwrap();
+    let mut before = before;
+    // member() computes elapsed liveness age on read; it is not stored seed state.
+    assert!(after["liveness_age_seconds"].as_f64().unwrap() >= before["liveness_age_seconds"].as_f64().unwrap());
+    after.as_object_mut().unwrap().remove("liveness_age_seconds");
+    before.as_object_mut().unwrap().remove("liveness_age_seconds");
+    assert_eq!(after, before, "adoption must not pair, resume or rewrite the seed");
 }
 #[test]
 fn stale_generation_and_wrong_signer_are_refused_before_adoption() {
