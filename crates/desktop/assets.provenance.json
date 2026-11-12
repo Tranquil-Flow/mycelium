@@ -61,7 +61,7 @@
   },
   "icon": {
     "source": "authored: W2 colony mark (icons/icon.png regenerated from the chosen mark)",
-    "sha256": "97cba727c4c7780b124e3f49186cf3ed8c6a874f152bb3c782b955777aefee41",
+    "sha256": "f8742690cc3535c5907a563ca1b6a9d00d7195f44c654ca2d5428bde2a144952",
     "reason": "The inherited v0.1.4 Tauri window icon was still the pre-redesign artwork; the Dock adopts this embedded PNG at runtime, so it must carry the colony mark."
   },
   "app_icon": {
