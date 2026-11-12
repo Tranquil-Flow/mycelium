@@ -226,8 +226,14 @@ fn memory_hog_process() {
 }
 
 /// (b) One real child allocates and touches memory above a small cap; the
-/// host probe sees it and the guard kills and reaps it within two samples of
-/// the memory being resident. No model, no Metal.
+/// host probe sees it and the guard kills and reaps it: while it is still
+/// touching (any reading above the cap counts), or within two samples of its
+/// memory being resident. No model, no Metal.
+///
+/// Bound (MGF F7): the verdict must arrive within v0.1.4's worker start
+/// allowance (`WorkerStartup`, worker.py:36), generous for spawning this test
+/// binary and touching 320 MiB under load; a guard that never kills fails at
+/// that deadline. The sample bound counts readings, not time.
 #[test]
 fn a_real_child_over_the_cap_is_killed_and_reaped() {
     let (client, server) = UnixStream::pair().unwrap();
@@ -254,22 +260,24 @@ fn a_real_child_over_the_cap_is_killed_and_reaped() {
         .any(|line| line == "mg_hog_resident");
     let base = worker.guard_samples();
     let failure =
-        worker.guard_wait_until(Instant::now() + duration(BudgetId::ModelSelection).unwrap());
+        worker.guard_wait_until(Instant::now() + duration(BudgetId::WorkerStartup).unwrap());
     assert_eq!(
         failure.as_ref().map(|f| f.code),
         Some(MEMORY_LIMIT_EXCEEDED),
         "resident marker seen: {resident}"
     );
     let failure = failure.unwrap();
-    assert!(
-        resident,
-        "the guard stopped the child before it was resident"
-    );
-    assert!(
-        failure.samples <= base + 2,
-        "{} samples after the memory was resident at sample {base}",
-        failure.samples
-    );
+    // A reading taken after the marker sees all of it: at most one sample
+    // already counted at `base` read earlier. A child killed while still
+    // touching never printed the marker (the reading above the cap is checked
+    // below); the review's F7 flake was this case.
+    if resident {
+        assert!(
+            failure.samples <= base + 2,
+            "{} samples after the memory was resident at sample {base}",
+            failure.samples
+        );
+    }
     let observed = failure.limit_detail["observed_group_rss_bytes"]
         .as_u64()
         .unwrap();
