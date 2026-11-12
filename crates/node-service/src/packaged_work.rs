@@ -57,6 +57,9 @@ struct Shared {
     status: work::Status,
     #[cfg(test)]
     receive_hook: Mutex<Option<ReceiveHook>>,
+    /// Test-only fault injection: panic immediately before the custody handoff.
+    #[cfg(test)]
+    panic_handoff: AtomicBool,
     stop: AtomicBool,
 }
 impl Shared {
@@ -113,6 +116,12 @@ impl Service {
     pub(crate) fn on_receive(&self, hook: ReceiveHook) {
         *self.shared.receive_hook.lock().unwrap() = Some(hook);
     }
+    /// Test-only: the member loop panics immediately before handing its custody object back,
+    /// so a regression exercises the real unwind instead of a simulated error return.
+    #[cfg(all(test, feature = "desktop-shell"))]
+    pub(crate) fn on_handoff_panic(&self) {
+        self.shared.panic_handoff.store(true, Ordering::SeqCst);
+    }
     pub fn start(
         root: PathBuf,
         session: SessionCell,
@@ -161,6 +170,8 @@ impl Service {
             ),
             #[cfg(test)]
             receive_hook: Mutex::new(None),
+            #[cfg(test)]
+            panic_handoff: AtomicBool::new(false),
             stop: AtomicBool::new(false),
         });
         shared.live()?; // refusal precedes sockets, threads, custody and native work
@@ -534,6 +545,12 @@ fn operations(
         }
         Ok(())
     })();
+    // Test-only: panic immediately before the handoff so a regression exercises the real
+    // unwind that drops `work` when the custody object has not been handed back yet.
+    #[cfg(test)]
+    if shared.panic_handoff.swap(false, Ordering::SeqCst) {
+        panic!("member_work_handoff_panic");
+    }
     // Hand the exact custody object to the owner of `close`, not to the thread's end: only
     // the Service may decide that discard is proven (and retry it with after a fault).
     *cleanup.lock().unwrap_or_else(|p| p.into_inner()) = Some(work);

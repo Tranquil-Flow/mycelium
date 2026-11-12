@@ -229,6 +229,64 @@ fn network_service_close_retries_only_its_unresolved_cleanup_owner() {
     f.network.close_work();
 }
 
+/// F2-R1: a panic in the member operation loop before its custody handoff used to drop the
+/// only member `work::Work`. `close` reported the panic once, the empty slot made
+/// `cleanup_pending` false, and the NEXT close returned Ok while the stage bytes remained —
+/// the same false success this lane exists to kill. The Service must keep the absence of
+/// proof: a sticky Err on every later close and a pending cleanup slot.
+#[test]
+fn panicked_member_work_handoff_must_not_turn_a_later_close_into_success() {
+    let (f, mut ports, state, mut env) = setup();
+    // Rescue first: restoring the private fixture and releasing the composed owners runs
+    // even if an assertion below fails.
+    let _rescue = Rescue {
+        work: ports.work.clone(),
+        mode: None,
+    };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    ports.work.node_slice_plans().unwrap();
+    let stage = stage_root(&owner_ports::contributor_dir(&f.root.join("owner")));
+    assert!(
+        stage.is_dir(),
+        "the local member must own real stage bytes before the panic"
+    );
+    let mut service = lock(&ports.work.resident)
+        .local
+        .take()
+        .expect("the composed run owns its local member Service");
+    // The hook panics inside the worker thread immediately before the custody handoff, so
+    // the real unwind (not an error return) drops the only `work::Work`.
+    service.on_handoff_panic();
+    let first = service.close();
+    let second = service.close();
+    let pending = service.cleanup_pending();
+    let bytes_remain = stage.is_dir();
+    println!(
+        "REVIEW_PANIC_HANDOFF first={first:?} second={second:?} pending={pending} bytes_remain={bytes_remain}"
+    );
+    assert_eq!(
+        first,
+        Err("member_work_panicked".to_owned()),
+        "the first close must report the panicked worker"
+    );
+    assert_eq!(
+        second,
+        Err("member_work_unprovable".to_owned()),
+        "a later close falsely reported success while the panicked worker's bytes remain"
+    );
+    assert!(
+        pending,
+        "the unprovable Service was not retained as pending cleanup"
+    );
+    assert!(
+        bytes_remain,
+        "the panicked worker's stage bytes must not vanish unproven"
+    );
+}
+
 fn stage_root(root: &Path) -> PathBuf {
     let runs = root.join("chain-runs");
     let mut dirs: Vec<_> = fs::read_dir(&runs)
