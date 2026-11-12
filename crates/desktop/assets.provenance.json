@@ -60,8 +60,9 @@
     }
   },
   "icon": {
-    "source": "apps/node-app/src-tauri/icons/icon.png",
-    "sha256": "6413bfe9d546e5225fc9256a0ecec48df3a1272ea4bdc91c15b8e000222a95d3"
+    "source": "authored: W2 colony mark (icons/icon.png regenerated from the chosen mark)",
+    "sha256": "97cba727c4c7780b124e3f49186cf3ed8c6a874f152bb3c782b955777aefee41",
+    "reason": "The inherited v0.1.4 Tauri window icon was still the pre-redesign artwork; the Dock adopts this embedded PNG at runtime, so it must carry the colony mark."
   },
   "app_icon": {
     "source": "v0.1.4 Mycelium A13 Demo.app/Contents/Resources/icon-windowed.icns (APP-FILES.sha256 of the published zip; certified f4e366e9 package)",
