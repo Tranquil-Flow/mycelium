@@ -212,3 +212,74 @@ fn two_path_builds_of_the_same_commit_are_byte_identical() {
     );
     assert!(text.contains("REPRODUCIBLE:"), "{text}");
 }
+
+/// Review RELF F16: `canon_acquire` waited for ever on a lock it could not take: a lock directory
+/// it cannot remove (another account's in the sticky `/Users/Shared`, or one whose mode forbids
+/// removing the pid file) made it spin without sleeping (a dead-looking owner, `rm -rf` failing,
+/// retry), and a lock whose pid file is empty made it sleep and retry for ever. The wait is now
+/// bounded (`MYCELIUM_CANONICAL_LOCK_WAIT` seconds) and ends with a message naming the lock.
+#[test]
+fn a_lock_that_cannot_be_broken_or_names_no_owner_fails_within_the_bounded_wait() {
+    use std::{os::unix::fs::PermissionsExt, sync::mpsc};
+    let span = |id: budgets::BudgetId| {
+        std::time::Duration::from_millis(id.span(budgets::Entries::ZERO).unwrap().millis())
+    };
+    // The bound the test gives the recipe (whole seconds) and how long it waits for the answer.
+    let bound = span(budgets::BudgetId::RelayPoll).as_secs().max(1);
+    let patience = span(budgets::BudgetId::WorkerStartup);
+    let base = std::env::temp_dir().join(format!("v02-relf2-canon-lock-{}", std::process::id()));
+    fs::create_dir_all(&base).unwrap();
+    let tree = tiny_tree(&base, "t");
+    let mut wrong = Vec::new();
+    for (n, (case, pid, mode)) in [
+        ("a dead owner's lock that cannot be removed", "999999", 0o500),
+        ("a lock whose pid file is empty", "", 0o700),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let canon = base.join(format!("canonical-src-{n}"));
+        let lock = base.join(format!("canonical-src-{n}.lock"));
+        fs::create_dir(&lock).unwrap();
+        fs::write(lock.join("pid"), pid).unwrap();
+        fs::set_permissions(&lock, fs::Permissions::from_mode(mode)).unwrap();
+        let script = format!(
+            ". '{}/canonical.sh' && canon_acquire '{}' && canon_release && echo acquired",
+            repro_dir().display(),
+            tree.display()
+        );
+        let child = Command::new("bash")
+            .args(["-c", &script])
+            .env("MYCELIUM_CANONICAL_SRC", &canon)
+            .env("MYCELIUM_CANONICAL_LOCK_WAIT", bound.to_string())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let (tx, rx) = mpsc::channel();
+        let waiter = std::thread::spawn(move || tx.send(child.wait_with_output()).unwrap_or(()));
+        match rx.recv_timeout(patience) {
+            Ok(out) => {
+                let out = out.unwrap();
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                if out.status.success() || !stderr.contains(lock.to_str().unwrap()) {
+                    wrong.push(format!("{case}: exit {:?}, stderr {stderr:?}", out.status.code()));
+                }
+            }
+            Err(_) => {
+                // Ours: the bash this test started, still waiting on the lock.
+                Command::new("/bin/kill")
+                    .args(["-KILL", &pid.to_string()])
+                    .status()
+                    .unwrap();
+                wrong.push(format!("{case}: still waiting after {patience:?}"));
+            }
+        }
+        waiter.join().unwrap();
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!canon.exists(), "{case}: the canonical link was made");
+    }
+    fs::remove_dir_all(&base).unwrap();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
