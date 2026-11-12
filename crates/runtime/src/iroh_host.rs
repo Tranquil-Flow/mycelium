@@ -292,6 +292,30 @@ impl Drop for LoopbackHost<'_> {
         self.abort_path_guards();
     }
 }
+/// Poll cancellation without restarting the bind/handshake future or its timeout.
+async fn interruptible<T>(
+    wait: Duration,
+    stopped: &dyn Fn() -> bool,
+    future: impl std::future::Future<Output = Result<T, Error>>,
+) -> Result<T, Error> {
+    let poll = budget(BudgetId::OwnerPoll)?;
+    tokio::time::timeout(wait, async {
+        tokio::pin!(future);
+        loop {
+            if stopped() {
+                return Err(Error::Expired);
+            }
+            tokio::select! {
+                biased;
+                result = &mut future => return result,
+                () = tokio::time::sleep(poll) => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| Error::Expired)?
+}
+
 pub(crate) fn outside_runtime() -> Result<(), Error> {
     if tokio::runtime::Handle::try_current().is_ok() {
         Err(Error::Unavailable)
@@ -436,6 +460,36 @@ impl<'a> LoopbackHost<'a> {
             Some((interface, policy)),
         )
     }
+    /// Router-only bind with cancellation observation; identical local/LAN policy.
+    /// No helper thread is spawned or abandoned when cancellation wins.
+    pub fn bind_router_until(
+        runtime: &'a tokio::runtime::Runtime,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        secret: iroh::SecretKey,
+        lan: Option<(IpAddr, LanPolicy)>,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Self, Error> {
+        if lan.as_ref().is_some_and(|(ip, policy)| !policy.allows(*ip)) {
+            return Err(Error::Authentication);
+        }
+        let mode = if lan.is_some() {
+            NetworkMode::DirectLan
+        } else {
+            NetworkMode::LocalOnly
+        };
+        Self::bind_inner_until(
+            runtime,
+            clock,
+            deadline,
+            Some(secret),
+            &[Channel::Router],
+            mode,
+            &Reach::Shipped,
+            lan,
+            stopped,
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     fn bind_inner(
         runtime: &'a tokio::runtime::Runtime,
@@ -446,6 +500,30 @@ impl<'a> LoopbackHost<'a> {
         mode: NetworkMode,
         reach: &Reach,
         lan: Option<(IpAddr, LanPolicy)>,
+    ) -> Result<Self, Error> {
+        Self::bind_inner_until(
+            runtime,
+            clock,
+            deadline,
+            secret,
+            channels,
+            mode,
+            reach,
+            lan,
+            &|| false,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn bind_inner_until(
+        runtime: &'a tokio::runtime::Runtime,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        secret: Option<iroh::SecretKey>,
+        channels: &[Channel],
+        mode: NetworkMode,
+        reach: &Reach,
+        lan: Option<(IpAddr, LanPolicy)>,
+        stopped: &dyn Fn() -> bool,
     ) -> Result<Self, Error> {
         outside_runtime()?;
         let wait = allowance(clock, deadline)?;
@@ -506,10 +584,10 @@ impl<'a> LoopbackHost<'a> {
             if let Some(secret) = secret {
                 builder = builder.secret_key(secret);
             }
-            tokio::time::timeout(wait, builder.bind())
-                .await
-                .map_err(|_| Error::Expired)?
-                .map_err(|_| Error::Unavailable)
+            interruptible(wait, stopped, async {
+                builder.bind().await.map_err(|_| Error::Unavailable)
+            })
+            .await
         })?;
         let host = Self {
             runtime,
@@ -976,6 +1054,17 @@ impl<'a> LoopbackHost<'a> {
         clock: &impl Clock,
         deadline: MonoInstant,
     ) -> Result<Connection, Error> {
+        self.connect_channel_until(peer, channel, clock, deadline, &|| false)
+    }
+    /// Cancellable dial/handshake, preserving its original absolute deadline.
+    pub fn connect_channel_until(
+        &self,
+        peer: &EndpointAddr,
+        channel: Channel,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Connection, Error> {
         outside_runtime()?;
         let endpoint = self.endpoint()?;
         // Reject the entire address, do not silently discard a relay/nonlocal
@@ -984,10 +1073,13 @@ impl<'a> LoopbackHost<'a> {
         let (target, pin) = self.dial_target(peer)?;
         let wait = allowance(clock, deadline)?;
         let connection = self.runtime.block_on(async {
-            tokio::time::timeout(wait, endpoint.connect(target, channel.alpn()))
-                .await
-                .map_err(|_| Error::Expired)?
-                .map_err(|_| Error::Unavailable)
+            interruptible(wait, stopped, async {
+                endpoint
+                    .connect(target, channel.alpn())
+                    .await
+                    .map_err(|_| Error::Unavailable)
+            })
+            .await
         })?;
         if let Err(error) = allowance(clock, deadline) {
             self.close_late(connection)?;

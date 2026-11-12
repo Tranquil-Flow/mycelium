@@ -50,6 +50,8 @@ pub struct Epoch {
     bearer: String,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    connections: Arc<Mutex<std::collections::BTreeMap<u64, TcpStream>>>,
+    stop_limit: Option<m16_route::StopLimit>,
     refusals: Arc<Mutex<Vec<String>>>,
 }
 
@@ -109,6 +111,17 @@ impl Epoch {
         carriers: Carriers,
         codec: Arc<dyn Codec>,
     ) -> Result<Self, PublicError> {
+        Self::open_until(coordinator, envelope, owner, carriers, codec, None)
+    }
+    /// Open with the work port's existing Stop token/timestamp, not a new timer.
+    pub fn open_until(
+        coordinator: Arc<seed::Coordinator>,
+        envelope: Value,
+        owner: iroh::SecretKey,
+        carriers: Carriers,
+        codec: Arc<dyn Codec>,
+        stop_limit: Option<m16_route::StopLimit>,
+    ) -> Result<Self, PublicError> {
         // A lease read the seed refused is one of the epoch's refusals.
         let refusals: Arc<Mutex<Vec<String>>> = Arc::default();
         let seen = refusals.clone();
@@ -124,6 +137,7 @@ impl Epoch {
             codec,
             seed,
             refusals,
+            stop_limit,
         )
     }
     /// [`Epoch::open`] with the seed view the pump reads member leases from.
@@ -143,9 +157,11 @@ impl Epoch {
             codec,
             seed,
             Arc::default(),
+            None,
         )
     }
     /// [`Epoch::open_watched`] whose refusals start in `refusals` (shared with the seed view).
+    #[allow(clippy::too_many_arguments)]
     fn open_with(
         coordinator: Arc<seed::Coordinator>,
         envelope: Value,
@@ -154,6 +170,7 @@ impl Epoch {
         codec: Arc<dyn Codec>,
         seed: SeedMembers,
         refusals: Arc<Mutex<Vec<String>>>,
+        stop_limit: Option<m16_route::StopLimit>,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
@@ -179,14 +196,19 @@ impl Epoch {
         let message = host.message().clone();
         let current = currentness(&coordinator);
         let (executor, handle) = match carriers {
-            Carriers::Loopback(peers) => {
-                RouteExecutor::connect(message.clone(), owner, peers, current, codec)
-            }
+            Carriers::Loopback(peers) => RouteExecutor::connect_until(
+                message.clone(),
+                owner,
+                peers,
+                current,
+                codec,
+                stop_limit.clone(),
+            ),
             Carriers::Lan {
                 interface,
                 policy,
                 verified,
-            } => RouteExecutor::connect_lan(
+            } => RouteExecutor::connect_lan_until(
                 message.clone(),
                 owner,
                 verified,
@@ -194,6 +216,7 @@ impl Epoch {
                 policy,
                 current,
                 codec,
+                stop_limit.clone(),
             ),
         }?;
         host.attach(handle.clone())?;
@@ -229,6 +252,8 @@ impl Epoch {
             bearer,
             stop,
             threads: Vec::new(),
+            connections: Arc::default(),
+            stop_limit,
             refusals,
         };
         // Gateway: one owned thread per connection, all joined on close.
@@ -236,6 +261,7 @@ impl Epoch {
         // F3), so the owned list is bounded by the live connections: at most
         // `max_admitted` holding a slot plus `max_admitted` not yet read.
         let (service, stop) = (epoch.service.clone(), epoch.stop.clone());
+        let sockets = epoch.connections.clone();
         let admitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let unread: Arc<Mutex<std::collections::VecDeque<(u64, TcpStream)>>> = Arc::default();
         let gateway = std::thread::Builder::new()
@@ -264,7 +290,26 @@ impl Epoch {
                     }
                     next += 1;
                     let id = next;
+                    {
+                        let mut active = sockets.lock().unwrap_or_else(|p| p.into_inner());
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        match stream.try_clone() {
+                            Ok(socket) => {
+                                active.insert(id, socket);
+                            }
+                            Err(e) => {
+                                eprintln!("joined_owner_gateway_socket_clone: {e}");
+                                continue;
+                            }
+                        }
+                    }
                     let Some(oldest) = unread_admit(&unread, id, &stream, max_admitted) else {
+                        sockets
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .remove(&id);
                         continue;
                     };
                     if let Some(oldest) = oldest
@@ -274,6 +319,7 @@ impl Epoch {
                     }
                     let (service, own_unread, admitted) =
                         (service.clone(), unread.clone(), admitted.clone());
+                    let own_sockets = sockets.clone();
                     let spawned = std::thread::Builder::new()
                         .name("joined-owner-connection".into())
                         .spawn(move || {
@@ -300,6 +346,10 @@ impl Epoch {
                                 |r| gateway.handle(r),
                             );
                             unread_done(&own_unread, id);
+                            own_sockets
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&id);
                             slot.release(&admitted);
                             if let Err(e) = served {
                                 // Bounded polls end streams; recorded, not dropped.
@@ -310,6 +360,10 @@ impl Epoch {
                         Ok(t) => connections.push(t),
                         Err(e) => {
                             unread_done(&unread, id);
+                            sockets
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&id);
                             eprintln!("joined owner gateway connection thread: {e}");
                         }
                     }
@@ -420,13 +474,28 @@ impl Epoch {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
     }
-    fn shutdown(&mut self) {
+    fn wake_gateway(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        // Close every accepted socket, including admitted bodies/SSE and unread
+        // headers, before joining. Registration uses the same lock and stop flag.
+        for socket in self
+            .connections
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            if let Err(e) = socket.shutdown(std::net::Shutdown::Both) {
+                eprintln!("joined_owner_gateway_shutdown: {e}");
+            }
+        }
         // Wake the accept loop; a refused connect means it already exited.
         if let Err(e) = TcpStream::connect(self.addr) {
             eprintln!("joined owner gateway wake: {e}");
         }
         self.handle.changed.notify_all();
+    }
+    fn shutdown(&mut self) {
+        self.wake_gateway();
         for t in self.threads.drain(..) {
             if t.join().is_err() {
                 eprintln!("joined owner epoch thread panicked");
@@ -437,20 +506,53 @@ impl Epoch {
     /// and return the pump's recorded refusals. A v2 epoch's carrier is closed
     /// first ([`m16_route::close`]): every member ends its serve with its
     /// compute closed (an unsettled request is torn down as a retirement).
-    pub fn close(mut self) -> Vec<String> {
-        if let Err(e) = m16_route::close(&self.handle) {
-            self.refusals
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push(e.code.to_owned());
+    pub fn close(self) -> Vec<String> {
+        let end = self.close_end();
+        self.close_until(end)
+    }
+    fn close_end(&self) -> std::time::Instant {
+        self.stop_limit
+            .as_ref()
+            .and_then(m16_route::StopLimit::end)
+            .unwrap_or_else(|| {
+                let now = std::time::Instant::now();
+                match span(B::CancelAndCleanup) {
+                    Ok(wait) => now + wait,
+                    Err(e) => {
+                        record_code(&self.refusals, e.code);
+                        now
+                    }
+                }
+            })
+    }
+    /// Start closing before collecting member replies, so one held member cannot
+    /// consume another member's discard opportunity. No new thread is spawned.
+    pub fn begin_close_until(&self, end: std::time::Instant) {
+        self.wake_gateway();
+        if let Err(e) = m16_route::begin_close_until(&self.handle, end) {
+            record_code(&self.refusals, e.code);
+        }
+    }
+    /// One original Stop end for carrier, gateway I/O, and joins.
+    pub fn close_until(mut self, end: std::time::Instant) -> Vec<String> {
+        self.wake_gateway();
+        if let Err(e) = m16_route::close_until(&self.handle, end) {
+            record_code(&self.refusals, e.code);
         }
         self.shutdown();
+        if std::time::Instant::now() > end {
+            record_code(&self.refusals, "owner_target_cleanup_unproven");
+        }
         self.refusals()
     }
 }
 impl Drop for Epoch {
     fn drop(&mut self) {
         if !self.threads.is_empty() {
+            self.wake_gateway();
+            if let Err(e) = m16_route::close_until(&self.handle, self.close_end()) {
+                record_code(&self.refusals, e.code);
+            }
             self.shutdown();
         }
     }

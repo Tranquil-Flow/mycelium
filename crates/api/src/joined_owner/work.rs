@@ -138,12 +138,22 @@ pub fn open_epoch(
             now,
         ),
     }?;
-    deliver(coordinator, envelope, owner, stages, network, codec, within)
+    deliver(
+        coordinator,
+        envelope,
+        owner,
+        stages,
+        network,
+        codec,
+        within,
+        None,
+    )
 }
 
 /// Ask each member for its carrier address, deliver the signed route
 /// (`serve`: the member serves until the epoch ends) and open the owner's
 /// epoch on the caller's network with the route's `owner` key.
+#[allow(clippy::too_many_arguments)]
 fn deliver(
     coordinator: &Arc<seed::Coordinator>,
     envelope: Value,
@@ -152,6 +162,7 @@ fn deliver(
     network: &Network,
     codec: Arc<dyn Codec>,
     within: Duration,
+    stop_limit: Option<crate::m16_route::StopLimit>,
 ) -> Result<Epoch, Refusal> {
     let mut addresses = Vec::new();
     for s in stages.iter_mut() {
@@ -175,12 +186,13 @@ fn deliver(
     for s in stages.iter_mut() {
         s.link.begin(json!({"command":"serve","route":envelope}))?;
     }
-    Ok(Epoch::open(
+    Ok(Epoch::open_until(
         coordinator.clone(),
         envelope,
         owner,
         carriers,
         codec,
+        stop_limit,
     )?)
 }
 
@@ -1036,7 +1048,7 @@ impl Worker {
             Some(at) if stopping => at,
             _ => Instant::now(),
         };
-        // EP2 + R1: close an open epoch FIRST, then release every member.
+        // Start epoch close FIRST; collect/discard members while the carrier closes.
         let cleanup = self.exit(open.take(), from + self.stop_allowance);
         let failure = match stopping {
             true => None,
@@ -1063,7 +1075,7 @@ impl Worker {
     }
     /// The exit (v0.1.4 teardown demo_chain.py:1322-1335, cleanup :1283-1320, 1380), all under
     /// ONE deadline `end` (`_stop_deadline`, :1240-1253; REVIEW-lanePH3B-S4AF F2-F4):
-    /// 1. an open epoch is closed FIRST (EP2: a v2 member serves until the owner closes it; its
+    /// 1. an open epoch starts closing FIRST (EP2: a v2 member serves until the owner closes it; its
     ///    `serve` then ends with its compute closed and is never cancelled);
     /// 2. every other operation a member still runs is cancelled (`cancel_operation`);
     /// 3. every member's replies are collected round-robin, and each member that began a
@@ -1074,7 +1086,9 @@ impl Worker {
     ///    swallowed.
     fn exit(&mut self, open: Option<Epoch>, end: Instant) -> Option<String> {
         let closed = open.is_some();
-        let refusals = open.map(Epoch::close);
+        if let Some(epoch) = &open {
+            epoch.begin_close_until(end);
+        }
         for m in &self.members {
             let serving = closed && m.link.begun.front().is_some_and(|c| c == "serve");
             if m.link.outstanding > 0 && !serving {
@@ -1139,7 +1153,11 @@ impl Worker {
                 )
             })
             .collect();
-        let unproven = rows.iter().any(|r| r["discarded"] != true);
+        let refusals = open.map(|epoch| epoch.close_until(end));
+        let carrier_unproven = refusals
+            .as_ref()
+            .is_some_and(|codes| codes.iter().any(|c| c == CLEANUP_UNPROVEN));
+        let unproven = carrier_unproven || rows.iter().any(|r| r["discarded"] != true);
         self.shared.update(|f| {
             f.member_cleanup = rows;
             if refusals.is_some() || !self.ended.is_empty() || !reports.is_empty() {
@@ -1219,6 +1237,11 @@ impl Worker {
             &self.network,
             self.codec.clone(),
             self.within,
+            Some(crate::m16_route::StopLimit::new(
+                self.stop.clone(),
+                self.stop_at.clone(),
+                self.stop_allowance,
+            )),
         );
         drop(stages);
         let epoch = match delivered {

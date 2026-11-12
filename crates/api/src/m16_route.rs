@@ -46,6 +46,9 @@ use std::{
     time::Instant,
 };
 use transport::{Channel, Clock, ConnectionFence, Exchange};
+#[path = "m16_route_stop.rs"]
+mod stop;
+pub use stop::{StopLimit, begin_close_until, close_until};
 
 fn uint(value: &PyReal) -> Option<u64> {
     match value {
@@ -58,12 +61,6 @@ fn uint(value: &PyReal) -> Option<u64> {
 }
 fn error(code: &'static str) -> PublicError {
     PublicError::new(409, code)
-}
-fn deadline(clock: &impl Clock, id: B) -> Result<MonoInstant, &'static str> {
-    clock
-        .monotonic()
-        .checked_add(id.span(Entries::ZERO).map_err(|_| "budget_unavailable")?)
-        .map_err(|_| "deadline_invalid")
 }
 /// Product tokenizer seam: the host's selected local model tokenizer.
 pub trait Codec: Send + Sync {
@@ -208,6 +205,7 @@ pub struct RouteWatch {
     /// v2: the carrier's command channel for [`close`]; taken by the executor's
     /// drop so the carrier thread always ends with its executor.
     closer: Mutex<Option<mpsc::Sender<Command>>>,
+    shutdown: stop::Shutdown,
 }
 impl RouteWatch {
     /// Wait (bounded) for a carrier state change; returns immediately on change.
@@ -300,7 +298,6 @@ pub struct RouteExecutor {
     codec: Arc<dyn Codec>,
     path: Option<Path>,
     teardown_sent: bool,
-    thread: Option<std::thread::JoinHandle<()>>,
     cancel: Arc<AtomicBool>,
     /// `mycelium.joined_route.v2`: many requests, one at a time.
     multi: bool,
@@ -314,6 +311,17 @@ impl RouteExecutor {
         peers: Vec<StagePeer>,
         currentness: Currentness,
         codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        Self::connect_until(message, secret, peers, currentness, codec, None)
+    }
+    /// The run's existing Stop token and first-Stop allowance, including setup.
+    pub fn connect_until(
+        message: Value,
+        secret: iroh::SecretKey,
+        peers: Vec<StagePeer>,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+        stop: Option<StopLimit>,
     ) -> Result<(Self, RouteHandle), PublicError> {
         if peers.iter().any(|p| !p.socket.ip().is_loopback()) {
             return Err(error("joined_route_peer_mismatch"));
@@ -334,6 +342,7 @@ impl RouteExecutor {
             Network::Loopback,
             currentness,
             codec,
+            stop,
         )
     }
     /// Explicit direct-LAN carrier: the owner endpoint binds exactly `interface`
@@ -350,6 +359,29 @@ impl RouteExecutor {
         policy: LanPolicy,
         currentness: Currentness,
         codec: Arc<dyn Codec>,
+    ) -> Result<(Self, RouteHandle), PublicError> {
+        Self::connect_lan_until(
+            message,
+            secret,
+            carriers,
+            interface,
+            policy,
+            currentness,
+            codec,
+            None,
+        )
+    }
+    /// Direct-LAN setup with the same first-Stop limit as the owner work.
+    #[allow(clippy::too_many_arguments)]
+    pub fn connect_lan_until(
+        message: Value,
+        secret: iroh::SecretKey,
+        carriers: Vec<crate::joined_shard::carrier::VerifiedCarrier>,
+        interface: IpAddr,
+        policy: LanPolicy,
+        currentness: Currentness,
+        codec: Arc<dyn Codec>,
+        stop: Option<StopLimit>,
     ) -> Result<(Self, RouteHandle), PublicError> {
         if !policy.allows(interface)
             || carriers
@@ -390,6 +422,7 @@ impl RouteExecutor {
             Network::Lan { interface, policy },
             currentness,
             codec,
+            stop,
         )
     }
     fn open(
@@ -399,6 +432,7 @@ impl RouteExecutor {
         network: Network,
         currentness: Currentness,
         codec: Arc<dyn Codec>,
+        stop: Option<StopLimit>,
     ) -> Result<(Self, RouteHandle), PublicError> {
         let stages = message["stages"]
             .as_array()
@@ -434,11 +468,16 @@ impl RouteExecutor {
                 ..Observed::default()
             }),
             changed: std::sync::Condvar::new(),
-            closer: Mutex::new(multi.then(|| tx.clone())),
+            closer: Mutex::new(Some(tx.clone())),
+            shutdown: stop::Shutdown {
+                limit: stop,
+                ..Default::default()
+            },
         });
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = observed.shutdown.cancel.clone();
         let (shared, flag, route) = (observed.clone(), cancel.clone(), message.clone());
         let thread = std::thread::spawn(move || {
+            let _finished = stop::Finished(shared.clone());
             let served = if multi {
                 carrier_epoch(
                     &route,
@@ -467,8 +506,24 @@ impl RouteExecutor {
             {
                 o.setup_failure.get_or_insert(code.to_owned());
             }
-            shared.changed.notify_all();
         });
+        *observed
+            .shutdown
+            .thread
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(thread);
+        let executor = Self {
+            message,
+            commands: Some(tx),
+            observed: observed.clone(),
+            pending: VecDeque::new(),
+            taken: 0,
+            codec,
+            path: None,
+            teardown_sent: false,
+            cancel,
+            multi,
+        };
         let ready_by = Instant::now()
             + std::time::Duration::from_millis(
                 B::WorkerStartup
@@ -482,7 +537,11 @@ impl RouteExecutor {
             .map_err(|_| error("joined_route_poisoned"))?;
         while !o.ready {
             let now = Instant::now();
-            if o.setup_failure.is_some() || thread.is_finished() || now >= ready_by {
+            if o.setup_failure.is_some()
+                || observed.shutdown.finished.load(Ordering::SeqCst)
+                || observed.shutdown.setup_stopped()
+                || now >= ready_by
+            {
                 return Err(error("joined_route_connect_failed"));
             }
             // Bounded by the owner poll so a finished carrier thread is noticed.
@@ -499,22 +558,7 @@ impl RouteExecutor {
                 .0;
         }
         drop(o);
-        Ok((
-            Self {
-                message,
-                commands: Some(tx),
-                observed: observed.clone(),
-                pending: VecDeque::new(),
-                taken: 0,
-                codec,
-                path: None,
-                teardown_sent: false,
-                thread: Some(thread),
-                cancel,
-                multi,
-            },
-            observed,
-        ))
+        Ok((executor, observed))
     }
 }
 impl Drop for RouteExecutor {
@@ -526,10 +570,10 @@ impl Drop for RouteExecutor {
             closer.take();
         }
         self.commands.take();
-        if let Some(t) = self.thread.take()
-            && t.join().is_err()
-        {
-            eprintln!("joined_route_carrier_panicked");
+        self.observed.shutdown.wake_io();
+        self.observed.changed.notify_all();
+        if let Err(e) = self.observed.shutdown.join() {
+            eprintln!("{}", e.code);
         }
     }
 }
@@ -631,7 +675,7 @@ impl Executor for RouteExecutor {
         // A carrier that exited after readiness without completing is a failure,
         // never an indefinitely pending request.
         if !o.completed
-            && (o.setup_failure.is_some() || self.thread.as_ref().is_some_and(|t| t.is_finished()))
+            && (o.setup_failure.is_some() || self.observed.shutdown.finished.load(Ordering::SeqCst))
         {
             return Err(error("joined_route_carrier_failed"));
         }
@@ -676,7 +720,7 @@ impl Executor for RouteExecutor {
             .count()
             .map_err(|_| error("budget_unavailable"))?
             .get();
-        let alive = self.thread.as_ref().is_some_and(|t| !t.is_finished());
+        let alive = !self.observed.shutdown.finished.load(Ordering::SeqCst);
         if alive && o.teardown_attempts < allowed {
             o.teardown_busy = true;
             drop(o);
@@ -839,6 +883,20 @@ pub fn observe_member_leases(
 /// every carrier connection is closed, so each member ends its serve with its
 /// compute closed. A v1 epoch has nothing to close here (no-op).
 pub fn close(handle: &RouteHandle) -> Result<(), PublicError> {
+    if !handle
+        .state
+        .lock()
+        .map_err(|_| error("joined_route_poisoned"))?
+        .multi
+        && handle
+            .shutdown
+            .end
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none()
+    {
+        return Ok(());
+    }
     let closer = handle
         .closer
         .lock()
@@ -878,6 +936,7 @@ fn peer_addr(p: &Peer) -> EndpointAddr {
         .fold(EndpointAddr::new(p.endpoint), |a, s| a.with_ip_addr(*s))
 }
 struct Link<'a> {
+    shutdown: &'a stop::Shutdown,
     send: IrohTransport<'a, app_host_clock::Clock, Fence>,
     receive: RouterReceiver<'a, app_host_clock::Clock, Fence>,
     fence: ConnectionFence,
@@ -900,7 +959,7 @@ impl Link<'_> {
             channel: Channel::Router,
             message_id: self.sent.to_be_bytes(),
             payload: bytes,
-            deadline: deadline(clock, id)?,
+            deadline: self.shutdown.deadline(clock, id)?,
             maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
         };
         transport::exchange(&mut self.send, &request, clock)
@@ -919,7 +978,7 @@ impl Link<'_> {
             channel: Channel::Router,
             message_id: self.sent.to_be_bytes(),
             payload: bytes,
-            deadline: deadline(clock, id)?,
+            deadline: self.shutdown.deadline(clock, id)?,
             maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
         };
         transport::exchange(&mut self.send, &request, clock).map_err(|e| match e {
@@ -939,7 +998,7 @@ impl Link<'_> {
     ) -> Result<router_wire::DecodedFrame, &'static str> {
         let delivery = self
             .receive
-            .receive(deadline(clock, id)?)
+            .receive(self.shutdown.deadline(clock, id)?)
             .map_err(|e| match e {
                 transport::Error::Expired => "joined_route_hop_deadline",
                 transport::Error::Generation => "joined_route_generation_changed",
@@ -983,20 +1042,20 @@ fn carrier(
         .build()
         .map_err(|_| "joined_route_runtime_failed")?;
     let clock = crate::managed_carrier::HostClock::default();
-    let bound = deadline(&clock, B::WorkerStartup)?;
-    let mut host = match network {
-        Network::Loopback => LoopbackHost::bind_with_secret(&rt, &clock, bound, secret),
-        Network::Lan { interface, policy } => LoopbackHost::bind_lan(
-            &rt,
-            &clock,
-            bound,
-            secret,
-            &[Channel::Router],
-            *interface,
-            policy.clone(),
-        ),
-    }
+    let bound = observed.shutdown.deadline(&clock, B::WorkerStartup)?;
+    let lan = match network {
+        Network::Loopback => None,
+        Network::Lan { interface, policy } => Some((*interface, policy.clone())),
+    };
+    let inner = LoopbackHost::bind_router_until(&rt, &clock, bound, secret, lan, &|| {
+        observed.shutdown.setup_stopped()
+    })
     .map_err(|_| "joined_route_bind_failed")?;
+    let host = stop::OwnedHost {
+        inner,
+        observed: observed.clone(),
+        clock: &clock,
+    };
     let epoch = message["topology_version"]
         .as_u64()
         .ok_or("joined_route_invalid")?;
@@ -1007,15 +1066,17 @@ fn carrier(
     let mut control: Vec<Connection> = Vec::new();
     for p in peers {
         for set in [&mut data, &mut control] {
-            set.push(
-                host.connect_channel(
+            let connection = host
+                .connect_channel_until(
                     &peer_addr(p),
                     Channel::Router,
                     &clock,
-                    deadline(&clock, B::WorkerStartup)?,
+                    observed.shutdown.deadline(&clock, B::WorkerStartup)?,
+                    &|| observed.shutdown.setup_stopped(),
                 )
-                .map_err(|_| "joined_route_connect_failed")?,
-            );
+                .map_err(|_| "joined_route_connect_failed")?;
+            observed.shutdown.keep(&connection);
+            set.push(connection);
         }
     }
     let fence = |p: &Peer| -> (ConnectionFence, Fence) {
@@ -1037,6 +1098,7 @@ fn carrier(
         let (base, f1) = fence(p);
         let (_, f2) = fence(p);
         Ok(Link {
+            shutdown: &observed.shutdown,
             send: IrohTransport::new(c.clone(), &rt, &clock, base, f1)
                 .map_err(|_| "joined_route_generation_changed")?,
             receive: RouterReceiver::new(c.clone(), &rt, &clock, base, f2)
@@ -1206,7 +1268,7 @@ fn carrier(
                     }
                 }
                 // Only a v2 epoch's handle holds a closer (`close`): unreachable here.
-                Command::Close => {}
+                Command::Close => break,
                 Command::Retry => {
                     let Some((frame, began)) = teardown.as_ref() else {
                         continue;
@@ -1226,11 +1288,23 @@ fn carrier(
                     let mut dialed = Vec::new();
                     let mut failed = Vec::new();
                     for i in unsettled {
-                        match deadline(&clock, B::RouterClose).and_then(|d| {
-                            host.connect_channel(&peer_addr(&peers[i]), Channel::Router, &clock, d)
+                        match observed
+                            .shutdown
+                            .deadline(&clock, B::RouterClose)
+                            .and_then(|d| {
+                                host.connect_channel_until(
+                                    &peer_addr(&peers[i]),
+                                    Channel::Router,
+                                    &clock,
+                                    d,
+                                    &|| observed.shutdown.setup_stopped(),
+                                )
                                 .map_err(|_| "joined_route_redial_failed")
-                        }) {
-                            Ok(c) => dialed.push((i, c)),
+                            }) {
+                            Ok(c) => {
+                                observed.shutdown.keep(&c);
+                                dialed.push((i, c));
+                            }
                             Err(code) => failed.push((i, Err(code.to_owned()))),
                         }
                     }
@@ -1262,12 +1336,8 @@ fn carrier(
     });
     drop(data);
     drop(control);
-    let closed = host.close(&clock, deadline(&clock, B::RouterClose)?);
     drop(host);
     drop(rt);
-    if let Ok(mut o) = observed.state.lock() {
-        o.carrier_closed = closed.is_ok();
-    }
     result
 }
 /// v2 (`mycelium.joined_route.v2`, lane EP1) carrier: ONE epoch serves many
@@ -1298,20 +1368,20 @@ fn carrier_epoch(
         .build()
         .map_err(|_| "joined_route_runtime_failed")?;
     let clock = crate::managed_carrier::HostClock::default();
-    let bound = deadline(&clock, B::WorkerStartup)?;
-    let mut host = match network {
-        Network::Loopback => LoopbackHost::bind_with_secret(&rt, &clock, bound, secret),
-        Network::Lan { interface, policy } => LoopbackHost::bind_lan(
-            &rt,
-            &clock,
-            bound,
-            secret,
-            &[Channel::Router],
-            *interface,
-            policy.clone(),
-        ),
-    }
+    let bound = observed.shutdown.deadline(&clock, B::WorkerStartup)?;
+    let lan = match network {
+        Network::Loopback => None,
+        Network::Lan { interface, policy } => Some((*interface, policy.clone())),
+    };
+    let inner = LoopbackHost::bind_router_until(&rt, &clock, bound, secret, lan, &|| {
+        observed.shutdown.setup_stopped()
+    })
     .map_err(|_| "joined_route_bind_failed")?;
+    let host = stop::OwnedHost {
+        inner,
+        observed: observed.clone(),
+        clock: &clock,
+    };
     let epoch = message["topology_version"]
         .as_u64()
         .ok_or("joined_route_invalid")?;
@@ -1328,15 +1398,17 @@ fn carrier_epoch(
     let mut control: Vec<Connection> = Vec::new();
     for p in peers {
         for set in [&mut data, &mut control] {
-            set.push(
-                host.connect_channel(
+            let connection = host
+                .connect_channel_until(
                     &peer_addr(p),
                     Channel::Router,
                     &clock,
-                    deadline(&clock, B::WorkerStartup)?,
+                    observed.shutdown.deadline(&clock, B::WorkerStartup)?,
+                    &|| observed.shutdown.setup_stopped(),
                 )
-                .map_err(|_| "joined_route_connect_failed")?,
-            );
+                .map_err(|_| "joined_route_connect_failed")?;
+            observed.shutdown.keep(&connection);
+            set.push(connection);
         }
     }
     let fence = |p: &Peer| -> (ConnectionFence, Fence) {
@@ -1358,6 +1430,7 @@ fn carrier_epoch(
         let (base, f1) = fence(p);
         let (_, f2) = fence(p);
         Ok(Link {
+            shutdown: &observed.shutdown,
             send: IrohTransport::new(c.clone(), &rt, &clock, base, f1)
                 .map_err(|_| "joined_route_generation_changed")?,
             receive: RouterReceiver::new(c.clone(), &rt, &clock, base, f2)
@@ -1511,6 +1584,13 @@ fn carrier_epoch(
         let mut open = true;
         let mut retired: Option<(Vec<u8>, Instant)> = None;
         for command in commands.iter() {
+            let shutdown = matches!(command, Command::Close)
+                && observed
+                    .shutdown
+                    .end
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .is_some();
             let retire = match command {
                 Command::Start {
                     path,
@@ -1692,16 +1772,22 @@ fn carrier_epoch(
                             let mut dialed = Vec::new();
                             let mut failed = Vec::new();
                             for i in unsettled {
-                                match deadline(&clock, B::RouterClose).and_then(|d| {
-                                    host.connect_channel(
-                                        &peer_addr(&peers[i]),
-                                        Channel::Router,
-                                        &clock,
-                                        d,
-                                    )
-                                    .map_err(|_| "joined_route_redial_failed")
-                                }) {
-                                    Ok(c) => dialed.push((i, c)),
+                                match observed.shutdown.deadline(&clock, B::RouterClose).and_then(
+                                    |d| {
+                                        host.connect_channel_until(
+                                            &peer_addr(&peers[i]),
+                                            Channel::Router,
+                                            &clock,
+                                            d,
+                                            &|| observed.shutdown.setup_stopped(),
+                                        )
+                                        .map_err(|_| "joined_route_redial_failed")
+                                    },
+                                ) {
+                                    Ok(c) => {
+                                        observed.shutdown.keep(&c);
+                                        dialed.push((i, c));
+                                    }
                                     Err(code) => failed.push((i, Err(code.to_owned()))),
                                 }
                             }
@@ -1770,6 +1856,9 @@ fn carrier_epoch(
                 retired = Some((frame, began));
                 torn = true;
             }
+            if shutdown {
+                break;
+            }
         }
         // The executor is gone: stop, close, join.
         if let Some((_, stop)) = current.as_ref() {
@@ -1788,12 +1877,8 @@ fn carrier_epoch(
     drop(data_links);
     drop(data);
     drop(control);
-    let closed = host.close(&clock, deadline(&clock, B::RouterClose)?);
     drop(host);
     drop(rt);
-    if let Ok(mut o) = observed.state.lock() {
-        o.carrier_closed = closed.is_ok();
-    }
     result
 }
 #[allow(clippy::too_many_arguments)]
