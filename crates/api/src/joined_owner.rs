@@ -29,6 +29,7 @@ pub mod epoch;
 pub mod link;
 pub mod remote;
 pub mod source;
+pub mod work;
 
 fn fail(code: &'static str) -> PublicError {
     PublicError::new(409, code)
