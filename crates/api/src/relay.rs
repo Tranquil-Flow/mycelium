@@ -125,6 +125,15 @@ impl Hooks {
             release_observer: None,
         }
     }
+    /// Ruling 31 (RELF2): the PACKAGED app's hooks. The relay client is only `client` = (the
+    /// admitted bundled file, the sha256 its pin names), never one found on `PATH`.
+    /// RED stub: today's lookup beside the executable (`<path>/../..` = the exe directory).
+    pub fn pinned(client: Option<(PathBuf, String)>) -> Self {
+        Self::production(
+            client
+                .and_then(|(path, _)| path.parent().and_then(Path::parent).map(Path::to_path_buf)),
+        )
+    }
 }
 /// `installed_relay_binary` (`public_relay.py:250-255`): `<bundled>/native/cloudflared` when it is an
 /// executable file, else `cloudflared` on `PATH`.
