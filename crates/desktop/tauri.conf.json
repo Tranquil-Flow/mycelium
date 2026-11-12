@@ -9,7 +9,7 @@
     "withGlobalTauri": false,
     "security": {
       "capabilities": [],
-      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'none'; child-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'"
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'none'; child-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'"
     }
   },
   "bundle": { "active": false, "macOS": { "minimumSystemVersion": "15.6.1", "signingIdentity": "-" } }
