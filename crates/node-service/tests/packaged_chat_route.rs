@@ -508,6 +508,41 @@ fn with_a_run_composed_every_chat_route_answers_the_shipped_not_ready_codes() {
     quit(&host.services);
 }
 
+/// W2: a composed distributed run owns chat admission, even when the unrelated
+/// SLICE-1 local model is absent. Named RunRoute/gateway doubles; real desktop
+/// boundary and HTTP/SSE. No native model or driver is executed.
+#[test]
+fn a_composed_run_bypasses_the_unrelated_native_model_gate() {
+    struct MissingLocalModel(AtomicUsize);
+    impl node_service::desktop_host::ModelGate for MissingLocalModel {
+        fn ready(&self) -> Result<(), PublicError> {
+            self.0.fetch_add(1, SeqCst);
+            Err(PublicError::new(503, "model_not_installed"))
+        }
+    }
+    let fake = FakeGateway::start(Script::completed(&["Hel", "lo"]));
+    let run = ScriptedRun::new(http(&fake), None);
+    let mut host = host_over(run.clone(), Arc::new(MustNotRun));
+    let gate = Arc::new(MissingLocalModel(AtomicUsize::new(0)));
+    host.services = host.services.gated(gate.clone());
+    let idle = call(&host.services, "/chat/api/state", json!({}));
+    let refused = call(&host.services, "/chat/api/send", json!({"prompt":"hi","max_new_tokens":2}));
+    run.set(Some(serving_status()));
+    let serving = call(&host.services, "/chat/api/state", json!({}));
+    let sent = call(&host.services, "/chat/api/send", json!({"prompt":"hi","max_new_tokens":2}));
+    let answer = (sent.0 == 200).then(|| until_done(&host.services, &sent.1["request_id"]));
+    quit(&host.services);
+    assert_eq!(idle.0, 200, "the native gate hid idle run status: {:?}", idle.1);
+    assert_eq!(idle.1["available"], false);
+    assert_eq!(refused, (503, json!({"error":"chat_not_ready"})));
+    assert_eq!(serving.0, 200, "{:?}", serving.1);
+    assert_eq!(serving.1["available"], true);
+    assert_eq!(sent.0, 200, "{:?}", sent.1);
+    let (text, last) = answer.unwrap();
+    assert_eq!((text.as_str(), &last["terminal"]), ("Hello", &json!("completed")));
+    assert_eq!(gate.0.load(SeqCst), 0, "route chat must not even probe the native driver");
+}
+
 /// F3: a native chat and a route chat are never admitted together. At 5963027 the route send
 /// checked the native chat and released that lock before `ChatService.send` marked itself busy, so
 /// a native send in that gap (the run not serving for a moment) was admitted too. The hold sits in
