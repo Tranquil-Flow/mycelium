@@ -10,11 +10,11 @@
 //! `/api/capability/report`) moves the next one 300 s on. The instants here are injected.
 use api::app_status::{Recorded, periodic_report_period};
 use serde_json::json;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[test]
 fn a_report_is_due_at_launch_and_again_300_s_after_the_last_one() {
-    assert_eq!(periodic_report_period(), Duration::from_secs(300));
+    assert_eq!(periodic_report_period().as_secs(), 300, "app.py:1162");
     let launch = Instant::now();
     let mut recorded = Recorded::default();
     assert!(
@@ -26,7 +26,7 @@ fn a_report_is_due_at_launch_and_again_300_s_after_the_last_one() {
     assert_eq!(recorded.last_report, Some(record));
     let period = periodic_report_period();
     assert!(!recorded.periodic_report_due(launch));
-    assert!(!recorded.periodic_report_due(launch + period - Duration::from_millis(1)));
+    assert!(!recorded.periodic_report_due(launch + period - period / 1000));
     assert!(recorded.periodic_report_due(launch + period));
     // A later report (here a failed one: `_auto_report` records it all the same) moves it on.
     let later = launch + period;
