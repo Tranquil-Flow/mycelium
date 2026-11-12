@@ -723,7 +723,10 @@ fn after_observe_the_owners_mailbox_refuses_a_stranger_a_foreign_key_and_an_expi
         || owner.mac.status()["owner_run"].clone(),
         |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
     );
-    assert_eq!(run["steps"][3]["state"], "done", "observe bound the mailbox: {run}");
+    assert_eq!(
+        run["steps"][3]["state"], "done",
+        "observe bound the mailbox: {run}"
+    );
     let root = private(&member.state);
     let membership = api::peer::load_membership_state(&root).unwrap().unwrap();
     let node = membership["node_id"].as_str().unwrap().to_owned();
@@ -738,7 +741,10 @@ fn after_observe_the_owners_mailbox_refuses_a_stranger_a_foreign_key_and_an_expi
     let refused = post_poll(&membership, &owner.seams, "stranger-node", &stranger);
     assert_eq!(refused, Err("managed_control_member_stale".to_owned()));
     let refused = post_poll(&membership, &owner.seams, &node, &stranger);
-    assert!(refused.is_err(), "a foreign key for the member's binding: {refused:?}");
+    assert!(
+        refused.is_err(),
+        "a foreign key for the member's binding: {refused:?}"
+    );
     assert_eq!(mailbox_effects(&owner.mac), before);
 
     // The joined Mac quits: it stops renewing, so its seed row stays RUNNING until its lease runs

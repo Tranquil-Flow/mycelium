@@ -401,11 +401,8 @@ impl<H: MemberHost> MemberAgent<H> {
         if let Some(context) = &context
             && host.periodic_report_due()
         {
-            let record = crate::joined_member::auto_report(
-                &root,
-                context.join_base.as_deref(),
-                "periodic",
-            );
+            let record =
+                crate::joined_member::auto_report(&root, context.join_base.as_deref(), "periodic");
             host.reported(record);
         }
         // `auto_accept` before `auto_steps` (standing_consent.py:363-365); its exception ends the

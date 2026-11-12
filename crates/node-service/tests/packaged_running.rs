@@ -35,7 +35,10 @@ fn the_page_reads_the_applications_running_flag_on_both_macs() {
     let shown = owner.mac.status();
     // `'role':'not_yet_serving'` (app.py:1263), shown by `#serving-state` (app.js:227).
     assert_eq!(shown["role"], "not_yet_serving", "{shown}");
-    assert_eq!(shown["running"], true, "an idle owner app is running: {shown}");
+    assert_eq!(
+        shown["running"], true,
+        "an idle owner app is running: {shown}"
+    );
     let member = member(&base, &owner);
     let fresh = member.status();
     assert_eq!(
@@ -48,10 +51,7 @@ fn the_page_reads_the_applications_running_flag_on_both_macs() {
     assert_eq!(joined["state"], "joined", "{joined}");
     let after = member.status();
     assert_eq!(after["running"], true, "a joined Mac is running: {after}");
-    assert_eq!(
-        after["authority"]["membership_state"], "current",
-        "{after}"
-    );
+    assert_eq!(after["authority"]["membership_state"], "current", "{after}");
 
     let stopped = member.post("/api/stop", json!({}));
     assert_eq!(stopped.0, 200, "stop: {}", stopped.1);
