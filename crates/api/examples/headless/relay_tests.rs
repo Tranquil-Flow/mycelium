@@ -254,7 +254,7 @@ fn an_active_owner_run_keeps_its_relay_window_renewing_until_the_run_ends() {
         Timing::registered(),
     );
     // As the launcher does before serving: the core keeps the run's view.
-    core.lock().unwrap().demo = runs.view();
+    core.lock().unwrap().run.demo = runs.view();
     let clock = Arc::new(AtomicU64::new(1_000_000));
     let lifetime = start(&core, &root.0, &clock, None);
     runs.demo_action(Action::DemoStart, &Map::new(), &mut OwnerFacts)
