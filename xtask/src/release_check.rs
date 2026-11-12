@@ -14,7 +14,8 @@
 //!   SOURCE tree's pins (`crates/desktop/{package,helper}-pins.json` at the candidate commit): every
 //!   pinned file has its pinned size and sha256 (the Metal entry may be exactly the
 //!   `../Resources/mlx.metallib` link), no link on any other pinned path, and nothing unpinned in
-//!   `Contents/MacOS` or `Contents/Frameworks` except the self-measured executable.
+//!   `Contents/MacOS` or `Contents/Frameworks` except the self-measured executable. Pinned Helpers
+//!   must also be executable regular files, as startup admission requires.
 //! * `relocation` (CL-L11-02): a clone of the bundle under a deeper path with a space has the same
 //!   bundle digest, still verifies and is still admitted; the copy is removed.
 //! * `release-build` (CL-L12-01): the recipe's outputs beside the bundle describe exactly these
@@ -176,6 +177,23 @@ fn bundle_admission(bundle: &Path, repo: &Path) -> Checked {
             };
         if !no_link_on(bundle, file) {
             return Err(format!("pinned_path_has_link: {}", pin.path));
+        }
+        // RELF3/F18: agree with startup's verify_closed, not only its byte pins.
+        if pin.kind == "Helper" {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let meta = fs::symlink_metadata(bundle.join(file))
+                    .map_err(|e| format!("pinned_helper_missing: {}: {}", pin.path, io_text(&e)))?;
+                if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
+                    return Err(format!("pinned_helper_not_executable: {}", pin.path));
+                }
+            }
+            #[cfg(not(unix))]
+            return Err(format!(
+                "pinned_helper_mode_check_unavailable: {}",
+                pin.path
+            ));
         }
         let (sha, bytes) = match sha256_file(&bundle.join(file)) {
             Ok(found) => found,
