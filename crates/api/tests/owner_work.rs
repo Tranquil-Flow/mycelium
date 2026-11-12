@@ -2212,6 +2212,33 @@ fn a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owne
     );
 }
 
+/// EP2F F2: a member-ended retirement closes the OTHER member without a run Stop.
+#[test]
+fn an_idle_member_failure_closes_the_other_members_serve_within_bound() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    scripts[1].serve_for = Some(span(B::OwnerPoll) * 4);
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let (ended, _, ended_control) = &members[1];
+    assert!(ended_control.wait(ended, |s| s.served.is_some(), span(B::WorkerStartup)));
+    let began = Instant::now();
+    let (other, _, control) = &members[0];
+    let closed = control.wait(other, |s| s.served.is_some(), span(B::OwnerPoll) * 6);
+    let elapsed = began.elapsed();
+    let before_stop = other.lock().unwrap().served.clone();
+    work.teardown().unwrap();
+    eprintln!("EP2F F2 other_closed={closed} elapsed={elapsed:?} before_stop={before_stop:?}");
+    assert!(
+        closed,
+        "the other member still serves after an idle retirement: {elapsed:?}"
+    );
+    assert_eq!(before_stop.unwrap().unwrap()["teardown"], "owner_closed");
+    assert_eq!(work.state()["cleanup_error"], Value::Null);
+}
+
 /// F9: the last chat completed, then its own reset failed and retired the epoch. Readiness no
 /// longer reads OK while the next submission is refused: both say `route_dropped`.
 #[test]
