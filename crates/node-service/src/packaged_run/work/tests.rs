@@ -206,7 +206,7 @@ impl Fixture {
         ))
         .unwrap();
         let case = &fixture["cases"][0];
-        let objects = self.root.join("objects");
+        let objects = self.root.join("stage-shards");
         fs::create_dir(&objects).unwrap();
         let (mut files, mut plans) = (Map::new(), Map::new());
         for (i, node) in state.participants.iter().enumerate() {
@@ -226,12 +226,7 @@ impl Fixture {
                 .step_by(2)
                 .map(|i| u8::from_str_radix(&encoded[i..i + 2], 16).unwrap())
                 .collect();
-            let hash = file["content_digest"]
-                .as_str()
-                .unwrap()
-                .strip_prefix("sha256:")
-                .unwrap();
-            fs::write(objects.join(hash), bytes).unwrap();
+            fs::write(objects.join(name), bytes).unwrap();
             files.insert(node.clone(), json!([file]));
             plans.insert(node.clone(), recipe);
         }
@@ -240,7 +235,7 @@ impl Fixture {
             deployment_id: state.deployment_id.clone(),
             model: json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca","manifest_digest":"sha256:00"}),
             document: json!({"node_files":files,"node_slice_plans":plans}),
-            objects,
+            objects: objects::view(&self.root, &json!({"node_files":files})).unwrap(),
             journal: self.root.join("journal"),
             ranges: state
                 .participants
