@@ -812,7 +812,11 @@ export function createField({ stage, state, reduce }) {
     css = getComputedStyle(stage),
     light = state.theme === "light",
     glow = css.getPropertyValue("--glow").trim(),
-    core = css.getPropertyValue("--core").trim();
+    core = css.getPropertyValue("--core").trim(),
+    // Motion layer: equal to glow/core in dark (dark rendering unchanged),
+    // hue-coloured in light where the art itself stays white (design.css).
+    pulseGlow = css.getPropertyValue("--pulse-glow").trim() || glow,
+    pulseCore = css.getPropertyValue("--pulse-core").trim() || core;
   const width = Math.round(document.documentElement.clientWidth || innerWidth),
     height = Math.round(innerHeight),
     d = Math.min(devicePixelRatio || 1, 2);
@@ -828,8 +832,12 @@ export function createField({ stage, state, reduce }) {
   // (r11.2) no blend mode on the life layer: over the dark ground source-over of its own additive strokes reads the same and keeps compositing cheap
   x.setTransform(d, 0, 0, d, 0, 0);
   lx.setTransform(d, 0, 0, d, 0, 0);
-  const fieldAlpha = light ? 0.24 : 0.62,
-    lightMul = light ? 0.62 : 1;
+  // Light mode was too faint to see at normal size (owner, 12 Nov): the
+  // background mycelium has to be present, so both multipliers come up. Dark
+  // values are untouched, and brighter art only raises the contrast of the
+  // dark copy that sits over it.
+  const fieldAlpha = light ? 0.42 : 0.62,
+    lightMul = light ? 0.85 : 1;
   let scene = hero ? window.__myceliumScene : null,
     field = null,
     graph = null,
@@ -2650,7 +2658,7 @@ export function createField({ stage, state, reduce }) {
     if (!leak) {
       if (trip.residueOnly) return;
       // Not built yet: the crest along the cord only.
-      lx.strokeStyle = core;
+      lx.strokeStyle = pulseCore;
       let dist = 0;
       for (const sg of trip.p.segments) {
         const dt = age - dist / trip.speed;
@@ -2667,7 +2675,7 @@ export function createField({ stage, state, reduce }) {
       return;
     }
     // Residue: what the pulse lit lingers faintly, then retreats far-edge first.
-    lx.strokeStyle = glow;
+    lx.strokeStyle = pulseGlow;
     for (const layer of leak.residue) {
       const a = mpResidue(leak, layer, age);
       if (a < 0.006) continue;
@@ -2691,7 +2699,7 @@ export function createField({ stage, state, reduce }) {
       if (env < 0.012) continue;
       for (const it of bucket.values()) {
         if (it.cord) {
-          lx.strokeStyle = core;
+          lx.strokeStyle = pulseCore;
           lx.globalAlpha = Math.min(1, env * (light ? 0.1 : 0.22) * G * it.amp);
           lx.lineWidth = 4.2;
           lx.stroke(it.path);
@@ -2699,7 +2707,7 @@ export function createField({ stage, state, reduce }) {
           lx.lineWidth = 1.1;
           lx.stroke(it.path);
         } else {
-          lx.strokeStyle = glow;
+          lx.strokeStyle = pulseGlow;
           lx.globalAlpha = Math.min(1, env * it.amp * 0.85 * G * (it.main ? 1.25 : 1));
           lx.lineWidth = it.main ? 0.85 : 0.55;
           lx.stroke(it.path);
@@ -2736,7 +2744,7 @@ export function createField({ stage, state, reduce }) {
     if (landed < 0 || landed >= 7) return;
     const bands = bloomFor(node),
       front = 0.2 + (landed / 4.8) * 1.25;
-    lx.strokeStyle = core;
+    lx.strokeStyle = pulseCore;
     for (const b of bands) {
       if (!b.r0) continue;
       const mid = (b.r0 + b.r1) / 2,
@@ -2896,7 +2904,7 @@ export function createField({ stage, state, reduce }) {
     if (scene?.activeTrips && !reduced && !scene.pulsesOff) {
       lx.save();
       lx.translate(0, oy);
-      lx.strokeStyle = core;
+      lx.strokeStyle = pulseCore;
       lx.lineCap = "butt";
       for (const trip of scene.activeTrips(t))
         for (const item of trip.route.fieldList) {

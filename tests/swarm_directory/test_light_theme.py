@@ -37,7 +37,7 @@ def light_block(css):
     # follows it, since comments are not semicolon-terminated.
     body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
     return {
-        key.strip(): value
+        key.strip(): value.strip()
         for key, value in (line.split(':', 1) for line in body.split(';') if ':' in line)
     }
 
@@ -117,3 +117,57 @@ def test_theme_choice_applies_persists_and_keeps_the_hero_readable(local):
         assert page.evaluate('localStorage.getItem("mycelium-site-theme-v1")') == 'dark'
         assert not errors, errors
         browser.close()
+
+
+def test_motion_follows_the_hue_in_light_mode_while_the_art_stays_white():
+    """Owner, 12 Nov: the Green/Blue switch must change the pulse effects in
+    light mode (it did nothing), and the background mycelium must be visible.
+    The art tokens stay the owner's white; only --pulse-* moves with the hue.
+    In dark, pulse == glow by construction, so dark rendering is unchanged."""
+    css = (WEB / 'design.css').read_text()
+    light = light_block(css)
+    assert light['--glow'] == '#f7f2e7' and light['--core'] == '#ffffff', 'art stays white'
+    assert light['--pulse-glow'] == '#0b6b28' and light['--pulse-core'] == '#084d1f'
+    blue_light = re.search(r':root\[data-theme="light"\]\[data-glow="blue"\]\s*\{[^}]*\}', css).group(0)
+    assert '--pulse-glow: #04629e' in blue_light and '--pulse-core: #063f6e' in blue_light
+    assert '--glow:' not in blue_light, 'blue must not recolour the art'
+    dark = re.search(r'^:root\s*\{[^}]*\}', css, re.M).group(0)
+    assert '--pulse-glow: #35df47' in dark and '--glow: #35df47' in dark
+    blue_dark = re.search(r':root\[data-glow="blue"\]\s*\{[^}]*\}', css).group(0)
+    assert '--pulse-glow: #06a8f0' in blue_dark and '--glow: #06a8f0' in blue_dark
+    # The renderers actually read the pulse tokens at the motion draw sites.
+    hero = (WEB / 'mycelium-hero.js').read_text()
+    field = (WEB / 'mycelium-field.js').read_text()
+    assert 'palette.pulse.glow' in hero and 'palette.pulse.core' in hero
+    assert 'pulseGlow' in field and 'pulseCore' in field
+
+
+def test_the_hue_switch_changes_the_pulse_tokens_in_a_real_browser(local):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        for hue, want in (('green', '#0b6b28'), ('blue', '#04629e')):
+            context = browser.new_context(
+                viewport={'width': 1440, 'height': 900}, color_scheme='dark')
+            context.add_init_script("localStorage.setItem('mycelium-site-theme-v1','light')")
+            context.add_init_script(f"localStorage.setItem('mycelium-site-glow-v1','{hue}')")
+            page = context.new_page()
+            page.goto(local['directory'].origin + '/', wait_until='networkidle')
+            page.evaluate('document.fonts.ready')
+            pulse = page.evaluate(
+                "getComputedStyle(document.documentElement).getPropertyValue('--pulse-glow').trim()")
+            art = page.evaluate(
+                "getComputedStyle(document.documentElement).getPropertyValue('--glow').trim()")
+            assert pulse == want, (hue, pulse)
+            assert art == '#f7f2e7', (hue, 'art must stay white', art)
+            context.close()
+        browser.close()
+
+
+def test_the_light_background_mycelium_is_present_not_ghostly():
+    # Owner: "hard to see the mycelium in background on the light mode".
+    # Both multipliers are light-only; the dark values stay 0.62 / 1.
+    field = (WEB / 'mycelium-field.js').read_text()
+    assert 'fieldAlpha = light ? 0.42 : 0.62' in field
+    assert 'lightMul = light ? 0.85 : 1' in field
+    hero = (WEB / 'mycelium-hero.js').read_text()
+    assert 'colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.75 : 1) * grow)' in hero

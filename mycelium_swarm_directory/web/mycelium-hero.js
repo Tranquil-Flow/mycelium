@@ -1362,7 +1362,14 @@ export function createHero(canvas, { stage, state, reduce }) {
     d = Math.min(devicePixelRatio || 1, 2),
     css = getComputedStyle(stage),
     light = state.theme === "light",
-    palette = { core: css.getPropertyValue("--core").trim(), glow: css.getPropertyValue("--glow").trim(), light },
+    core = css.getPropertyValue("--core").trim(),
+    glow = css.getPropertyValue("--glow").trim(),
+    // Motion reads its own tokens: equal to glow/core in dark (so dark
+    // rendering is byte-identical), a separate hue-coloured layer in light,
+    // where the art itself stays white.
+    palette = { core, glow, light,
+      pulse: { core: css.getPropertyValue("--pulse-core").trim() || core,
+               glow: css.getPropertyValue("--pulse-glow").trim() || glow } },
     begun = performance.now();
   // The hidden #hyphae canvas is the page-space static raster (viewport width).
   canvas.width = Math.round(L.W * d);
@@ -1483,8 +1490,8 @@ export function createHero(canvas, { stage, state, reduce }) {
       ctx.globalAlpha = (light ? 0.08 : 0.15) * grow * p;
       ctx.fillStyle = grad;
       ctx.fillRect(n.x - r, n.y - r, 2 * r, 2 * r); // the gradient is clear at r (no arc on the field)
-      colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
-      if (c.fill2) colonyFill(ctx, { node: c.node, fill: c.fill2 }, hexRgb(palette.glow), (light ? 0.55 : 1) * grow);
+      colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.75 : 1) * grow);
+      if (c.fill2) colonyFill(ctx, { node: c.node, fill: c.fill2 }, hexRgb(palette.glow), (light ? 0.75 : 1) * grow);
       if (box) {
         const R = Math.max(r, c.fill?.r || 0, c.fill2?.r || 0) + 2;
         grow_(box, [n.x - R, n.y - R, n.x + R, n.y + R]);
@@ -2581,7 +2588,7 @@ export function createHero(canvas, { stage, state, reduce }) {
               x.globalCompositeOperation = light ? "source-over" : "lighter";
               for (const item of items) {
                 const main = item.type === "cord";
-                x.strokeStyle = main ? palette.core : palette.glow;
+                x.strokeStyle = main ? palette.pulse.core : palette.pulse.glow;
                 if (main) {
                   // Soft body glow under a calmer core: the cord glows, not a spark.
                   x.globalAlpha = light ? 0.1 : 0.22;
@@ -2698,7 +2705,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       x.setTransform(d, 0, 0, d, -l * d, -t * d);
       x.lineCap = "butt";
       x.globalCompositeOperation = light ? "source-over" : "lighter";
-      x.strokeStyle = palette.glow;
+      x.strokeStyle = palette.pulse.glow;
       for (const it of items) {
         x.globalAlpha = it.amp * (light ? 0.5 : 0.9);
         x.lineWidth = it.explorer ? 0.7 : 0.5;
@@ -2812,7 +2819,7 @@ export function createHero(canvas, { stage, state, reduce }) {
           if (gain < 0.02) continue;
           const groups = bandGroups(b);
           if (!groups) continue;
-          strokeGroups(ctx, groups, palette.core, gain * (light ? 0.34 : 0.7));
+          strokeGroups(ctx, groups, palette.pulse.core, gain * (light ? 0.34 : 0.7));
           grow(box, b.box);
           drawn++;
         }

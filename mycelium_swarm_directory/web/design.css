@@ -15,6 +15,11 @@
   --strand: #1dbc24;
   --glow: #35df47;
   --core: #a4ffad;
+  /* The pulse layer (route crest, leak, residue, arrival blooms) carries its
+     own tokens so light mode can recolour motion without recolouring the art.
+     In dark they equal --glow/--core, so dark rendering is unchanged. */
+  --pulse-glow: #35df47;
+  --pulse-core: #a4ffad;
   --radius: 16px;
   --surface: var(--card);
   --surface2: var(--card-2);
@@ -33,6 +38,8 @@
   --strand: #04629e;
   --glow: #06a8f0;
   --core: #b4f5ff;
+  --pulse-glow: #06a8f0;
+  --pulse-core: #b4f5ff;
 }
 /* Owner light mode (11 Nov): sage ground, ink copy, white ✳ Mycelium in the
    header. theme.js sets data-theme on <html> from the stored choice (or the
@@ -52,11 +59,19 @@
   --line: #575e48;
   --line-2: #4a503d;
   /* The mycelium itself: owner wants it white in light mode (the canvas
-     reads --glow/--core off body at build time). The hue switch stays inert
-     here - this block sits after the glow blocks and wins the tie. */
+     reads --glow/--core off body at build time), so this block still wins
+     the tie over the hue blocks for the ART. Motion is a separate layer:
+     --pulse-* below keeps the Green/Blue switch live in light mode, with
+     deep tones that read on the sage ground (2.95:1 glow, 4.44:1 core). */
   --strand: #f7f2e7;
   --glow: #f7f2e7;
   --core: #ffffff;
+  --pulse-glow: #0b6b28;
+  --pulse-core: #084d1f;
+}
+:root[data-theme="light"][data-glow="blue"] {
+  --pulse-glow: #04629e;
+  --pulse-core: #063f6e;
 }
 /* The owner's white ✳ Mycelium: cream in the header only, where it sits
    outside main (so the 4.5:1 hero gate does not measure it). Dark mode keeps
