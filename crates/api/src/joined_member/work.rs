@@ -636,8 +636,6 @@ pub struct Work {
     /// Native work needs the announced share of the offer's own run (an announced owner);
     /// `false` for the operator-driven member (`Work::operator`).
     require_share: bool,
-    /// The first native prepare: the member's consent wall counts from it.
-    pub prepared_at: Option<std::time::Instant>,
 }
 impl Work {
     pub fn new(root: PathBuf) -> Self {
@@ -649,7 +647,6 @@ impl Work {
             left: false,
             announced: None,
             require_share: true,
-            prepared_at: None,
         }
     }
     /// A member driven by its local operator (the example's CLI-pinned owner, no announcement):
@@ -951,7 +948,6 @@ impl Work {
             .offer()
             .clone();
         self.admit_share_for(session, &offer, self.require_share)?;
-        self.prepared_at.get_or_insert_with(std::time::Instant::now);
         let member = session.ok_or("not_joined")?;
         let range =
             serde_json::from_value(request["range"].clone()).map_err(|_| "range_invalid")?;
@@ -1053,24 +1049,22 @@ impl Work {
             .as_deref()
             .ok_or("native_proof_required")?;
         let current = || member.current(signer);
-        // EP2: ONE serve is the run's whole epoch: it lasts until the route's signed expiry (the
-        // owner's publish + the smallest consented wall), not the dispatcher's one-operation wall,
-        // and never past this member's own consent wall counted from its first prepare (the
-        // command allowance is checked per step and reset by NativeShard). An unverifiable expiry
-        // is refused by the route check inside `serve`.
-        let consent = standing_consent::load(&self.root)
-            .map_err(|_| "joined_shard_consent_required")?
-            .ok_or("joined_shard_consent_required")?;
-        let wall = consent["caps"]["max_wall_seconds"]
-            .as_u64()
-            .filter(|w| *w > 0)
-            .ok_or("joined_native_consent_invalid")?;
+        // EP2: ONE serve is the run's whole epoch: it ends at the route's signed expiry (the
+        // owner's publish + the smallest consented wall), not at the dispatcher's one-operation
+        // wall. The serve loop checks the signed expiry itself (ending `route_expired`); the
+        // operation bound is only its backstop, one RouterClose past it. The member's OWN consent (wall from the first prepare, command allowance,
+        // membership current, consent unchanged) ends it earlier: the serve loop checks it on
+        // every pass through `StageCompute::live` (lane EPF), not duplicated here. An
+        // unverifiable expiry is refused by the route check inside `serve`.
+        let close = budgets::BudgetId::RouterClose
+            .span(budgets::Entries::ZERO)
+            .map_err(|_| "budget_unavailable")?;
         let now = std::time::Instant::now();
-        let consented = self.prepared_at.unwrap_or(now) + std::time::Duration::from_secs(wall);
         let expiry = operation.request["route"]["message"]["expires_at"]
             .as_f64()
             .filter(|e| e.is_finite())
             .map(|e| now + std::time::Duration::from_secs_f64((e - app_host::now()).max(0.0)))
+            .map(|at| at + Duration::from_millis(close.millis()))
             .unwrap_or(operation.deadline);
         stage::serve(
             &stage::Serve {
@@ -1079,7 +1073,7 @@ impl Work {
                 clock: carrier_side.clock,
                 current: &current,
                 cancelled: operation.cancelled.clone(),
-                deadline: expiry.min(consented),
+                deadline: expiry,
             },
             native,
             &operation.request["route"],
