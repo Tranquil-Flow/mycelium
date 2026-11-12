@@ -25,7 +25,7 @@
       "reason": "Adds the ask dialog markup, the site's #page-mycelium / #hyphae canvases for the living background, its module boot script, and drops the pre-ruling-25 page subtitle 'macOS A13 hackathon demo' in favour of 'local swarm demo'."
     },
     "style.css": {
-      "sha256": "600fbe93df3e8e345b11bfa807b1a1911880cfd3a0e437fd40ac0c07da216dd0",
+      "sha256": "4a394dbface89eef3a557655138f0bc29e2a4472ef12ecf8fd096c73d75e3be6",
       "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art)."
     }
   },
