@@ -1619,6 +1619,11 @@ impl Admission for ControlledAdmission {
         )
     }
 }
+#[path = "support/tokenizer_helper.rs"]
+mod tokenizer_helper;
+#[path = "support/owner_codec_stop.rs"]
+mod codec_stop;
+
 /// Model-free prompt codec of the serving tests (token ids are carrier test values).
 struct Prompt;
 impl Codec for Prompt {
@@ -1636,6 +1641,9 @@ impl Swarm {
     /// Hand the members to a work port that admits them through the controlled admission;
     /// `scripts` per stage (the last stage's emits [`SCRIPTED`]).
     fn serving(&mut self, plan: Plan, scripts: Vec<Serving>) -> (OwnerWork, Vec<Watched>) {
+        self.serving_with_codec(plan, scripts, Arc::new(Prompt))
+    }
+    fn serving_with_codec(&mut self, plan: Plan, scripts: Vec<Serving>, codec: Arc<dyn Codec>) -> (OwnerWork, Vec<Watched>) {
         let (seed, _, _) =
             app_host::identity_in(&self.owner, app_host::SEED_IDENTITY_FILE).unwrap();
         let mut taken = Vec::new();
@@ -1656,7 +1664,7 @@ impl Swarm {
             members,
             plan,
             None,
-            Arc::new(Prompt),
+            codec,
             host_clocks(),
         )
         .unwrap()
