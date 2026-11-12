@@ -110,6 +110,9 @@ pub struct Service {
     /// `discard` PROVES the owned stage released; a failed close retains this exact owner so a
     /// later `close` retries only its unresolved custody instead of reporting success.
     cleanup: Arc<Mutex<Option<work::Work>>>,
+    /// The loop unwound before its custody handoff, so the exact `work::Work` is gone and no
+    /// later close can prove its stage released. Sticky: every close stays an error.
+    unprovable: bool,
 }
 impl Service {
     #[cfg(all(test, feature = "desktop-shell"))]
@@ -189,6 +192,7 @@ impl Service {
             carrier: None,
             thread: Some(thread),
             cleanup,
+            unprovable: false,
         };
         let (address, endpoint) = ready
             .recv_timeout(duration(B::RouterClose)?)
@@ -317,29 +321,42 @@ impl Service {
         self.shared.stop.store(true, Ordering::SeqCst);
         let cancel = self.shared.dispatcher.cancel_active();
         let input = self.shared.dispatcher.close_input();
-        let joined = self
-            .thread
-            .take()
-            .map(|t| {
-                t.join()
-                    .map_err(|_| "member_work_panicked".to_owned())
-                    .and_then(|r| r)
-            })
-            .unwrap_or(Ok(()));
+        let joined = match self.thread.take() {
+            None => Ok(()),
+            Some(t) => match t.join() {
+                Ok(result) => result,
+                Err(_) => {
+                    // The loop unwound before its custody handoff: the exact `work::Work` was
+                    // dropped unproven. Never let the now-empty cleanup slot read as success.
+                    self.unprovable = true;
+                    Err("member_work_panicked".to_owned())
+                }
+            },
+        };
         // The loop hands its custody object back here. Retry (or finish) its ONE discard:
         // an unproven retire keeps the same Work for the next close; it is never dropped
         // into a success while the stage bytes are still owned.
         let cleanup = self.discard();
         self.address = None;
-        cancel.and(input).and(joined).and(cleanup)
+        let outcome = cancel.and(input).and(joined).and(cleanup);
+        if self.unprovable {
+            return Err(outcome
+                .err()
+                .unwrap_or_else(|| "member_work_unprovable".to_owned()));
+        }
+        outcome
     }
     /// True while a failed close still owns member-side custody (a `close` retries it).
+    /// An unprovable Service stays pending forever: its Work was dropped by the unwind, so no
+    /// later close may be treated as a successful release.
     #[cfg(any(feature = "desktop-shell", feature = "packaged"))]
     pub(crate) fn cleanup_pending(&self) -> bool {
-        self.cleanup
-            .lock()
-            .map(|slot| slot.is_some())
-            .unwrap_or(true)
+        self.unprovable
+            || self
+                .cleanup
+                .lock()
+                .map(|slot| slot.is_some())
+                .unwrap_or(true)
     }
     fn discard(&self) -> Result<()> {
         let mut slot = self
