@@ -70,7 +70,8 @@ setup = "headless-release"
 #    the catalogue tests do their full check instead of failing early on a stale pin): the RU-053 admitted
 #    closure (289 s), the launch-graph fixpoint (156 s) and its census table (7 s), and the sixteen
 #    admission_catalogue_ru053_refuses_* tests (5-75 s each, selected by name prefix so a new one is covered).
-#    With several lanes building, nine of them crossed the 60 s limit in every quick run.
+#    With several lanes building, nine of them timed out at the 60 s limit in one no-fail-fast quick run (the
+#    fail-fast runs stopped at the first, and the slowest alone timed out in 2 of 5 reruns; REVIEW-batch2-small F1).
 # A test that still passes the filter but runs for 60 s (15 s period x 4) is killed and fails the run.
 [profile.quick]
 fail-fast = true
