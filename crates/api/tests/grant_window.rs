@@ -97,6 +97,10 @@ struct Rig {
     root: PathBuf,
     member_root: PathBuf,
     time: Time,
+    /// How far (ms) the seed's own clock runs ahead of `time` (0 but in the seed-side lease-lapse
+    /// case): the seed then sees the member's lease lapsed while the member's and the source's
+    /// clocks have not reached it.
+    seed_ahead: Arc<AtomicU64>,
     coordinator: Arc<seed::Coordinator>,
     server: Option<seed::server::Server>,
     material: seed::tls::Material,
@@ -126,13 +130,14 @@ impl Rig {
         let seed_signer = Identity::from_secret("endpoint-gr-seed", &seed_key).unwrap();
         let options = seed::Options::new(SWARM, "seed-gr", "boot-gr").unwrap();
         let ids = AtomicU64::new(1);
-        let clock = time.clone();
+        let (clock, seed_ahead) = (time.clone(), Arc::new(AtomicU64::new(0)));
+        let ahead = seed_ahead.clone();
         let coordinator = Arc::new(
             seed::Coordinator::open(
                 &owner.join("seed.sqlite"),
                 seed_signer,
                 options,
-                Box::new(move || clock.now()),
+                Box::new(move || clock.now() + ahead.load(Ordering::SeqCst) as f64 / 1000.0),
                 Box::new(move || {
                     format!(
                         "{:08x}-0000-4000-8000-{:012x}",
@@ -177,6 +182,7 @@ impl Rig {
             root,
             member_root,
             time,
+            seed_ahead,
             coordinator,
             server: Some(server),
             material,
@@ -303,13 +309,21 @@ impl Drop for Rig {
 /// A seed action the test arms to land while the owner source is reading a chunk.
 type Armed = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
 /// The source's durable object store, unchanged, except that an armed action runs while a chunk
-/// is being read: after the owner's pre-read seed check, before its post-read one.
+/// is being read: after the owner's pre-read seed check, before its post-read one; and one armed
+/// in `sized` runs when the store is asked an object's size: after the owner source's size-gate
+/// seed check, before its pre-read one. `reads` counts the chunk reads that reached the store.
 struct Hooked<S> {
     inner: S,
     armed: Armed,
+    sized: Armed,
+    reads: Arc<AtomicU64>,
 }
 impl<S: ArtifactObjects> ArtifactObjects for Hooked<S> {
     fn verified_size(&self, digest: &str) -> Option<u64> {
+        let action = self.sized.lock().unwrap().take();
+        if let Some(action) = action {
+            action();
+        }
         self.inner.verified_size(digest)
     }
     fn admit_and_read(
@@ -324,6 +338,7 @@ impl<S: ArtifactObjects> ArtifactObjects for Hooked<S> {
         if let Some(action) = action {
             action();
         }
+        self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner
             .admit_and_read(grant, request, nonce, expiry, now)
     }
@@ -396,6 +411,12 @@ enum Between {
     /// R1: the owner revokes the member while chunk 2 is being read (after the source's pre-read
     /// seed check passed); the member keeps its old session.
     RevokedMidRead,
+    /// The owner revokes the member when the source's store is asked chunk 2's object size (after
+    /// the source's size-gate seed check passed, before its pre-read one).
+    RevokedAfterTheSizeCheck,
+    /// The member's lease lapsed at the seed before chunk 2 (the seed's clock is past it) while
+    /// the member, which does not renew, still holds it as fresh on its own clock.
+    LeaseLapsedAtSeed,
 }
 struct Outcome {
     /// Each chunk's fetch result, in order (a refusal ends the transfer).
@@ -409,6 +430,8 @@ struct Outcome {
     /// Bytes the owner source handed to the wire, and the length of chunk 1.
     served: u64,
     first_chunk: u64,
+    /// Chunk reads that reached the source's object store.
+    store_reads: u64,
 }
 
 /// One transfer of the fixture shard in three chunks; `step` seconds pass before chunks 2 and 3.
@@ -437,8 +460,11 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
     let journal = rig.root.join("journal");
     let source_time = rig.time.clone();
     let armed: Armed = Arc::new(Mutex::new(None));
+    let sized: Armed = Arc::new(Mutex::new(None));
     let served_bytes = Arc::new(AtomicU64::new(0));
+    let store_reads = Arc::new(AtomicU64::new(0));
     let (source_armed, source_served) = (armed.clone(), served_bytes.clone());
+    let (source_sized, source_reads) = (sized.clone(), store_reads.clone());
     let source = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -471,6 +497,8 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
         let hooked = Hooked {
             inner: store,
             armed: source_armed,
+            sized: source_sized,
+            reads: source_reads,
         };
         let wrapped = Served {
             inner: joined_shard::JoinedSource::new(coordinator.clone(), offer, hooked).unwrap(),
@@ -575,8 +603,21 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
                 Between::RevokedMidRead if i == 1 => {
                     *armed.lock().unwrap() = Some(Box::new(rig.revoke_action()));
                 }
+                Between::RevokedAfterTheSizeCheck if i == 1 => {
+                    *sized.lock().unwrap() = Some(Box::new(rig.revoke_action()));
+                }
+                Between::LeaseLapsedAtSeed if i == 1 => {
+                    let left_ms = (rig.lease() - rig.time.now()) * 1000.0;
+                    assert!(left_ms > 0.0, "the member's own lease must still be fresh");
+                    rig.seed_ahead
+                        .store(left_ms.ceil() as u64 + 1_000, Ordering::SeqCst);
+                }
                 // The member does nothing else: it keeps its old, locally fresh session.
-                Between::RevokedAtSeed | Between::ResumedAtSeed | Between::RevokedMidRead => {}
+                Between::RevokedAtSeed
+                | Between::ResumedAtSeed
+                | Between::RevokedMidRead
+                | Between::RevokedAfterTheSizeCheck
+                | Between::LeaseLapsedAtSeed => {}
             }
         }
         last_fetch_at = rig.time.now();
@@ -639,6 +680,7 @@ fn transfer(rig: &mut Rig, step: u64, between: Between) -> Outcome {
         last_fetch_at,
         served: served_bytes.load(Ordering::SeqCst),
         first_chunk: part,
+        store_reads: store_reads.load(Ordering::SeqCst),
     }
 }
 
@@ -882,6 +924,57 @@ fn a_member_revoked_while_a_chunk_is_read_gets_none_of_its_bytes_from_the_owner_
             Err("artifact_source_refused:joined_shard_member_changed".to_owned())
         ],
         "the owner source must re-check the seed after the read"
+    );
+    assert_eq!(
+        out.served, out.first_chunk,
+        "no byte past chunk 1 leaves the owner source"
+    );
+    assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
+}
+
+/// The owner revokes the member after the source's size gate passed for chunk 2 and before the
+/// chunk is read: the pre-read seed check refuses (`joined_shard_member_changed`) before the store
+/// reads anything for a member that is no longer current (review batch2-small F2: no test failed
+/// with that check alone removed, the post-read check refusing the same chunk afterwards).
+/// v0.1.4: a member that is not live gets nothing (`peer_model_source.py:256-262`).
+#[test]
+fn a_member_revoked_after_the_size_check_gets_no_read_of_its_chunk() {
+    let mut rig = Rig::new();
+    let out = transfer(&mut rig, 1, Between::RevokedAfterTheSizeCheck);
+    assert_eq!(
+        (out.chunks, out.store_reads),
+        (
+            vec![
+                Ok(()),
+                Err("artifact_source_refused:joined_shard_member_changed".to_owned())
+            ],
+            1
+        ),
+        "the owner source must check the seed before it reads chunk 2"
+    );
+    assert_eq!(
+        out.served, out.first_chunk,
+        "no byte past chunk 1 leaves the owner source"
+    );
+    assert_eq!(out.debt_after, 1, "a refused transfer keeps its byte debt");
+}
+
+/// The mirror of the revoked and resumed cases for a lease (REVIEW-laneGR R1): the member's lease
+/// lapsed at the seed while the member still holds it as fresh (it does not renew, and its own
+/// clock has not reached the expiry): the owner source refuses chunk 2 on the seed's row.
+/// v0.1.4: the seed's lease decides liveness (`peer_model_source.py:256-262`,
+/// `model_source_member_not_live`).
+#[test]
+fn a_member_whose_lease_lapsed_at_the_seed_gets_no_further_chunk_from_the_owner_source() {
+    let mut rig = Rig::new();
+    let out = transfer(&mut rig, 1, Between::LeaseLapsedAtSeed);
+    assert_eq!(
+        out.chunks,
+        vec![
+            Ok(()),
+            Err("artifact_source_refused:artifact_object_unavailable".to_owned())
+        ],
+        "the owner source must refuse a member whose seed lease lapsed"
     );
     assert_eq!(
         out.served, out.first_chunk,
