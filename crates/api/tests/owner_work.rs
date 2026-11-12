@@ -2169,24 +2169,44 @@ fn a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owne
         "member 1's serve ended at its own deadline"
     );
     let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 6);
-    assert_ne!(status, 200, "readiness after a member ended the epoch: {ready}");
-    assert!(ready.to_string().contains("joined_route_member_ended"), "{ready}");
+    assert_ne!(
+        status, 200,
+        "readiness after a member ended the epoch: {ready}"
+    );
+    assert!(
+        ready.to_string().contains("joined_route_member_ended"),
+        "{ready}"
+    );
     let posted = Instant::now();
     let (status, refused) = post(&gateway);
     // The gateway's status for an epoch's idle-retirement code (as `joined_route_member_stale`):
     // 400 (requests.rs submit table; 409 is only for the qualification-change codes).
     assert_eq!(status, 400, "{refused}");
-    assert!(refused.to_string().contains("joined_route_member_ended"), "{refused}");
-    assert!(posted.elapsed() < span(B::OwnerPoll) * 4, "refused promptly");
+    assert!(
+        refused.to_string().contains("joined_route_member_ended"),
+        "{refused}"
+    );
+    assert!(
+        posted.elapsed() < span(B::OwnerPoll) * 4,
+        "refused promptly"
+    );
     let state = work.state();
     assert_eq!(state["state"], "api_running", "{state}");
-    assert_eq!(state["epoch_retired"], "joined_route_member_ended", "{state}");
+    assert_eq!(
+        state["epoch_retired"], "joined_route_member_ended",
+        "{state}"
+    );
     work.teardown().unwrap();
     let state = work.state();
     assert_eq!(state["state"], "stopped", "{state}");
     assert_eq!(state["cleanup_error"], Value::Null, "{state}");
     assert_eq!(
-        state["serve_reports"].as_array().unwrap().iter().filter(|r| r["node_id"].is_string()).count(),
+        state["serve_reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["node_id"].is_string())
+            .count(),
         2,
         "the ended serve's report is kept beside the other's: {state}"
     );
@@ -2205,14 +2225,25 @@ fn readiness_after_a_completed_then_retired_epoch_agrees_with_the_refused_submis
     activate(&mut work);
     let gateway = work.gateway().unwrap();
     let all = chat(&gateway);
-    assert_eq!(all.last().map(|e| e["type"].clone()), Some(json!("completed")), "{all:?}");
+    assert_eq!(
+        all.last().map(|e| e["type"].clone()),
+        Some(json!("completed")),
+        "{all:?}"
+    );
     let (seen, _, control) = &members[1];
     assert!(
-        control.wait(seen, |s| count(s, "reset_attempt") == 1, span(B::WorkerStartup)),
+        control.wait(
+            seen,
+            |s| count(s, "reset_attempt") == 1,
+            span(B::WorkerStartup)
+        ),
         "the final stage's reset was attempted"
     );
     let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 6);
-    assert_ne!(status, 200, "readiness after a completed-then-retired epoch: {ready}");
+    assert_ne!(
+        status, 200,
+        "readiness after a completed-then-retired epoch: {ready}"
+    );
     assert!(ready.to_string().contains("route_dropped"), "{ready}");
     let (status, refused) = post(&gateway);
     assert_eq!(status, 409, "{refused}");
@@ -2246,17 +2277,29 @@ fn an_old_member_paired_with_a_v2_route_fails_the_activation_with_a_named_owner_
     let activated = ActivationPort::activate(&mut work, &proposal);
     assert!(activated.is_ok(), "{activated:?}");
     let ended = work.wait_state(
-        |s| matches!(s["state"].as_str(), Some("api_running" | "failed" | "stopped")),
+        |s| {
+            matches!(
+                s["state"].as_str(),
+                Some("api_running" | "failed" | "stopped")
+            )
+        },
         span(B::WorkerStartup) * 6,
     );
-    eprintln!("old member: activation ended {:?} after {:?}", ended["state"], began.elapsed());
+    eprintln!(
+        "old member: activation ended {:?} after {:?}",
+        ended["state"],
+        began.elapsed()
+    );
     let (seen, _, _) = &members[0];
     assert_eq!(
         seen.lock().unwrap().served.clone(),
         Some(Err("joined_shard_signature_invalid".to_owned()))
     );
     assert_eq!(ended["state"], "failed", "{ended}");
-    assert_eq!(ended["error_code"], "joined_route_member_v2_unsupported", "{ended}");
+    assert_eq!(
+        ended["error_code"], "joined_route_member_v2_unsupported",
+        "{ended}"
+    );
     assert!(
         ended["serve_reports"]
             .as_array()
@@ -2268,5 +2311,8 @@ fn an_old_member_paired_with_a_v2_route_fails_the_activation_with_a_named_owner_
     eprintln!("old member: cleanup {}", ended["member_cleanup"]);
     let torn = Instant::now();
     work.teardown().unwrap();
-    eprintln!("old member: teardown after the failure took {:?}", torn.elapsed());
+    eprintln!(
+        "old member: teardown after the failure took {:?}",
+        torn.elapsed()
+    );
 }
