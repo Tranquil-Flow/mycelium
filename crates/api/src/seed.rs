@@ -355,8 +355,19 @@ impl SeedClient {
                         != Some(status)
                 })
             {
+                // The wire code is deliberately discarded below when it does not match the join
+                // table, which leaves the peer with an opaque remote error. Record what arrived
+                // so the cause is recoverable from the log without changing the bytes.
+                eprintln!(
+                    "seed_refusal_discarded:code={:?} status={} path={}",
+                    exposed, status, path
+                );
                 exposed = None;
             }
+            eprintln!(
+                "seed_refusal:code={:?} status={} path={}",
+                exposed, status, path
+            );
             return Err(SeedError::with_status(
                 exposed.as_deref().unwrap_or("seed_http_remote_error"),
                 status,
