@@ -6,6 +6,7 @@
 //! (`reports()`: the latest report of each node plus the owner's `received_at`). The signed-control routes
 //! (`/managed-control/demo-run/read|report`) are a separate seam (SE-L10-EXCHANGE-ROUTES): they verify a member's
 //! envelope on the seed mailbox and then call [`RunExchange::announcement`] and `report`.
+pub mod owner_pin;
 use crate::{preferences::dumps_sorted, wire::Json};
 use serde_json::{Map, Value};
 use std::{
@@ -306,6 +307,8 @@ pub struct RunExchange {
     inner: Mutex<Inner>,
     provider: Mutex<Option<HintProvider>>,
     incarnation: String,
+    /// The owner pin (`owner_pin::FIELD`), published only once set.
+    owner_control: Mutex<Option<owner_pin::OwnerControl>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -342,6 +345,7 @@ impl RunExchange {
             }),
             provider: Mutex::new(None),
             incarnation: incarnation(),
+            owner_control: Mutex::new(None),
         };
         let idle = Announce {
             phase: "idle".into(),
@@ -427,6 +431,12 @@ impl RunExchange {
         }
     }
 
+    /// The owner pin every later announcement carries (`owner_pin::FIELD`); `None` withdraws it,
+    /// and an exchange that never sets one publishes the existing announcement bytes unchanged.
+    pub fn set_owner_control(&self, control: Option<owner_pin::OwnerControl>) {
+        *lock(&self.owner_control) = control;
+    }
+
     /// `update_node(node_id, **extra)`.
     pub fn update_node(&self, node: &str, extra: Map<String, Value>) -> Result<(), ExchangeError> {
         check_node_extra(&extra)?;
@@ -470,6 +480,10 @@ impl RunExchange {
             _ => String::new(),
         };
         value.set("model_source", self.model_source_hint(&phase));
+        // Additive (`owner_pin`): only an owner that set its pin publishes the key.
+        if let Some(control) = lock(&self.owner_control).as_ref() {
+            value.set(owner_pin::FIELD, control.to_json());
+        }
         value
     }
 

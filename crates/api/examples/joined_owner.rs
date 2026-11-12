@@ -14,8 +14,8 @@
 //! `close`. Replies: `{ok:true,result}` or `{ok:false,code}`.
 //! The owner work port (`joined_owner::work::OwnerWork`, PH3b S4a) instead of
 //! transfer/prepare/open: `work {tokens, worker_wall_seconds}` (start serving,
-//! activate) -> workflow state with the epoch gateway; `work_next` (the next
-//! single-use epoch); `work_stop` (teardown; member links come back).
+//! activate) -> workflow state with the run's ONE epoch gateway (every chat of
+//! the run on it, lane EP2); `work_stop` (teardown; member links come back).
 //!
 //! Rehearsal limits (named seams, not product claims): the swarm seed listens
 //! on loopback and a bounded forwarder exposes it on the explicit LAN
@@ -219,6 +219,8 @@ impl Drop for Forwarder {
 }
 struct Member {
     link: Box<dyn MemberLink + Send>,
+    /// The link's `cancel_operation` (the work port interrupts with it).
+    cancel: work::Cancel,
     registration: Value,
     node_id: String,
     pid: u64,
@@ -287,6 +289,7 @@ impl Owner {
             .to_owned();
         let pid = status["pid"].as_u64().ok_or("member_status_invalid")?;
         self.members.push(Member {
+            cancel: Arc::new(link.canceller()),
             link: Box::new(link),
             registration,
             node_id: node_id.clone(),
@@ -596,6 +599,7 @@ impl Owner {
                 node_id: m.node_id,
                 link: m.link,
                 registration: m.registration,
+                cancel: m.cancel,
             });
         }
         self.parked = parked;
@@ -615,8 +619,19 @@ impl Owner {
         .map_err(code)?;
         let proposal = json!({"max_wall_seconds":wall});
         let begun = Instant::now();
-        let started = owner_run::steps::publish::WorkPort::start_serving(&mut port, &proposal)
-            .map_err(|e| e.code_or("serving_start_failed"));
+        // The slices step pushes every stage shard before publish (S4aF F5).
+        let pushed = owner_run::steps::slices::SlicesPort::node_slice_plans(&mut port).map_err(
+            |e| match e {
+                owner_run::chain::StepError::Refused(e) => e.code,
+                owner_run::chain::StepError::Stopped => "managed_workflow_stopped".into(),
+                owner_run::chain::StepError::Exception { class } => class,
+            },
+        );
+        let pushed_ms = begun.elapsed().as_secs_f64() * 1000.0;
+        let started = pushed.and_then(|_| {
+            owner_run::steps::publish::WorkPort::start_serving(&mut port, &proposal)
+                .map_err(|e| e.code_or("serving_start_failed"))
+        });
         self.work = Some(port);
         started?;
         let port = self.work.as_mut().ok_or("owner_work_absent")?;
@@ -643,34 +658,14 @@ impl Owner {
                 .unwrap_or("owner_work_not_serving")
                 .into());
         }
-        Ok(json!({"state":serving,"staged_ms":staged_ms,
-            "ms":begun.elapsed().as_secs_f64()*1000.0}))
-    }
-    /// Retire the spent epoch and open the next one (single-use epochs).
-    fn work_next(&mut self) -> Result<Value> {
-        let port = self.work.as_mut().ok_or("owner_work_absent")?;
-        let before = port.state()["epoch"].as_u64().unwrap_or(0);
-        let begun = Instant::now();
-        port.next_epoch().map_err(code)?;
-        let next = port.wait_state(
-            |s| {
-                s["state"] == "failed"
-                    || (s["state"] == "api_running" && s["epoch"].as_u64() > Some(before))
-            },
-            self.wall,
-        );
-        if next["state"] != "api_running" {
-            return Err(next["error_code"]
-                .as_str()
-                .unwrap_or("owner_work_not_serving")
-                .into());
-        }
-        Ok(json!({"state":next,"ms":begun.elapsed().as_secs_f64()*1000.0}))
+        Ok(
+            json!({"state":serving,"staged_ms":staged_ms,"pushed_ms":pushed_ms,
+            "ms":begun.elapsed().as_secs_f64()*1000.0}),
+        )
     }
     /// Teardown: close the open epoch and the source; member links come back.
     fn work_stop(&mut self) -> Result<Value> {
-        let mut port = self.work.take().ok_or("owner_work_absent")?;
-        port.teardown()?;
+        let mut port = OwnerWork::take_stopped(&mut self.work)?;
         let state = port.state();
         let mut back = port.take_members();
         for (node_id, pid, range) in std::mem::take(&mut self.parked) {
@@ -680,6 +675,7 @@ impl Owner {
                 .ok_or("owner_work_member_lost")?;
             let m = back.remove(i);
             self.members.push(Member {
+                cancel: m.cancel,
                 link: m.link,
                 registration: m.registration,
                 node_id,
@@ -804,7 +800,6 @@ fn run() -> Result<()> {
             "open" => owner.open(&request),
             "settle" => owner.settle(),
             "work" => owner.work(&request),
-            "work_next" => owner.work_next(),
             "work_stop" => owner.work_stop(),
             "leave" => owner.leave(&request),
             "close" => {

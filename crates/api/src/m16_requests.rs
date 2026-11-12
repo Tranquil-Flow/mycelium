@@ -414,6 +414,15 @@ impl M16Requests {
     pub fn terminal(&self, id: &str) -> Result<Option<String>, PublicError> {
         Ok(self.shared.lock()?.registry.terminal(id).map(str::to_owned))
     }
+    /// Watch-only observation: never wait behind an executor/host callback.
+    /// Busy is not terminal proof; the owner must keep watching its Stop token.
+    pub fn try_terminal(&self, id: &str) -> Result<Option<String>, PublicError> {
+        let state = self.shared.state.try_lock().map_err(|e| match e {
+            std::sync::TryLockError::WouldBlock => error("m16_owner_busy"),
+            std::sync::TryLockError::Poisoned(_) => error("m16_owner_poisoned"),
+        })?;
+        Ok(state.registry.terminal(id).map(str::to_owned))
+    }
     pub fn cleanup_debt(&self, id: &str) -> Result<Option<&'static str>, PublicError> {
         Ok(self
             .shared

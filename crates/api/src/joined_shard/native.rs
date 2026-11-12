@@ -553,6 +553,14 @@ impl NativeShard {
         self.cleanup_proven = true;
         Ok(evidence)
     }
+    /// Non-consuming liveness (lane EPF, REVIEW-laneEP R1): the same check
+    /// every step and reset runs first (membership current, consent granted
+    /// and unchanged, the wall from the first prepare and the command
+    /// allowance not spent), without spending a command. A serving v2 epoch
+    /// runs it on every loop pass, so idle traffic cannot outlive the consent.
+    pub fn live(&self, current: &dyn Fn() -> Result<Value>) -> Result<()> {
+        self.check(current)
+    }
     pub fn worker_pid(&self) -> Option<u32> {
         self.worker.as_ref().and_then(|w| w.pid().ok())
     }

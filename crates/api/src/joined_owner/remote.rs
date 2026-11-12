@@ -19,7 +19,11 @@ use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
     net::IpAddr,
-    sync::mpsc,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use transport::{Channel, Clock};
@@ -27,10 +31,16 @@ use transport::{Channel, Clock};
 fn span(id: B) -> Result<Duration, Refusal> {
     super::span(id).map_err(Refusal::from)
 }
+/// A queued command and whether its reply is dropped instead of delivered
+/// (the owner's own `cancel_operation`, which no caller waits on).
+type Queued = (Value, bool);
+/// The command sender, shared with cancellers; taken (closing the driver)
+/// when the channel drops.
+type Commands = Arc<Mutex<Option<mpsc::SyncSender<Queued>>>>;
 /// Command sender + owned driver thread; replies arrive on the receiver given
 /// at `start`, in the member channel's reply shape (`{ok, result | code}`).
 pub struct RemoteChannel {
-    commands: Option<mpsc::SyncSender<Value>>,
+    commands: Commands,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl RemoteChannel {
@@ -54,7 +64,7 @@ impl RemoteChannel {
         };
         // Bounded both ways (REVIEW-laneB16 F3): queued commands and admitted
         // operations awaiting their result; past either, a typed refusal.
-        let (tx, commands) = mpsc::sync_channel::<Value>(budgets.pending);
+        let (tx, commands) = mpsc::sync_channel::<Queued>(budgets.pending);
         let (reply_tx, replies) = mpsc::channel();
         let (ready_tx, ready) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -62,7 +72,7 @@ impl RemoteChannel {
             .spawn(move || drive(owner, member, lan, budgets, commands, reply_tx, ready_tx))
             .map_err(|_| Refusal("member_control_thread_failed".into()))?;
         let channel = Self {
-            commands: Some(tx),
+            commands: Arc::new(Mutex::new(Some(tx))),
             thread: Some(thread),
         };
         match ready.recv_timeout(budgets.wall) {
@@ -72,24 +82,32 @@ impl RemoteChannel {
         }
     }
     pub fn send(&self, command: Value) -> Result<(), Refusal> {
-        self.commands
-            .as_ref()
-            .ok_or_else(|| Refusal("member_control_closed".into()))?
-            .try_send(command)
-            .map_err(|e| {
-                Refusal(
-                    match e {
-                        mpsc::TrySendError::Full(_) => "member_control_busy",
-                        mpsc::TrySendError::Disconnected(_) => "member_control_closed",
-                    }
-                    .into(),
-                )
-            })
+        queue(&self.commands, (command, false))
     }
+}
+fn queue(commands: &Commands, queued: Queued) -> Result<(), Refusal> {
+    commands
+        .lock()
+        .map_err(|_| Refusal("member_control_closed".into()))?
+        .as_ref()
+        .ok_or_else(|| Refusal("member_control_closed".into()))?
+        .try_send(queued)
+        .map_err(|e| {
+            Refusal(
+                match e {
+                    mpsc::TrySendError::Full(_) => "member_control_busy",
+                    mpsc::TrySendError::Disconnected(_) => "member_control_closed",
+                }
+                .into(),
+            )
+        })
 }
 impl Drop for RemoteChannel {
     fn drop(&mut self) {
-        self.commands.take();
+        match self.commands.lock() {
+            Ok(mut commands) => drop(commands.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
+        }
         if let Some(t) = self.thread.take()
             && t.join().is_err()
         {
@@ -111,7 +129,7 @@ fn drive(
     member: iroh::EndpointAddr,
     lan: Option<(IpAddr, LanPolicy)>,
     budgets: Budgets,
-    commands: mpsc::Receiver<Value>,
+    commands: mpsc::Receiver<Queued>,
     replies: mpsc::Sender<Value>,
     ready: mpsc::Sender<Result<(), Refusal>>,
 ) {
@@ -212,10 +230,19 @@ fn drive(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         };
-        if let Some(command) = next {
+        if let Some((command, quiet)) = next {
             let name = command["command"].as_str().unwrap_or_default().to_owned();
             let operation = command["operation_id"].as_u64();
             match call_unless_full(&remote, command, &name, pending.len()) {
+                // The owner's own cancel: nobody waits on its answer (an
+                // unanswered cancel shows as the operation's own reply).
+                Some(Ok(reply)) if quiet => {
+                    if reply["ok"] != true {
+                        eprintln!("member cancel refused: {}", reply["code"]);
+                    }
+                }
+                Some(Err(code)) if quiet => eprintln!("member cancel failed: {code}"),
+                None if quiet => eprintln!("member cancel not sent: owner busy"),
                 // Not sent: the member never starts what the owner cannot track.
                 None => send(json!({"ok":false,"code":"member_control_busy"})),
                 // Immediate member answers (never queued on the member).
@@ -287,7 +314,8 @@ fn drive(
 pub struct RemoteMember {
     channel: RemoteChannel,
     replies: mpsc::Receiver<Value>,
-    last_op: u64,
+    /// The last operation id sent (the member runs one operation at a time).
+    last_op: Arc<AtomicU64>,
 }
 impl RemoteMember {
     pub fn start(
@@ -299,17 +327,36 @@ impl RemoteMember {
         Ok(Self {
             channel,
             replies,
-            last_op: 0,
+            last_op: Arc::new(AtomicU64::new(0)),
         })
+    }
+    /// Ask the member to cancel the operation this link sent last
+    /// (`cancel_operation`, member_control v1; the member cancels only its
+    /// admitted operation with exactly that id). Callable from any thread; its
+    /// reply is not queued for `finish`: the cancelled operation answers.
+    pub fn canceller(&self) -> impl Fn() + Send + Sync + 'static {
+        let (commands, last) = (self.channel.commands.clone(), self.last_op.clone());
+        move || {
+            let id = last.load(Ordering::SeqCst);
+            if id == 0 {
+                return;
+            }
+            let cancel = json!({"command":"cancel_operation","operation_id":id});
+            if let Err(e) = queue(&commands, (cancel, true)) {
+                eprintln!("member cancel not queued: {}", e.0);
+            }
+        }
     }
 }
 impl MemberLink for RemoteMember {
     fn begin(&mut self, mut command: Value) -> Result<(), Refusal> {
         match command["operation_id"].as_u64() {
-            Some(id) => self.last_op = self.last_op.max(id),
+            Some(id) => {
+                self.last_op.fetch_max(id, Ordering::SeqCst);
+            }
             None if command["command"] != "cancel_operation" => {
-                self.last_op += 1;
-                command["operation_id"] = json!(self.last_op);
+                let id = self.last_op.fetch_add(1, Ordering::SeqCst) + 1;
+                command["operation_id"] = json!(id);
             }
             None => {}
         }

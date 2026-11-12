@@ -38,20 +38,39 @@ pub fn stream(
     let end = Instant::now() + allowance;
     let mut idle = 0u32;
     while Instant::now() < end {
-        let mut c = TcpStream::connect(addr).unwrap();
-        c.set_read_timeout(Some(allowance)).unwrap();
+        let mut c = match TcpStream::connect(addr) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("test_sse_connect_ended: {e}");
+                return; // No terminal invented; callers that require one still assert it.
+            }
+        };
+        c.set_read_timeout(Some(end.saturating_duration_since(Instant::now())))
+            .unwrap();
         let last = cursor
             .as_ref()
             .map(|id| format!("Last-Event-ID: {id}\r\n"))
             .unwrap_or_default();
-        write!(
+        if let Err(e) = write!(
             c,
             "GET {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}{last}Content-Length: 0\r\n\r\n"
-        )
-        .unwrap();
+        ) {
+            eprintln!("test_sse_write_ended: {e}");
+            return;
+        }
         let mut reader = BufReader::new(c);
         let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                eprintln!("test_sse_header_eof");
+                return;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("test_sse_header_ended: {e}");
+                return;
+            }
+        }
         if !line.starts_with("HTTP/1.1 200") {
             let mut rest = String::new();
             if let Err(e) = reader.read_to_string(&mut rest) {
