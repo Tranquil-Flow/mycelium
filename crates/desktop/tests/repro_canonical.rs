@@ -232,7 +232,11 @@ fn a_lock_that_cannot_be_broken_or_names_no_owner_fails_within_the_bounded_wait(
     let tree = tiny_tree(&base, "t");
     let mut wrong = Vec::new();
     for (n, (case, pid, mode)) in [
-        ("a dead owner's lock that cannot be removed", "999999", 0o500),
+        (
+            "a dead owner's lock that cannot be removed",
+            "999999",
+            0o500,
+        ),
         ("a lock whose pid file is empty", "", 0o700),
     ]
     .into_iter()
@@ -264,7 +268,10 @@ fn a_lock_that_cannot_be_broken_or_names_no_owner_fails_within_the_bounded_wait(
                 let out = out.unwrap();
                 let stderr = String::from_utf8_lossy(&out.stderr).to_string();
                 if out.status.success() || !stderr.contains(lock.to_str().unwrap()) {
-                    wrong.push(format!("{case}: exit {:?}, stderr {stderr:?}", out.status.code()));
+                    wrong.push(format!(
+                        "{case}: exit {:?}, stderr {stderr:?}",
+                        out.status.code()
+                    ));
                 }
             }
             Err(_) => {
