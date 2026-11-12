@@ -105,7 +105,7 @@ pub struct Service {
     thread: Option<JoinHandle<Result<()>>>,
 }
 impl Service {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "desktop-shell"))]
     pub(crate) fn on_receive(&self, hook: ReceiveHook) {
         *self.shared.receive_hook.lock().unwrap() = Some(hook);
     }
