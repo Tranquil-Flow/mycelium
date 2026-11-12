@@ -4,7 +4,10 @@
 //! a bundle without it or with other bytes is refused, and assembly copies only the pinned bytes.
 use desktop::{
     bundle::{self, BundleError},
-    package::{self, Entry, Kind, Manifest, PackageError, RESOURCE_PROBE_PATH},
+    package::{
+        self, Entry, IROH_SIDECAR_PATH, Kind, Manifest, PackageError, RELAY_CLIENT_PATH,
+        RESOURCE_PROBE_PATH,
+    },
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -73,8 +76,14 @@ fn bundle_with_probe(root: &Path, probe_path: &str) -> Manifest {
 #[test]
 fn the_shipped_helper_pin_is_the_resource_probe_where_the_observer_looks() {
     let pins = package::helper_pins().unwrap();
-    // RELF item 3: the pinned relay client (`native/cloudflared`) is the second helper.
-    assert_eq!(pins.len(), 2, "{pins:?}");
+    // The pinned helper set, exactly: the resource probe (REL item 4), the relay client
+    // (`native/cloudflared`, RELF item 3), and the native iroh transport a run spawns to reach a
+    // peer. Named as a set rather than a count so a new helper cannot slip in unrecorded.
+    let mut paths: Vec<&str> = pins.iter().map(|p| p.path.as_str()).collect();
+    paths.sort_unstable();
+    let mut expected = vec![RESOURCE_PROBE_PATH, RELAY_CLIENT_PATH, IROH_SIDECAR_PATH];
+    expected.sort_unstable();
+    assert_eq!(paths, expected, "{pins:?}");
     assert!(pins.iter().all(|p| p.kind == Kind::Helper));
     // `ProbeObserver::beside_executable`: `<dir of Contents/MacOS/mycelium>/native/resource_probe`.
     assert_eq!(RESOURCE_PROBE_PATH, "Contents/MacOS/native/resource_probe");
