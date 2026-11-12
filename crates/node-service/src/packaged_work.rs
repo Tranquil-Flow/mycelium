@@ -443,6 +443,13 @@ fn operations(
                     .live()
                     .and_then(|()| operation.check())
                     .and_then(|()| match command {
+                        "carrier_address" => {
+                            let address = side.host.address().map_err(|_| "member_work_address_unavailable".to_owned())?;
+                            let sockets: Vec<_> = address.ip_addrs().copied().collect();
+                            let held = shared.session.lock().map_err(|_| "session_poisoned".to_owned())?;
+                            let advert = api::joined_shard::carrier::advertise(held.as_ref().ok_or("not_joined")?, &shared.signer, carrier, &sockets, app_host::now()).map_err(|e| e.0.to_owned())?;
+                            Ok(json!({"endpoint_id":address.id.to_string(),"socket":sockets.first().ok_or("carrier_address_missing")?,"sockets":sockets,"advert":advert}))
+                        }
                         "consent_status" => work::consent_status(&shared.root),
                         "consent" | "grant_consent" => Err("member_local_consent_required".into()),
                         "pair_request" | "accept" => Err("member_already_joined".into()),
