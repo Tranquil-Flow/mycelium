@@ -124,6 +124,20 @@ fn enrolled_packaged_control_dispatches_without_pair_request_and_closes_all_owne
     let status = link.call(json!({"command":"status"}), wait).unwrap();
     assert_eq!(status["joined"], true);
     assert_eq!(status["native_owned"], false);
+    let address = link.call(json!({"command":"carrier_address"}), wait);
+    assert!(
+        address.is_ok(),
+        "epoch consumer needs an enrolled carrier advertisement: {address:?}"
+    );
+    let address = address.unwrap();
+    assert_eq!(
+        address["advert"]["message"]["member"]["node_id"],
+        p.session.node_id()
+    );
+    assert_eq!(
+        address["endpoint_id"],
+        verified.registration()["message"]["carrier_endpoint_id"]
+    );
     let consent = link
         .call(json!({"command":"consent_status"}), wait)
         .unwrap();
