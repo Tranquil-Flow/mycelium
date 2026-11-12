@@ -307,13 +307,15 @@ impl NativeShard {
         // A fresh worker per serving epoch is allowed only after the previous one's
         // close/reap was proven. The consent wall and command budget keep running
         // from the FIRST prepare; a new worker never resets the granted lifetime.
-        if self.worker.is_some()
-            || !self.cleanup_proven
-            || !proof::valid_nonce(nonce)
-            || range[0] >= range[1]
-            || range[1] > 28
-            || tokens == 0
-        {
+        if self.worker.is_some() {
+            return Err(fail("joined_native_prepare_invalid"));
+        }
+        // No replacement may be launched while the previous exact child's
+        // release is unproven (F1: a failed abort keeps that child owned).
+        if !self.cleanup_proven {
+            return Err(fail("joined_native_cleanup_required"));
+        }
+        if !proof::valid_nonce(nonce) || range[0] >= range[1] || range[1] > 28 || tokens == 0 {
             return Err(fail("joined_native_prepare_invalid"));
         }
         if signer.verification_key_digest()
@@ -480,12 +482,16 @@ impl NativeShard {
         Ok(bytes)
     }
     pub fn close(&mut self) -> Result<Value> {
+        // F1: the close request and its exit wait share the remaining consent
+        // end (`started + wall`); neither phase refreshes an allowance. A
+        // failed close keeps the worker owned so `abort` can escalate to the
+        // exact-child SIGKILL.
+        let end = self.started.ok_or(fail("joined_native_not_prepared"))? + self.wall;
         let worker = self
             .worker
             .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?;
-        // A failed graceful close keeps the worker owned for abort().
-        let stats = worker.close_in_place().map_err(native)?;
+        let stats = worker.close_in_place_until(end).map_err(native)?;
         self.worker = None;
         self.cleanup_proven = true;
         Ok(stats)
@@ -517,16 +523,27 @@ impl NativeShard {
     }
     /// After an interrupted step the socket framing is not reusable: kill and
     /// reap the exact owned child. Cleanup is proven only by the OS exit report;
-    /// the evidence says `context_closed:false`, never a graceful close.
+    /// the evidence says `context_closed:false`, never a graceful close. A
+    /// failed kill or reap keeps the worker (and the exact Child handle) owned
+    /// for a retry and answers the explicit `native_cleanup_unproven`; a
+    /// replacement worker is refused while that is unproven.
     pub fn abort(&mut self) -> Result<Value> {
         let worker = self
             .worker
-            .take()
+            .as_mut()
             .ok_or(fail("joined_native_not_prepared"))?;
         if let Some(failure) = worker.guard_failure() {
             self.guard_failure = Some(failure.document());
         }
-        let evidence = worker.kill_and_reap().map_err(native)?;
+        let evidence = worker.kill_and_reap_in_place().map_err(|e| {
+            fail(match e.0 {
+                "native_worker_kill_failed" | "native_worker_reap_failed" => {
+                    "native_cleanup_unproven"
+                }
+                other => other,
+            })
+        })?;
+        self.worker = None;
         // MG2: a prepared worker that ended without this abort's own kill died
         // after load: the run is blocked as after a guard kill. A live worker
         // aborted here (interrupted epoch) does not block it.

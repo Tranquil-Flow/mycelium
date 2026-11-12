@@ -573,7 +573,9 @@ struct Fake {
 
 impl Drop for Fake {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        if let Err(error) = std::fs::remove_dir_all(&self.root) {
+            eprintln!("f1_fixture_cleanup_failed: {error}");
+        }
     }
 }
 

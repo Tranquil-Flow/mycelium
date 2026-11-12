@@ -320,11 +320,34 @@ fn fake_native_worker() {
     }
     write_frame(&mut link, &json!({"ok":true}));
     let _proof = read_frame(&mut link);
-    if mode == "refuse_proof" {
+    if matches!(
+        mode.as_str(),
+        "refuse_proof" | "refuse_close" | "accept_close"
+    ) {
         write_frame(&mut link, &json!({"ok":false}));
-    } else {
-        hog();
+        if mode == "refuse_proof" {
+            while read_frame(&mut link).is_some() {}
+            return;
+        }
+        // The proof refusal left the worker owned; answer its close request.
+        let Some(close) = read_frame(&mut link) else {
+            return;
+        };
+        assert_eq!(close, json!({"command":"close"}), "{mode} got {close}");
+        if mode == "refuse_close" {
+            write_frame(&mut link, &json!({"ok":false}));
+            while read_frame(&mut link).is_some() {}
+            return;
+        }
+        write_frame(
+            &mut link,
+            &json!({"ok":true,"stats":{"active_bytes":0,"reserved_memory_bytes":0,
+                "context_closed":true}}),
+        );
+        // Exits 0 after a graceful close; the owner observes the real exit.
+        return;
     }
+    hog();
     // Hold until the guard or the owner kills this worker, or the link closes.
     while read_frame(&mut link).is_some() {}
 }
@@ -748,5 +771,68 @@ fn dies_during_prepare_child() {
         native.worker_failure(),
         Some(json!({"code":NATIVE_EXITED,"limit_detail":null}))
     );
+    native.discard().unwrap();
+}
+
+// ---- NATIVE-F1: the close path through NativeShard, with a real child ----
+
+/// NATIVE-F1: a graceful close that the peer refuses fails explicitly and keeps
+/// the exact fake child owned; the established abort escalation (the `stop(false)`
+/// fallthrough) kills and reaps that same child, and only then may the custody
+/// be discarded. The fake is NOT MLX computation.
+#[test]
+fn a_failed_native_close_escalates_to_the_exact_owned_child() {
+    run_child("failed_close_child");
+}
+#[test]
+#[ignore = "child of a_failed_native_close_escalates_to_the_exact_owned_child"]
+fn failed_close_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("f1-close");
+    set_mode("refuse_close");
+    // The proof refusal leaves the prepared worker owned; no model is loaded.
+    assert_eq!(p.prepare(&mut native), Err("native_proof_binding_mismatch"));
+    let pid = native.worker_pid().expect("the prepared worker is owned");
+    assert_eq!(
+        native.close().map_err(|e| e.0),
+        Err("native_cleanup_unproven"),
+        "a refused close is explicit cleanup-unproven"
+    );
+    assert_eq!(
+        native.worker_pid(),
+        Some(pid),
+        "the exact child stays owned for abort"
+    );
+    assert_eq!(
+        native.discard().map_err(|e| e.0),
+        Err("joined_native_cleanup_required"),
+        "no replacement/discard while release is unproven"
+    );
+    let evidence = native.abort().unwrap();
+    assert_eq!(evidence["worker_pid"], pid);
+    assert_eq!(evidence["killed"], true);
+    assert_eq!(native.worker_pid(), None);
+    assert_eq!(native.worker_failure(), None);
+    native.discard().unwrap();
+}
+
+/// NATIVE-F1: a graceful close under the consent end reaps the exact fake child
+/// that ACKs and exits 0, and proves cleanup so the custody can be retired.
+#[test]
+fn a_graceful_native_close_reaps_the_exact_fake_child() {
+    run_child("graceful_close_child");
+}
+#[test]
+#[ignore = "child of a_graceful_native_close_reaps_the_exact_fake_child"]
+fn graceful_close_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("f1-close-ok");
+    set_mode("accept_close");
+    assert_eq!(p.prepare(&mut native), Err("native_proof_binding_mismatch"));
+    assert!(native.worker_pid().is_some());
+    let stats = native.close().unwrap();
+    assert_eq!(stats["context_closed"], true);
+    assert_eq!(native.worker_pid(), None);
+    assert_eq!(native.worker_failure(), None);
     native.discard().unwrap();
 }
