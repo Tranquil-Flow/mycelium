@@ -17,6 +17,9 @@ let busy = false;
 let connected = false;
 let latest = null;
 let reviewedRequest = null;
+// A claimed card is the owner's only action item; keep it in view and focus its Approve button once,
+// so the decision is reachable by keyboard and without hunting for a button below the fold.
+const claimedShown = new Set();
 let stageOffer = null;
 async function api(path, body) {
   const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST',
@@ -560,6 +563,8 @@ function renderJoinFlow(value,target,a){
       const approve=document.createElement('button');approve.type='button';approve.textContent='Approve this Mac';
       approve.addEventListener('click',()=>void perform('/api/pair/window/approve',{window_id:w.window_id,request_digest:p.request_digest},'Approved. The encrypted invitation returns to that Mac automatically.'));
       row.append(approve);
+      if(!claimedShown.has(w.window_id)){claimedShown.add(w.window_id);
+        requestAnimationFrame(()=>{row.scrollIntoView({block:'center'});approve.focus({preventScroll:true});});}
     }
     if(['open','claimed','approved'].includes(w.state)){
       const revoke=document.createElement('button');revoke.type='button';revoke.className='secondary';revoke.textContent='Close code';
