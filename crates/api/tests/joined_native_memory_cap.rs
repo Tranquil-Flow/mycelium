@@ -264,7 +264,7 @@ fn hog() {
 
 /// The fake worker. Mode (file `mode` in the record dir): `hog_after_reply`
 /// accepts the prepare, then holds memory during the resident-proof exchange;
-/// `hog_during_prepare` holds memory before answering the prepare;
+/// `hog_during_prepare` holds memory and never answers the prepare;
 /// `refuse_proof` accepts the prepare and answers the proof with `ok:false`.
 #[test]
 #[ignore = "fake native worker, run only by the pinned script of run_child"]
@@ -283,7 +283,10 @@ fn fake_native_worker() {
     )
     .unwrap();
     if mode == "hog_during_prepare" {
+        // Never answers the prepare: the breach lands while it is in flight.
         hog();
+        while read_frame(&mut link).is_some() {}
+        return;
     }
     write_frame(&mut link, &json!({"ok":true}));
     let _proof = read_frame(&mut link);
@@ -430,5 +433,83 @@ fn prepared_and_guarded_child() {
     assert_eq!(prepared_memory(), share, "the prepared memory");
     assert_eq!(guarded_limit(&native), Some(share), "the guard's limit");
     native.abort().unwrap();
+    native.discard().unwrap();
+}
+
+/// F2 (REVIEW-laneMG): after the guard killed a worker, the same run cannot
+/// prepare that member again; a new run (a new offer, new custody) can.
+/// v0.1.4: the dead worker's runtime is `blocked`/`runtime_cold_restart_required`
+/// once load was admitted (managed_runtime.py:279-345, worker.py:1549-1552,1368),
+/// the runtime stays attached (`runtime_already_attached`, target_app.py:192)
+/// and the handled offer is never re-accepted (standing_consent.py:420-421,465-466)
+/// until `stop_control` (target_app.py:280-284) and a NEW offer.
+#[test]
+fn after_a_memory_kill_the_same_run_cannot_prepare_again_until_a_new_offer() {
+    run_child("same_run_blocked_child");
+}
+#[test]
+#[ignore = "child of after_a_memory_kill_the_same_run_cannot_prepare_again_until_a_new_offer"]
+fn same_run_blocked_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("mgf-run-1");
+    set_mode("hog_after_reply");
+    assert_eq!(p.prepare(&mut native), Err("worker_memory_limit_exceeded"));
+    native.abort().unwrap();
+    let killed = native.worker_failure();
+    assert_eq!(guarded_limit(&native), Some(SMALL_CAP));
+    // The same run: refused before any worker is launched, the verdict kept.
+    set_mode("refuse_proof");
+    assert_eq!(
+        p.prepare(&mut native),
+        Err("runtime_cold_restart_required"),
+        "a fresh prepare after a memory-limit kill"
+    );
+    assert!(
+        !fake_dir().join("prepare.json").exists(),
+        "no worker was launched"
+    );
+    assert_eq!(native.worker_pid(), None);
+    assert_eq!(native.worker_failure(), killed);
+    native.discard().unwrap();
+    // A new run (new offer, new custody) on the same member prepares again.
+    let mut next = p.custody("mgf-run-2");
+    set_mode("refuse_proof");
+    assert_eq!(p.prepare(&mut next), Err("native_proof_binding_mismatch"));
+    assert_eq!(
+        prepared_memory(),
+        SMALL_CAP,
+        "the new run's worker was prepared"
+    );
+    assert_eq!(next.worker_failure(), None);
+    next.abort().unwrap();
+    next.discard().unwrap();
+}
+
+/// F4 (REVIEW-laneMG): a kill that lands DURING prepare (weights load, the
+/// likeliest moment) keeps the guard's three `limit_detail` numbers, as a kill
+/// after prepare does. v0.1.4 records code + detail for any breach
+/// (worker.py:845-860, `_watch` 1236-1270).
+#[test]
+fn a_kill_during_prepare_keeps_the_guard_numbers() {
+    run_child("kill_during_prepare_child");
+}
+#[test]
+#[ignore = "child of a_kill_during_prepare_keeps_the_guard_numbers"]
+fn kill_during_prepare_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("mgf-during");
+    set_mode("hog_during_prepare");
+    assert_eq!(p.prepare(&mut native), Err("worker_memory_limit_exceeded"));
+    assert_eq!(prepared_memory(), SMALL_CAP);
+    assert_eq!(
+        native.worker_pid(),
+        None,
+        "the failed start reaped its child"
+    );
+    assert_eq!(
+        guarded_limit(&native),
+        Some(SMALL_CAP),
+        "the numbers of a kill during prepare"
+    );
     native.discard().unwrap();
 }
