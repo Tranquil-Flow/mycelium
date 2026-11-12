@@ -21,11 +21,11 @@
       "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">."
     },
     "index.html": {
-      "sha256": "cf809f93a67a03a7054f89990f525a03050a8e20078a19f9700a36e22c127d7b",
+      "sha256": "940b89f7fb719393aa1335d1c8127d58c3a889d2085defe0a8336e0a61f1b33d",
       "reason": "Adds the ask dialog markup, the site's #page-mycelium / #hyphae canvases for the living background, its module boot script, and drops the pre-ruling-25 page subtitle 'macOS A13 hackathon demo' in favour of 'local swarm demo'."
     },
     "style.css": {
-      "sha256": "dfcbb2f759498e4b8d2956330ef07abb155526e68f3ace6eea38339aecded5e9",
+      "sha256": "bf336172c7d86463f246be3d676d74378059c3ff03443c5901919100bbd350f6",
       "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art)."
     }
   },
