@@ -33,15 +33,27 @@ impl Service for Backend<'_> {
         true
     }
     fn state(&self) -> Result<Value, ChatError> {
+        // With a run composed, the shipped `ChatService` answers (lanes PH3b S5, S5F).
+        if let Some(chat) = self.host.routed_chat() {
+            return Ok(chat.state());
+        }
         self.value("/chat/api/state", json!({}))
     }
     fn send(&self, _: &str, body: Value, via_relay: bool) -> Result<Value, ChatError> {
         if via_relay {
             return Err(ChatError::new(403, "relay_not_supported"));
         }
+        if let Some(chat) = self.host.routed_chat() {
+            return self.host.route_send(chat, &body);
+        }
         self.value("/chat/api/send", body)
     }
     fn events(&self, body: Value) -> Result<Value, ChatError> {
+        // With a run composed, every record lives in the service (it answers at once,
+        // chat.py:454-474).
+        if let Some(chat) = self.host.routed_chat() {
+            return chat.events(&body);
+        }
         let bytes = serde_json::to_vec(&body).map_err(|_| converted(err("native_json_failed")))?;
         let callback = self
             .callback

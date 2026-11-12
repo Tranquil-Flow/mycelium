@@ -110,6 +110,11 @@ pub struct VerifiedBundle {
     root: std::path::PathBuf,
 }
 impl VerifiedBundle {
+    /// The installed executable bound by this admission (identity, not a
+    /// publisher-authentication claim). No new helper kind or layout is admitted.
+    pub fn executable(&self) -> std::path::PathBuf {
+        self.root.join("Contents/MacOS/mycelium")
+    }
     pub fn metal(&self) -> std::path::PathBuf {
         self.root.join("Contents/Frameworks/mlx.metallib")
     }

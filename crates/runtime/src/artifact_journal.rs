@@ -29,6 +29,9 @@ use std::{
     time::Instant,
 };
 
+mod pinned;
+pub use pinned::PinnedObjects;
+
 pub const LEDGER_FILE: &str = "source-ledger.jsonl";
 const LEDGER_TMP: &str = "source-ledger.jsonl.tmp";
 const LEDGER_PROTOCOL: &str = "mycelium.artifact_source_ledger.v1";
@@ -234,6 +237,7 @@ impl Journal {
 /// Content-addressed objects (`<root>/<sha256 hex>`) served behind the durable journal.
 pub struct DurableObjects {
     root: PathBuf,
+    pinned: Option<Arc<PinnedObjects>>,
     state: Mutex<SourceState>,
 }
 
@@ -253,8 +257,28 @@ impl DurableObjects {
         state.journal = Some(journal);
         Ok(Self {
             root: config.objects,
+            pinned: None,
             state: Mutex::new(state),
         })
+    }
+    /// Replace pathname reads with admission-time custody. No fallback for absent pins.
+    pub fn with_pinned(mut self, pinned: Option<Arc<PinnedObjects>>) -> Self {
+        self.pinned = pinned;
+        self
+    }
+    fn open_object(&self, hex: &str) -> Result<File, ArtifactError> {
+        match &self.pinned {
+            Some(pinned) => pinned.open(hex),
+            None => {
+                File::open(self.root.join(hex)).map_err(|_| error("artifact_object_unavailable"))
+            }
+        }
+    }
+    fn check_object(&self, hex: &str) -> Result<(), ArtifactError> {
+        if let Some(pinned) = &self.pinned {
+            pinned.open(hex).map(drop)?;
+        }
+        Ok(())
     }
     /// Opt-in bounded verification before publishing immutable large objects.
     /// Existing callers retain their behavior. Checkpoints may enforce absolute
@@ -274,8 +298,7 @@ impl DurableObjects {
             })
             .ok_or_else(|| error("artifact_object_digest_invalid"))?;
         checkpoint()?;
-        let mut file =
-            File::open(self.root.join(hex)).map_err(|_| error("artifact_object_unavailable"))?;
+        let mut file = self.open_object(hex)?;
         let metadata = file
             .metadata()
             .map_err(|_| error("artifact_object_unavailable"))?;
@@ -306,6 +329,7 @@ impl DurableObjects {
         if size != metadata.len() || format!("{:x}", hash.finalize()) != hex {
             return Err(error("artifact_source_chunk_unverified"));
         }
+        self.check_object(hex)?;
         self.lock().verified.insert(hex.into(), size);
         Ok(size)
     }
@@ -328,8 +352,12 @@ impl ArtifactObjects for DurableObjects {
     /// Length of a held object whose content matches its name (hashed once).
     fn verified_size(&self, digest: &str) -> Option<u64> {
         let hex = digest.strip_prefix("sha256:")?;
+        self.check_object(hex).ok()?;
         if let Some(length) = self.lock().verified.get(hex) {
             return Some(*length);
+        }
+        if self.pinned.is_some() {
+            return self.verify_bounded(digest, &|| Ok(())).ok();
         }
         let bytes = std::fs::read(self.root.join(hex)).ok()?;
         if range_digest(&bytes) != digest {
@@ -366,18 +394,22 @@ impl ArtifactObjects for DurableObjects {
             .object_digest
             .strip_prefix("sha256:")
             .ok_or_else(unavailable)?;
-        let mut file = File::open(self.root.join(hex)).map_err(|_| unavailable())?;
+        let mut file = self.open_object(hex)?;
         let length = usize::try_from(request.length_bytes).map_err(|_| unavailable())?;
         let mut bytes = vec![0_u8; length];
         file.seek(SeekFrom::Start(request.offset_bytes))
             .and_then(|_| file.read_exact(&mut bytes))
             .map_err(|_| unavailable())?;
+        self.check_object(hex)?;
         Ok(AdmittedChunk {
             bytes,
             pace: Span::from_millis(pace),
         })
     }
 }
+
+#[cfg(test)]
+mod custody_tests;
 
 #[cfg(test)]
 mod tests {

@@ -220,11 +220,23 @@ pub struct DesktopServices {
     product: Arc<dyn api::desktop::ProductRoutes>,
     /// The packaged host's network and authority, for the status (`crate::packaged_network`).
     network: Arc<crate::packaged_network::Network>,
-    authority: Option<Arc<Mutex<api::app_host::Authority>>>,
+    authority: Option<Arc<Mutex<crate::packaged_run::Authority>>>,
+    /// The packaged host's owner run, for the status's `owner_run` (`crate::packaged_run`).
+    run: crate::packaged_run::RunConfig,
     gate: Arc<Mutex<Gate>>,
     chat: Arc<Mutex<Option<Chat>>>,
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
     rate: Arc<Mutex<crate::chat_edge::RateWindow>>,
+    /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): once a run is
+    /// composed it answers every `/chat/*` route (lane S5F); without one the SLICE-1 native path
+    /// above answers.
+    chat_run: Option<api::chat_service::ChatService>,
+    /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
+    run_chats: Option<api::chat_service::RunChats>,
+    /// The node's state root these services were built with: `private`'s parent (`<state
+    /// root>/v02-node` in the packaged composition, packaged.rs:76-89). The chat timing file must
+    /// lie under it (lane S5F).
+    node_root: Option<std::path::PathBuf>,
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
@@ -308,9 +320,31 @@ impl DesktopServices {
         publisher: Arc<api::swarm::publisher::app::AppPublisher>,
         network: crate::packaged_network::NetworkConfig,
     ) -> Self {
+        Self::packaged_with_run(
+            node,
+            capacity,
+            private,
+            source,
+            publisher,
+            network,
+            crate::packaged_run::RunConfig::default(),
+        )
+    }
+    /// [`DesktopServices::packaged_with_network`] with the owner's run composed over `run`'s seams
+    /// (`PackagedHost::with_run`, lane PH3b S3); `run` is also the status's handle to it.
+    pub fn packaged_with_run(
+        node: NodeService,
+        capacity: NonZeroUsize,
+        private: &Path,
+        source: crate::app_host::ModelSource,
+        publisher: Arc<api::swarm::publisher::app::AppPublisher>,
+        network: crate::packaged_network::NetworkConfig,
+        run: crate::packaged_run::RunConfig,
+    ) -> Self {
         let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
             .with_network(network)
-            .with_publisher(publisher);
+            .with_publisher(publisher)
+            .with_run(run.clone());
         let qualification = development_source(&node);
         // `PublishedStatus.start()` (published_status.py:26-30, app.py:630-632 @ f4e366e9): the
         // packaged app publishes a complete initial status before the window's first request, so
@@ -319,7 +353,9 @@ impl DesktopServices {
         if let Err(error) = api::actions::Backend::publish(&mut node.clone()) {
             eprintln!("status_publish_failed: {}", error.code);
         }
-        Self::with_host(node, capacity, private, host, qualification)
+        let mut services = Self::with_host(node, capacity, private, host, qualification);
+        services.run = run;
+        services
     }
     /// The packaged host's network (its relay, closed by the packaged Quit).
     pub fn network(&self) -> Arc<crate::packaged_network::Network> {
@@ -334,6 +370,74 @@ impl DesktopServices {
     pub fn gated(mut self, gate: Arc<dyn ModelGate>) -> Self {
         self.model = Some(gate);
         self
+    }
+    /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): from now
+    /// on `/chat/api/{state,send,events}` always go through the shipped `ChatService`, which answers
+    /// `chat_not_ready` / `chat_warming_up` / `chat_switching_runs` itself while `run` does not serve
+    /// (lane S5F); `timing` is the owner's per-chat timing file (v0.2's own evidence folder, never
+    /// v0.1.4's).
+    pub fn with_chat_run(
+        mut self,
+        run: Arc<dyn api::chat_service::RunRoute>,
+        timing: Option<std::path::PathBuf>,
+    ) -> Result<Self, PublicError> {
+        let refused = PublicError::new(500, "chat_timing_path_refused");
+        let timing = match (timing, &self.node_root) {
+            (None, _) => None,
+            (Some(path), Some(root)) => Some(api::chat_service::TimingFile::under(root, &path)?),
+            (Some(_), None) => return Err(refused),
+        };
+        let chat = api::chat_service::ChatService::new(
+            run,
+            Arc::new(api::chat_service::MonotonicClock::default()),
+            timing,
+        )?;
+        self.run_chats = Some(api::chat_service::RunChats::new(Arc::new(chat.clone())));
+        self.chat_run = Some(chat);
+        Ok(self)
+    }
+    /// The handle the owner run's ports hold (lane S5F): its teardown, ceiling, rollover and
+    /// dead-member facts cancel the page's route chats with the shipped codes. `None` without
+    /// [`DesktopServices::with_chat_run`].
+    pub fn run_chats(&self) -> Option<api::chat_service::RunChats> {
+        self.run_chats.clone()
+    }
+    /// The route chat service once a run is composed: then it answers EVERY `/chat/*` route, as the
+    /// shipped app's only chat path does (`DemoApp.chat_route` app.py:1926 -> `chat.handle`
+    /// chat.py:553-584 -> `ChatService`; not serving -> its own 503 codes, chat.py:311-318). `None`:
+    /// no run is composed and the SLICE-1 native path answers. A host never has both paths, so a
+    /// native chat and a route chat can never run at once (lane S5F, REVIEW-lanePH3B-S5 F1/F3).
+    fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
+        self.chat_run.as_ref()
+    }
+    /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
+    /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
+    fn route_send(
+        &self,
+        chat: &api::chat_service::ChatService,
+        body: &Value,
+    ) -> Result<Value, api::chat::ChatError> {
+        let refused = |error: PublicError| api::chat::ChatError {
+            error,
+            retry_after: None,
+        };
+        let plan = crate::chat_edge::plan(body).map_err(refused)?;
+        if self
+            .gate
+            .lock()
+            .map_err(|_| refused(err("desktop_poisoned")))?
+            .closing
+        {
+            return Err(refused(err("application_closed")));
+        }
+        chat.send(
+            "local",
+            api::chat_service::Prompt {
+                text: plan.prompt,
+                max_new_tokens: plan.max_new_tokens,
+                clamped: plan.clamped,
+            },
+        )
     }
     fn with_host(
         node: NodeService,
@@ -363,6 +467,7 @@ impl DesktopServices {
             actions: Arc::new(Control::new(backend)),
             network,
             authority,
+            run: crate::packaged_run::RunConfig::default(),
             serving,
             fast_mode,
             loops,
@@ -379,6 +484,9 @@ impl DesktopServices {
             })),
             chat: Arc::new(Mutex::new(None)),
             rate: Arc::default(),
+            chat_run: None,
+            run_chats: None,
+            node_root: private.parent().map(Path::to_path_buf),
             started: std::time::Instant::now(),
             capacity,
         }
@@ -413,7 +521,9 @@ impl DesktopServices {
             &format!("{}:{}", request.method, request.target),
         );
         if request.target.starts_with("/chat/") {
-            if let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready()) {
+            if self.routed_chat().is_none()
+                && let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready())
+            {
                 Self::complete_error(complete, refusal);
                 return;
             }
@@ -436,9 +546,24 @@ impl DesktopServices {
             ("GET", "/api/status") => {
                 // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
                 let mut status = self.node.published_status()?;
-                status["swarm"] = crate::app_host::swarm_status(self.publishing.as_ref());
+                // Only into a published object, never indexed into a panic (REVIEW-lanePH2 F8).
+                status
+                    .as_object_mut()
+                    .ok_or_else(|| err("status_unavailable"))?
+                    .insert(
+                        "swarm".into(),
+                        crate::app_host::swarm_status(self.publishing.as_ref()),
+                    );
                 // v0.1.4's network window, role, consent and join flow (`crate::packaged_network`).
                 crate::packaged_network::status_overlay(
+                    &mut status,
+                    self.authority.as_deref(),
+                    &self.network,
+                );
+                // v0.1.4's `owner_run` (`demo_app.owner_status`, `crate::packaged_run`).
+                crate::packaged_run::status_overlay(&mut status, &self.run);
+                // v0.1.4's `demo_target` member card (PH3b S2).
+                crate::packaged_network::member_status(
                     &mut status,
                     self.authority.as_deref(),
                     &self.network,
@@ -551,6 +676,13 @@ impl DesktopServices {
                     body.as_object()
                         .ok_or(PublicError::new(400, "invalid_request"))?,
                 )?;
+                // The run's Stop tears it down with `chat.cancel_all('chat_cancelled')`
+                // (demo_chain.py:1322-1335 @ f4e366e9); repeated by the run's own hook, a no-op.
+                if path == "/api/demo/stop"
+                    && let Some(chat) = &self.chat_run
+                {
+                    chat.cancel_all(api::chat_service::Teardown::Stopped.code());
+                }
                 Self::json(value)
             }
             _ => Err(PublicError::new(404, "not_found")),
@@ -673,6 +805,10 @@ impl DesktopServices {
                 }
                 "completed" => "completed",
                 "cancelled" => "cancelled",
+                // `/api/demo/stop` cancels the node service's job directly, which ends the
+                // request `failed` with `request_cancelled`; v0.1.4's Stop cancels through the
+                // gateway (`cancel_all`, demo_chain.py:1322-1335), a `cancelled` terminal.
+                "failed" if event.payload["code"] == "request_cancelled" => "cancelled",
                 "failed" => "failed",
                 // `accepted` (and any lifecycle event) carries nothing for the page.
                 _ => {
@@ -686,6 +822,11 @@ impl DesktopServices {
             };
             chat.done = true;
             chat.terminal = Some(terminal);
+            if terminal == "cancelled" {
+                // v0.1.4: `error = cancel_reason or 'chat_cancelled'` (chat.py:368-369); every
+                // cancel on this path is a Stop, whose reason is `chat_cancelled`.
+                chat.error = Some(api::chat_service::Teardown::Stopped.code().to_owned());
+            }
             if terminal == "failed" {
                 // v0.1.4: a failed terminal shows its code (chat.py:366-367).
                 chat.error = Some(

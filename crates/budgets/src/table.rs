@@ -632,6 +632,7 @@ table! {
     PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917 => (Duration(Span::from_millis(20_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:917 @ f5bfb709")),
     PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009 => (Duration(Span::from_millis(1_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1009 @ f5bfb709")),
     PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1203 @ f5bfb709")),
+    MemberPeriodicReport => (Duration(Span::from_millis(300_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1162 @ f4e366e9; _auto_report sets _next_periodic_report = time.monotonic() + 300 and the standing loop (_standing_tick, :1196-1199) sends a periodic capability report once it is due; 0.0 at app start (:532) makes the first tick due")),
     PyMyceliumA13MacosAppDemoappCloseTimeoutL1841 => (Duration(Span::from_millis(15_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1841 @ f5bfb709")),
     PyMyceliumA13MacosAppHandlerSetupSelfConnectionSettimeoutL1869 => (Duration(Span::from_millis(3_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1869 @ f5bfb709")),
     PyMyceliumA13MacosAuthorityMaxPrivateJsonBytesL96 => (Storage(Bytes::new(262_144)), Resource, Source("mycelium_a13_macos/authority.py:96 @ f5bfb709")),

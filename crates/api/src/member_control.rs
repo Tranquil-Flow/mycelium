@@ -13,6 +13,7 @@
 //! use. This channel carries the member operator commands (pairing, consent,
 //! receive, prepare, serve, status, leave); it does not replace seed-signed
 //! membership, offers or routes, which each side still verifies independently.
+pub mod joined;
 use crate::schema::PublicError;
 use budgets::{BudgetId as B, Entries};
 use protocol::identity::{self, Identity};

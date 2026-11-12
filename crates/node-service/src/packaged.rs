@@ -177,6 +177,9 @@ pub struct WindowQuit {
     model: ModelClose,
     /// `self.public_relay.close()` (app.py:1848-1850), started as Quit begins.
     relay: crate::packaged_network::RelayClose,
+    /// `demo_app.close` and `_stop_local_contributor` (`crate::packaged_run`), started as Quit
+    /// begins, before every other step.
+    run: Option<crate::packaged_run::RunClose>,
     /// The first step that failed, reported once every step ran.
     failed: Option<CleanupError>,
 }
@@ -204,6 +207,9 @@ impl Cleanup for AppCleanup {
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
             Self::Service(quit) => {
+                if let Some(run) = &mut quit.run {
+                    run.begin();
+                }
                 quit.deadline = quit.origin.and_then(|origin| {
                     origin.checked_add(Duration::from_millis(deadline.millis()))
                 });
@@ -251,13 +257,15 @@ impl Cleanup for AppCleanup {
                 let swarm = quit.swarm.as_mut().map_or(Some(Ok(())), SwarmClose::poll);
                 let model = quit.model.poll();
                 let relay = quit.relay.poll();
-                let (Some(swarm), Some(relay)) = (swarm, relay) else {
+                let run = quit.run.as_mut().map_or(Some(Ok(())), |run| run.poll());
+                let (Some(swarm), Some(relay), Some(run)) = (swarm, relay, run) else {
                     return Ok(Poll::Pending);
                 };
                 if model == Ok(Poll::Pending) {
                     return Ok(Poll::Pending);
                 }
                 for step in [
+                    run.map(|()| Poll::Verified),
                     swarm.map(|()| Poll::Verified),
                     model,
                     relay.map(|()| Poll::Verified),
@@ -485,20 +493,81 @@ pub fn core_with_network(
         state_root,
         ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
         network,
+        RunConfig::default(),
     )
 }
-/// The core and cleanup for the window, from the state root.
+pub use crate::packaged_run::RunConfig;
+/// [`core_with_network`] with the owner run's composition seams given.
+pub fn core_with_run(
+    state_root: &Path,
+    transport: Arc<dyn Transport>,
+    observer: Arc<dyn Observer>,
+    network: NetworkConfig,
+    run: RunConfig,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    compose(
+        state_root,
+        ModelSource::new(state_root.to_owned(), transport).with_observer(observer),
+        network,
+        run,
+    )
+}
+/// Bind the current installed executable to the entry already checked by bundle
+/// admission. Expected bytes come from that startup manifest, never a spawn-time
+/// measurement. The locally installed app is the trust root, not a publisher pin.
+pub fn admitted_native_program(
+    verified: &desktop::package::VerifiedBundle,
+    entry: &desktop::package::Entry,
+    executable: &Path,
+) -> Result<api::native_compiler::NativeProgram, String> {
+    if entry.kind != desktop::package::Kind::Executable
+        || entry.path != "Contents/MacOS/mycelium"
+        || executable != verified.executable()
+    {
+        return Err("native_executable_admission_mismatch".into());
+    }
+    api::native_compiler::NativeProgram {
+        binary: executable.into(),
+        expected: api::compiled_handoff::Pin {
+            bytes: entry.bytes,
+            sha256: entry.sha256.clone(),
+        },
+    }
+    .admit(&|| false)
+    .map_err(|error| error.0.into())
+}
+
+/// Production entrypoint after bundle admission, with explicit native identity.
+pub fn core_with_native_program(
+    state_root: &Path,
+    native_program: api::native_compiler::NativeProgram,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    compose(
+        state_root,
+        ModelSource::hub(state_root.to_owned()),
+        NetworkConfig::default(),
+        RunConfig {
+            native_program: Some(native_program),
+            ..RunConfig::default()
+        },
+    )
+}
+
+/// The core and cleanup for the window, from the state root. No native compiler
+/// program is available unless the admitted executable entrypoint supplies it.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     compose(
         state_root,
         ModelSource::hub(state_root.to_owned()),
         NetworkConfig::default(),
+        RunConfig::default(),
     )
 }
 fn compose(
     state_root: &Path,
     source: ModelSource,
     network: NetworkConfig,
+    run: RunConfig,
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     let dirs = prepare_dirs(state_root)?;
     let private = dirs.private.clone();
@@ -525,16 +594,23 @@ fn compose(
     );
     // `DemoApp.swarm_publisher`: the listing custody's state beside the owner's private state.
     let publisher = Arc::new(api::swarm::publisher::app::AppPublisher::new(&private));
-    let services = DesktopServices::packaged_with_network(
+    // `DemoApp.owner_run` (lane PH3b S3, `crate::packaged_run`): composed with the host; Quit
+    // stops and joins it first (`DemoApp.close` -> `demo_app.close`, app.py:1815-1825).
+    let services = DesktopServices::packaged_with_run(
         node,
         CALLBACK_CAPACITY,
         &private,
         source.clone(),
         publisher,
         network,
+        run.clone(),
     )
     .gated(native);
-    Ok(assemble(services, source))
+    let (core, mut cleanup) = assemble(services, source);
+    if let AppCleanup::Service(quit) = &mut cleanup {
+        quit.run = Some(crate::packaged_run::RunClose::new(run));
+    }
+    Ok((core, cleanup))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`
 /// (the same source the services' packaged host was given): the composition's last step, also
@@ -572,6 +648,7 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
             swarm,
             model: ModelClose::new(source),
             relay,
+            run: None,
             failed: None,
         })),
     )

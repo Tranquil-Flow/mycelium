@@ -207,6 +207,10 @@ pub trait Host: Send {
     fn membership_binding(&self) -> Option<crate::member::Binding> {
         None
     }
+    /// `self._auto_report(purpose)` (app.py:1138-1163): the joined Mac's signed capability report
+    /// to its owner, recorded as `last_report`; never fails the caller. A host without one sends
+    /// nothing.
+    fn auto_report(&mut self, _purpose: &str) {}
     /// `self.authority.accept_pairing(handoff)`.
     fn pair_accept(&mut self, _handoff: &Value) -> Result<Json, PublicError> {
         Err(PublicError::new(409, "action_not_completed"))
@@ -1212,6 +1216,11 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                     if self.host.owner() && self.host.local_contributor_retained() {
                         self.host.local_contributor_start()?;
                     }
+                }
+                // app.py:1641-1643: "Reconnect can be clicked while this member is still running.
+                // The owner's in-memory report inbox may have restarted alone."
+                if !self.host.owner() && self.host.membership_binding().is_some() {
+                    self.host.auto_report("periodic");
                 }
                 Ok(self.host.status_document())
             }

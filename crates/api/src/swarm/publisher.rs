@@ -147,6 +147,19 @@ pub struct Status {
     pub error_code: Option<String>,
     pub next_attempt_at: i64,
 }
+/// What the owner's `swarm` status shows of the listing besides [`Status`] (`SwarmPublisher.status`,
+/// swarm_publish.py:456-472 @ f4e366e9): the listing's name and access mode (the record's once one
+/// is signed, else the owner's opted-in choice), the listing key, the record's entry origin, whether
+/// the directory accepted the record, and the status the last accepted heartbeat carried.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Shown {
+    pub name: Option<String>,
+    pub access_mode: Option<String>,
+    pub key: String,
+    pub entry_origin: Option<String>,
+    pub attached: bool,
+    pub heartbeat: Option<String>,
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct State {
@@ -582,6 +595,24 @@ impl SwarmPublisher {
             protocol_version: PROTOCOL_VERSION,
             error_code: self.state.error.clone(),
             next_attempt_at: self.state.next_attempt,
+        }
+    }
+    /// What the status shows of this listing (read-only; see [`Shown`]).
+    pub fn shown(&self) -> Shown {
+        let record = self.state.record.as_ref();
+        let text = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
+        let listing = self.state.listing.as_ref();
+        Shown {
+            name: text(record.map(|r| &r["name"])).or_else(|| listing.map(|l| l.name.clone())),
+            access_mode: text(record.map(|r| &r["access_mode"]))
+                .or_else(|| listing.map(|l| l.access_mode.clone())),
+            key: self.public.clone(),
+            entry_origin: text(record.map(|r| &r["entry"]["origin"])),
+            attached: record.is_some() && self.state.record_accepted,
+            heartbeat: self
+                .state
+                .last_beat
+                .and_then(|_| text(self.state.beat_fields.as_ref().map(|f| &f["status"]))),
         }
     }
     /// The sole opt-in port; do not call this merely because a swarm exists. None revokes

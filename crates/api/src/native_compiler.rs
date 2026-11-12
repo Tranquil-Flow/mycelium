@@ -21,6 +21,8 @@ use std::{
     },
     time::Instant,
 };
+#[cfg(test)]
+mod program_tests;
 pub mod shard_sandbox;
 pub(crate) mod worker;
 
@@ -62,9 +64,14 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
     {
         return Err(Error("native_path_invalid"));
     }
+    // Refuse special files BEFORE open: opening a FIFO for read can block forever.
+    let before = fs::symlink_metadata(path).map_err(|_| Error("native_file_unavailable"))?;
+    if !before.is_file() {
+        return Err(Error("native_path_invalid"));
+    }
     let mut file = fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
         .map_err(|_| Error("native_file_unavailable"))?;
     let metadata = file
@@ -77,6 +84,8 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
     let mut bytes = 0;
     let mut buffer = vec![0; 64 * 1024];
     loop {
+        #[cfg(test)]
+        program_tests::hash_checkpoint(path);
         if stopped() {
             return Err(Error("compiler_stopped"));
         }
@@ -89,7 +98,28 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
         hash.update(&buffer[..n]);
         bytes += n as u64;
     }
-    if bytes != metadata.len() {
+    use std::os::unix::fs::MetadataExt;
+    let after = file
+        .metadata()
+        .map_err(|_| Error("native_file_unavailable"))?;
+    let named = fs::symlink_metadata(path).map_err(|_| Error("native_file_unavailable"))?;
+    let identity = |m: &fs::Metadata| {
+        (
+            m.dev(),
+            m.ino(),
+            m.len(),
+            m.mtime(),
+            m.mtime_nsec(),
+            m.ctime(),
+            m.ctime_nsec(),
+        )
+    };
+    if bytes != metadata.len()
+        || identity(&before) != identity(&metadata)
+        || identity(&metadata) != identity(&after)
+        || identity(&after) != identity(&named)
+        || !named.is_file()
+    {
         return Err(Error("native_file_changed"));
     }
     Ok(Pin {
@@ -97,6 +127,83 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
         sha256: format!("{:x}", hash.finalize()),
     })
 }
+/// Expected identity captured by the trusted composition at startup. This is an
+/// identity/drift check, not independent publisher or signature authentication.
+#[derive(Clone, Debug)]
+pub struct NativeProgram {
+    pub binary: PathBuf,
+    pub expected: Pin,
+}
+
+impl NativeProgram {
+    /// Admit an operator-trusted installed path against its previously captured
+    /// identity. macOS's system /var alias is accepted, arbitrary symlinks are not.
+    /// The canonical path is retained, so later ancestor swaps fail closed.
+    pub fn admit(mut self, stopped: &dyn Fn() -> bool) -> Result<Self> {
+        use std::path::Component;
+        if !self.binary.is_absolute()
+            || self
+                .binary
+                .components()
+                .any(|c| !matches!(c, Component::RootDir | Component::Normal(_)))
+            || self.expected.bytes == 0
+            || self.expected.sha256.len() != 64
+            || !self
+                .expected
+                .sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(Error("native_path_invalid"));
+        }
+        let canonical = self
+            .binary
+            .canonicalize()
+            .map_err(|_| Error("native_path_invalid"))?;
+        let normalized = if cfg!(target_os = "macos") {
+            self.binary
+                .strip_prefix("/var")
+                .map(|suffix| Path::new("/private/var").join(suffix))
+                .unwrap_or_else(|_| self.binary.clone())
+        } else {
+            self.binary.clone()
+        };
+        if canonical != normalized {
+            return Err(Error("native_path_invalid"));
+        }
+        self.binary = canonical;
+        Config {
+            binary: self.binary.clone(),
+            pin: self.expected.clone(),
+        }
+        .verify_until(stopped)?;
+        Ok(self)
+    }
+}
+
+/// Environment selection exists only for development/headless callers. Explicit
+/// None is an unavailable producer, not permission to consult the environment.
+#[derive(Clone)]
+pub(crate) enum ProgramSelection {
+    Environment,
+    Explicit(Option<NativeProgram>),
+}
+impl ProgramSelection {
+    fn resolve(&self, stopped: &dyn Fn() -> bool) -> Result<Option<Config>> {
+        match self {
+            Self::Environment => Config::from_environment_until(stopped),
+            Self::Explicit(None) => Ok(None),
+            Self::Explicit(Some(program)) => {
+                let program = program.clone().admit(stopped)?;
+                Ok(Some(Config {
+                    binary: program.binary,
+                    pin: program.expected,
+                }))
+            }
+        }
+    }
+}
+
 pub(crate) struct Config {
     binary: PathBuf,
     pin: Pin,
@@ -120,10 +227,23 @@ impl Config {
         }
         Ok(Some(Self { binary, pin }))
     }
+    #[cfg(test)]
     fn verify(&self) -> Result<()> {
         self.verify_until(&|| false)
     }
     fn verify_until(&self, stopped: &dyn Fn() -> bool) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        if stopped() {
+            return Err(Error("compiler_stopped"));
+        }
+        let metadata =
+            fs::symlink_metadata(&self.binary).map_err(|_| Error("native_file_unavailable"))?;
+        if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+            return Err(Error("native_path_invalid"));
+        }
+        if metadata.len() != self.pin.bytes {
+            return Err(Error("native_binary_changed"));
+        }
         let pin = file_pin_until(&self.binary, stopped)?;
         if pin.sha256 != self.pin.sha256 || pin.bytes != self.pin.bytes {
             return Err(Error("native_binary_changed"));
@@ -342,6 +462,22 @@ pub fn build(
     current: &dyn Fn() -> Result<BTreeMap<String, Value>>,
     cancel: Arc<AtomicBool>,
 ) -> Result<Option<Qualified>> {
+    build_selected(
+        artifact,
+        signer,
+        current,
+        cancel,
+        &ProgramSelection::Environment,
+    )
+}
+
+pub(crate) fn build_selected(
+    artifact: &InputArtifact,
+    signer: &Identity,
+    current: &dyn Fn() -> Result<BTreeMap<String, Value>>,
+    cancel: Arc<AtomicBool>,
+    program: &ProgramSelection,
+) -> Result<Option<Qualified>> {
     let request = artifact.request();
     if request.model_id != "Qwen/Qwen3-0.6B" {
         return Ok(None);
@@ -349,7 +485,7 @@ pub fn build(
     // Every parent-side whole-file scan below observes the compiler's Stop,
     // starting with the worker-binary pin.
     let stopped = || cancel.load(Ordering::SeqCst);
-    let Some(config) = Config::from_environment_until(&stopped)? else {
+    let Some(config) = program.resolve(&stopped)? else {
         return Ok(None);
     };
     let started = Instant::now();
