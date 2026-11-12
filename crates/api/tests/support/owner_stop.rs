@@ -102,7 +102,15 @@ fn ep2g_stop_held_gateway_and_member_close_share_the_first_stop_end() {
     let elapsed = first_stop.elapsed();
     // Rescue the controlled member only after measuring; never count rescue as success.
     release.send(()).unwrap();
-    silent.shutdown(std::net::Shutdown::Both).unwrap();
+    if result.is_err() {
+        if let Err(e) = silent.shutdown(std::net::Shutdown::Both) {
+            assert_eq!(
+                e.kind(),
+                std::io::ErrorKind::NotConnected,
+                "rescue shutdown: {e}"
+            );
+        }
+    }
     let mut work = thread.join().unwrap();
     let state = result
         .as_ref()
@@ -130,7 +138,14 @@ fn ep2g_stop_held_gateway_and_member_close_share_the_first_stop_end() {
     assert!(members[0].0.lock().unwrap().served.is_some());
     silent.set_read_timeout(Some(span(B::OwnerPoll))).unwrap();
     let mut byte = [0];
-    assert_eq!(silent.read(&mut byte).unwrap_or(0), 0);
+    match silent.read(&mut byte) {
+        Ok(n) => assert_eq!(n, 0, "gateway must close the held socket itself"),
+        Err(e) => assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::ConnectionReset,
+            "gateway socket: {e}"
+        ),
+    }
     assert!(
         std::net::TcpStream::connect(gateway_addr(&gateway)).is_err(),
         "owned gateway joined"
