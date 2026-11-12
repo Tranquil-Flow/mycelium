@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Run-bound glue only. Shared owner-run steps retain planning, share arithmetic and clocks.
 use super::*;
+mod objects;
 #[cfg(test)]
 mod tests;
 use api::{
@@ -228,7 +229,10 @@ impl Work {
                     deployment_id: state.deployment_id.clone(),
                     model: json!({"model_id":model.model_id,"resolved_commit":model.resolved_commit,"manifest_digest":model.manifest_digest}),
                     document: artifact.stage_shards().map_err(|e| refused(e.0))?.clone(),
-                    objects: artifact.root().join("stage-shards"),
+                    objects: objects::view(
+                        artifact.root(),
+                        artifact.stage_shards().map_err(|e| refused(e.0))?,
+                    )?,
                     journal: artifact.root().join("work-source"),
                     ranges: request
                         .node_ids
