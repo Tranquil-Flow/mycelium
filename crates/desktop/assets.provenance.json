@@ -61,8 +61,8 @@
   },
   "icon": {
     "source": "authored: W2 colony mark (icons/icon.png regenerated from the chosen mark)",
-    "sha256": "f8742690cc3535c5907a563ca1b6a9d00d7195f44c654ca2d5428bde2a144952",
-    "reason": "The inherited v0.1.4 Tauri window icon was still the pre-redesign artwork; the Dock adopts this embedded PNG at runtime, so it must carry the colony mark."
+    "sha256": "289f73f73d854be238927878339d28c28cce8339025508a94d05a703c71deb61",
+    "reason": "macOS icons carry their own squircle mask; the tile was square and read as a foreign shape in the Dock."
   },
   "app_icon": {
     "source": "v0.1.4 Mycelium A13 Demo.app/Contents/Resources/icon-windowed.icns (APP-FILES.sha256 of the published zip; certified f4e366e9 package)",
