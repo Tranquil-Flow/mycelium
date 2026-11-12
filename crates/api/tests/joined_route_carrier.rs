@@ -2955,3 +2955,40 @@ fn a_prefill_of_an_idle_cancelled_request_is_refused() {
     assert_eq!(report["requests_served"], 0, "{report}");
     assert_eq!(events, [("close", 0)]);
 }
+
+/// REVIEW-laneEP F6 (mutant M5b survived): a revoke seen by the seed lease
+/// pump while the epoch is IDLE (a fresh lease of another generation: no death
+/// evidence) retires the epoch at once with `joined_route_generation_changed`
+/// and closes its carrier, without waiting for the next Start; both members
+/// end their serves `owner_closed` with their compute closed after one reset.
+#[test]
+fn a_revoke_seen_while_idle_retires_the_epoch_without_a_next_request() {
+    let r = epoch_route([Script::default(), scripted(&[5, 9, 3, 7])]);
+    assert_eq!(r.chat(4).0, "completed");
+    let view = SeedView::fresh(&["node-a", "node-b"]);
+    view.set("node-b", 2, SEED_NOW + lease());
+    assert_eq!(
+        m16_route::observe_member_leases(&r.handle, &r.message, &view.members()).unwrap(),
+        Vec::<usize>::new(),
+        "a fresh lease is no death evidence"
+    );
+    assert_eq!(
+        r.service.qualification().err().map(|e| e.code),
+        Some("joined_route_generation_changed"),
+        "the idle epoch retired on the generation change: {}",
+        r.state()
+    );
+    assert!(
+        r.until_closed(),
+        "the epoch's carrier closed: {}",
+        r.state()
+    );
+    let logs: Vec<_> = r.members.iter().map(|m| m.log.clone()).collect();
+    let reports = r.finish();
+    for (report, log) in reports.iter().zip(logs) {
+        assert_eq!(report["teardown"], "owner_closed", "{report}");
+        assert_eq!(report["requests_served"], 1, "{report}");
+        let events = log.lock().unwrap().events.clone();
+        assert_eq!(events[4..], [("reset", 0), ("close", 0)], "{events:?}");
+    }
+}
