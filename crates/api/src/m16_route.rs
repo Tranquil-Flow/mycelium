@@ -474,7 +474,9 @@ impl RouteExecutor {
                 ..Default::default()
             },
         });
-        let cancel = observed.shutdown.cancel.clone();
+        // Request cancellation must not disable cleanup re-dials. Run shutdown
+        // has its own flag; both paths wake owned I/O on final executor Drop.
+        let cancel = Arc::new(AtomicBool::new(false));
         let (shared, flag, route) = (observed.clone(), cancel.clone(), message.clone());
         let thread = std::thread::spawn(move || {
             let _finished = stop::Finished(shared.clone());
