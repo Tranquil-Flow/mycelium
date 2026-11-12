@@ -285,6 +285,18 @@ pub fn serve(
             B::PyFinalScriptsRunA11RouteBenchmarkTargetTpotMsL398C12
         })
     };
+    // v2 (lane EPF2, REVIEW-laneEPF F10): a step and its forwarding exchange
+    // also end by the route's signed expiry (the consent wall caps the step
+    // in native.rs).
+    let hop_wait = |t: u64| -> Outcome<Duration> {
+        let wait = hop_budget(t)?;
+        if !multi {
+            return Ok(wait);
+        }
+        let left = Duration::try_from_secs_f64((expires_at - crate::app_host::now()).max(0.0))
+            .unwrap_or(Duration::ZERO);
+        Ok(wait.min(left))
+    };
     let stages = message["stages"].as_array().ok_or("route_invalid")?.len();
     // v2: settled request ids (refused if replayed) and per-request summaries.
     let mut served: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -532,7 +544,7 @@ pub fn serve(
                                 None
                             };
                             let step_began = Instant::now();
-                            let deadline = Instant::now() + hop_budget(t)?;
+                            let deadline = Instant::now() + hop_wait(t)?;
                             let bytes = compute
                                 .step(
                                     tokens.as_deref(),
@@ -581,7 +593,7 @@ pub fn serve(
                                 channel: Channel::Router,
                                 message_id: sent.to_be_bytes(),
                                 payload: frame,
-                                deadline: mono(s.clock, hop_budget(t)?)?,
+                                deadline: mono(s.clock, hop_wait(t)?)?,
                                 maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
                             };
                             transport::exchange(&mut sender, &request, s.clock)
