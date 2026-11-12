@@ -44,6 +44,8 @@ impl NetworkChoice {
         }
     }
 }
+#[cfg(test)]
+type ReceiveHook = Box<dyn FnOnce(&work::Operation) + Send>;
 struct Shared {
     root: PathBuf,
     session: SessionCell,
@@ -53,6 +55,8 @@ struct Shared {
     pins: work::Pins,
     dispatcher: Arc<work::Dispatcher>,
     status: work::Status,
+    #[cfg(test)]
+    receive_hook: Mutex<Option<ReceiveHook>>,
     stop: AtomicBool,
 }
 impl Shared {
@@ -101,6 +105,10 @@ pub struct Service {
     thread: Option<JoinHandle<Result<()>>>,
 }
 impl Service {
+    #[cfg(test)]
+    pub(crate) fn on_receive(&self, hook: ReceiveHook) {
+        *self.shared.receive_hook.lock().unwrap() = Some(hook);
+    }
     pub fn start(
         root: PathBuf,
         session: SessionCell,
@@ -147,6 +155,8 @@ impl Service {
             status: work::Live::new(
                 json!({"joined":true,"native_owned":false,"shard_owned":false,"route_ready":false}),
             ),
+            #[cfg(test)]
+            receive_hook: Mutex::new(None),
             stop: AtomicBool::new(false),
         });
         shared.live()?; // refusal precedes sockets, threads, custody and native work
@@ -454,6 +464,8 @@ fn operations(
                         "consent" | "grant_consent" => Err("member_local_consent_required".into()),
                         "pair_request" | "accept" => Err("member_already_joined".into()),
                         "receive" => {
+                            #[cfg(test)]
+                            if let Some(hook) = shared.receive_hook.lock().unwrap().take() { hook(&operation); }
                             work.receive(Some(shared), side, &shared.signer, carrier, &operation)
                         }
                         "prepare_native" => {

@@ -289,7 +289,9 @@ impl Work {
             }
             match self.local() {
                 Ok(()) => {}
-                Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {}
+                Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {
+                    env.progress("member_work_renewing");
+                }
                 Err(e) => return Err(e),
             }
             let current = state
@@ -308,7 +310,9 @@ impl Work {
                 .collect::<Result<Vec<_>, _>>();
             match current {
                 Ok(v) => break v,
-                Err(e) if e.code == "member_work_unavailable" => {}
+                Err(e) if e.code == "member_work_unavailable" => {
+                    env.progress("member_work_unavailable");
+                }
                 Err(e) => return Err(refused(e.code)),
             }
             if env.now() >= until {
@@ -323,7 +327,7 @@ impl Work {
             let link = RemoteMember::already_joined(
                 self.owner.clone(),
                 &seed.coordinator,
-                &v,
+                v,
                 network.0.clone(),
             )
             .map_err(|e| refused(&e.0))?;

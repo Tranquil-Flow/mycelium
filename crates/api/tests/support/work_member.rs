@@ -119,7 +119,7 @@ impl Joined {
             &self.seed.options(),
         )
         .unwrap();
-        let client = ExchangeClient::new(
+        ExchangeClient::new(
             client,
             self.signer.clone(),
             Membership {
@@ -132,8 +132,7 @@ impl Joined {
             },
             Box::new(app_host::now),
             Box::new(|| Some(app_host::hex(&app_host::random(16).unwrap()))),
-        );
-        client
+        )
     }
     pub fn resume(&mut self) {
         let options = self.seed.options();

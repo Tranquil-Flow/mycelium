@@ -288,6 +288,75 @@ fn local_work_session_tracks_renewal_and_contributor_removal() {
     );
 }
 #[test]
+fn stop_reaches_real_push_while_member_receive_is_held() {
+    let mut f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    seed.exchange
+        .set_owner_control(Some(OwnerControl::new(ports.work.owner.public())));
+    seed.exchange
+        .announce(Announce {
+            phase: "compile".into(),
+            run_id: Some("run-stop".into()),
+            deployment_id: Some("dep-stop".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    f.agent.tick(&f.member);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut state = RunState::new("run-stop", "dep-stop", owner_run::Reason::Start);
+    state.participants = vec![local.clone(), f.remote.clone()];
+    state.local_node = Some(local);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    let within = span(BudgetId::RouterClose).unwrap();
+    let (entered, waiting) = std::sync::mpsc::sync_channel(1);
+    let (release, held) = std::sync::mpsc::sync_channel(1);
+    lock(&ports.work.resident)
+        .local
+        .as_ref()
+        .unwrap()
+        .on_receive(Box::new(move |_| {
+            entered.send(()).unwrap();
+            held.recv_timeout(span(BudgetId::MemberChosenWall).unwrap())
+                .unwrap();
+        }));
+    let (done, finished) = std::sync::mpsc::sync_channel(1);
+    let mut work = ports.work.clone();
+    std::thread::scope(|scope| {
+        let thread = scope.spawn(move || {
+            done.send(work.node_slice_plans()).unwrap();
+        });
+        waiting.recv_timeout(within).unwrap();
+        f.host.stop_work();
+        let result = finished.recv_timeout(within);
+        release.send(()).unwrap();
+        thread.join().unwrap();
+        assert!(
+            matches!(result, Ok(Err(StepError::Stopped))),
+            "Stop must reach the port before the held receive is released: {result:?}"
+        );
+    });
+    ports.close_work().unwrap();
+    assert!(lock(&ports.work.resident).work.is_none());
+}
+#[test]
 fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
     let mut f = Fixture::new();
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
