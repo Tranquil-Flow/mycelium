@@ -286,6 +286,11 @@ pub fn serve(
     let mut skipped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut requests: Vec<Value> = Vec::new();
     let report = std::thread::scope(|scope| -> Outcome<Value> {
+        // The queue ends with this closure, before the scope joins the
+        // receiver threads (lane EPF2, REVIEW-laneEPF N1): a PathCancellation
+        // still queued when the epoch ends drops its verdict sender with it,
+        // so the receiver waiting on that verdict refuses it and returns.
+        let rx = rx;
         for (role, mut receiver) in receivers.into_iter().enumerate() {
             let (tx, cancel, data_cancel) = (tx.clone(), cancel.clone(), &data_cancel);
             let request_cancel = request_cancel.clone();
