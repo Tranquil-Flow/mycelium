@@ -1057,3 +1057,23 @@ impl<'a> LoopbackHost<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod late_close_tests {
+    use super::{Error, late_outcome};
+
+    /// REVIEW-laneB20f (2): a connection that completed after the caller's deadline is closed and
+    /// flushed before the call returns, and the call reports the DEADLINE error even when that close
+    /// could not be proven; the cleanup failure must not replace it.
+    #[test]
+    fn a_late_connection_returns_the_deadline_error_even_when_its_close_is_unproven() {
+        for deadline in [Error::Expired, Error::ClockDomain] {
+            assert_eq!(late_outcome(deadline, Ok(())), deadline);
+            assert_eq!(
+                late_outcome(deadline, Err(Error::CleanupUnproven)),
+                deadline,
+                "the late close's cleanup error replaced the deadline error"
+            );
+        }
+    }
+}
