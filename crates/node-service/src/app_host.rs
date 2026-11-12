@@ -825,7 +825,10 @@ impl PackagedHost {
                             state.active = true;
                             Reverify::Done
                         }
-                        Err(_) => Reverify::Failed,
+                        Err(error) => {
+                            eprintln!("l11_reverify_gate:rehash={error:?}");
+                            Reverify::Failed
+                        }
                     }
                 })
             },
