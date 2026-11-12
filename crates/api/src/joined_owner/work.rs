@@ -851,6 +851,9 @@ impl OwnerWork {
     /// The member links, handed back after [`OwnerWork::teardown`] (the run
     /// never closes them: members stay joined).
     pub fn take_members(&mut self) -> Vec<WorkMember> {
+        if self.cleanup_pending() {
+            return Vec::new();
+        }
         std::mem::take(&mut self.returned)
     }
 }
@@ -1150,6 +1153,12 @@ impl Worker {
                 }
             }
             let left = end.saturating_duration_since(Instant::now());
+            // Keep one existing OwnerPoll slice of the SAME first-Stop allowance
+            // for publishing cleanup evidence and joining local owners. Spending
+            // the entire allowance in a silent member's last receive leaves no
+            // time to return its truthful unproven result. No deadline is renewed.
+            let reserve = self.members.first().map_or(Duration::ZERO, |m| m.link.poll);
+            let finalize = left <= reserve;
             if left.is_zero() || self.members.iter().all(|m| m.link.outstanding == 0) {
                 break;
             }
@@ -1157,7 +1166,9 @@ impl Worker {
                 if m.link.outstanding == 0 {
                     continue;
                 }
-                let left = end.saturating_duration_since(Instant::now());
+                let left = end
+                    .saturating_duration_since(Instant::now())
+                    .saturating_sub(reserve);
                 let Some((command, reply)) = m.link.take(left.min(m.link.poll)) else {
                     continue;
                 };
@@ -1182,6 +1193,9 @@ impl Worker {
                     // A cancelled or late operation's reply: drained, nothing to prove.
                     _ => {}
                 }
+            }
+            if finalize {
+                break;
             }
         }
         let rows: Vec<Value> = self

@@ -144,3 +144,16 @@ fn ep2h_native_deadline_retry_never_signals_an_unrelated_helper() {
         "EP2H_NATIVE_DEADLINE code={code} held_pid={pid} retained={retained:?} unrelated_pid={other_pid} isolated=true"
     );
 }
+#[test]
+fn ep2h_native_response_growth_is_bounded_and_reaps_the_helper() {
+    let helper = HelperFixture::new("grow");
+    let began = Instant::now();
+    let error = helper.codec.decode(11).unwrap_err();
+    assert_eq!(error.code, "tokenizer_response_too_large");
+    assert_eq!(helper.codec.owned_pid().unwrap(), None);
+    eprintln!(
+        "EP2H_NATIVE_GROWTH code={} elapsed={:?} reaped=true",
+        error.code,
+        began.elapsed()
+    );
+}

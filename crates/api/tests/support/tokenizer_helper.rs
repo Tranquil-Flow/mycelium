@@ -62,6 +62,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"encode":'*) printf '{{"ids":[0,1,2,3]}}\n' ;;
     *'"decode":'*)
+      if test '{mode}' = grow; then printf '%*s\n' '{overflow}' ''; continue; fi
       if test '{mode}' = read; then hold; fi
       token="${{line#*:}}"; token="${{token%\}}}}"
       printf '{{"text":"<%s>"}}\n' "$token"
@@ -70,7 +71,8 @@ while IFS= read -r line; do
   esac
 done
 "#,
-            wait = (span(B::WorkerStartup) * 2).as_secs_f64()
+            wait = (span(B::WorkerStartup) * 2).as_secs_f64(),
+            overflow = protocol::remote::REMOTE_MAX_FRAME_BYTES + 1
         );
         let binary = root.join("helper");
         fs::write(&binary, script).unwrap();
