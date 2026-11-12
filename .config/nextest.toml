@@ -233,8 +233,15 @@ not (
 )
 '''
 
+# A test that never ends (a deadlock: a failure message that locks a mutex its own test holds hung a gate for
+# more than 300 s) is killed after 60 minutes (60 s period x 60) and fails the run instead of hanging it.
+# Sized from the loaded whole-workspace run of batch 3 (qualification/batch3-70f590b/merge.log, 3555 passed,
+# 46 slow, load about 21): the slowest test took 843 s (budget-model::inventory_partition_b_families
+# b_families_require_the_exact_source_target_and_same_unit_provenance), so the kill is 4.3x that. nightly
+# inherits it. Re-size it when a passing test gets within a quarter of it.
 [profile.merge]
 fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 60 }
 
 [profile.merge.junit]
 path = "junit.xml"
