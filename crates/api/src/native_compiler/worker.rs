@@ -468,9 +468,30 @@ impl Worker {
         disk: Option<guard::Disk>,
         probe: Box<dyn guard::MemoryProbe>,
     ) -> Result<Self> {
+        Self::from_child_paced(
+            child,
+            client,
+            cancel,
+            memory_limit,
+            disk,
+            probe,
+            Box::new(guard::Clock::new()),
+        )
+    }
+    /// As `from_child_watched`, the guard waiting and timing through `pace`
+    /// (constructor-only seam; production passes `guard::Clock`).
+    pub(crate) fn from_child_paced(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        disk: Option<guard::Disk>,
+        probe: Box<dyn guard::MemoryProbe>,
+        pace: Box<dyn guard::Pace>,
+    ) -> Result<Self> {
         let mut worker = Self::from_child(child, client, cancel)?;
         let started = worker.pid().and_then(|pid| {
-            guard::Guard::start(worker.child.clone(), pid, memory_limit, disk, probe)
+            guard::Guard::start(worker.child.clone(), pid, memory_limit, disk, probe, pace)
         });
         match started {
             Ok(guard) => {

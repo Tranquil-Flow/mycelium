@@ -86,8 +86,10 @@ enum Unwalked {
 fn walk(
     disk: &Disk,
     entries: u64,
-    deadline: std::time::Instant,
+    pace: &mut dyn Pace,
+    budget: Duration,
 ) -> std::result::Result<u64, Unwalked> {
+    let started = pace.now();
     use rustix::fs::{AtFlags, CWD, Dir, FileType, Mode, OFlags, openat, statat};
     use std::os::unix::fs::MetadataExt;
     let gone = |_| Unwalked::Unobservable;
@@ -114,7 +116,7 @@ fn walk(
             continue;
         }
         count += 1;
-        if count > entries || std::time::Instant::now() > deadline {
+        if count > entries || pace.now().saturating_sub(started) > budget {
             return Err(Unwalked::Unobservable);
         }
         let parent = dir.fd().map_err(gone)?;
@@ -136,8 +138,15 @@ fn walk(
     }
 }
 /// The storage verdict for one sample, `None` within the limit.
-fn storage_verdict(disk: &Disk, entries: u64, cadence: Duration, samples: u64) -> Option<Failure> {
-    match walk(disk, entries, std::time::Instant::now() + cadence) {
+/// The walk must finish within one sampling period (`cadence`), by `pace`'s clock.
+fn storage_verdict(
+    disk: &Disk,
+    entries: u64,
+    pace: &mut dyn Pace,
+    cadence: Duration,
+    samples: u64,
+) -> Option<Failure> {
+    match walk(disk, entries, pace, cadence) {
         Ok(_) => None,
         Err(Unwalked::Over(total)) => Some(Failure {
             code: DISK_LIMIT_EXCEEDED,
@@ -190,6 +199,32 @@ impl MemoryProbe for HostProbe {
     }
 }
 
+/// How the guard waits out its sampling period and reads the time that bounds
+/// a storage walk (lane MG2). Production (`Clock`) waits on the guard's own
+/// condvar for the budgets row's period; tests drive a virtual clock through
+/// the constructor-only `Worker::from_child_paced`.
+pub(crate) trait Pace: Send {
+    /// Wait out one sampling `period`. `rest(d)` waits up to `d`, returning
+    /// early once the guard is stopped; the result is whether it was stopped.
+    fn period(&mut self, period: Duration, rest: &mut dyn FnMut(Duration) -> bool) -> bool;
+    /// Monotonic time since an arbitrary origin.
+    fn now(&mut self) -> Duration;
+}
+pub(crate) struct Clock(std::time::Instant);
+impl Clock {
+    pub(crate) fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+}
+impl Pace for Clock {
+    fn period(&mut self, period: Duration, rest: &mut dyn FnMut(Duration) -> bool) -> bool {
+        rest(period)
+    }
+    fn now(&mut self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
 /// The guard's verdict: the closed code, v0.1.4's three `limit_detail` numbers
 /// (worker.py:855-859; null for an observation failure) and the sample count.
 #[derive(Clone, Debug, PartialEq)]
@@ -227,6 +262,7 @@ impl Guard {
         limit: u64,
         disk: Option<Disk>,
         probe: Box<dyn MemoryProbe>,
+        pace: Box<dyn Pace>,
     ) -> Result<Self> {
         let cadence =
             duration(BudgetId::PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460)?;
@@ -244,7 +280,17 @@ impl Guard {
         let watched = shared.clone();
         let thread = std::thread::Builder::new()
             .name("worker-memory-guard".into())
-            .spawn(move || watch(&watched, &child, pid, limit, (cadence, entries), probe))
+            .spawn(move || {
+                watch(
+                    &watched,
+                    &child,
+                    pid,
+                    limit,
+                    (cadence, entries),
+                    probe,
+                    pace,
+                )
+            })
             .map_err(|_| Error("worker_guard_failed"))?;
         Ok(Self {
             shared,
@@ -392,16 +438,29 @@ fn watch(
     limit: u64,
     (cadence, entries): (Duration, u64),
     mut probe: Box<dyn MemoryProbe>,
+    mut pace: Box<dyn Pace>,
 ) {
     let (lock, changed) = &**shared;
-    loop {
-        let (samples, disk) = {
-            let Ok(state) = lock.lock() else {
+    // Waits up to `wait` for a stop; true once stopped (or the lock is poisoned).
+    let mut rest = |wait: Duration| -> bool {
+        let Ok(state) = lock.lock() else {
+            eprintln!("worker_guard_poisoned");
+            return true;
+        };
+        match changed.wait_timeout_while(state, wait, |s| !s.stopped) {
+            Ok((state, _)) => state.stopped,
+            Err(_) => {
                 eprintln!("worker_guard_poisoned");
-                return;
-            };
-            let Ok((mut state, _)) = changed.wait_timeout_while(state, cadence, |s| !s.stopped)
-            else {
+                true
+            }
+        }
+    };
+    loop {
+        if pace.period(cadence, &mut rest) {
+            return;
+        }
+        let (samples, disk) = {
+            let Ok(mut state) = lock.lock() else {
                 eprintln!("worker_guard_poisoned");
                 return;
             };
@@ -414,7 +473,7 @@ fn watch(
         // v0.1.4 `_check` order: the storage walk, then the memory reading.
         let storage = disk
             .as_ref()
-            .and_then(|disk| storage_verdict(disk, entries, cadence, samples));
+            .and_then(|disk| storage_verdict(disk, entries, pace.as_mut(), cadence, samples));
         let verdict = match storage {
             Some(failure) => failure,
             None => match memory_verdict(probe.as_mut(), pid, limit, samples) {

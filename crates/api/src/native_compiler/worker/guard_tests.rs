@@ -18,7 +18,7 @@ use std::{
         atomic::AtomicBool,
         mpsc::{Receiver, SyncSender, sync_channel},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const LIMIT: u64 = 1 << 30;
@@ -335,19 +335,32 @@ fn temp_root(tag: &str) -> PathBuf {
     std::fs::create_dir(&root).unwrap();
     std::fs::canonicalize(root).unwrap()
 }
+/// Real sampling periods, but a clock that never advances: a walk can never
+/// overrun its time budget, so the entry and depth bounds are tested alone
+/// (the time budget has its own test with a ticking clock).
+struct Frozen;
+impl Pace for Frozen {
+    fn period(&mut self, period: Duration, rest: &mut dyn FnMut(Duration) -> bool) -> bool {
+        rest(period)
+    }
+    fn now(&mut self) -> Duration {
+        Duration::ZERO
+    }
+}
 /// An idle owned child guarded from construction on with `disk` (the member
 /// start path's order), its memory readings scripted.
 fn disk_guarded(disk: Disk) -> (Worker, SyncSender<Reading>, u32) {
     let (child, client) = idle_child();
     let pid = child.id();
     let (readings, script) = sync_channel(0);
-    let worker = Worker::from_child_watched(
+    let worker = Worker::from_child_paced(
         child,
         client,
         flag(),
         LIMIT,
         Some(disk),
         Box::new(Scripted(script)),
+        Box::new(Frozen),
     )
     .unwrap();
     (worker, readings, pid)
@@ -560,5 +573,150 @@ fn the_storage_root_must_be_a_real_directory() {
         Disk::open(&root, 0).map(|_| ()).map_err(|e| e.0),
         Err("worker_limits_invalid")
     );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+// ---- Lane MG2 item 3 (REVIEW-laneMGF F7): the guard's speed is pinned.
+// The guard waits through an injected `Pace` that hands each requested period
+// to the test and advances a virtual clock by it; no wall-clock sleep orders
+// anything.
+
+/// Hands every requested period to the test, then advances the virtual clock
+/// by it; `now` advances it by `step` per call (a slow filesystem). Once the
+/// test is gone it waits for real, so teardown can stop the guard.
+struct Ticked {
+    periods: SyncSender<Duration>,
+    clock: Arc<std::sync::Mutex<Duration>>,
+    step: Duration,
+}
+impl Pace for Ticked {
+    fn period(&mut self, period: Duration, rest: &mut dyn FnMut(Duration) -> bool) -> bool {
+        if self.periods.send(period).is_err() {
+            return rest(period);
+        }
+        *self.clock.lock().unwrap() += period;
+        rest(Duration::ZERO)
+    }
+    fn now(&mut self) -> Duration {
+        let mut clock = self.clock.lock().unwrap();
+        *clock += self.step;
+        *clock
+    }
+}
+fn ticked(step: Duration) -> (Ticked, Receiver<Duration>, Arc<std::sync::Mutex<Duration>>) {
+    let (periods, requested) = sync_channel(0);
+    let clock = Arc::new(std::sync::Mutex::new(Duration::ZERO));
+    let pace = Ticked {
+        periods,
+        clock: clock.clone(),
+        step,
+    };
+    (pace, requested, clock)
+}
+fn period_row() -> Duration {
+    duration(BudgetId::PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460).unwrap()
+}
+
+/// Every wait the guard takes is exactly one sampling period from the budgets
+/// row (v0.1.4 `_closed.wait(0.25)`, worker.py:1460), and a breach that
+/// appears between two samples is acted on at the next one: the verdict comes
+/// with no further period asked for, at virtual time 4 periods for a breach
+/// first readable at sample 4. A guard sampling 40 times slower fails here.
+#[test]
+fn a_breach_is_acted_on_within_one_sampling_period() {
+    let row = period_row();
+    let bound = duration(BudgetId::ModelSelection).unwrap();
+    let (child, client) = idle_child();
+    let pid = child.id();
+    // Buffered by one: a guard that waits twice per sample cannot deadlock the
+    // test; the virtual clock below catches it instead.
+    let (readings, script) = sync_channel(1);
+    let (pace, periods, clock) = ticked(Duration::ZERO);
+    let worker = Worker::from_child_paced(
+        child,
+        client,
+        flag(),
+        LIMIT,
+        None,
+        Box::new(Scripted(script)),
+        Box::new(pace),
+    )
+    .unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            periods.recv_timeout(bound),
+            Ok(row),
+            "each wait is one sampling period: the budgets row"
+        );
+        readings.send(Ok(LIMIT)).unwrap();
+    }
+    assert_eq!(periods.recv_timeout(bound), Ok(row));
+    readings.send(Ok(LIMIT + 1)).unwrap();
+    let failure = worker.guard_wait_until(Instant::now() + bound);
+    assert_eq!(
+        failure.map(|f| (f.code, f.samples)),
+        Some((MEMORY_LIMIT_EXCEEDED, 4))
+    );
+    assert_eq!(
+        periods.recv_timeout(bound),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
+        "the guard acted without waiting another period"
+    );
+    assert_eq!(
+        *clock.lock().unwrap(),
+        row * 4,
+        "virtual time at the verdict"
+    );
+    assert_gone(pid);
+    assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
+}
+
+/// A storage walk that cannot finish within one sampling period fails closed
+/// (`worker_storage_observation_failed`); the same folder walked on a clock
+/// that does not move is within the cap and leaves the worker running.
+#[test]
+fn a_storage_walk_that_overruns_one_period_fails_closed() {
+    let row = period_row();
+    let bound = duration(BudgetId::ModelSelection).unwrap();
+    let root = temp_root("slow");
+    for i in 0..8 {
+        write(&root.join(i.to_string()), 1);
+    }
+    for (step, expected) in [
+        (Duration::ZERO, None),
+        (row / 4, Some(STORAGE_OBSERVATION_FAILED)),
+    ] {
+        let (child, client) = idle_child();
+        let pid = child.id();
+        let (readings, script) = sync_channel(1);
+        let (pace, periods, _clock) = ticked(step);
+        let worker = Worker::from_child_paced(
+            child,
+            client,
+            flag(),
+            LIMIT,
+            Some(Disk::open(&root, 1024).unwrap()),
+            Box::new(Scripted(script)),
+            Box::new(pace),
+        )
+        .unwrap();
+        readings.send(Ok(0)).unwrap();
+        assert_eq!(periods.recv_timeout(bound), Ok(row));
+        // The second request proves the first sample was judged; after a
+        // verdict the guard asks for none.
+        let next = periods.recv_timeout(bound);
+        let failure = worker
+            .guard_wait_until(Instant::now() + if next.is_ok() { Duration::ZERO } else { bound });
+        assert_eq!(failure.map(|f| f.code), expected, "clock step {step:?}");
+        if expected.is_some() {
+            assert_eq!(next, Err(std::sync::mpsc::RecvTimeoutError::Disconnected));
+            assert_gone(pid);
+        } else {
+            assert_eq!(next, Ok(row));
+        }
+        drop(periods);
+        drop(readings);
+        assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
+    }
     std::fs::remove_dir_all(&root).unwrap();
 }
