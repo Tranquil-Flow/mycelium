@@ -50,7 +50,12 @@ impl Drop for Tree {
 fn entry(root: &Path, path: &str, kind: Kind, bytes: &[u8]) -> Entry {
     let file = root.join(path);
     fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::write(file, bytes).unwrap();
+    fs::write(&file, bytes).unwrap();
+    if kind == Kind::Helper {
+        // The mode the recipe ships a helper with (`bundle.rs` plan: `Kind::Helper` -> 0o755).
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     Entry {
         path: path.into(),
         kind,
@@ -145,6 +150,32 @@ fn startup_admission_checks_the_pinned_relay_client_and_refuses_a_swapped_or_mis
         admit(&tree.0, &manifest),
         Err(AdmissionError::Package(PackageError::Missing))
     ));
+}
+
+/// Review RELF F12(i) / ruling 31: admission checked bytes, not mode, so a `chmod 644` copy of the
+/// pinned relay client was admitted, and the relay lookup (`<exe dir>/native/cloudflared` when it
+/// is an executable file, else `PATH`) then ran whatever `cloudflared` a `PATH` entry held. A pinned
+/// helper must be an executable regular file, as the recipe ships it (0o755); the probe likewise.
+#[test]
+fn startup_admission_refuses_a_pinned_helper_that_is_not_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    for helper in [RELAY, RESOURCE_PROBE_PATH] {
+        let tree = Tree::new();
+        let manifest = bundle_tree(&tree.0, true);
+        assert!(
+            admit(&tree.0, &manifest).is_ok(),
+            "control: {:?}",
+            admit(&tree.0, &manifest)
+        );
+        let path = tree.0.join(helper);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let refused = admit(&tree.0, &manifest);
+        assert!(
+            format!("{refused:?}").contains("NotExecutable")
+                && format!("{refused:?}").contains(helper),
+            "a mode 0644 {helper} with the pinned bytes was admitted: {refused:?}"
+        );
+    }
 }
 
 #[test]
