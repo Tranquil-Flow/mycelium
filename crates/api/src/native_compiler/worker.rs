@@ -9,6 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) mod guard;
 #[cfg(test)]
 mod tests;
 
@@ -19,10 +20,23 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .millis(),
     ))
 }
+/// A failed serving-worker start: the error, and the guard's verdict when the
+/// guard stopped the worker during prepare (lane MGF F4: its numbers are kept).
+#[derive(Debug)]
+pub(crate) struct StartError {
+    pub(crate) error: Error,
+    pub(crate) guard: Option<guard::Failure>,
+}
+impl From<Error> for StartError {
+    fn from(error: Error) -> Self {
+        Self { error, guard: None }
+    }
+}
 pub(crate) struct Worker {
-    child: Option<Child>,
+    child: guard::Slot,
     link: Link,
     cancel: Arc<AtomicBool>,
+    guard: Option<guard::Guard>,
 }
 impl Worker {
     pub(crate) fn start(
@@ -95,14 +109,39 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, StartError> {
+        Self::start_scoped_probed_until(
+            config,
+            prepare,
+            cancel,
+            source,
+            deadline,
+            Box::new(guard::HostProbe),
+        )
+    }
+    /// As `start_scoped_until`, reading the worker's memory through `probe`
+    /// (the guard's constructor-only seam; production passes `HostProbe`).
+    fn start_scoped_probed_until(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+        deadline: Instant,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> std::result::Result<Self, StartError> {
         config.verify()?;
         if Instant::now() >= deadline {
-            return Err(Error("native_worker_deadline"));
+            return Err(Error("native_worker_deadline").into());
         }
         if cancel.load(Ordering::SeqCst) {
-            return Err(Error("compiler_stopped"));
+            return Err(Error("compiler_stopped").into());
         }
+        // The guard holds the worker to the prepare's `memory`: the member's
+        // consent cap or a tighter share (NativeShard::memory_limit).
+        let memory = prepare["memory"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(Error("worker_limits_invalid"))?;
         let (client, server) = UnixStream::pair().map_err(|_| Error("native_socket_failed"))?;
         let home = std::env::var_os("HOME").ok_or(Error("native_shard_path_invalid"))?;
         let profile = super::shard_sandbox::profile(
@@ -119,13 +158,19 @@ impl Worker {
             .stdout(Stdio::from(OwnedFd::from(server)))
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
-        let mut worker = Self::from_child(child, client, Arc::new(AtomicBool::new(false)))
-            .map_err(|e| match e.0 {
-                "native_worker_kill_failed" | "native_worker_reap_failed" => {
-                    Error("native_cleanup_unproven")
-                }
-                _ => e,
-            })?;
+        let mut worker = Self::from_child_guarded(
+            child,
+            client,
+            Arc::new(AtomicBool::new(false)),
+            memory,
+            probe,
+        )
+        .map_err(|e| match e.0 {
+            "native_worker_kill_failed" | "native_worker_reap_failed" => {
+                Error("native_cleanup_unproven")
+            }
+            _ => e,
+        })?;
         let started = worker
             .request_controlled(prepare, &[], deadline, cancel)
             .and_then(|(reply, body)| {
@@ -137,10 +182,16 @@ impl Worker {
             });
         match started {
             Ok(()) => Ok(worker),
-            Err(error) => match worker.kill_and_reap() {
-                Ok(_) => Err(error),
-                Err(_) => Err(Error("native_cleanup_unproven")),
-            },
+            Err(error) => {
+                let guard = worker.guard_failure();
+                match worker.kill_and_reap() {
+                    Ok(_) => Err(StartError { error, guard }),
+                    Err(_) => Err(StartError {
+                        error: Error("native_cleanup_unproven"),
+                        guard,
+                    }),
+                }
+            }
         }
     }
     fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {
@@ -175,13 +226,16 @@ impl Worker {
             }
         };
         Ok(Self {
-            child: Some(child),
+            child: Arc::new(std::sync::Mutex::new(Some(child))),
             link,
             cancel,
+            guard: None,
         })
     }
     pub(crate) fn pid(&self) -> Result<u32> {
         self.child
+            .lock()
+            .map_err(|_| Error("native_worker_closed"))?
             .as_ref()
             .map(Child::id)
             .ok_or(Error("native_worker_closed"))
@@ -214,6 +268,9 @@ impl Worker {
         deadline: Instant,
     ) -> Result<(Value, Vec<u8>)> {
         use crate::native_worker_link::LinkError;
+        if let Some(failure) = self.guard_failure() {
+            return Err(Error(failure.code));
+        }
         let (reply, body) = self
             .link
             .request_until(
@@ -230,6 +287,11 @@ impl Worker {
                     LinkError::Deadline => "native_worker_deadline",
                     _ => "native_worker_exchange_failed",
                 })
+            })
+            // An exchange broken by the guard's kill reports the guard's code.
+            .map_err(|error| {
+                self.guard_failure()
+                    .map_or(error, |failure| Error(failure.code))
             })?;
         if let Some(error) = reply.get("error") {
             eprintln!("native_worker_refused: {error}");
@@ -301,19 +363,23 @@ impl Worker {
         }
         let deadline = Instant::now() + duration(BudgetId::RouterClose)?;
         loop {
-            if let Some(status) = self
+            let mut child = self
                 .child
+                .lock()
+                .map_err(|_| Error("native_worker_reap_failed"))?;
+            if let Some(status) = child
                 .as_mut()
                 .ok_or(Error("native_worker_closed"))?
                 .try_wait()
                 .map_err(|_| Error("native_worker_reap_failed"))?
             {
-                self.child.take();
+                child.take();
                 if !status.success() {
                     return Err(Error("native_worker_exit_failed"));
                 }
                 return Ok(reply["stats"].clone());
             }
+            drop(child);
             if Instant::now() >= deadline {
                 return Err(Error("native_cleanup_unproven"));
             }
@@ -325,8 +391,13 @@ impl Worker {
     /// Interrupted framing cannot carry a graceful close. Kill and wait for the
     /// exact owned child; return reap evidence only after the OS reported its exit.
     /// This is process-release evidence, NOT native-context-closed evidence.
-    pub(crate) fn kill_and_reap(mut self) -> Result<Value> {
-        let mut child = self.child.take().ok_or(Error("native_worker_closed"))?;
+    pub(crate) fn kill_and_reap(self) -> Result<Value> {
+        let mut child = self
+            .child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .ok_or(Error("native_worker_closed"))?;
         let pid = child.id();
         let killed = match child
             .try_wait()
@@ -350,9 +421,69 @@ impl Worker {
         )
     }
 }
+impl Worker {
+    /// A worker whose memory is guarded from now on (lane MG): over
+    /// `memory_limit` the guard kills and reaps the exact child; this and every
+    /// later exchange then answers the guard's code.
+    pub(crate) fn from_child_guarded(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> Result<Self> {
+        let mut worker = Self::from_child(child, client, cancel)?;
+        let started = worker
+            .pid()
+            .and_then(|pid| guard::Guard::start(worker.child.clone(), pid, memory_limit, probe));
+        match started {
+            Ok(guard) => {
+                worker.guard = Some(guard);
+                Ok(worker)
+            }
+            // An unguarded worker never runs: kill and reap the exact child first.
+            Err(error) => match worker.kill_and_reap() {
+                Ok(_) => Err(error),
+                Err(e) => Err(Error(match e.0 {
+                    "native_worker_reap_failed" => "native_worker_reap_failed",
+                    _ => "native_worker_kill_failed",
+                })),
+            },
+        }
+    }
+    /// The guard's verdict, once it stopped the worker.
+    pub(crate) fn guard_failure(&self) -> Option<guard::Failure> {
+        self.guard.as_ref().and_then(guard::Guard::failure)
+    }
+    /// Readings the guard has taken so far.
+    #[cfg(test)]
+    pub(crate) fn guard_samples(&self) -> u64 {
+        self.guard.as_ref().map_or(0, guard::Guard::samples)
+    }
+    /// NOT BUILT (lane MG item 4, design in REPORT-laneMG.md): v0.1.4's disk
+    /// guard (worker.py:820-844) has no v0.2 counterpart yet. Test-only stub so
+    /// the ignored RED compiles; it watches nothing.
+    #[cfg(test)]
+    pub(crate) fn guard_disk(&mut self, _root: &Path, _max_disk_bytes: u64) -> Result<()> {
+        Ok(())
+    }
+    /// Test-only: wait (bounded) for the guard's verdict.
+    #[cfg(test)]
+    pub(crate) fn guard_wait_until(&self, deadline: Instant) -> Option<guard::Failure> {
+        self.guard.as_ref().and_then(|g| g.wait_until(deadline))
+    }
+}
 impl Drop for Worker {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
+        if let Some(guard) = self.guard.as_mut() {
+            guard.stop();
+        }
+        let owned = self
+            .child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(mut child) = owned {
             match child.try_wait() {
                 Ok(Some(_)) => (),
                 Ok(None) => {

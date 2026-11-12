@@ -172,6 +172,10 @@ pub struct NativeShard {
     remaining: u64,
     cleanup_proven: bool,
     consent: serde_json::Map<String, Value>,
+    /// A tighter owner share for the worker guard (lane MG); never above consent.
+    memory_share: Option<u64>,
+    /// The last worker's guard verdict, kept after its cleanup.
+    guard_failure: Option<Value>,
 }
 impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
@@ -206,6 +210,8 @@ impl NativeShard {
             remaining,
             cleanup_proven: true,
             consent,
+            memory_share: None,
+            guard_failure: None,
         })
     }
     fn check(&self, current: &dyn Fn() -> Result<Value>) -> Result<()> {
@@ -282,6 +288,13 @@ impl NativeShard {
         };
         checkpoint()?;
         self.check(current)?;
+        // F2: once the guard killed a worker, this run is over on this member,
+        // as v0.1.4's runtime after a loaded worker died: `blocked`,
+        // `runtime_cold_restart_required`, no replacement (managed_runtime.py:336-345).
+        // Only a new offer (new custody, a new NativeShard) prepares again.
+        if self.guard_failure.is_some() {
+            return Err(fail("runtime_cold_restart_required"));
+        }
         // A fresh worker per serving epoch is allowed only after the previous one's
         // close/reap was proven. The consent wall and command budget keep running
         // from the FIRST prepare; a new worker never resets the granted lifetime.
@@ -319,13 +332,9 @@ impl NativeShard {
         let reference = native_compiler::reference().map_err(native)?;
         let id = &reference["recorded"]["identity"];
         let m = &self.received.offer["message"];
-        let consent = standing_consent::load(&self.received.root)
-            .map_err(|_| fail("joined_shard_consent_required"))?
-            .ok_or(fail("joined_shard_consent_required"))?;
-        let memory = consent["caps"]["max_memory_bytes"]
-            .as_u64()
-            .filter(|n| *n > 0)
-            .ok_or(fail("joined_native_consent_invalid"))?;
+        // The ONE source of the worker's limit (prepare `memory` = guard limit):
+        // the consent `check()` proved equal to disk, or a tighter share (R1).
+        let memory = self.memory_limit()?;
         let request_id = digest(&self.received.offer)?;
         let prepare = json!({"command":shard::COMMAND,"checkpoint":self.received.path(),
             "start":range[0],"end":range[1],"total":28,"memory":memory,"tokens":tokens,
@@ -351,7 +360,12 @@ impl NativeShard {
             deadline,
         ) {
             Ok(worker) => self.worker = Some(worker),
-            Err(e) => {
+            Err(started) => {
+                // F4: a guard kill during prepare keeps its verdict and numbers.
+                if let Some(failure) = started.guard {
+                    self.guard_failure = Some(failure.document());
+                }
+                let e = started.error;
                 // A failed start already killed and reaped its exact child; only
                 // a failed kill/reap leaves the release unproven (debt retained).
                 self.cleanup_proven = e.0 != "native_cleanup_unproven";
@@ -485,6 +499,9 @@ impl NativeShard {
             .worker
             .take()
             .ok_or(fail("joined_native_not_prepared"))?;
+        if let Some(failure) = worker.guard_failure() {
+            self.guard_failure = Some(failure.document());
+        }
         let evidence = worker.kill_and_reap().map_err(native)?;
         self.cleanup_proven = true;
         Ok(evidence)
@@ -499,6 +516,43 @@ impl NativeShard {
     }
     pub fn worker_pid(&self) -> Option<u32> {
         self.worker.as_ref().and_then(|w| w.pid().ok())
+    }
+    /// The memory the worker's guard holds it to (lane MG): the member's own
+    /// consent `max_memory_bytes`, or a tighter share set by `limit_memory_to`.
+    pub fn memory_limit(&self) -> Result<u64> {
+        let cap = self.consent_memory()?;
+        Ok(self.memory_share.map_or(cap, |share| share.min(cap)))
+    }
+    fn consent_memory(&self) -> Result<u64> {
+        self.consent["caps"]["max_memory_bytes"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(fail("joined_native_consent_invalid"))
+    }
+    /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-259):
+    /// an owner's announced share may only TIGHTEN the guard; a share above the
+    /// member's cap is refused `member_memory_cap_below_share`, loosening nothing.
+    pub fn limit_memory_to(&mut self, share_rss_bytes: u64) -> Result<u64> {
+        if share_rss_bytes == 0 {
+            return Err(fail("member_resources_invalid"));
+        }
+        if share_rss_bytes > self.consent_memory()? {
+            return Err(fail("member_memory_cap_below_share"));
+        }
+        self.memory_share = Some(
+            self.memory_share
+                .map_or(share_rss_bytes, |held| held.min(share_rss_bytes)),
+        );
+        self.memory_limit()
+    }
+    /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
+    /// guard stopped the worker; the later errors carry the code only.
+    pub fn worker_failure(&self) -> Option<Value> {
+        self.worker
+            .as_ref()
+            .and_then(Worker::guard_failure)
+            .map(|failure| failure.document())
+            .or_else(|| self.guard_failure.clone())
     }
     /// The offer this compute custody serves, for route binding checks.
     pub fn offer(&self) -> &Value {
