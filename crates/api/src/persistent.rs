@@ -949,7 +949,9 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                     return Err(PublicError::new(400, "application_closed"));
                 }
                 // v0.1.4 never serves a refused installation state (app.py:595-611): every
-                // action but Quit answers the refusal before it can persist anything.
+                // action but Quit answers the refusal before it can persist any installation
+                // state (only the diagnostic last-action-error.private.json record is written,
+                // which Authority::load never reads).
                 if action != Quit
                     && let Some(code) = self.host.installation_refused()
                 {
@@ -1035,8 +1037,13 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 }
                 self.inner.prepare(action, body)
             }
-            // The listing custody checks closed/role/shape itself (see Host::swarm_publish).
-            SwarmPublish | SwarmUnpublish => Ok(()),
+            // The listing custody checks closed/role/shape itself (see Host::swarm_publish),
+            // but not a refused installation state, which v0.1.4 never serves (app.py:595-611):
+            // that is answered here, before the custody can create its state in that folder.
+            SwarmPublish | SwarmUnpublish => match self.host.installation_refused() {
+                Some(code) if !self.host.closed() => Err(PublicError::new(409, code)),
+                _ => Ok(()),
+            },
             PairPreview => {
                 if self.host.closed() {
                     return Err(PublicError::new(400, "application_closed"));
