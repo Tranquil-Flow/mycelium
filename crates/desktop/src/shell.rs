@@ -15,6 +15,20 @@ use tauri::{
 };
 
 pub use crate::core::{Core, Reply};
+/// Size the packaged window opens at, in logical points.
+///
+/// The page is one long single-column form (the create form alone runs past 1 600 pt, and the
+/// consent/role sections take the document to roughly 8 800 pt at 400 pt wide). Without an
+/// explicit size the window fell back to the framework default of ~400×300, so a fresh install
+/// opened showing only the masthead and the first heading, with no hint that the form continued
+/// below. 1040×760 shows the masthead plus the first two fields on a 1512×982 display and still
+/// fits a 13-inch MacBook screen.
+pub const WINDOW_WIDTH: f64 = 1_040.0;
+pub const WINDOW_HEIGHT: f64 = 760.0;
+/// Below this the form is unusable (a 400 pt column puts the create form past 8 800 pt of scroll),
+/// so the user may not drag the window smaller than this.
+pub const MIN_WINDOW_WIDTH: f64 = 720.0;
+pub const MIN_WINDOW_HEIGHT: f64 = 560.0;
 #[cfg(all(feature = "dev-shell", debug_assertions))]
 const DEV_TITLE: &str = "Mycelium L11 development — core not integrated";
 fn asset(path: &str) -> Option<Reply> {
@@ -273,6 +287,8 @@ fn run<C: Cleanup + Send + 'static>(
             let popup_app = app.handle().clone();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External("mycelium://localhost/".parse()?))
                 .title(window_title.as_str())
+                .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
+                .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
                 .visible(false).focused(!dev_probe).incognito(true).devtools(false)
                 .initialization_script(probe.script())
                 .on_navigation(move |url| {
@@ -363,6 +379,19 @@ fn run<C: Cleanup + Send + 'static>(
                         match window.is_visible() {
                             Ok(visible) => println!("L11_WINDOW_VISIBLE:{visible}"),
                             Err(e) => eprintln!("window_visible_failed:{e}"),
+                        }
+                        // Report the size the window actually opened at, in logical points, so a
+                        // smoke test can hold the "the form is usable without resizing" line:
+                        // the default fallback was ~400×300 and clipped the whole create form.
+                        match (window.inner_size(), window.scale_factor()) {
+                            (Ok(size), Ok(scale)) if scale > 0.0 => println!(
+                                "L11_WINDOW_SIZE:{}x{}",
+                                (f64::from(size.width) / scale).round() as i64,
+                                (f64::from(size.height) / scale).round() as i64
+                            ),
+                            (Err(e), _) => eprintln!("window_size_failed:{e}"),
+                            (_, Err(e)) => eprintln!("window_scale_failed:{e}"),
+                            _ => eprintln!("window_size_failed:zero_scale"),
                         }
                     }
                 }

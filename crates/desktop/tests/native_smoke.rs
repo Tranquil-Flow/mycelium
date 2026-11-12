@@ -99,6 +99,7 @@ fn native_smoke(custom: bool) {
         let mut inactive_policy = false;
         let mut security_receipts = std::collections::BTreeSet::new();
         let mut browser_opens = 0;
+        let mut window_size: Option<(i64, i64)> = None;
         let deadline = Instant::now() + budget(BudgetId::MemberRestartGrace);
         while !(ready && fetched) {
             let line = rx
@@ -109,6 +110,13 @@ fn native_smoke(custom: bool) {
             fetched |= line == "L11_NATIVE_FETCH_OK";
             inactive_policy |= line == "L11_WEBVIEW_INACTIVE_POLICY:Throttle";
             browser_opens += usize::from(line == "L11_SYSTEM_BROWSER_CAPTURE");
+            if let Some(rest) = line.strip_prefix("L11_WINDOW_SIZE:") {
+                let (width, height) = rest.split_once('x').expect("L11_WINDOW_SIZE:WxH");
+                window_size = Some((
+                    width.parse().expect("window width"),
+                    height.parse().expect("window height"),
+                ));
+            }
             if line.starts_with("L11_FRAME_")
                 || line.starts_with("L11_NAV_")
                 || line.starts_with("L11_POPUP_")
@@ -159,6 +167,23 @@ fn native_smoke(custom: bool) {
             .collect()
         );
         assert_eq!(browser_opens, if custom { 0 } else { 2 });
+        // The window must open at the size the app configured, not the framework default: the
+        // packaged app fell back to ~400×300 and opened showing only the masthead, with the whole
+        // create form below the fold and no hint it continued.
+        let (width, height) = window_size.expect("the app reported no L11_WINDOW_SIZE");
+        assert_eq!(
+            (width, height),
+            (
+                desktop::shell::WINDOW_WIDTH as i64,
+                desktop::shell::WINDOW_HEIGHT as i64
+            ),
+            "the window opened at {width}×{height}, not the configured size"
+        );
+        assert!(
+            width >= desktop::shell::MIN_WINDOW_WIDTH as i64
+                && height >= desktop::shell::MIN_WINDOW_HEIGHT as i64,
+            "the window opened below the usable minimum: {width}×{height}"
+        );
         // An occluded window must not suspend the page: a held chat request would never be
         // answered. The shell reads the applied policy back from the live web view.
         assert!(
