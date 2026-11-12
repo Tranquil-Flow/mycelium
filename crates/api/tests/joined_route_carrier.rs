@@ -3162,3 +3162,57 @@ fn a_member_returns_when_its_epoch_ends_with_two_cancellations_queued() {
     assert_eq!(report["redial_ack_ms"], Value::Null, "{report}");
     assert_eq!(events, [("step", 0), ("close", 0)]);
 }
+
+// ---- EPF2 F11 (REVIEW-laneEPF Q2(b)): the member keeps settled request ids
+// for the epoch's life, so their LENGTH must be bounded, not only their count.
+// The owner's ids follow the shipped gateway's grammar
+// `[A-Za-z0-9][A-Za-z0-9._~-]{0,127}` (v0.1.4 mycelium_request_gateway
+// contracts.py:27, admission service.py:468; v0.2 registry::valid_request_id,
+// checked at m16_requests.rs:496 before any dispatch): at most 128 bytes.
+
+/// An idle PathCancellation whose id is longer than the owner's 128-byte
+/// bound is refused before it is kept or ACKed: compute closed, epoch ended.
+#[test]
+fn an_idle_cancellation_of_an_overlong_request_id_is_refused() {
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            assert!(
+                (raw.cancel)(&"a".repeat(128)),
+                "an id at the owner's bound is ACKed"
+            );
+            assert!(
+                !(raw.cancel)(&"a".repeat(129)),
+                "an idle cancellation of a 129-byte request id is refused"
+            );
+        },
+    );
+    assert_eq!(report["failure"], "route_cancellation_invalid", "{report}");
+    assert_eq!(report["requests_served"], 0, "{report}");
+    assert_eq!(report["native"]["graceful"], true, "{report}");
+    assert_eq!(events, [("close", 0)]);
+}
+
+/// A PREFILL whose id is longer than the owner's bound is refused (never
+/// ACKed, never stepped): the compute is closed and the owner's teardown is
+/// then ACKed against the closed compute, ending the epoch.
+#[test]
+fn a_prefill_of_an_overlong_request_id_is_refused_before_it_runs() {
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            assert!(
+                !(raw.prefill)(&"a".repeat(129)),
+                "a PREFILL of a 129-byte request id is refused"
+            );
+            assert!((raw.cancel)("route-7-0"), "the released compute is ACKed");
+        },
+    );
+    assert_eq!(report["failure"], "route_request_invalid", "{report}");
+    assert_eq!(report["requests_served"], 0, "{report}");
+    assert_eq!(events, [("close", 0)]);
+}
