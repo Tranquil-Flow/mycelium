@@ -37,6 +37,36 @@ fn pause(end: Instant) -> Result<(), PublicError> {
     );
     Ok(())
 }
+#[allow(unsafe_code)] // poll borrows one live pipe fd, for a finite typed budget
+fn wait_pipe(
+    pipe: &impl std::os::fd::AsRawFd,
+    events: libc::c_short,
+    limit: &CodecLimit,
+) -> Result<(), PublicError> {
+    limit.check()?;
+    let within =
+        (span(B::OwnerPoll)? / 10).min(limit.end().saturating_duration_since(Instant::now()));
+    let timeout =
+        i32::try_from(within.as_millis()).map_err(|_| fail("tokenizer_wait_budget_invalid"))?;
+    let mut descriptor = libc::pollfd {
+        fd: pipe.as_raw_fd(),
+        events,
+        revents: 0,
+    };
+    // SAFETY: descriptor is one initialized pollfd; the borrowed pipe remains
+    // alive throughout this finite wait. poll neither owns nor closes the fd.
+    let ready = unsafe { libc::poll(&mut descriptor, 1, timeout) };
+    if ready < 0 {
+        if std::io::Error::last_os_error().kind() != ErrorKind::Interrupted {
+            return Err(fail("tokenizer_pipe_wait_failed"));
+        }
+        // EINTR is a wakeup: recheck cancellation/deadline before retrying I/O.
+    } else if descriptor.revents & libc::POLLNVAL != 0 {
+        return Err(fail("tokenizer_pipe_wait_failed"));
+    }
+    // HUP/ERR wake the next nonblocking read/write to drain bytes or report EOF.
+    limit.check()
+}
 fn nonblocking(fd: &impl std::os::fd::AsFd) -> Result<(), PublicError> {
     let flags = rustix::fs::fcntl_getfl(fd).map_err(|_| fail("tokenizer_pipe_failed"))?;
     rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)
@@ -108,7 +138,13 @@ impl NativeCodec {
                     Ok(0) => return Err(unavailable()),
                     Ok(n) => written += n,
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => pause(limit.end())?,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                        wait_pipe(
+                            h.input.as_ref().ok_or_else(unavailable)?,
+                            libc::POLLOUT,
+                            limit,
+                        )?;
+                    }
                     Err(_) => return Err(unavailable()),
                 }
             }
@@ -132,7 +168,9 @@ impl NativeCodec {
                         }
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                    Err(e) if e.kind() == ErrorKind::WouldBlock => pause(limit.end())?,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                        wait_pipe(&h.output, libc::POLLIN, limit)?;
+                    }
                     Err(_) => return Err(unavailable()),
                 }
             }
