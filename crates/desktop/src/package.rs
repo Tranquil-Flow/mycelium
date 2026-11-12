@@ -17,6 +17,11 @@ pub const RESOURCE_PROBE_PATH: &str = "Contents/MacOS/native/resource_probe";
 /// (`<exe dir>/native/cloudflared`; v0.1.4 `public_relay.py:250-255`, bundled by
 /// `scripts/build_a13_macos.py:285-288,318` @ f4e366e9).
 pub const RELAY_CLIENT_PATH: &str = "Contents/MacOS/native/cloudflared";
+/// The native iroh transport the run spawns to reach other Macs
+/// (`api::member_agent::installed_sidecar`: `<exe dir>/native/mycelium-iroh-sidecar`, executable,
+/// not writable by others). v0.1.4 ships these exact bytes; the Rust port must package them or
+/// every run stops at "joined Macs report in" with `native_sidecar_installation_invalid`.
+pub const IROH_SIDECAR_PATH: &str = "Contents/MacOS/native/mycelium-iroh-sidecar";
 /// Where the relay client's licence ships (v0.1.4: `Resources/third_party/cloudflared-LICENSE`,
 /// `build_a13_macos.py:325`; v0.2 keeps every notice under `Resources/licenses/`).
 pub const RELAY_LICENSE_PATH: &str = "Contents/Resources/licenses/cloudflared-LICENSE";
