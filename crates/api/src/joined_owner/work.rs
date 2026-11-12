@@ -1250,10 +1250,12 @@ impl Worker {
             match self.inbox.recv_timeout(poll) {
                 Ok(_) => return Err(refusal("managed_workflow_not_startable")),
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-            if let Some(epoch) = open.as_ref() {
-                self.watch(epoch);
+                // One owner poll passed with no command: watch the epoch.
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some(epoch) = open.as_ref() {
+                        self.watch(epoch);
+                    }
+                }
             }
         }
     }
