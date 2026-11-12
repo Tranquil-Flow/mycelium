@@ -10,5 +10,11 @@
     "kind": "Helper",
     "bytes": 25972048,
     "sha256": "41423e7c363eed5ec73087cd21b04590e454bd0dc9284f5bd77eada147342c7f"
+  },
+  {
+    "path": "Contents/MacOS/native/mycelium-iroh-sidecar",
+    "kind": "Helper",
+    "bytes": 17606048,
+    "sha256": "a11f73f32a9b60e83c9439bfd54aa786b60de14c419f5b91c6322c1b4f8df77f"
   }
 ]

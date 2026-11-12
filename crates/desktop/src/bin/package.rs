@@ -6,7 +6,7 @@ use desktop::{
     package::{self, Manifest},
 };
 use std::{path::Path, process::ExitCode};
-const USAGE: &str = "usage: desktop-package <verify|stage|sign-plan> MANIFEST [SOURCE] [DESTINATION] | pins NATIVE_INPUTS | bundle EXECUTABLE NATIVE_INPUTS ICON OUT_DIR [NATIVE_INPUTS_SHA256] [--resource-probe FILE] [--relay-client FILE --relay-license FILE] [--sign-adhoc] | admit APP | audit-no-python APP | finalize BUNDLE_DIR VERSION ROLLBACK_FLOOR SOURCE_REVISION SIGNING_KEY_FILE | install HOME APPLICATIONS BUNDLE_DIR | rollback HOME APPLICATIONS | uninstall HOME APPLICATIONS [--delete-identity-and-state] | status HOME APPLICATIONS";
+const USAGE: &str = "usage: desktop-package <verify|stage|sign-plan> MANIFEST [SOURCE] [DESTINATION] | pins NATIVE_INPUTS | bundle EXECUTABLE NATIVE_INPUTS ICON OUT_DIR [NATIVE_INPUTS_SHA256] [--resource-probe FILE] [--relay-client FILE --relay-license FILE] [--iroh-sidecar FILE] [--sign-adhoc] | admit APP | audit-no-python APP | finalize BUNDLE_DIR VERSION ROLLBACK_FLOOR SOURCE_REVISION SIGNING_KEY_FILE | install HOME APPLICATIONS BUNDLE_DIR | rollback HOME APPLICATIONS | uninstall HOME APPLICATIONS [--delete-identity-and-state] | status HOME APPLICATIONS";
 fn read_manifest(path: &str) -> Result<Manifest, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("manifest_read:{:?}", e.kind()))?;
     serde_json::from_slice(&bytes).map_err(|_| "manifest_invalid".to_string())
@@ -19,6 +19,7 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
     let mut positional = Vec::new();
     let mut probe = None;
     let (mut relay, mut relay_license) = (None, None);
+    let mut sidecar = None;
     let mut sign = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -28,6 +29,7 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
             "--relay-license" if relay_license.is_none() => {
                 relay_license = Some(rest.next().ok_or(USAGE)?);
             }
+            "--iroh-sidecar" if sidecar.is_none() => sidecar = Some(rest.next().ok_or(USAGE)?),
             "--sign-adhoc" if !sign => sign = true,
             flag if flag.starts_with("--") => {
                 return Err(format!("{USAGE}\nunknown or repeated {flag}"));
@@ -66,6 +68,15 @@ fn bundle_command(args: &[String]) -> Result<(), String> {
         }
         (None, None) => {}
         _ => return Err("cloudflared_build_dependency_and_license_required".into()),
+    }
+    // The native iroh transport travels with the app: pinned, copied at 0o755, and named in the
+    // manifest, or a packaged run cannot reach another Mac (and admission refuses a drop-in).
+    if let Some(source) = sidecar {
+        let pin = helper_pins
+            .iter()
+            .find(|p| p.path == package::IROH_SIDECAR_PATH)
+            .ok_or("helper_pins:iroh_sidecar_pin_missing")?;
+        helpers.push((Path::new(source), pin));
     }
     let mut built = bundle::build_with_helpers(
         &bundle::Spec {
