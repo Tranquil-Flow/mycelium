@@ -50,6 +50,7 @@ use std::{
 
 #[cfg(test)]
 mod program_tests;
+mod work;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -126,6 +127,7 @@ struct Custody {
     bootstrap: Option<target::Worker>,
     failure: Option<CleanupFailure>,
     compiler: Option<Weak<Mutex<Compiler<PackagedRun>>>>,
+    work_stop: Option<api::joined_owner::work::Cancel>,
     exchange_resource: Option<(Instant, Option<&'static str>)>,
 }
 
@@ -420,7 +422,8 @@ enum Observe {
 struct PackagedChainPorts {
     model: ModelAdapter<ModelPorts>,
     contributor: OwnerPorts<PackagedRun>,
-    reports: OwnerPorts<PackagedRun>,
+    reports: work::Reports,
+    work: work::Work,
     observation: Observe,
     compiler: SharedCompiler<PackagedRun>,
 }
@@ -451,10 +454,15 @@ impl PackagedChainPorts {
         let compiler = Arc::new(Mutex::new(compiler.with_native_program(native_program)));
         lock(&host.custody).compiler = Some(Arc::downgrade(&compiler));
         let ports = OwnerPorts::new(host.clone());
+        let work = work::Work::new(host.clone());
         Self {
             model: ModelAdapter::new(ModelPorts(host.clone())),
             contributor: ports.clone(),
-            reports: ports,
+            reports: work::Reports {
+                inner: ports,
+                work: work.clone(),
+            },
+            work,
             observation,
             compiler: SharedCompiler(compiler),
         }
@@ -464,6 +472,7 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
     /// `chain.teardown`: the compiler's worker first, then the bootstrap offers' cleanup and
     /// retirement (`api::owner_observation::Backend::teardown`).
     fn teardown(&mut self, _: bool, _: &mut dyn owner_run::chain::StepEnv) -> Result<(), String> {
+        let work = self.close_work();
         let compilation = self
             .compiler
             .0
@@ -484,7 +493,16 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
                 .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
                 .teardown(),
         };
-        compilation.and(observation)
+        work.and(compilation).and(observation)
+    }
+    fn slices_ports(&mut self) -> Option<owner_run::steps::slices::SlicesPorts<'_>> {
+        Some(self.slices())
+    }
+    fn work_ports(&mut self) -> Option<owner_run::steps::publish::WorkPorts<'_>> {
+        Some(self.publication())
+    }
+    fn activation_port(&mut self) -> Option<&mut dyn owner_run::steps::activate::ActivationPort> {
+        Some(&mut self.work)
     }
     fn ports(&mut self) -> owner_run::owner_chain::Ports<'_> {
         owner_run::owner_chain::Ports {
@@ -514,11 +532,11 @@ impl OwnerRun {
         let native_program = config.native_program.clone();
         let runs = DemoRuns::new(
             Box::new(move || {
-                Box::new(SharedHostChain::new(PackagedChainPorts::new(
+                Box::new(work::Composed::new(
                     &chain_host,
                     double.as_ref(),
                     native_program.clone(),
-                )))
+                ))
             }),
             Box::new(|| {
                 fresh_identity(api::app_host::now()).unwrap_or_else(|_| {
@@ -545,7 +563,11 @@ impl OwnerRun {
         body: &Map<String, Value>,
     ) -> Result<Json, PublicError> {
         let mut facts = owner_ports::demo_facts(&self.host);
-        lock(&self.runs).demo_action(action, body, &mut facts)
+        let result = lock(&self.runs).demo_action(action, body, &mut facts);
+        if result.is_ok() && action == Action::DemoStop {
+            self.host.stop_work();
+        }
+        result
     }
     /// `app.owner_run.active()`.
     pub fn active(&self) -> bool {
@@ -611,6 +633,7 @@ impl RunClose {
             self.closing = Closing::Done(Ok(()));
             return;
         };
+        installed.host.stop_work();
         if let Some(renewal) = &installed.renewal {
             renewal.stop();
         }

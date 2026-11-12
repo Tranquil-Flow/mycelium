@@ -227,6 +227,7 @@ impl Config {
         }
         Ok(Some(Self { binary, pin }))
     }
+    #[cfg(test)]
     fn verify(&self) -> Result<()> {
         self.verify_until(&|| false)
     }

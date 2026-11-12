@@ -218,6 +218,34 @@ impl<H: ChainHost> Compiler<H> {
         };
         self
     }
+    /// A completed, non-retired compilation of exactly this run. The caller borrows the
+    /// original source-bound input; no observation descriptors or synthetic Qualified values.
+    pub fn completed_input(
+        &self,
+        run: &str,
+        deployment: &str,
+    ) -> Result<&crate::compiler_inputs::InputArtifact, PortError> {
+        if self.retired || self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(failed("compiler_stopped"));
+        }
+        if self
+            .identity
+            .as_ref()
+            .map(|(r, d)| (r.as_str(), d.as_str()))
+            != Some((run, deployment))
+        {
+            return Err(failed("compiler_run_changed"));
+        }
+        if self.worker.is_some() || self.failure.is_some() || self.qualified.is_none() {
+            return Err(failed("compiler_not_completed"));
+        }
+        let artifact = self
+            .artifact
+            .as_ref()
+            .ok_or_else(|| failed("compiler_not_completed"))?;
+        artifact.validate()?;
+        Ok(artifact)
+    }
     fn host(&self) -> Result<H, PortError> {
         H::upgrade(&self.core).ok_or_else(|| failed("compiler_stopped"))
     }

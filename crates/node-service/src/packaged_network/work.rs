@@ -6,6 +6,9 @@ use api::{
     run_exchange::owner_pin::{OwnerPin, VerifiedAnnouncement},
 };
 impl Network {
+    pub fn work_network(&self) -> crate::packaged_work::NetworkChoice {
+        self.work_network.clone()
+    }
     pub fn close_work(&self) {
         if let Some(mut work) = lock(&self.work).take()
             && let Err(code) = work.close()

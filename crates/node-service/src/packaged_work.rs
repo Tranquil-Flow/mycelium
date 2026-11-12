@@ -31,6 +31,19 @@ pub type SessionCell = Arc<Mutex<Option<Session>>>;
 /// Explicit transport policy; no environment-selected interface or public relay fallback.
 #[derive(Clone, Default)]
 pub struct NetworkChoice(pub Option<(IpAddr, LanPolicy)>);
+impl NetworkChoice {
+    pub fn allows(&self, address: std::net::SocketAddr) -> bool {
+        match &self.0 {
+            None => address.ip().is_loopback(),
+            Some((_, policy)) => {
+                policy.allows(address.ip())
+                    && policy
+                        .peer_hosts()
+                        .is_none_or(|hosts| hosts.contains(&address.ip()))
+            }
+        }
+    }
+}
 struct Shared {
     root: PathBuf,
     session: SessionCell,

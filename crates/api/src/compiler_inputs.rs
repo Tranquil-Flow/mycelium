@@ -170,6 +170,13 @@ impl InputArtifact {
     pub fn request(&self) -> &BuildRequest {
         &self.request
     }
+    /// Borrow the retained source-shard document after validating its bound on-disk identity.
+    pub fn stage_shards(&self) -> Result<&Value> {
+        self.validate()?;
+        self.documents
+            .get("source-shards.private.json")
+            .ok_or(Error("compiler_outputs_changed"))
+    }
     pub fn topology(&self) -> &Value {
         &self.documents["topology.json"]
     }
