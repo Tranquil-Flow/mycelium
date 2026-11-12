@@ -145,3 +145,4 @@ M16LiveAllocatableInvalidDefault
 M16LivePerPlacementFloor
 M16LiveKvContextTokens
 IrohPrefillProgressLimit
+MemberPeriodicReport
