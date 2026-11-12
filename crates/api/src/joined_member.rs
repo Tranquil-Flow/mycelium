@@ -15,6 +15,7 @@
 //!   target_app.py:330-343) and `_join_flow_status` (app.py:1214-1237);
 //! * `authority.start()` of a joined target (`RemoteMacMember.start`, app.py:613-626) and the
 //!   durable half of a member leave's "no owned compute" proof.
+pub mod work;
 use crate::{
     app_host::{
         self, Authority, CONSENT_FILE, Cell, HANDOFF_FILE, IDENTITY_FILE, ManagedSlot, PENDING_FILE,

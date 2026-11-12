@@ -101,6 +101,19 @@ pub fn native_worker() -> Result<()> {
                         .resident_proof(nonce)?;
                     Ok((json!({"ok":true,"proof":proof}), Vec::new(), false))
                 }
+                stage_contract::native_session::COMMAND => {
+                    // Exactly the contract's request: no payload, no other field.
+                    if !payload.is_empty()
+                        || head != json!({"command":stage_contract::native_session::COMMAND})
+                    {
+                        return Err("native_session_request_invalid".into());
+                    }
+                    let session = stage
+                        .as_mut()
+                        .ok_or("worker_not_prepared")?
+                        .reset_session()?;
+                    Ok((json!({"ok":true,"session":session}), Vec::new(), false))
+                }
                 "step" => {
                     let input = match head.get("tokens") {
                         Some(tokens) => Input::Tokens(serde_json::from_value(tokens.clone())?),

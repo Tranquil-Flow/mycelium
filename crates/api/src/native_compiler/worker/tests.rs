@@ -17,6 +17,21 @@ fn fake_worker_process() {
         .set_read_timeout(Some(duration(BudgetId::SidecarReceivePollWait).unwrap()))
         .unwrap();
     if mode != "blocked_write" {
+        if let Some(session) = reset_reply(&mode) {
+            // EP0: answer exactly one session reset; any other request is
+            // refused so a wrong command can never pass as a reset.
+            let mut link = Link::new(wire.try_clone().unwrap(), guard).unwrap();
+            let (head, body) = link.receive().unwrap();
+            let reply = if head == json!({"command":stage_contract::native_session::COMMAND})
+                && body.is_empty()
+            {
+                json!({"ok":true,"session":session})
+            } else {
+                json!({"error":"fake_unexpected_request"})
+            };
+            link.send(&reply, &[]).unwrap();
+            return;
+        }
         Link::new(wire.try_clone().unwrap(), guard)
             .unwrap()
             .receive()
@@ -269,4 +284,73 @@ fn unavailable_link_budget_still_kills_and_reaps_the_child() {
         Err(rustix::io::Errno::CHILD),
         "the child outlived a failed worker start"
     );
+}
+
+/// EP0 fake worker replies: `reset_valid` is a well-formed session reset;
+/// the others are each wrong in exactly one way.
+fn reset_reply(mode: &str) -> Option<Value> {
+    let mut session = json!({"protocol":stage_contract::native_session::REPLY_PROTOCOL,
+        "state_generation":1,"active_bytes":700,"baseline_bytes":700});
+    match mode {
+        "reset_valid" => {}
+        "reset_residue" => session["active_bytes"] = json!(701),
+        "reset_extra_field" => session["position"] = json!(0),
+        "reset_wrong_protocol" => session["protocol"] = json!("mycelium.native_session_reset.v0"),
+        _ => return None,
+    }
+    Some(session)
+}
+/// Drive one `reset_session` exchange against the fake worker in `mode` and
+/// return its result; the fake child is always killed and reaped.
+fn reset_against(mode: &str) -> Result<Value> {
+    let root = std::env::temp_dir().join(format!(
+        "ep0-io-{}-{}",
+        std::process::id(),
+        crate::app_host::hex(&crate::app_host::random(8).unwrap())
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let socket = root.join("s");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let phase_listener = UnixListener::bind(root.join("s.phase")).unwrap();
+    let child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "native_compiler::worker::tests::fake_worker_process",
+            "--nocapture",
+        ])
+        .env("B5_FAKE_SOCKET", &socket)
+        .env("B5_FAKE_MODE", mode)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    let (_phase, _) = phase_listener.accept().unwrap();
+    let mut worker = Worker::from_child(child, stream, Arc::new(AtomicBool::new(false))).unwrap();
+    let result = worker.reset_session(Instant::now() + duration(BudgetId::ModelSelection).unwrap());
+    assert_eq!(worker.kill_and_reap().unwrap()["worker_reaped"], true);
+    std::fs::remove_dir_all(&root).unwrap();
+    result
+}
+/// EP0: the client sends exactly `{"command":"session_reset_v1"}` (the fake
+/// refuses anything else) and returns the worker's session object.
+#[test]
+fn session_reset_sends_the_exact_command_and_returns_the_session() {
+    assert_eq!(
+        reset_against("reset_valid").map_err(|e| e.0),
+        Ok(reset_reply("reset_valid").unwrap())
+    );
+}
+/// EP0: a reply that reports residue (more active memory than the resident
+/// weights), carries an unknown field or another protocol is no reset proof.
+#[test]
+fn session_reset_refuses_residue_and_malformed_replies() {
+    for mode in ["reset_residue", "reset_extra_field", "reset_wrong_protocol"] {
+        assert_eq!(
+            reset_against(mode).map_err(|e| e.0),
+            Err("native_session_reset_invalid"),
+            "{mode}"
+        );
+    }
 }

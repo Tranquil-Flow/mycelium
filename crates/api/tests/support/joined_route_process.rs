@@ -1022,3 +1022,225 @@ fn owner_process_streams_chat_stops_and_leaves() {
         began.elapsed()
     );
 }
+
+/// Lane EP2 (EP3): the owner process's work port serves FIVE chats on ONE route
+/// epoch: the same prompt five times equals the pinned Python/MLX oracle each
+/// time (each chat's session reset proven by its tokens), the member worker pids
+/// never change, Stop of chat 3 mid-stream is followed by chat 4 equal to the
+/// oracle, per-chat TTFT / request time / decode rate / member and worker RSS are
+/// recorded with the host load beside each, and the run's Stop leaves no worker.
+/// The 1.5 s TTFT bound is NOT asserted (a loaded host); chats 2..5 must start far
+/// below the prepare every chat paid with per-request epochs.
+#[test]
+#[ignore = "real Metal + local Qwen3; B16_OWNER_BINARY, B7_MEMBER_BINARY, native pins and resource gate required"]
+fn owner_work_port_serves_five_chats_on_one_epoch() {
+    let began = Instant::now();
+    let gate = std::env::var_os("B7_RESOURCE_GATE").expect("resource preflight script");
+    let snapshot = PathBuf::from(std::env::var_os("MYCELIUM_QWEN3_SNAPSHOT").unwrap());
+    let native_binary = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY").unwrap();
+    let oracle: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let reference: Vec<u64> = serde_json::from_value(oracle["recorded"]["tokens"].clone()).unwrap();
+    let prompt_ids = oracle["recorded"]["workload"]["prompt_ids"]
+        .as_array()
+        .unwrap()
+        .len();
+    let load = || {
+        String::from_utf8_lossy(
+            &Command::new("/usr/sbin/sysctl")
+                .args(["-n", "vm.loadavg"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_owned()
+    };
+    let rss_kib = |pid: i64| -> Option<u64> {
+        let out = Command::new("/bin/ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    };
+    let path = std::env::temp_dir().join(format!("ep2-owner-{}", std::process::id()));
+    fs::create_dir(&path).unwrap();
+    let root = super::native_process::Root(path.canonicalize().unwrap());
+    let key = root.0.join("owner-control.key");
+    let hex: String = super::member_remote::owner_secret()
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    fs::write(&key, hex).unwrap();
+    let mut spawned = Vec::new();
+    let mut addrs = Vec::new();
+    for i in 0..2 {
+        let (m, a) = spawn_member(&root.0.join(format!("member{i}")));
+        spawned.push(m);
+        addrs.push(a);
+    }
+    let member_pids: Vec<i64> = spawned.iter().map(|m| i64::from(m.0.id())).collect();
+    let args: Vec<std::ffi::OsString> = vec![
+        "--state-root".into(),
+        root.0.join("owner").into(),
+        "--swarm".into(),
+        "ep2-owner".into(),
+        "--control-key".into(),
+        key.into(),
+        "--snapshot".into(),
+        snapshot.into(),
+        "--native-binary".into(),
+        native_binary,
+    ];
+    let mut owner = OwnerProcess::start(&args);
+    for addr in &addrs {
+        owner.call(json!({"command":"admit","member":addr}));
+    }
+    owner.call(json!({"command":"compile","ranges":[[0,14],[14,28]]}));
+    let capacity = prompt_ids + 64;
+    let wall = B::MemberChosenWall.span(Entries::ZERO).unwrap().millis() / 1000;
+    for i in 0..2 {
+        admit_native_load(&gate, &format!("stage={i}"));
+    }
+    let load_work = load();
+    let work = owner.call(json!({"command":"work","tokens":capacity,"worker_wall_seconds":wall}));
+    eprintln!(
+        "EP2 work port serving {work} load={load_work} elapsed={:?}",
+        began.elapsed()
+    );
+    let state = &work["state"];
+    assert_eq!(state["state"], "api_running", "{work}");
+    assert_eq!(state["epoch"], 1, "{work}");
+    let gateway = state["gateway"].clone();
+    let pids: Vec<i32> = serde_json::from_value(gateway["worker_pids"].clone()).unwrap();
+    assert_eq!(pids.len(), 2, "{gateway}");
+    let addr: SocketAddr = gateway["addr"].as_str().unwrap().parse().unwrap();
+    let bearer = gateway["bearer"].as_str().unwrap().to_owned();
+    let mut chats = Vec::new();
+    for k in 1..=5usize {
+        let load_before = load();
+        let r = post_chat(addr, &bearer, &gateway["qualification"], NEW_TOKENS);
+        let mut all = Vec::new();
+        let stopped_mid = k == 3;
+        let mut stop_ms = None;
+        if stopped_mid {
+            events_until(&r, 4, &mut all);
+            let stop_at = Instant::now();
+            let auth = format!(
+                "Authorization: Bearer {bearer}\r\nX-Mycelium-Session: {}\r\n",
+                r.token
+            );
+            let (status, body) = http(
+                addr,
+                "DELETE",
+                &format!("/v1/inference/{}", r.id),
+                &auth,
+                "",
+            );
+            assert_eq!(status, 202, "{body}");
+            events_until(&r, usize::MAX, &mut all);
+            stop_ms = Some(ms(stop_at));
+        } else {
+            events_until(&r, NEW_TOKENS + 1, &mut all);
+        }
+        r.reader.join().unwrap();
+        let tokens = token_ids(&all);
+        let ends = terminal(&all).unwrap();
+        let times: Vec<Instant> = all
+            .iter()
+            .filter(|(e, _)| e["type"] == "token")
+            .map(|(_, t)| *t)
+            .collect();
+        let ttft = times[0].duration_since(r.posted).as_secs_f64() * 1000.0;
+        let request_ms = all.last().unwrap().1.duration_since(r.posted).as_secs_f64() * 1000.0;
+        let decode = (times.len() > 1).then(|| {
+            (times.len() - 1) as f64
+                / times[times.len() - 1]
+                    .duration_since(times[0])
+                    .as_secs_f64()
+        });
+        if stopped_mid {
+            assert_eq!(ends["type"], "cancelled", "chat {k}: {all:?}");
+            assert_eq!(
+                tokens,
+                reference[..tokens.len()],
+                "chat {k}: pre-Stop tokens == oracle prefix"
+            );
+        } else {
+            assert_eq!(ends["type"], "completed", "chat {k}: {all:?}");
+            assert_eq!(
+                tokens,
+                reference[..NEW_TOKENS],
+                "chat {k}: tokens == oracle"
+            );
+        }
+        for pid in &pids {
+            assert!(alive(*pid), "chat {k}: worker {pid} still serves");
+        }
+        let row = json!({"chat":k,"ttft_ms":ttft,"request_ms":request_ms,"decode_tokens_per_s":decode,
+            "tokens":tokens.len(),"terminal":ends["type"],"stop_terminal_ms":stop_ms,
+            "worker_pids":pids,"worker_rss_kib":pids.iter().map(|p| rss_kib(i64::from(*p))).collect::<Vec<_>>(),
+            "member_rss_kib":member_pids.iter().map(|p| rss_kib(*p)).collect::<Vec<_>>(),
+            "load_before":load_before,"load_after":load()});
+        eprintln!("EP2 chat {row}");
+        chats.push(row);
+    }
+    let ttft = |k: usize| chats[k - 1]["ttft_ms"].as_f64().unwrap();
+    let staged = work["staged_ms"].as_f64().unwrap();
+    for k in 2..=5 {
+        assert!(
+            ttft(k) * 4.0 < staged,
+            "chat {k} starts far below the prepare a per-request epoch paid: ttft {} ms vs prepare {staged} ms",
+            ttft(k)
+        );
+    }
+    let stop_load = load();
+    let stopped = owner.call(json!({"command":"work_stop"}));
+    assert_eq!(stopped["state"], "stopped", "{stopped}");
+    assert_eq!(stopped["cleanup_error"], Value::Null, "{stopped}");
+    assert_eq!(stopped["epoch"], 1, "one epoch served the run: {stopped}");
+    for report in stopped["serve_reports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["node_id"].is_string())
+    {
+        assert_eq!(report["teardown"], "owner_closed", "{report}");
+        assert_eq!(report["requests_served"], 5, "{report}");
+    }
+    let gone_ms = wait_workers_gone(&pids);
+    eprintln!(
+        "EP2 stopped {stopped}; workers {pids:?} gone after {gone_ms:.1} ms; load={stop_load}"
+    );
+    if let Some(path) = std::env::var_os("EP2_WORK_EVIDENCE") {
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(&json!({"work":work,"load_at_work":load_work,"chats":chats,
+                "stopped":stopped,"stop_load":stop_load,"workers_gone_ms":gone_ms,
+                "member_pids":member_pids,"route_ready":false}))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    owner.close();
+    for mut m in spawned {
+        let end = Instant::now() + allowance();
+        let status = loop {
+            if let Some(status) = m.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < end,
+                "member did not exit after owner close"
+            );
+            std::thread::yield_now();
+        };
+        assert!(status.success(), "member exit {status:?}");
+    }
+    for pid in &pids {
+        assert!(!alive(*pid), "no worker left: {pid}");
+    }
+    drop(root);
+    eprintln!("EP2 owner work port total elapsed={:?}", began.elapsed());
+}

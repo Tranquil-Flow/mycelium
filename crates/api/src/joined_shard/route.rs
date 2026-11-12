@@ -12,6 +12,13 @@ use super::*;
 use protocol::router_wire;
 
 pub const ROUTE: &str = "mycelium.joined_route.v1";
+/// Class A, additive (lane EP1, ruling U4): the SAME fields and signature as
+/// [`ROUTE`], but ONE epoch serves many requests, one at a time: each member
+/// resets its stage session after a request-scoped PathCancellation and keeps
+/// serving until the owner closes the epoch, the serve operation ends or the
+/// signed `expires_at` passes. A member built before EP1 opens only [`ROUTE`]
+/// (its [`verify_member`]), so it refuses a v2 route: mixed builds fail closed.
+pub const ROUTE_V2: &str = "mycelium.joined_route.v2";
 pub const SCOPE: &str = "loopback_two_node_qualified";
 const FIELDS: &[&str] = &[
     "protocol",
@@ -60,12 +67,90 @@ pub fn issue(
     stages: &[native::Admitted],
     now: f64,
 ) -> Result<Value> {
-    if stages.len() < 2 || owner_endpoint_id.parse::<iroh::EndpointId>().is_err() || epoch == 0 {
-        return Err(fail("joined_route_invalid"));
-    }
     let wall = budgets::BudgetId::MemberChosenWall
         .span(budgets::Entries::ZERO)
         .map_err(|_| fail("budget_unavailable"))?;
+    issue_until(
+        coordinator,
+        model,
+        deployment_id,
+        epoch,
+        owner_endpoint_id,
+        stages,
+        now,
+        now + wall.millis() as f64 / 1000.0,
+    )
+}
+/// [`issue`] with the route's expiry given by the caller: the owner's run passes
+/// its members' REAL worker wall counted from the run's publish step (PH3b S4a,
+/// demo_chain.py:896,1125-1164), so no route outlives the workers it names.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_until(
+    coordinator: &seed::Coordinator,
+    model: &Value,
+    deployment_id: &str,
+    epoch: u64,
+    owner_endpoint_id: &str,
+    stages: &[native::Admitted],
+    now: f64,
+    expires_at: f64,
+) -> Result<Value> {
+    issue_as(
+        ROUTE,
+        coordinator,
+        model,
+        deployment_id,
+        epoch,
+        owner_endpoint_id,
+        stages,
+        now,
+        expires_at,
+    )
+}
+/// [`issue_until`] for a multi-request epoch: the same checks and fields, the
+/// [`ROUTE_V2`] marker (lane EP1). The owner's run issues ONE such route per
+/// run; its expiry is the members' real worker wall from the publish step.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_epoch_until(
+    coordinator: &seed::Coordinator,
+    model: &Value,
+    deployment_id: &str,
+    epoch: u64,
+    owner_endpoint_id: &str,
+    stages: &[native::Admitted],
+    now: f64,
+    expires_at: f64,
+) -> Result<Value> {
+    issue_as(
+        ROUTE_V2,
+        coordinator,
+        model,
+        deployment_id,
+        epoch,
+        owner_endpoint_id,
+        stages,
+        now,
+        expires_at,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn issue_as(
+    protocol: &str,
+    coordinator: &seed::Coordinator,
+    model: &Value,
+    deployment_id: &str,
+    epoch: u64,
+    owner_endpoint_id: &str,
+    stages: &[native::Admitted],
+    now: f64,
+    expires_at: f64,
+) -> Result<Value> {
+    if stages.len() < 2 || owner_endpoint_id.parse::<iroh::EndpointId>().is_err() || epoch == 0 {
+        return Err(fail("joined_route_invalid"));
+    }
+    if !expires_at.is_finite() || expires_at <= now {
+        return Err(fail("joined_route_expired"));
+    }
     let mut rows = Vec::new();
     let mut next = 0;
     let mut nodes = std::collections::BTreeSet::new();
@@ -101,15 +186,24 @@ pub fn issue(
     }
     signed(
         coordinator.signer(),
-        json!({"protocol":ROUTE,"swarm_id":coordinator.swarm_id(),"deployment_id":deployment_id,
+        json!({"protocol":protocol,"swarm_id":coordinator.swarm_id(),"deployment_id":deployment_id,
         "deployment_epoch":epoch,"topology_version":epoch,"model_id":model["model_id"],
         "resolved_commit":model["resolved_commit"],"manifest_digest":model["manifest_digest"],
         "owner_endpoint_id":owner_endpoint_id,"stages":rows,"issued_at":now,
-        "expires_at":now + wall.millis() as f64 / 1000.0,"route_ready":false,"scope":SCOPE}),
+        "expires_at":expires_at,"route_ready":false,"scope":SCOPE}),
     )
 }
-fn checked(route: &Value, key_digest: &str, now: f64) -> Result<Value> {
-    let message = open(route, ROUTE, key_digest)?;
+/// Open and check a route envelope as one of `protocols`. A message naming another protocol
+/// is opened as the FIRST one, so it fails exactly as the v1-only check does.
+fn checked_as(route: &Value, key_digest: &str, now: f64, protocols: &[&str]) -> Result<Value> {
+    let protocol = match route["message"]["protocol"].as_str() {
+        Some(named) if protocols.contains(&named) => named,
+        _ => protocols
+            .first()
+            .copied()
+            .ok_or(fail("joined_route_invalid"))?,
+    };
+    let message = open(route, protocol, key_digest)?;
     exact(message, FIELDS)?;
     let stages = message["stages"]
         .as_array()
@@ -133,7 +227,12 @@ fn checked(route: &Value, key_digest: &str, now: f64) -> Result<Value> {
 }
 /// Owner-side re-verification: seed signature plus every stage still current.
 pub fn verify_owner(coordinator: &seed::Coordinator, route: &Value, now: f64) -> Result<Value> {
-    let message = checked(route, &coordinator.signer().verification_key_digest(), now)?;
+    let message = checked_as(
+        route,
+        &coordinator.signer().verification_key_digest(),
+        now,
+        &[ROUTE, ROUTE_V2],
+    )?;
     for s in message["stages"].as_array().into_iter().flatten() {
         current(coordinator, &s["member"])?;
     }
@@ -141,6 +240,9 @@ pub fn verify_owner(coordinator: &seed::Coordinator, route: &Value, now: f64) ->
 }
 /// Member-side: seed-signed, names THIS live member with its own held offer and
 /// its own currently resident proof. Returns the stage index and message.
+///
+/// This is the member check of every build before lane EP1, unchanged: it
+/// opens only [`ROUTE`], so such a member refuses a [`ROUTE_V2`] route.
 pub fn verify_member(
     route: &Value,
     member: &Value,
@@ -148,7 +250,32 @@ pub fn verify_member(
     proof_digest: &str,
     now: f64,
 ) -> Result<(usize, Value)> {
-    let message = checked(route, text(member, "seed_key_digest")?, now)?;
+    verify_member_as(route, member, offer, proof_digest, now, &[ROUTE])
+}
+/// [`verify_member`] of a member that also serves multi-request epochs
+/// ([`ROUTE_V2`], lane EP1).
+pub fn verify_member_epoch(
+    route: &Value,
+    member: &Value,
+    offer: &Value,
+    proof_digest: &str,
+    now: f64,
+) -> Result<(usize, Value)> {
+    verify_member_as(route, member, offer, proof_digest, now, &[ROUTE, ROUTE_V2])
+}
+/// A verified route message that serves many requests (`ROUTE_V2`).
+pub fn multi_request(message: &Value) -> bool {
+    message["protocol"] == ROUTE_V2
+}
+fn verify_member_as(
+    route: &Value,
+    member: &Value,
+    offer: &Value,
+    proof_digest: &str,
+    now: f64,
+    protocols: &[&str],
+) -> Result<(usize, Value)> {
+    let message = checked_as(route, text(member, "seed_key_digest")?, now, protocols)?;
     let offer_digest = digest(offer)?;
     let index = message["stages"]
         .as_array()

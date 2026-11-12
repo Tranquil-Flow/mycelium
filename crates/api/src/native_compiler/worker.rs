@@ -255,6 +255,38 @@ impl Worker {
     pub(crate) fn close(mut self) -> Result<Value> {
         self.close_in_place()
     }
+    /// Reset the prepared worker's stage session between requests of one
+    /// route epoch (private worker-link `session_reset_v1`, lane EP0). The
+    /// worker's OWN cancel flag governs this exchange, so a route's request
+    /// cancellation can never interrupt it. Returns the worker's session object
+    /// only when its reply has exactly the contract's shape and reports no
+    /// residue (active bytes back at or below the post-prepare baseline).
+    pub(crate) fn reset_session(&mut self, deadline: Instant) -> Result<Value> {
+        use stage_contract::native_session as contract;
+        let (reply, body) =
+            self.request_until(&json!({"command":contract::COMMAND}), &[], deadline)?;
+        let exact = |v: &Value, fields: &[&str]| {
+            v.as_object().is_some_and(|o| {
+                o.len() == fields.len() && fields.iter().all(|k| o.contains_key(*k))
+            })
+        };
+        let session = &reply["session"];
+        let within = matches!(
+            (session["active_bytes"].as_u64(), session["baseline_bytes"].as_u64()),
+            (Some(active), Some(baseline)) if active <= baseline
+        );
+        if !body.is_empty()
+            || !exact(&reply, &["ok", "session"])
+            || reply["ok"] != true
+            || !exact(session, contract::REPLY_FIELDS)
+            || session["protocol"] != contract::REPLY_PROTOCOL
+            || session["state_generation"].as_u64().is_none()
+            || !within
+        {
+            return Err(Error("native_session_reset_invalid"));
+        }
+        Ok(session.clone())
+    }
     /// Graceful close that leaves the worker owned on failure, so the caller can
     /// still kill and reap the exact child.
     pub(crate) fn close_in_place(&mut self) -> Result<Value> {

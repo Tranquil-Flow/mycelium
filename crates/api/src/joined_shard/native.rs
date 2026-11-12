@@ -452,6 +452,31 @@ impl NativeShard {
         self.cleanup_proven = true;
         Ok(stats)
     }
+    /// Release one request's session state between requests of a multi-request
+    /// route epoch (worker `session_reset_v1`; lane EP0). It is one command
+    /// against the consent's `max_commands` and runs inside the consent wall
+    /// counted from the FIRST prepare, like a step; the worker's own cancel
+    /// flag governs it, so a route's request cancellation never interrupts it.
+    /// Weights and the worker process stay; a failure leaves the worker owned
+    /// for `close`/`abort`.
+    pub fn reset(&mut self, current: &dyn Fn() -> Result<Value>) -> Result<Value> {
+        self.check(current)?;
+        self.remaining -= 1;
+        let end = self.started.ok_or(fail("joined_native_not_prepared"))? + self.wall;
+        // Part of the request's close: the owner waits RouterClose for the ACK.
+        let close = budgets::BudgetId::RouterClose
+            .span(budgets::Entries::ZERO)
+            .map_err(|_| fail("budget_unavailable"))?;
+        let deadline = (Instant::now() + std::time::Duration::from_millis(close.millis())).min(end);
+        let session = self
+            .worker
+            .as_mut()
+            .ok_or(fail("joined_native_not_prepared"))?
+            .reset_session(deadline)
+            .map_err(native)?;
+        self.check(current)?;
+        Ok(session)
+    }
     /// After an interrupted step the socket framing is not reusable: kill and
     /// reap the exact owned child. Cleanup is proven only by the OS exit report;
     /// the evidence says `context_closed:false`, never a graceful close.
@@ -463,6 +488,14 @@ impl NativeShard {
         let evidence = worker.kill_and_reap().map_err(native)?;
         self.cleanup_proven = true;
         Ok(evidence)
+    }
+    /// Non-consuming liveness (lane EPF, REVIEW-laneEP R1): the same check
+    /// every step and reset runs first (membership current, consent granted
+    /// and unchanged, the wall from the first prepare and the command
+    /// allowance not spent), without spending a command. A serving v2 epoch
+    /// runs it on every loop pass, so idle traffic cannot outlive the consent.
+    pub fn live(&self, current: &dyn Fn() -> Result<Value>) -> Result<()> {
+        self.check(current)
     }
     pub fn worker_pid(&self) -> Option<u32> {
         self.worker.as_ref().and_then(|w| w.pid().ok())
