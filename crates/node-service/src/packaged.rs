@@ -512,7 +512,49 @@ pub fn core_with_run(
         run,
     )
 }
-/// The core and cleanup for the window, from the state root.
+/// Bind the current installed executable to the entry already checked by bundle
+/// admission. Expected bytes come from that startup manifest, never a spawn-time
+/// measurement. The locally installed app is the trust root, not a publisher pin.
+pub fn admitted_native_program(
+    verified: &desktop::package::VerifiedBundle,
+    entry: &desktop::package::Entry,
+    executable: &Path,
+) -> Result<api::native_compiler::NativeProgram, String> {
+    if entry.kind != desktop::package::Kind::Executable
+        || entry.path != "Contents/MacOS/mycelium"
+        || executable != verified.executable()
+    {
+        return Err("native_executable_admission_mismatch".into());
+    }
+    api::native_compiler::NativeProgram {
+        binary: executable.into(),
+        expected: api::compiled_handoff::Pin {
+            bytes: entry.bytes,
+            sha256: entry.sha256.clone(),
+        },
+    }
+    .admit(&|| false)
+    .map_err(|error| error.0.into())
+}
+
+/// Production entrypoint after bundle admission, with explicit native identity.
+pub fn core_with_native_program(
+    state_root: &Path,
+    native_program: api::native_compiler::NativeProgram,
+) -> Result<(Arc<dyn Core>, AppCleanup), String> {
+    compose(
+        state_root,
+        ModelSource::hub(state_root.to_owned()),
+        NetworkConfig::default(),
+        RunConfig {
+            native_program: Some(native_program),
+            ..RunConfig::default()
+        },
+    )
+}
+
+/// The core and cleanup for the window, from the state root. No native compiler
+/// program is available unless the admitted executable entrypoint supplies it.
 pub fn core(state_root: &Path) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     compose(
         state_root,

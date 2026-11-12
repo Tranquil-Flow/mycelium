@@ -428,7 +428,7 @@ impl PackagedChainPorts {
     fn new(
         host: &PackagedRun,
         double: Option<&ObserveTestDouble>,
-        _native_program: Option<api::native_compiler::NativeProgram>,
+        native_program: Option<api::native_compiler::NativeProgram>,
     ) -> Self {
         let (observation, compiler) = match double {
             None => {
@@ -448,7 +448,7 @@ impl PackagedChainPorts {
                 (Observe::TestDouble(observation), compiler)
             }
         };
-        let compiler = Arc::new(Mutex::new(compiler));
+        let compiler = Arc::new(Mutex::new(compiler.with_native_program(native_program)));
         lock(&host.custody).compiler = Some(Arc::downgrade(&compiler));
         let ports = OwnerPorts::new(host.clone());
         Self {

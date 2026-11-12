@@ -176,6 +176,7 @@ pub struct Compiler<H: ChainHost> {
     pub qualified: Option<crate::native_compiler::Qualified>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     identity: Option<(String, String)>,
+    native_program: crate::native_compiler::ProgramSelection,
 }
 impl<H: ChainHost> Compiler<H> {
     pub fn new(core: H::Weak, observation: Observation<H>) -> Self {
@@ -195,7 +196,27 @@ impl<H: ChainHost> Compiler<H> {
             qualified: None,
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             identity: None,
+            native_program: crate::native_compiler::ProgramSelection::Environment,
         }
+    }
+    /// Packaged composition supplies the identity captured by startup admission.
+    /// None disables the producer explicitly. It never enables environment lookup.
+    /// Admission errors remain visible through the ordinary compile port.
+    pub fn with_native_program(
+        mut self,
+        program: Option<crate::native_compiler::NativeProgram>,
+    ) -> Self {
+        let admitted = program
+            .map(|program| program.admit(&|| self.cancel.load(std::sync::atomic::Ordering::SeqCst)))
+            .transpose();
+        self.native_program = match admitted {
+            Ok(program) => crate::native_compiler::ProgramSelection::Explicit(program),
+            Err(error) => {
+                self.failure = Some(failed(error.0));
+                crate::native_compiler::ProgramSelection::Explicit(None)
+            }
+        };
+        self
     }
     fn host(&self) -> Result<H, PortError> {
         H::upgrade(&self.core).ok_or_else(|| failed("compiler_stopped"))
@@ -514,6 +535,7 @@ impl<H: ChainHost> CompilePort for Compiler<H> {
         let core = self.core.clone();
         let cancel = self.cancel.clone();
         let request = request.clone();
+        let native_program = self.native_program.clone();
         let worker = std::thread::Builder::new()
             .name("chain-compiler-inputs".into())
             .spawn(move || {
@@ -581,11 +603,12 @@ impl<H: ChainHost> CompilePort for Compiler<H> {
                         )
                     })
                 };
-                let qualified = crate::native_compiler::build(
+                let qualified = crate::native_compiler::build_selected(
                     &artifact,
                     seed.coordinator.signer(),
                     &current,
                     cancel.clone(),
+                    &native_program,
                 )
                 .map_err(|e| failed(e.0))?;
                 artifact.validate_members(&check()?, now())?;
