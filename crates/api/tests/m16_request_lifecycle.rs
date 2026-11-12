@@ -134,6 +134,8 @@ struct Control {
     clean: bool,
     refuse: bool,
     fail_start: bool,
+    /// The code the executor fails with on its second poll (after one token), if any.
+    fail_mid_answer: Option<&'static str>,
     cleanup_cancels: Vec<bool>,
     cleanup_requests: Vec<String>,
     owner_refusals: BTreeMap<String, &'static str>,
@@ -152,6 +154,11 @@ impl Executor for Controlled {
     fn poll(&mut self, _: &str) -> Result<Execution, PublicError> {
         let mut c = self.0.lock().unwrap();
         c.polls += 1;
+        if c.polls == 2
+            && let Some(code) = c.fail_mid_answer
+        {
+            return Err(PublicError::new(503, code));
+        }
         Ok(if c.polls == 1 {
             Execution::Token {
                 token_id: 9,
@@ -759,4 +766,95 @@ fn loopback_http_admission_stream_and_cancel_use_the_production_adapter() {
     );
     assert_eq!(s.placement_status().unwrap(), baseline);
     assert_eq!(c.lock().unwrap().dispatched[0].context.request_id, id);
+}
+
+/// Ruling 23 (M4-WORKPLAN, 11 Nov 16:06): the SHIPPED v0.1.4 app does not recover a chat whose answer
+/// fails mid-way. It serves through `run_registry_server` (`mycelium_a13_macos/serving.py:734-736`), whose
+/// registry builds every `LiveRouterPort` without a recovery authority (`mycelium_live/registry.py:153-167`),
+/// so `RECOVERY_REQUIRED` cannot occur (`router_port.py:1114-1120`): the request ends `failed` with the
+/// router's code, the route's capacity is free again, the registry has no recovery projection
+/// (`/api/v1/recovery/status` answers unavailable, `swarm_live.py:96-121`) and the owner simply starts
+/// again. v0.2 matches it; recovery with a successor is v0.3 (plans/RC-PLAN.md). This pins that failure
+/// path at the request service of the joined route: a change that adds a silent recovery (a second
+/// dispatch, a relabelled or delayed terminal, a recovery projection) fails here.
+#[test]
+fn an_answer_that_fails_mid_way_fails_cleanly_with_its_code_and_the_next_request_is_served() {
+    const DIED: &str = "joined_route_stage_died";
+    let (s, c, _) = fixture();
+    let baseline = s.placement_status().unwrap();
+    c.lock().unwrap().fail_mid_answer = Some(DIED);
+    let a = s.submit(document()).unwrap();
+    s.tick().unwrap(); // dispatch
+    s.tick().unwrap(); // one token
+    s.tick().unwrap(); // the executor fails: cleanup with Stop
+    assert_eq!(s.terminal(&a.request_id).unwrap(), None);
+    c.lock().unwrap().clean = true;
+    s.tick().unwrap();
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("failed")
+    );
+    for _ in 0..3 {
+        s.tick().unwrap();
+    }
+    {
+        let control = c.lock().unwrap();
+        assert_eq!(
+            control.dispatched.len(),
+            1,
+            "a failed answer was dispatched again (recovery)"
+        );
+        assert_eq!(control.cleanup_cancels, vec![true]);
+        assert_eq!(control.cleanup_requests, vec![a.request_id.clone()]);
+    }
+    // The route keeps nothing for the failed request.
+    assert!(s.reservations(&a.request_id).unwrap().is_empty());
+    assert_eq!(s.placement_status().unwrap(), baseline);
+    // The member saw the one token, then the failure with the route's own code; nothing follows it.
+    let mut stream = s
+        .subscribe(&a.request_id, None, Some(&a.session_token))
+        .unwrap();
+    let mut kinds = Vec::new();
+    while let Some(e) = stream.next().unwrap() {
+        s.validate_event(&e).unwrap();
+        stream.ack(e["sequence"].as_u64().unwrap()).unwrap();
+        kinds.push(e["type"].as_str().unwrap().to_owned());
+        if e["type"] == "failed" {
+            assert_eq!(e["code"], DIED, "{e}");
+        }
+    }
+    stream.close().unwrap();
+    assert_eq!(
+        kinds,
+        ["accepted", "lifecycle", "token", "lifecycle", "failed"],
+        "the failed answer's events"
+    );
+    // No recovery projection exists, as on the shipped app's registry.
+    let response = http(s.clone(), "GET", "/v1/recovery/status", None, "");
+    assert!(
+        response.starts_with("HTTP/1.1 503"),
+        "recovery status: {response}"
+    );
+    assert!(response.contains("m16_recovery_unavailable"), "{response}");
+    // Start again: the next request is admitted, dispatched once and completes.
+    {
+        let mut control = c.lock().unwrap();
+        control.fail_mid_answer = None;
+        control.polls = 0;
+    }
+    let b = s.submit(document()).unwrap();
+    for _ in 0..4 {
+        s.tick().unwrap();
+    }
+    assert_eq!(
+        s.terminal(&b.request_id).unwrap().as_deref(),
+        Some("completed")
+    );
+    assert_eq!(c.lock().unwrap().dispatched.len(), 2);
+    assert_eq!(
+        s.terminal(&a.request_id).unwrap().as_deref(),
+        Some("failed"),
+        "the failed request was relabelled"
+    );
+    assert_eq!(s.placement_status().unwrap(), baseline);
 }
