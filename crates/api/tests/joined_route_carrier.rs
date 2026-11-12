@@ -2855,6 +2855,8 @@ struct Raw<'a> {
     cancel: Box<dyn FnMut(&str) -> bool + 'a>,
     /// The PREFILL of this request (data link): ACKed (queued for compute)?
     prefill: Box<dyn FnMut(&str) -> bool + 'a>,
+    /// EP2H: arbitrary request id and token index, including a DECODE before admission.
+    hop: Box<dyn FnMut(&str, u64) -> bool + 'a>,
     /// EPF2: a PathCancellation of this request sent on the DATA link (the
     /// member's data receiver accepts one too): ACKed?
     cancel_on_data: Box<dyn FnMut(&str) -> bool + 'a>,
@@ -3003,6 +3005,16 @@ fn raw_owner(
                 )
                 .unwrap();
                 data_send(frame)
+            }),
+            hop: Box::new(|id, t| {
+                data_send(
+                    protocol::router_wire::encode_frame(
+                        "HopHeader",
+                        &route::hop(message, &raw_path(id), t, 0).unwrap(),
+                        &route::entry_payload(&[5]).unwrap(),
+                    )
+                    .unwrap(),
+                )
             }),
             cancel_on_data: Box::new(|id| {
                 data_send(
@@ -3436,6 +3448,43 @@ fn a_prefill_of_an_overlong_request_id_is_refused_before_it_runs() {
     assert_eq!(report["failure"], "route_request_invalid", "{report}");
     assert_eq!(report["requests_served"], 0, "{report}");
     assert_eq!(events, [("close", 0)]);
+}
+
+// ---- EP2H C2: actual receive/ACK boundary, not a claim of retained tombstones.
+#[test]
+fn ep2h_overlong_decode_id_is_refused_before_ack() {
+    let began = Instant::now();
+    let mut acked = false;
+    let (report, events) = raw_owner(span(B::MemberChosenWall), Script::default(), None, |_, _, raw| {
+        acked = (raw.hop)(&"a".repeat(129), 1);
+        // Legitimate cleanup still works; join all owners before the assertion.
+        assert!((raw.cancel)("route-7-0"));
+    });
+    eprintln!("EP2H_DECODE acked={acked} elapsed={:?} report={report} events={events:?}", began.elapsed());
+    assert!(!acked, "129-byte v2 DECODE was ACKed at the receive boundary");
+    assert_eq!(events, [("close", 0)], "no compute executed");
+}
+
+#[test]
+fn ep2h_overlong_cancel_after_release_is_refused_before_ack() {
+    let began = Instant::now();
+    let mut acked = false;
+    let (report, events) = raw_owner(span(B::MemberChosenWall), Script::default(), None, |_, entry, raw| {
+        assert!(!(raw.prefill)(&"a".repeat(129)));
+        let end = Instant::now() + span(B::RouterClose);
+        while entry.released().is_none() && Instant::now() < end {
+            std::thread::yield_now();
+        }
+        assert!(entry.released().is_some(), "compute release established before cancellation");
+        acked = (raw.cancel)(&"a".repeat(129));
+        if !acked {
+            // A valid request cleanup is still permitted after the refusal.
+            assert!((raw.cancel)("route-7-0"));
+        }
+    });
+    eprintln!("EP2H_CANCEL_RELEASED acked={acked} elapsed={:?} report={report} events={events:?}", began.elapsed());
+    assert!(!acked, "129-byte v2 cancellation was ACKed after compute release");
+    assert_eq!(events, [("close", 0)], "no compute executed");
 }
 
 // ---- EPF2 F10 (REVIEW-laneEPF R1 residue): one loop pass of a v2 member
