@@ -79,6 +79,10 @@ struct Script {
     reset_gate: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
     /// EP1: every session reset fails (the compute cannot release its state).
     reset_fails: bool,
+    /// EPF: the member's own consent wall (its liveness refuses from then on).
+    consent_wall: Option<Instant>,
+    /// EPF: set = the member's standing consent changed (liveness refuses).
+    consent_changed: Option<Arc<AtomicBool>>,
 }
 struct Controlled {
     offer: Value,
@@ -162,6 +166,25 @@ impl StageCompute for Controlled {
         self.position = 0;
         self.log.lock().unwrap().events.push(("reset", 0));
         Ok(json!({"controlled_reset":true}))
+    }
+    fn live(&self, current: serve::Current<'_>) -> Result<(), Error> {
+        current()?;
+        if self
+            .script
+            .consent_wall
+            .is_some_and(|w| Instant::now() >= w)
+        {
+            return Err(Error("joined_native_consent_exhausted"));
+        }
+        if self
+            .script
+            .consent_changed
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::SeqCst))
+        {
+            return Err(Error("joined_native_consent_changed"));
+        }
+        Ok(())
     }
 }
 struct Text;
@@ -2559,7 +2582,19 @@ fn a_member_ends_its_epoch_at_the_signed_route_expiry() {
     );
     assert_eq!(r.chat(4).0, "completed");
     let members = std::mem::take(&mut r.members);
+    // Bounded (REVIEW-laneEP F6, M4 hung to the 600 s member deadline): each
+    // member must have ended by itself by the expiry plus one loop pass.
+    let left = r.message["expires_at"].as_f64().unwrap() - app_host::now();
+    let end = Instant::now() + Duration::from_secs_f64(left.max(0.0)) + span(B::RouterClose);
     for m in members {
+        while !m.thread.is_finished() && Instant::now() < end {
+            std::thread::sleep(span(B::OwnerPoll) / 4);
+        }
+        assert!(
+            m.thread.is_finished(),
+            "a member still serves {:?} past the signed expiry",
+            span(B::RouterClose)
+        );
         let report = m.thread.join().unwrap().unwrap();
         assert_eq!(report["teardown"], "route_expired", "{report}");
         assert_eq!(report["native"]["graceful"], true, "{report}");
@@ -2574,4 +2609,349 @@ fn a_member_ends_its_epoch_at_the_signed_route_expiry() {
         );
     }
     r.finish();
+}
+
+// ---- EPF (REVIEW-laneEP R1): a member's v2 serve ends at its own bounds
+// whatever the owner sends. v0.1.4 ends the member's worker at its consented
+// wall by a timer and checks its membership every 0.25 s, independent of the
+// traffic: DemoApp (app.py:505) -> /api/work/accept (app.py:1478-1500) ->
+// work_acceptance.accept_work (:54-66) -> TargetApplication.start_work
+// (target_app.py:172) -> _start_offer (:189-227) -> prepare_runtime
+// (:240-263) -> ManagedTargetRuntime (managed_runtime.py:117) -> _make_worker
+// (:196) -> ManagedWorker (:227) -> start: _arm_deadline (worker.py:1063,
+// :985-1000) -> _expire (:1453-1457); _watch (:1066, :1459) -> _check
+// (:800-818: membership current, wall).
+
+/// A raw owner's operations on ONE member's real v2 stage server.
+struct Raw<'a> {
+    /// A request-scoped PathCancellation of this request (control link): ACKed?
+    cancel: Box<dyn FnMut(&str) -> bool + 'a>,
+    /// The PREFILL of this request (data link): ACKed (queued for compute)?
+    prefill: Box<dyn FnMut(&str) -> bool + 'a>,
+    /// Take the member's forwarded stage output and ACK it.
+    forwarded: Box<dyn FnMut() -> bool + 'a>,
+}
+fn raw_path(request_id: &str) -> route::Path {
+    route::Path {
+        request_id: request_id.into(),
+        path_id: format!("path-{request_id}"),
+        path_attempt: 0,
+    }
+}
+fn raw_send(
+    t: &mut impl transport::Transport,
+    clock: &HostClock,
+    peer: transport::ConnectionFence,
+    id: u128,
+    payload: Vec<u8>,
+) -> bool {
+    let deadline = clock
+        .monotonic()
+        .checked_add(B::RouterClose.span(Entries::ZERO).unwrap())
+        .unwrap();
+    transport::exchange(
+        t,
+        &transport::Exchange {
+            peer,
+            channel: transport::Channel::Router,
+            message_id: id.to_be_bytes(),
+            payload,
+            deadline,
+            maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
+        },
+        clock,
+    )
+    .is_ok()
+}
+/// Stage 0 of a v2 route living `lifetime` from now, served by the REAL member
+/// stage server (controlled compute; its member row stops being current once
+/// `revoked` is set); a raw owner (test-held endpoint and its two connections)
+/// runs `body`, then closes. Returns the member's report and compute log.
+fn raw_owner(
+    lifetime: Duration,
+    script: Script,
+    revoked: Option<Arc<AtomicBool>>,
+    body: impl FnOnce(&Value, &Member, &mut Raw<'_>),
+) -> (Value, Vec<(&'static str, u64)>) {
+    let seed = Identity::from_secret("test-seed", &[7; 32]).unwrap();
+    let rows: Vec<Value> = ["node-a", "node-b"]
+        .iter()
+        .map(|n| {
+            json!({"node_id":n,"generation":1,"swarm_id":"swarm",
+            "seed_key_digest":seed.verification_key_digest()})
+        })
+        .collect();
+    let offers: Vec<Value> = (0..2).map(|i| json!({"controlled_offer":i})).collect();
+    let row = rows[0].clone();
+    let live: Live = Arc::new(move || match &revoked {
+        Some(r) if r.load(Ordering::SeqCst) => Err(Error("joined_shard_member_changed")),
+        _ => Ok(row.clone()),
+    });
+    let entry = member_at(
+        Bind::Loopback,
+        live,
+        offers[0].clone(),
+        false,
+        script,
+        proof(0),
+    );
+    let owner = iroh::SecretKey::generate();
+    let other = iroh::SecretKey::generate().public();
+    let (message, envelope) = signed_route_as(
+        route::ROUTE_V2,
+        lifetime,
+        &seed,
+        "swarm",
+        &rows,
+        &offers,
+        &[entry.endpoint, other],
+        &owner,
+    );
+    entry.route.send(envelope).unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = HostClock::default();
+    let until = |id: B| {
+        clock
+            .monotonic()
+            .checked_add(id.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
+    let mut host =
+        LoopbackHost::bind_with_secret(&rt, &clock, until(B::WorkerStartup), owner).unwrap();
+    let addr = iroh::EndpointAddr::new(entry.endpoint).with_ip_addr(entry.socket);
+    let channel = transport::Channel::Router;
+    let data = host
+        .connect_channel(&addr, channel, &clock, until(B::WorkerStartup))
+        .unwrap();
+    let control = host
+        .connect_channel(&addr, channel, &clock, until(B::WorkerStartup))
+        .unwrap();
+    let fence = transport::ConnectionFence {
+        endpoint_id: *entry.endpoint.as_bytes(),
+        local_generation: 7,
+        remote_generation: 1,
+    };
+    let current = move || fence;
+    let mut to_data = IrohTransport::new(data.clone(), &rt, &clock, fence, current).unwrap();
+    let mut from_data = RouterReceiver::new(data.clone(), &rt, &clock, fence, current).unwrap();
+    let mut to_control = IrohTransport::new(control.clone(), &rt, &clock, fence, current).unwrap();
+    let (mut data_ids, mut control_ids) = (0u128, 0u128);
+    {
+        let (message, clock) = (&message, &clock);
+        let mut raw = Raw {
+            cancel: Box::new(|id| {
+                let frame = protocol::router_wire::encode_frame(
+                    "PathCancellation",
+                    &route::cancellation(message, &raw_path(id)),
+                    &[],
+                )
+                .unwrap();
+                control_ids += 1;
+                raw_send(&mut to_control, clock, fence, control_ids - 1, frame)
+            }),
+            prefill: Box::new(|id| {
+                let frame = protocol::router_wire::encode_frame(
+                    "HopHeader",
+                    &route::hop(message, &raw_path(id), 0, 0).unwrap(),
+                    &route::entry_payload(&(0..35).collect::<Vec<u32>>()).unwrap(),
+                )
+                .unwrap();
+                data_ids += 1;
+                raw_send(&mut to_data, clock, fence, data_ids - 1, frame)
+            }),
+            forwarded: Box::new(|| {
+                from_data
+                    .receive(until(B::WorkerStartup))
+                    .and_then(|d| d.acknowledge())
+                    .is_ok()
+            }),
+        };
+        body(message, &entry, &mut raw);
+    }
+    data.close(0u32.into(), b"test_done");
+    control.close(0u32.into(), b"test_done");
+    let log = entry.log.clone();
+    let report = entry.thread.join().unwrap().unwrap();
+    host.close(&clock, until(B::RouterClose)).unwrap();
+    let events = log.lock().unwrap().events.clone();
+    (report, events)
+}
+/// When `expires_at` (wall seconds) falls on the monotonic clock.
+fn at_wall(expires_at: f64) -> Instant {
+    Instant::now() + Duration::from_secs_f64((expires_at - app_host::now()).max(0.0))
+}
+/// The review's chatter, paced: a PathCancellation of a request that never ran
+/// every quarter OwnerPoll (gaps below the member's idle poll), until one is
+/// refused or `stop` passes. Returns the ACK times and the first refusal.
+fn chatter(raw: &mut Raw<'_>, stop: Instant) -> (Vec<Instant>, Option<Instant>) {
+    let mut acked = Vec::new();
+    let mut n = 0u64;
+    while Instant::now() < stop {
+        let ok = (raw.cancel)(&format!("never-ran-{n}"));
+        n += 1;
+        if !ok {
+            return (acked, Some(Instant::now()));
+        }
+        acked.push(Instant::now());
+        std::thread::sleep(span(B::OwnerPoll) / 4);
+    }
+    (acked, None)
+}
+/// Assert the chatter stopped being ACKed at `bound` (at most one ACK whose
+/// check ran just before it) and was refused within one more loop pass.
+fn assert_ended_at(what: &str, bound: Instant, acked: &[Instant], refused: Option<Instant>) {
+    let late = acked.iter().filter(|t| **t > bound).count();
+    assert!(
+        late <= 1 && refused.is_some(),
+        "the member kept ACKing idle cancellations past {what}: {late} late of {} ACKs, \
+         refused {:?} after it",
+        acked.len(),
+        refused.map(|r| r.saturating_duration_since(bound))
+    );
+}
+
+/// REVIEW-laneEP R1, the reviewer's probe made a bounded test: an owner
+/// chattering idle PathCancellations (requests that never ran) cannot keep the
+/// member's serve and compute past the route's SIGNED expiry. The member ends
+/// by the expiry plus one loop pass, compute closed, and counts no request.
+#[test]
+fn idle_cancellations_cannot_keep_a_member_past_the_signed_expiry() {
+    let (report, events) = raw_owner(
+        span(B::RouterClose),
+        Script::default(),
+        None,
+        |message, _, raw| {
+            let expires = at_wall(message["expires_at"].as_f64().unwrap());
+            let (acked, refused) = chatter(raw, expires + span(B::RouterClose));
+            assert_ended_at("the signed expiry", expires, &acked, refused);
+        },
+    );
+    assert_eq!(report["teardown"], "route_expired", "{report}");
+    assert_eq!(report["native"]["graceful"], true, "{report}");
+    assert_eq!(report["requests_served"], 0, "{report}");
+    assert_eq!(events, [("close", 0)]);
+}
+
+/// REVIEW-laneEP R1: the member's OWN consent wall, earlier than the signed
+/// expiry, ends its serve the same way under the same chatter.
+#[test]
+fn idle_cancellations_cannot_keep_a_member_past_its_own_consent_wall() {
+    let wall = Instant::now() + span(B::RouterClose);
+    let script = Script {
+        consent_wall: Some(wall),
+        ..Script::default()
+    };
+    let (report, events) = raw_owner(span(B::MemberChosenWall), script, None, |_, _, raw| {
+        let (acked, refused) = chatter(raw, wall + span(B::RouterClose));
+        assert_ended_at("its consent wall", wall, &acked, refused);
+    });
+    assert_eq!(report["teardown"], "member_consent_ended", "{report}");
+    assert_eq!(
+        report["failure"], "joined_native_consent_exhausted",
+        "{report}"
+    );
+    assert_eq!(report["native"]["graceful"], true, "{report}");
+    assert_eq!(report["requests_served"], 0, "{report}");
+    assert_eq!(events, [("close", 0)]);
+}
+
+/// REVIEW-laneEP R1: an IDLE member (no traffic at all) whose membership stops
+/// being current, or whose standing consent changes, ends within one loop pass
+/// with its compute closed; it does not wait for the next request.
+#[test]
+fn an_idle_member_ends_when_its_membership_or_consent_changes() {
+    for (case, code) in [
+        ("membership", "joined_shard_member_changed"),
+        ("consent", "joined_native_consent_changed"),
+    ] {
+        let flag = Arc::new(AtomicBool::new(false));
+        let script = Script {
+            consent_changed: (case == "consent").then(|| flag.clone()),
+            ..Script::default()
+        };
+        let revoked = (case == "membership").then(|| flag.clone());
+        let (report, events) = raw_owner(
+            span(B::MemberChosenWall),
+            script,
+            revoked,
+            |_, entry, raw| {
+                assert!((raw.cancel)("never-ran-0"), "{case}: the epoch serves");
+                flag.store(true, Ordering::SeqCst);
+                let end = Instant::now() + span(B::RouterClose);
+                while !entry.thread.is_finished() && Instant::now() < end {
+                    std::thread::sleep(span(B::OwnerPoll) / 4);
+                }
+                assert!(
+                    entry.thread.is_finished(),
+                    "{case}: an idle member still serves {:?} after its {case} changed",
+                    span(B::RouterClose)
+                );
+            },
+        );
+        assert_eq!(
+            report["teardown"], "member_consent_ended",
+            "{case}: {report}"
+        );
+        assert_eq!(report["failure"], code, "{case}: {report}");
+        assert_eq!(report["native"]["graceful"], true, "{case}: {report}");
+        assert_eq!(events, [("close", 0)], "{case}");
+    }
+}
+
+/// REVIEW-laneEP R1: the served set and `requests_served` hold only requests
+/// the member admitted. An idle cancellation (a request that never ran here)
+/// is remembered as a tombstone and counted against the epoch's lifetime
+/// bound (`JoinedEpochMaxSessions`); past it, it is refused and the epoch ends
+/// with the compute closed (as the shipped relay refuses a pending
+/// cancellation once its table is full, relay.py:718-743).
+#[test]
+fn idle_cancellations_are_bounded_and_never_counted_as_served_requests() {
+    let capacity = usize::try_from(B::JoinedEpochMaxSessions.count().unwrap().get()).unwrap();
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            assert!((raw.prefill)("route-7-0"), "PREFILL queued");
+            assert!((raw.forwarded)(), "stage output forwarded");
+            assert!((raw.cancel)("route-7-0"), "the admitted request is reset");
+            let mut idle = 0;
+            while idle <= capacity && (raw.cancel)(&format!("never-ran-{idle}")) {
+                idle += 1;
+            }
+            assert_eq!(
+                idle,
+                capacity - 1,
+                "idle cancellations ACKed; the epoch's bound is {capacity} requests"
+            );
+        },
+    );
+    assert_eq!(report["requests_served"], 1, "{report}");
+    assert_eq!(report["failure"], "route_request_capacity", "{report}");
+    assert_eq!(events, [("step", 0), ("reset", 0), ("close", 0)]);
+}
+
+/// A request id the member saw only as an idle cancellation is settled there
+/// (the shipped relay's pending tombstone, relay.py:718-743, consumed by a
+/// later hop of that path, :1051): its PREFILL is refused, never reaches the
+/// compute, and is not a served request.
+#[test]
+fn a_prefill_of_an_idle_cancelled_request_is_refused() {
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            assert!((raw.cancel)("route-7-0"), "idle cancellation ACKed");
+            assert!((raw.prefill)("route-7-0"), "PREFILL queued");
+            assert!((raw.cancel)("route-7-0"), "the released compute is ACKed");
+        },
+    );
+    assert_eq!(report["failure"], "route_request_settled", "{report}");
+    assert_eq!(report["requests_served"], 0, "{report}");
+    assert_eq!(events, [("close", 0)]);
 }

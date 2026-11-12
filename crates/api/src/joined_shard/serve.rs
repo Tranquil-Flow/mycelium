@@ -68,6 +68,11 @@ pub trait StageCompute {
     fn reset(&mut self, _current: Current<'_>) -> Result<Value, Error> {
         Err(Error("joined_native_reset_unsupported"))
     }
+    /// The member's own consent, checked WITHOUT spending anything (lane
+    /// EPF, REVIEW-laneEP R1): membership current, consent granted and
+    /// unchanged, its wall (from the first prepare) and command allowance not
+    /// spent. A v2 serve checks it on every loop pass, whatever the traffic.
+    fn live(&self, current: Current<'_>) -> Result<(), Error>;
 }
 impl StageCompute for NativeShard {
     fn offer(&self) -> &Value {
@@ -94,6 +99,9 @@ impl StageCompute for NativeShard {
     }
     fn reset(&mut self, current: Current<'_>) -> Result<Value, Error> {
         NativeShard::reset(self, &|| current())
+    }
+    fn live(&self, current: Current<'_>) -> Result<(), Error> {
+        NativeShard::live(self, &|| current())
     }
 }
 /// Serving context: the member's carrier host and the operator operation bounds.
