@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Promoted from the independently executed S4CB2 owner-probes, with fault rescue.
+use super::*;
+use std::os::unix::fs::PermissionsExt;
+
+fn setup() -> (Fixture, PackagedChainPorts, RunState, Env) {
+    let mut f = Fixture::new();
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    seed.exchange
+        .set_owner_control(Some(OwnerControl::new(ports.work.owner.public())));
+    seed.exchange
+        .announce(Announce {
+            phase: "compile".into(),
+            run_id: Some("review-run".into()),
+            deployment_id: Some("review-dep".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    f.agent.tick(&f.member);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut state = RunState::new("review-run", "review-dep", owner_run::Reason::Start);
+    state.participants = vec![local.clone(), f.remote.clone()];
+    state.local_node = Some(local);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    (f, ports, state, Env { at: Instant::now() })
+}
+
+struct Rescue {
+    work: Work,
+    mode: Option<PathBuf>,
+}
+impl Drop for Rescue {
+    fn drop(&mut self) {
+        if let Some(path) = &self.mode
+            && let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        {
+            eprintln!("s4cb3_mode_rescue_failed:{e}");
+        }
+        if let Err(e) = self.work.teardown() {
+            eprintln!("s4cb3_owner_rescue_failed:{e}");
+        }
+    }
+}
+
+#[test]
+fn review_source_parent_substitution_must_refuse_real_transfer() {
+    let (f, mut ports, state, mut env) = setup();
+    let _rescue = Rescue {
+        work: ports.work.clone(),
+        mode: None,
+    };
+    let plan = f.plan(&state);
+    let source = f.root.join("stage-shards");
+    let escaped = f.root.join("outside-original-parent");
+    fs::rename(&source, &escaped).unwrap();
+    std::os::unix::fs::symlink(&escaped, &source).unwrap();
+    ports
+        .work
+        .compose(&state, plan, Arc::new(NoCodec), &mut env)
+        .unwrap();
+    let transferred = ports.work.node_slice_plans();
+    let flow = ports.work.workflow_state().unwrap();
+    let closed = ports.close_work();
+    println!(
+        "REVIEW_PARENT_SUBSTITUTION accepted={} transferred={} cleanup={closed:?}",
+        transferred.is_ok(),
+        flow["transferred"]
+    );
+    assert!(
+        transferred.is_err(),
+        "real shard source followed a substituted parent through its content alias"
+    );
+    closed.unwrap();
+}
+
+#[test]
+fn review_cleanup_failure_must_retain_retry_owner_and_not_become_success() {
+    let (f, mut ports, state, mut env) = setup();
+    let mut rescue = Rescue {
+        work: ports.work.clone(),
+        mode: None,
+    };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    ports.work.node_slice_plans().unwrap();
+    let runs = owner_ports::contributor_dir(&f.root.join("owner")).join("chain-runs");
+    let roots: Vec<_> = fs::read_dir(&runs)
+        .unwrap()
+        .map(|r| r.unwrap().path())
+        .filter(|p| p.join("stage-shards").is_dir())
+        .collect();
+    assert_eq!(roots.len(), 1);
+    let stage = roots[0].join("stage-shards");
+    rescue.mode = Some(stage.clone());
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o755)).unwrap();
+    let first = ports.close_work();
+    let retained = {
+        let resident = lock(&ports.work.resident);
+        resident.work.is_some() || resident.local.is_some()
+    };
+    let second = ports.close_work();
+    let bytes_remain = stage.is_dir();
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o700)).unwrap();
+    rescue.mode = None;
+    let settled = ports.close_work();
+    println!(
+        "REVIEW_CLEANUP first={first:?} second={second:?} retained={retained} bytes_remain={bytes_remain} settled={settled:?}"
+    );
+    assert!(first.is_err(), "fault must reach actual cleanup");
+    assert!(
+        second.is_err(),
+        "retry falsely reports successful cleanup with retained bytes and no retry owner"
+    );
+    assert!(retained, "cleanup debt lost its handles");
+    settled.unwrap();
+    assert!(
+        !stage.exists(),
+        "same production owner must release custody after fault restoration"
+    );
+    ports.close_work().unwrap();
+}
