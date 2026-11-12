@@ -207,6 +207,10 @@ pub trait Host: Send {
     fn membership_binding(&self) -> Option<crate::member::Binding> {
         None
     }
+    /// `self._auto_report(purpose)` (app.py:1138-1163): the joined Mac's signed capability report
+    /// to its owner, recorded as `last_report`; never fails the caller. A host without one sends
+    /// nothing.
+    fn auto_report(&mut self, _purpose: &str) {}
     /// `self.authority.accept_pairing(handoff)`.
     fn pair_accept(&mut self, _handoff: &Value) -> Result<Json, PublicError> {
         Err(PublicError::new(409, "action_not_completed"))
@@ -949,7 +953,9 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                     return Err(PublicError::new(400, "application_closed"));
                 }
                 // v0.1.4 never serves a refused installation state (app.py:595-611): every
-                // action but Quit answers the refusal before it can persist anything.
+                // action but Quit answers the refusal before it can persist any installation
+                // state (only the diagnostic last-action-error.private.json record is written,
+                // which Authority::load never reads).
                 if action != Quit
                     && let Some(code) = self.host.installation_refused()
                 {
@@ -1035,8 +1041,13 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                 }
                 self.inner.prepare(action, body)
             }
-            // The listing custody checks closed/role/shape itself (see Host::swarm_publish).
-            SwarmPublish | SwarmUnpublish => Ok(()),
+            // The listing custody checks closed/role/shape itself (see Host::swarm_publish),
+            // but not a refused installation state, which v0.1.4 never serves (app.py:595-611):
+            // that is answered here, before the custody can create its state in that folder.
+            SwarmPublish | SwarmUnpublish => match self.host.installation_refused() {
+                Some(code) if !self.host.closed() => Err(PublicError::new(409, code)),
+                _ => Ok(()),
+            },
             PairPreview => {
                 if self.host.closed() {
                     return Err(PublicError::new(400, "application_closed"));
@@ -1205,6 +1216,11 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
                     if self.host.owner() && self.host.local_contributor_retained() {
                         self.host.local_contributor_start()?;
                     }
+                }
+                // app.py:1641-1643: "Reconnect can be clicked while this member is still running.
+                // The owner's in-memory report inbox may have restarted alone."
+                if !self.host.owner() && self.host.membership_binding().is_some() {
+                    self.host.auto_report("periodic");
                 }
                 Ok(self.host.status_document())
             }

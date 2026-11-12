@@ -18,6 +18,13 @@ fn cases() -> Vec<Value> {
 fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap()
 }
+/// Owner ruling 25 (a ruling change, not a loosening): v0.2 is named `Mycelium`, v0.1.4 was
+/// `Mycelium A13 Demo`. The recorded oracle is not edited; its words are compared with the name
+/// swapped, and the swap must really happen in every refusal text it is applied to.
+fn renamed(oracle: &str) -> String {
+    assert!(oracle.contains("Mycelium A13 Demo"), "{oracle}");
+    oracle.replace("Mycelium A13 Demo", desktop::bundle::DISPLAY_NAME)
+}
 
 #[test]
 fn every_oracle_case_is_admitted_or_refused_alike() {
@@ -64,7 +71,7 @@ fn the_refusal_line_exit_code_and_alert_are_v014s_byte_for_byte() {
         assert_eq!(refusal.exit_code, 2, "{machine} {version:?}");
         assert_eq!(
             format!("{}\n", refusal.event),
-            s(launch, "stderr"),
+            renamed(s(launch, "stderr")),
             "{machine} {version:?}"
         );
         let calls = launch["osascript_calls"].as_array().unwrap();
@@ -78,7 +85,7 @@ fn the_refusal_line_exit_code_and_alert_are_v014s_byte_for_byte() {
         assert_eq!(&argv[..2], ["/usr/bin/osascript", "-e"]);
         assert_eq!(
             alert_script(&refusal.message),
-            argv[2],
+            renamed(argv[2]),
             "{machine} {version:?}"
         );
         // `--preflight` (a probe, not a Finder launch) never shows the dialog.
@@ -103,7 +110,7 @@ fn the_two_user_words_and_the_unknown_version_cap_are_the_oracles() {
     let old = platform_refusal("Darwin", "arm64", "14.5").unwrap();
     assert!(
         old.message
-            .starts_with("This Mac runs macOS 14.5. Mycelium A13 Demo needs macOS 26.0 or later.")
+            .starts_with("This Mac runs macOS 14.5. Mycelium needs macOS 26.0 or later.")
     );
     // v0.1.4 shows at most 16 characters of the version, else the word `unknown`.
     let long = platform_refusal("Darwin", "arm64", &format!("{}.0", "9".repeat(17))).unwrap();

@@ -12,6 +12,10 @@
 //! `compile {ranges}`, `transfer`, `prepare {tokens}`, `open {epoch}` ->
 //! `{gateway, bearer, qualification, worker_pids}`, `settle`, `leave {stage}`,
 //! `close`. Replies: `{ok:true,result}` or `{ok:false,code}`.
+//! The owner work port (`joined_owner::work::OwnerWork`, PH3b S4a) instead of
+//! transfer/prepare/open: `work {tokens, worker_wall_seconds}` (start serving,
+//! activate) -> workflow state with the run's ONE epoch gateway (every chat of
+//! the run on it, lane EP2); `work_stop` (teardown; member links come back).
 //!
 //! Rehearsal limits (named seams, not product claims): the swarm seed listens
 //! on loopback and a bounded forwarder exposes it on the explicit LAN
@@ -23,13 +27,14 @@ use api::{
     app_host, compiler_inputs,
     joined_owner::{
         codec::NativeCodec,
-        epoch::{Carriers, Epoch},
+        epoch::Epoch,
         link::{self, MemberLink, Refusal, Stage},
         remote::RemoteMember,
-        source::{ShardSource, transfer},
+        source::ShardSource,
+        work::{self, Clocks, EpochStage, OwnerWork, Plan, SettleStage, WorkMember},
     },
-    joined_shard::{carrier, native, route},
-    m16_route::{Codec, RouteHost, StagePeer},
+    joined_shard::native,
+    m16_route::{Codec, RouteHost},
 };
 use budgets::{BudgetId as B, Entries};
 use runtime::iroh_host::LanPolicy;
@@ -213,7 +218,9 @@ impl Drop for Forwarder {
     }
 }
 struct Member {
-    link: RemoteMember,
+    link: Box<dyn MemberLink + Send>,
+    /// The link's `cancel_operation` (the work port interrupts with it).
+    cancel: work::Cancel,
     registration: Value,
     node_id: String,
     pid: u64,
@@ -240,6 +247,10 @@ struct Owner {
     challenges: native::Challenges,
     admitted: Vec<native::Admitted>,
     epoch: Option<Epoch>,
+    /// The owner work port while it runs (`work` .. `work_stop`), and the
+    /// handed-over members' local facts (node, pid, range) in stage order.
+    work: Option<OwnerWork>,
+    parked: Vec<(String, u64, [u64; 2])>,
     /// The last epoch's request host, kept for verified withdrawals.
     last_host: Option<Arc<RouteHost>>,
     wall: Duration,
@@ -278,7 +289,8 @@ impl Owner {
             .to_owned();
         let pid = status["pid"].as_u64().ok_or("member_status_invalid")?;
         self.members.push(Member {
-            link,
+            cancel: Arc::new(link.canceller()),
+            link: Box::new(link),
             registration,
             node_id: node_id.clone(),
             pid,
@@ -425,14 +437,14 @@ impl Owner {
         let mut out = Vec::new();
         for (i, m) in self.members.iter_mut().enumerate() {
             let began = Instant::now();
-            let done = transfer(
+            let done = work::transfer_stage(
                 &source,
                 &self.seed.coordinator,
-                &mut m.link,
+                m.link.as_mut(),
                 &m.registration,
+                &m.node_id,
+                &compiled.document,
                 &format!("b16-transfer-{i}"),
-                &compiled.document["node_files"][&m.node_id][0],
-                &compiled.document["node_slice_plans"][&m.node_id],
                 self.wall,
             )
             .map_err(code)?;
@@ -468,7 +480,7 @@ impl Owner {
             stages.push(Stage {
                 offer: m.offer.as_ref().ok_or("owner_not_transferred")?,
                 range: m.range,
-                member: &mut m.link,
+                member: m.link.as_mut(),
             });
         }
         self.admitted = link::prepare(
@@ -490,85 +502,33 @@ impl Owner {
         let compiled = self.compiled.as_ref().ok_or("owner_not_compiled")?;
         let model = json!({"model_id":MODEL_ID,"resolved_commit":RESOLVED_COMMIT,
             "manifest_digest":compiled.manifest_digest});
-        let owner = iroh::SecretKey::generate();
         let admitted = std::mem::take(&mut self.admitted);
-        let envelope = route::issue(
+        let mut stages = Vec::new();
+        for m in self.members.iter_mut() {
+            stages.push(EpochStage {
+                node_id: &m.node_id,
+                offer: m
+                    .offer
+                    .as_ref()
+                    .ok_or(api::compiler_inputs::Error("owner_not_transferred"))
+                    .map_err(|e| e.0.to_owned())?,
+                link: m.link.as_mut(),
+            });
+        }
+        let codec: Arc<dyn Codec> = self.codec.clone();
+        let opened = work::open_epoch(
             &self.seed.coordinator,
             &model,
             DEPLOYMENT,
             epoch,
-            &owner.public().to_string(),
             &admitted,
-            app_host::now(),
-        )
-        .map_err(|e| e.0.to_owned())?;
-        let mut addresses = Vec::new();
-        for m in self.members.iter_mut() {
-            addresses.push(
-                m.link
-                    .call(json!({"command":"carrier_address"}), self.wall)
-                    .map_err(code)?,
-            );
-        }
-        let carriers = match &self.lan {
-            Some((interface, policy)) => Carriers::Lan {
-                verified: self
-                    .members
-                    .iter()
-                    .zip(&addresses)
-                    .map(|(m, a)| {
-                        carrier::verify(
-                            &self.seed.coordinator,
-                            m.offer
-                                .as_ref()
-                                .ok_or(api::compiler_inputs::Error("owner_not_transferred"))?,
-                            &a["advert"],
-                            policy,
-                            app_host::now(),
-                        )
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(|e| e.0.to_owned())?,
-                interface: *interface,
-                policy: policy.clone(),
-            },
-            None => Carriers::Loopback(
-                self.members
-                    .iter()
-                    .zip(&addresses)
-                    .enumerate()
-                    .map(|(i, (m, a))| {
-                        Ok(StagePeer {
-                            node_id: m.node_id.clone(),
-                            endpoint: a["endpoint_id"]
-                                .as_str()
-                                .and_then(|e| e.parse().ok())
-                                .ok_or("carrier_address_invalid")?,
-                            socket: serde_json::from_value(a["socket"].clone())
-                                .map_err(|_| "carrier_address_invalid")?,
-                            generation: envelope["message"]["stages"][i]["member"]["generation"]
-                                .as_u64()
-                                .ok_or("route_invalid")?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?,
-            ),
-        };
-        // Deliver the signed route; each member serves until the epoch ends.
-        for m in self.members.iter_mut() {
-            m.link
-                .begin(json!({"command":"serve","route":envelope}))
-                .map_err(code)?;
-        }
-        let codec: Arc<dyn Codec> = self.codec.clone();
-        let opened = Epoch::open(
-            self.seed.coordinator.clone(),
-            envelope,
-            owner,
-            carriers,
+            &mut stages,
+            &self.lan,
             codec,
+            self.wall,
+            None,
         )
-        .map_err(|e| e.code.to_owned())?;
+        .map_err(code)?;
         let reply = json!({"gateway":opened.addr(),"bearer":opened.bearer(),
             "qualification":opened.qualification().map_err(|e| e.code.to_owned())?,
             "worker_pids":opened.worker_pids(),"route_ready":false});
@@ -581,54 +541,150 @@ impl Owner {
     /// epoch (threads joined, port freed).
     fn settle(&mut self) -> Result<Value> {
         let epoch = self.epoch.take().ok_or("owner_epoch_absent")?;
-        let mut seen = 0;
-        let end = Instant::now() + span(B::WorkerStartup)?;
-        while !epoch
-            .handle()
-            .state
-            .lock()
-            .map_err(|_| "carrier_state_poisoned")?
-            .teardown_finished
-        {
-            if Instant::now() >= end {
-                self.epoch = Some(epoch);
-                return Err("owner_epoch_not_settled".into());
-            }
-            seen = epoch.handle().wait(seen, span(B::OwnerPoll)?);
+        if let Err(e) = work::wait_settled(&epoch) {
+            self.epoch = Some(epoch);
+            return Err(code(e));
         }
-        let pids = epoch.worker_pids();
-        let mut reports = Vec::new();
-        for (m, pid) in self.members.iter_mut().zip(&pids) {
-            let report = m.link.finish(self.wall).map_err(code)?;
-            let close = Instant::now() + span(B::RouterClose)?;
-            loop {
-                let probe = m
-                    .link
-                    .call(json!({"command":"status","probe_pids":[pid]}), self.wall)
-                    .map_err(code)?;
-                if probe["probe_alive"][pid.to_string()] == false {
-                    break;
-                }
-                if Instant::now() >= close {
-                    return Err("member_worker_still_alive".into());
-                }
-            }
-            reports.push(
-                json!({"node_id":m.node_id,"ack_delivered":report["ack_delivered"],
-                "teardown":report["teardown"],"failure":report["failure"],"worker_gone":true}),
-            );
-        }
-        let acks: Vec<Option<f64>> = epoch
-            .handle()
-            .state
-            .lock()
-            .map_err(|_| "carrier_state_poisoned")?
-            .stages
-            .iter()
-            .map(|s| s.acknowledged_ms)
+        let mut stages: Vec<SettleStage<'_>> = self
+            .members
+            .iter_mut()
+            .map(|m| SettleStage {
+                node_id: &m.node_id,
+                link: m.link.as_mut(),
+            })
             .collect();
+        let (reports, acks) = work::settle_members(&epoch, &mut stages, self.wall).map_err(code)?;
         let refusals = epoch.close();
         Ok(json!({"reports":reports,"stage_ack_ms":acks,"pump_refusals":refusals}))
+    }
+    /// The owner work port over this run: consent + transfer + native prepare
+    /// per member (start serving), then activation (route -> serve -> epoch).
+    fn work(&mut self, request: &Value) -> Result<Value> {
+        if self.work.is_some() || self.epoch.is_some() || self.members.is_empty() {
+            return Err("owner_work_not_ready".into());
+        }
+        let tokens = request["tokens"].as_u64().ok_or("tokens_invalid")? as usize;
+        let wall = request["worker_wall_seconds"]
+            .as_u64()
+            .ok_or("worker_wall_invalid")?;
+        let compiled = self.compiled.as_ref().ok_or("owner_not_compiled")?;
+        let plan = Plan {
+            run_id: "b16-owner".into(),
+            deployment_id: DEPLOYMENT.into(),
+            model: json!({"model_id":MODEL_ID,"resolved_commit":RESOLVED_COMMIT,
+                "manifest_digest":compiled.manifest_digest}),
+            document: compiled.document.clone(),
+            objects: compiled.objects.clone(),
+            journal: self.root.join("journal"),
+            ranges: self
+                .members
+                .iter()
+                .map(|m| (m.node_id.clone(), m.range))
+                .collect(),
+            tokens,
+            forbidden_source: compiled.source.clone(),
+            worker_walls: self
+                .members
+                .iter()
+                .map(|m| (m.node_id.clone(), wall))
+                .collect(),
+            owner_root: self.root.clone(),
+        };
+        let members = std::mem::take(&mut self.members);
+        let mut parked = Vec::new();
+        let mut handed = Vec::new();
+        for m in members {
+            parked.push((m.node_id.clone(), m.pid, m.range));
+            handed.push(WorkMember {
+                node_id: m.node_id,
+                link: m.link,
+                registration: m.registration,
+                cancel: m.cancel,
+            });
+        }
+        self.parked = parked;
+        let origin = Instant::now();
+        let codec: Arc<dyn Codec> = self.codec.clone();
+        let mut port = OwnerWork::new(
+            self.seed.coordinator.clone(),
+            handed,
+            plan,
+            self.lan.clone(),
+            codec,
+            Clocks {
+                mono: Arc::new(move || origin.elapsed().as_secs_f64()),
+                wall: Arc::new(app_host::now),
+            },
+        )
+        .map_err(code)?;
+        let proposal = json!({"max_wall_seconds":wall});
+        let begun = Instant::now();
+        // The slices step pushes every stage shard before publish (S4aF F5).
+        let pushed = owner_run::steps::slices::SlicesPort::node_slice_plans(&mut port).map_err(
+            |e| match e {
+                owner_run::chain::StepError::Refused(e) => e.code,
+                owner_run::chain::StepError::Stopped => "managed_workflow_stopped".into(),
+                owner_run::chain::StepError::Exception { class } => class,
+            },
+        );
+        let pushed_ms = begun.elapsed().as_secs_f64() * 1000.0;
+        let started = pushed.and_then(|_| {
+            owner_run::steps::publish::WorkPort::start_serving(&mut port, &proposal)
+                .map_err(|e| e.code_or("serving_start_failed"))
+        });
+        self.work = Some(port);
+        started?;
+        let port = self.work.as_mut().ok_or("owner_work_absent")?;
+        let staged = port.wait_state(
+            |s| matches!(s["state"].as_str(), Some("awaiting_activation" | "failed")),
+            self.wall * 2,
+        );
+        if staged["state"] != "awaiting_activation" {
+            return Err(staged["error_code"]
+                .as_str()
+                .unwrap_or("owner_work_not_staged")
+                .into());
+        }
+        let staged_ms = begun.elapsed().as_secs_f64() * 1000.0;
+        owner_run::steps::activate::ActivationPort::activate(port, &proposal)
+            .map_err(|e| e.code_or("activation_failed"))?;
+        let serving = port.wait_state(
+            |s| matches!(s["state"].as_str(), Some("api_running" | "failed")),
+            self.wall,
+        );
+        if serving["state"] != "api_running" {
+            return Err(serving["error_code"]
+                .as_str()
+                .unwrap_or("owner_work_not_serving")
+                .into());
+        }
+        Ok(
+            json!({"state":serving,"staged_ms":staged_ms,"pushed_ms":pushed_ms,
+            "ms":begun.elapsed().as_secs_f64()*1000.0}),
+        )
+    }
+    /// Teardown: close the open epoch and the source; member links come back.
+    fn work_stop(&mut self) -> Result<Value> {
+        let mut port = OwnerWork::take_stopped(&mut self.work)?;
+        let state = port.state();
+        let mut back = port.take_members();
+        for (node_id, pid, range) in std::mem::take(&mut self.parked) {
+            let i = back
+                .iter()
+                .position(|m| m.node_id == node_id)
+                .ok_or("owner_work_member_lost")?;
+            let m = back.remove(i);
+            self.members.push(Member {
+                cancel: m.cancel,
+                link: m.link,
+                registration: m.registration,
+                node_id,
+                pid,
+                offer: None,
+                range,
+            });
+        }
+        Ok(state)
     }
     fn leave(&mut self, request: &Value) -> Result<Value> {
         if self.epoch.is_some() {
@@ -653,6 +709,9 @@ impl Owner {
         Ok(json!({"left":left,"withdrawn":withdrawn,"qualification_after":after}))
     }
     fn close(&mut self) -> Result<Value> {
+        if self.work.is_some() {
+            self.work_stop()?;
+        }
         if let Some(epoch) = self.epoch.take() {
             epoch.close();
         }
@@ -705,6 +764,8 @@ fn run() -> Result<()> {
         challenges: native::Challenges::new(),
         admitted: Vec::new(),
         epoch: None,
+        work: None,
+        parked: Vec::new(),
         last_host: None,
         wall,
         _forwarder: forwarder,
@@ -738,6 +799,8 @@ fn run() -> Result<()> {
             "prepare" => owner.prepare(&request),
             "open" => owner.open(&request),
             "settle" => owner.settle(),
+            "work" => owner.work(&request),
+            "work_stop" => owner.work_stop(),
             "leave" => owner.leave(&request),
             "close" => {
                 closing = true;

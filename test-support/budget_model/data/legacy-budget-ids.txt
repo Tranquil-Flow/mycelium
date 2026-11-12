@@ -145,3 +145,7 @@ M16LiveAllocatableInvalidDefault
 M16LivePerPlacementFloor
 M16LiveKvContextTokens
 IrohPrefillProgressLimit
+WorkerStorageWalkEntries
+MemberPeriodicReport
+JoinedEpochMaxSessions
+ResourceProbeNetworkWait

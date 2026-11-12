@@ -13,6 +13,7 @@ use api::{
 };
 use serde_json::{Value, json};
 use std::{
+    io::{Read, Write},
     path::PathBuf,
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
@@ -172,5 +173,120 @@ fn a_seventeenth_concurrent_managed_control_request_is_refused_before_the_mailbo
         );
     }
     assert_eq!(gate.entered(), 2 * HELD + 1);
+    seed.close();
+}
+
+/// One raw TLS connection to the seed, as `SeedClient` would dial it (local CA, loopback name).
+fn raw_tls(
+    options: &api::seed::SeedOptions,
+) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+    use rustls_pki_types::pem::PemObject;
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pki_types::CertificateDer::pem_slice_iter(options.ca_pem.as_deref().unwrap())
+    {
+        roots.add(cert.unwrap()).unwrap();
+    }
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let connection = rustls::ClientConnection::new(
+        Arc::new(config),
+        rustls_pki_types::ServerName::IpAddress(std::net::Ipv4Addr::LOCALHOST.into()),
+    )
+    .unwrap();
+    let socket = std::net::TcpStream::connect(options.connect_to.unwrap()).unwrap();
+    // Bounds the wait for an answer: a server that waits for the body never answers.
+    socket.set_read_timeout(Some(secs(30))).unwrap();
+    rustls::StreamOwned::new(connection, socket)
+}
+
+/// v0.1.4 `CombinedSeedHandler.do_POST` (`tls.py:438-441 @ f4e366e9`; reached from `DemoApp` through
+/// `LocalTLSSeedServer(..., control_mailbox=...)`, `tls.py:430-456`) takes its slot FIRST, before the header
+/// checks and before `_ManagedControlRequestHandler.do_POST` reads the body: a 17th concurrent request is
+/// answered 503 without its body being read, so a slow or withheld body never occupies the seed beyond
+/// its head. This request promises a body and never sends it.
+#[test]
+fn a_seventeenth_request_is_refused_before_its_body_is_read() {
+    const HELD: usize = 16;
+    let root = Root(std::env::temp_dir().join(format!(
+        "lb2-managed-capacity-{}-{}",
+        std::process::id(),
+        line!()
+    )));
+    std::fs::create_dir_all(&root.0).unwrap();
+    let root = Root(std::fs::canonicalize(&root.0).unwrap());
+    let seed = start_seed::<Unmanaged>(&root.0, "swarm-capacity", None).unwrap();
+    let gate = Arc::new(Gate::default());
+    let _release = Release(gate.clone());
+    {
+        let gate = gate.clone();
+        seed.mailbox_routes.bind(Arc::new(move |_raw: &[u8]| {
+            gate.enter(HELD);
+            Ok(br#"{"answered":true}"#.to_vec())
+        }));
+    }
+    let options = seed.options();
+    let mut held = Vec::new();
+    for _ in 0..HELD {
+        let client = client(&seed.seed_url, &options);
+        held.push(thread::spawn(move || {
+            let (path, body) = poll_body();
+            client.post(path, &body).map_err(|e| e.code)
+        }));
+    }
+    gate.wait_entered(HELD);
+
+    let (path, body) = poll_body();
+    let length = protocol::canonical::to_bytes(&body).unwrap().len();
+    let mut stream = raw_tls(&options);
+    stream
+        .write_all(
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {length}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    stream.flush().unwrap();
+    let mut answer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let ended = loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break None,
+            Ok(n) => answer.extend_from_slice(&chunk[..n]),
+            Err(error) => break Some(error.kind()),
+        }
+    };
+    let answer = String::from_utf8_lossy(&answer).into_owned();
+    assert!(
+        answer.starts_with("HTTP/1.1 503 "),
+        "a 17th request whose body never comes must be refused at once, got {answer:?} (read ended: {ended:?})"
+    );
+    assert!(
+        answer.contains("managed_control_capacity_exhausted"),
+        "{answer:?}"
+    );
+    assert_eq!(
+        gate.entered(),
+        HELD,
+        "the refused request reached the mailbox"
+    );
+    drop(stream);
+
+    gate.release();
+    for worker in held {
+        assert_eq!(worker.join().unwrap(), Ok(json!({"answered": true})));
+    }
+    // The refusal took no slot with it: all 16 are free again.
+    assert_eq!(
+        client(&seed.seed_url, &options)
+            .post(path, &body)
+            .map_err(|e| e.code),
+        Ok(json!({"answered": true}))
+    );
     seed.close();
 }

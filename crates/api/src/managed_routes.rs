@@ -7,7 +7,10 @@
 //! member sends. Owner commands and results stay on the owner's local carrier. The route is
 //! transport only: the bound dispatcher authenticates every envelope against the CURRENT
 //! membership and the mailbox verifies its signature, exactly as for the local carrier.
-use seed::{Coordinator, SeedError, http::RouteExtension};
+use seed::{
+    Coordinator, SeedError,
+    http::{RouteExtension, Ticket},
+};
 use serde_json::Value;
 use std::sync::{
     Arc, Mutex,
@@ -66,10 +69,10 @@ pub struct DispatchSlot {
     in_flight: AtomicUsize,
 }
 /// One admitted managed-control request; dropping it frees the slot.
-struct Admitted<'a>(&'a AtomicUsize);
-impl Drop for Admitted<'_> {
+struct Admitted(Arc<DispatchSlot>);
+impl Drop for Admitted {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 }
 impl DispatchSlot {
@@ -92,13 +95,13 @@ impl DispatchSlot {
             .clone()
     }
     /// `slots.acquire(blocking=False)`: a slot, or `None` when all are taken.
-    fn admit(&self) -> Option<Admitted<'_>> {
+    fn admit(self: &Arc<Self>) -> Option<Admitted> {
         self.in_flight
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < MAX_CONCURRENT_REQUESTS).then_some(n + 1)
             })
             .ok()
-            .map(|_| Admitted(&self.in_flight))
+            .map(|_| Admitted(self.clone()))
     }
 }
 
@@ -112,10 +115,7 @@ impl RouteExtension for MailboxRoutes {
         body: &Value,
     ) -> Option<Result<Value, SeedError>> {
         let (_, protocol) = TARGET_ROUTES.iter().find(|(p, _)| *p == path)?;
-        // The seed's error envelope carries the code; its status map answers 503 as v0.1.4 (ruling 16).
-        let Some(_admitted) = self.0.admit() else {
-            return Some(Err(SeedError::new("managed_control_capacity_exhausted")));
-        };
+        // The request's slot was taken by `admit`, before its body was read.
         Some((|| {
             // The path names the statement it carries; nothing else crosses this route.
             if body["statement"]["protocol"] != *protocol {
@@ -132,6 +132,18 @@ impl RouteExtension for MailboxRoutes {
                 .map_err(|_| SeedError::new("managed_control_response_invalid"))
         })())
     }
+    /// v0.1.4 `CombinedSeedHandler.do_POST` (`tls.py:438-441`): the slot is taken first, before the
+    /// header checks and the body read; the seed's error envelope carries the code and its status
+    /// map answers 503 as v0.1.4 (ruling 16).
+    fn admit(&self, path: &str) -> Result<Option<Ticket>, SeedError> {
+        if !TARGET_ROUTES.iter().any(|(p, _)| *p == path) {
+            return Ok(None);
+        }
+        match self.0.admit() {
+            Some(admitted) => Ok(Some(Box::new(admitted))),
+            None => Err(SeedError::new("managed_control_capacity_exhausted")),
+        }
+    }
 }
 
 /// Several route extensions on one seed server, tried in order.
@@ -146,5 +158,13 @@ impl RouteExtension for Routes {
         self.0
             .iter()
             .find_map(|routes| routes.post(coordinator, path, body))
+    }
+    fn admit(&self, path: &str) -> Result<Option<Ticket>, SeedError> {
+        for routes in &self.0 {
+            if let Some(ticket) = routes.admit(path)? {
+                return Ok(Some(ticket));
+            }
+        }
+        Ok(None)
     }
 }

@@ -99,6 +99,26 @@ pub trait WorkAcceptance {
     fn clock(&mut self) -> f64;
 }
 
+/// The code a persisted cap that cannot be compared fails with: the grant document is not what
+/// `grant_standing_consent` writes (v0.1.4 raises `TypeError` at the comparison instead).
+const CAPS_INVALID: &str = "standing_consent_state_invalid";
+
+/// Python's `need > cap` for an integer `need` against a persisted cap: a JSON number compares
+/// numerically (`600.0` is 600); anything else (a string, `null`, a boolean) is `None`, which every
+/// caller fails CLOSED (v0.1.4 raises `TypeError` for a string, standing_consent.py:248-258).
+fn exceeds(need: u64, cap: &Value) -> Option<bool> {
+    let Value::Number(cap) = cap else {
+        return None;
+    };
+    if let Some(cap) = cap.as_u64() {
+        return Some(need > cap);
+    }
+    if cap.as_i64().is_some() {
+        return Some(true);
+    }
+    cap.as_f64().map(|cap| need as f64 > cap)
+}
+
 fn seconds(id: BudgetId) -> u64 {
     id.span(Entries::ZERO).map_or(0, |s| s.millis() / 1000)
 }
@@ -125,7 +145,7 @@ pub fn standing_limits(
             else {
                 return Err(StandingError("member_wall_limit_invalid"));
             };
-            if caps["max_wall_seconds"].as_u64().is_some_and(|cap| w > cap) {
+            if exceeds(w, &caps["max_wall_seconds"]).ok_or(StandingError(CAPS_INVALID))? {
                 return Err(StandingError("member_wall_cap_below_share"));
             }
             wall = want.clone();
@@ -136,16 +156,10 @@ pub fn standing_limits(
         else {
             return Err(StandingError("member_resources_invalid"));
         };
-        if caps["max_memory_bytes"]
-            .as_u64()
-            .is_some_and(|cap| need_rss > cap)
-        {
+        if exceeds(need_rss, &caps["max_memory_bytes"]).ok_or(StandingError(CAPS_INVALID))? {
             return Err(StandingError("member_memory_cap_below_share"));
         }
-        if caps["storage_bytes"]
-            .as_u64()
-            .is_some_and(|cap| need_disk > cap)
-        {
+        if exceeds(need_disk, &caps["storage_bytes"]).ok_or(StandingError(CAPS_INVALID))? {
             return Err(StandingError("member_storage_cap_below_share"));
         }
         (rss, disk) = (json!(need_rss), json!(need_disk));
@@ -208,9 +222,11 @@ pub fn check_work_preview(
     if preview["node_id"] != binding["node_id"] {
         return deny("standing_offer_not_for_this_member");
     }
+    // A cap that cannot be compared counts as exceeded (fail closed).
     let over = PREVIEW_LIMIT_CAPS.iter().any(|(k, cap)| {
-        let cap = grant["caps"][*cap].as_i64().unwrap_or(i64::MAX);
-        limits[*k].as_i64().is_some_and(|v| v > cap)
+        limits[*k]
+            .as_u64()
+            .is_some_and(|v| exceeds(v, &grant["caps"][*cap]).unwrap_or(true))
     });
     if over {
         return deny("standing_preview_exceeds_caps");
@@ -319,6 +335,9 @@ impl StandingAcceptor {
         let required = self.limits_for.as_ref().and_then(|f| f(&offer));
         let limits = match standing_limits(&grant, required.as_ref()) {
             Ok(limits) => limits,
+            // v0.1.4's `TypeError` escapes `except StandingConsentError`: the tick fails, nothing is
+            // reported, previewed or accepted, and the offer stays unhandled.
+            Err(error) if error.0 == CAPS_INVALID => return Err(AcceptFailure::from(error)),
             Err(error) => return Ok(Some(self.record(&id, "refused", Some(error.0), true))),
         };
         let attempt = (|| -> Result<Option<Value>, AcceptFailure> {

@@ -241,7 +241,11 @@ fn bundle_digest_is_the_sha256_of_the_sorted_per_file_listing() {
 }
 
 #[test]
-fn bundle_digest_changes_for_a_byte_a_rename_an_extra_file_and_refuses_a_symlink() {
+fn bundle_digest_changes_for_a_byte_a_rename_an_extra_file_and_a_link_and_refuses_links_out_and_specials()
+ {
+    // Re-pinned (lane REL): an in-bundle relative link was refused before; the real bundle has
+    // v0.1.4's signable Metal link (c85059e), so a link inside the bundle is now part of the
+    // digest (never followed) and only links out of the bundle and other specials are refused.
     let sandbox = Sandbox::new("accept");
     let bundle = sandbox.root.join("candidate/bundle");
     let original = bundle_digest(&bundle).unwrap();
@@ -259,7 +263,20 @@ fn bundle_digest_changes_for_a_byte_a_rename_an_extra_file_and_refuses_a_symlink
     fs::write(bundle.join("extra"), b"x").unwrap();
     assert_ne!(bundle_digest(&bundle).unwrap(), original, "extra file");
     fs::remove_file(bundle.join("extra")).unwrap();
-    std::os::unix::fs::symlink("Info.plist", bundle.join("Contents/link")).unwrap();
+    let link = bundle.join("Contents/link");
+    std::os::unix::fs::symlink("Info.plist", &link).unwrap();
+    let linked = bundle_digest(&bundle).unwrap();
+    assert_ne!(linked, original, "a link is part of the bytes");
+    fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink("../../outside", &link).unwrap();
+    let error = bundle_digest(&bundle).unwrap_err();
+    assert!(error.contains("bundle_link_outside"), "{error}");
+    fs::remove_file(&link).unwrap();
+    let made = std::process::Command::new("/usr/bin/mkfifo")
+        .arg(&link)
+        .status()
+        .unwrap();
+    assert!(made.success());
     let error = bundle_digest(&bundle).unwrap_err();
     assert!(error.contains("bundle_special_file"), "{error}");
 }

@@ -20,8 +20,11 @@ use std::{path::Path, process::ExitCode};
 const PINS: &str = include_str!("../../../desktop/package-pins.json");
 
 fn manifest() -> Result<package::Manifest, String> {
-    let pins: Vec<Entry> =
+    let mut pins: Vec<Entry> =
         serde_json::from_str(PINS).map_err(|_| "embedded_pins_invalid".to_string())?;
+    // The pinned helpers this tree builds (`native/resource_probe`): admitted by their pinned bytes
+    // like the native payload, so a bundle without the probe, or with other bytes, never starts.
+    pins.extend(package::helper_pins().map_err(|e| format!("embedded_helper_pins:{e:?}"))?);
     let executable = std::env::current_exe().map_err(|e| format!("executable:{:?}", e.kind()))?;
     package::with_measured_executable(pins, &executable)
         .map_err(|e| format!("executable_measure:{e:?}"))
@@ -76,19 +79,23 @@ fn run() -> Result<(), String> {
     let manifest = manifest()?;
     let budget = desktop::lifecycle::quit_allowance().map_err(|e| format!("budget:{e:?}"))?;
     let state = state_root()?;
+    let executable = std::env::current_exe().map_err(|e| format!("executable:{:?}", e.kind()))?;
+    // This is the entry measured at startup and subsequently admitted by the
+    // shell, not a fresh expected hash measured when a worker is spawned.
+    let entry = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.kind == package::Kind::Executable)
+        .ok_or("native_executable_entry_missing")?;
+    let compose = |verified: package::VerifiedBundle| {
+        let program =
+            node_service::packaged::admitted_native_program(&verified, entry, &executable)?;
+        node_service::packaged::core_with_native_program(&state, program)
+    };
     #[cfg(not(feature = "qualification-probe"))]
-    return shell::run_packaged(
-        &manifest,
-        |_verified| node_service::packaged::core(&state),
-        budget,
-    );
+    return shell::run_packaged(&manifest, compose, budget);
     #[cfg(feature = "qualification-probe")]
-    return shell::run_packaged_with_probe(
-        &manifest,
-        |_verified| node_service::packaged::core(&state),
-        budget,
-        probe_script(&state)?,
-    );
+    return shell::run_packaged_with_probe(&manifest, compose, budget, probe_script(&state)?);
 }
 /// Test builds only: the frozen chat driven with the oracle question (as many tokens as the
 /// recorded oracle run, Stop after the first). The page posts the plain question; the chat edge

@@ -500,6 +500,7 @@ table! {
     UnknownMemberWall => (Duration(Span::from_millis(60_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:834 @ f5bfb709")),
     WorkerCleanupReserve => (Duration(Span::from_millis(10_000)), Policy, Source("mycelium_a13_macos/worker.py:35 @ f5bfb709")),
     WorkerStartup => (Duration(Span::from_millis(30_000)), Operational(Phase::Start), Source("mycelium_a13_macos/worker.py:36 @ f5bfb709")),
+    JoinedEpochMaxSessions => (Count(Entries::new(1_024)), Resource, Source("mycelium_request_gateway/service.py:308 @ f4e366e9; RequestGatewayService max_sessions default, one gateway per run: the lifetime admissions of one multi-request joined route epoch and the member's settled-request set; not a concurrency limit")),
     ExecutionCeilingLead => (Duration(Span::from_millis(30_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:1111 @ f5bfb709")),
     RolloverMargin => (Duration(Span::from_millis(120_000)), Policy, Source("mycelium_a13_macos/demo_chain.py:268 @ f5bfb709")),
     EffectiveRolloverLead => (Derived(Formula::RolloverLead), Policy, Source("mycelium_a13_macos/demo_chain.py:1140 @ f5bfb709")),
@@ -566,6 +567,8 @@ table! {
     AdaptiveHostTimingMin => (Duration(Span::from_millis(1_000)), Policy, Source("mycelium_a13_macos/adaptive_host.py:61 @ f4e366e9 sha256:dce11fdeccad901f739aff97613cc7b0a9b67bc4263f5fad347a82390585f8fa; _TIMING_MIN (seconds)")),
     AdaptiveHostTimingMax => (Duration(Span::from_millis(3_600_000)), Policy, Source("mycelium_a13_macos/adaptive_host.py:62 @ f4e366e9 sha256:dce11fdeccad901f739aff97613cc7b0a9b67bc4263f5fad347a82390585f8fa; _TIMING_MAX (seconds)")),
     AdaptiveHostAuthorityObservationsDefault => (Count(Entries::new(2)), Policy, Source("mycelium_a13_macos/adaptive_host.py:59 @ f4e366e9 sha256:dce11fdeccad901f739aff97613cc7b0a9b67bc4263f5fad347a82390585f8fa; DEFAULT_TIMINGS[authority_observations]")),
+    // SE-REL-RESOURCE-PROBE: the packaged resource probe's wait for its first network path update.
+    ResourceProbeNetworkWait => (Duration(Span::from_millis(1_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/native/resource_probe.m:74-76 @ f4e366e9 sha256:00a85c6d48c337438d9f806297bc92f7444eaca8da8b81b6bdfc61676030154c; dispatch_semaphore_wait(ready, NSEC_PER_SEC)")),
     AdaptiveHostAuthorityObservationsMin => (Count(Entries::new(2)), Policy, Source("mycelium_a13_macos/adaptive_host.py:131 @ f4e366e9 sha256:dce11fdeccad901f739aff97613cc7b0a9b67bc4263f5fad347a82390585f8fa; authority_observations lower bound (validate_policy)")),
     AdaptiveHostAuthorityObservationsMax => (Count(Entries::new(10)), Policy, Source("mycelium_a13_macos/adaptive_host.py:131 @ f4e366e9 sha256:dce11fdeccad901f739aff97613cc7b0a9b67bc4263f5fad347a82390585f8fa; authority_observations upper bound (validate_policy)")),
     // SE-L10-REPLAY-BOUND: replay-id window of the two membership endpoints (v0.1.4 _MAX_REPLAY_IDS = 4096); outside the L0 census.
@@ -629,6 +632,7 @@ table! {
     PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917 => (Duration(Span::from_millis(20_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:917 @ f5bfb709")),
     PyMyceliumA13MacosAppDemoappPolicyLoopSelfClosedWaitL1009 => (Duration(Span::from_millis(1_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1009 @ f5bfb709")),
     PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1203 @ f5bfb709")),
+    MemberPeriodicReport => (Duration(Span::from_millis(300_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1162 @ f4e366e9; _auto_report sets _next_periodic_report = time.monotonic() + 300 and the standing loop (_standing_tick, :1196-1199) sends a periodic capability report once it is due; 0.0 at app start (:532) makes the first tick due")),
     PyMyceliumA13MacosAppDemoappCloseTimeoutL1841 => (Duration(Span::from_millis(15_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1841 @ f5bfb709")),
     PyMyceliumA13MacosAppHandlerSetupSelfConnectionSettimeoutL1869 => (Duration(Span::from_millis(3_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/app.py:1869 @ f5bfb709")),
     PyMyceliumA13MacosAuthorityMaxPrivateJsonBytesL96 => (Storage(Bytes::new(262_144)), Resource, Source("mycelium_a13_macos/authority.py:96 @ f5bfb709")),
@@ -743,6 +747,7 @@ table! {
     PyMyceliumA13MacosWorkerManagedworkerObservationTimeoutSL667 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:667 @ f5bfb709")),
     PyMyceliumA13MacosWorkerManagedworkerObservationBackoffSL669 => (Duration(Span::from_millis(50)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:669 @ f5bfb709")),
     PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460 => (Duration(Span::from_millis(250)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:1460 @ f5bfb709")),
+    WorkerStorageWalkEntries => (Count(Entries::new(10000)), Resource, Source("mycelium_a13_macos/worker.py:835 @ f4e366e9; entries the worker guard's storage walk of the staging root may lstat before it fails closed with worker_storage_observation_failed")),
     PyMyceliumA13MacosWorkerManagedworkerCloseTimeoutL1621 => (Duration(Span::from_millis(5_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/worker.py:1621 @ f5bfb709")),
     PyMyceliumA13MacosWorkflowBootIdObservationBudgetSecondsL38 => (Duration(Span::from_millis(180_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/workflow.py:38 @ f5bfb709")),
     PyMyceliumA13MacosWorkflowBootIdObservationInitialRetrySecondsL39 => (Duration(Span::from_millis(2_000)), Operational(Phase::Unclassified), Source("mycelium_a13_macos/workflow.py:39 @ f5bfb709")),

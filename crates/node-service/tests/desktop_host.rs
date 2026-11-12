@@ -1025,3 +1025,34 @@ fn a_test_root_is_removed_when_its_test_ends() {
         "{failing:?} was left behind by a failing test"
     );
 }
+/// The page shows why a stopped chat ended: v0.1.4 sets `error = cancel_reason or
+/// 'chat_cancelled'` for a cancelled terminal (chat.py:367-369 @ f4e366e9; Stop -> teardown
+/// `cancel_all('chat_cancelled')`, demo_chain.py:1322-1335), so the native path's Stop shows
+/// `[stopped: chat_cancelled]`, not `error null` (REVIEW-lanePH1F; lane PH3b S5 item 4).
+#[test]
+fn a_stop_ends_the_native_chat_chat_cancelled_as_the_page_shows() {
+    for route in ["/api/serving/stop", "/api/demo/stop"] {
+        let seen = chat_with_stop(route, StopAt::Registered);
+        assert_eq!(
+            seen.outcome,
+            (json!("cancelled"), json!("chat_cancelled")),
+            "{route}"
+        );
+    }
+}
+/// REVIEW-lanePH3B-S5 F7, checked: v0.1.4's `/api/stop` (the page's app.js:361 -> `DemoApp._action`
+/// app.py:1626-1631: `_cancel_acquisition`, `_stop_local_contributor`, `authority.stop`) calls no
+/// `cancel_all`, so the page never shows `chat_cancelled` for it (chat.py:366-369). Here `/api/stop`
+/// does not reach the node service's run at all (api persistent.rs `Action::Stop`), so the native
+/// chat is not cancelled and ends with its own end (this driver's), never `chat_cancelled`; only the
+/// Stops that cancel chats (`/api/demo/stop`, and v0.2's unified `/api/serving/stop`) show it.
+#[test]
+fn an_app_stop_never_shows_the_native_chat_chat_cancelled() {
+    let seen = chat_with_stop("/api/stop", StopAt::Registered);
+    assert_eq!((seen.runs, seen.cancelled), (1, false), "/api/stop");
+    assert_eq!(
+        seen.outcome,
+        (json!("failed"), json!("driver_never_cancelled")),
+        "/api/stop"
+    );
+}

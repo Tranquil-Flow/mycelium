@@ -9,7 +9,7 @@
 # the mark on the installed copy.  Any mismatch: nothing is changed and nothing is run.
 set -eu
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-APP="$HERE/Mycelium A13 Demo.app"
+APP="$HERE/Mycelium.app"
 EXE="$APP/Contents/MacOS/mycelium"
 XATTR=/usr/bin/xattr
 refuse() {
@@ -34,7 +34,7 @@ if "$XATTR" -p com.apple.quarantine "$EXE" >/dev/null 2>&1; then refuse "the dow
 RUNNER="$EXE"
 if "$RUNNER" --install --bundle "$HERE"; then
   echo
-  echo "Mycelium is installed for this user: open 'Mycelium A13' in the Applications folder of your home folder."
+  echo "Mycelium is installed for this user: open 'Mycelium' in the Applications folder of your home folder."
 else
   status=$?
   echo "Mycelium is not installed: the installer refused (see above)." >&2

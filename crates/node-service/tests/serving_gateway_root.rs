@@ -613,9 +613,11 @@ fn serving_gateway_root_cancel_reaches_driver() {
     assert_eq!(ledger.driver_cancels(), 1, "driver canceller calls");
     let (rest, last) = drain(&host, &id, 1);
     assert!(rest.is_empty(), "{rest:?}");
+    // The page shows the Stop's reason (chat.py:367-369 @ f4e366e9: `error = cancel_reason or
+    // 'chat_cancelled'`); this pinned `null` before lane PH3b S5 (REVIEW-lanePH1F).
     assert_eq!(
         (&last["terminal"], &last["error"]),
-        (&json!("cancelled"), &Value::Null)
+        (&json!("cancelled"), &json!("chat_cancelled"))
     );
     // Near miss: Stop with the request already terminal.
     let again = request(&host, "POST", "/api/serving/stop", Some(json!({})));

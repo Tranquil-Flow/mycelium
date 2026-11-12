@@ -977,3 +977,159 @@ fn close_ends_a_start_that_waits_for_its_origin() {
     );
     std::fs::remove_dir_all(&root).unwrap_or(());
 }
+
+/// A fake quick-tunnel client at a bundle's relay path (never `cloudflared`): each run appends
+/// `<pid> <argv0>` to `launches`, prints a `trycloudflare.com` origin and blocks on a FIFO it holds
+/// open itself until it is terminated.
+struct BundledFake {
+    root: PathBuf,
+    client: PathBuf,
+    genuine: Vec<u8>,
+    launches: PathBuf,
+}
+impl BundledFake {
+    fn new(root: &Path) -> Self {
+        let native = root.join("Mycelium.app/Contents/MacOS/native");
+        std::fs::create_dir_all(&native).expect("bundle dirs");
+        let hold = root.join("hold");
+        let made = std::process::Command::new("/usr/bin/mkfifo")
+            .arg("-m")
+            .arg("600")
+            .arg(&hold)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success(), "mkfifo {}", hold.display());
+        let launches = root.join("launches");
+        let genuine = format!(
+            "#!/bin/sh\nexec 3<>'{hold}'\necho \"$$ $0\" >> '{launches}'\necho 'INF |  https://relf2-pinned.trycloudflare.com  |'\nread _ <&3\n",
+            hold = hold.display(),
+            launches = launches.display(),
+        )
+        .into_bytes();
+        let fake = Self {
+            root: root.to_owned(),
+            client: native.join("cloudflared"),
+            genuine,
+            launches,
+        };
+        fake.put(&fake.genuine.clone(), 0o755);
+        fake
+    }
+    /// `bytes` at the bundle's relay path with `mode` (replacing whatever is there).
+    fn put(&self, bytes: &[u8], mode: u32) {
+        if std::fs::symlink_metadata(&self.client).is_ok() {
+            std::fs::remove_file(&self.client).expect("remove client");
+        }
+        std::fs::write(&self.client, bytes).expect("client");
+        std::fs::set_permissions(&self.client, std::fs::Permissions::from_mode(mode))
+            .expect("mode");
+    }
+    /// The test's own pin of the genuine fake (the app's pin is `helper-pins.json`).
+    fn digest(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(&self.genuine))
+    }
+    fn launches(&self) -> Vec<(i32, String)> {
+        std::fs::read_to_string(&self.launches)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                let (pid, argv0) = line.split_once(' ')?;
+                Some((pid.parse().ok()?, argv0.to_owned()))
+            })
+            .collect()
+    }
+}
+
+/// Ruling 31 (RELF2, review RELF F12): the PACKAGED app runs only the admitted bundled relay
+/// client and checks it again before every spawn. v0.1.4 runs `<bundled>/native/cloudflared` when
+/// it is an executable file, else `shutil.which('cloudflared')`, and checks nothing
+/// (`public_relay.py:250-255`, called by `TemporaryHttpsRelay.start` :327-328 for each Start;
+/// app.py `DemoApp._start_public_relay` :711-712); v0.2's packaged hooks are deliberately
+/// stricter: a missing, non-executable, symlinked or other-bytes file is
+/// `relay_client_installation_required` (the shipped relay's own code, :328) and nothing runs.
+///
+/// Guard: every refused case asserts the lookup answers `None` BEFORE any Start, so a lookup that
+/// would fall back to `PATH` (this Mac has a real `cloudflared` there) fails the test before it
+/// can spawn anything; only the genuine fake is ever started.
+#[test]
+fn the_packaged_relay_client_is_only_the_pinned_bundled_file_checked_before_every_spawn() {
+    let root = scratch("pinned-client");
+    let fake = BundledFake::new(&root);
+    let start = |tag: &str| {
+        let hooks = Hooks::pinned(Some((fake.client.clone(), fake.digest())));
+        let lookup = hooks.binary.clone();
+        let relay =
+            Relay::new(&root.join(tag), &json!("cloudflare"), &Map::new(), hooks).expect("relay");
+        (relay, lookup)
+    };
+    // Control: the genuine file at the pinned path is what runs, from that path.
+    let (relay, lookup) = start("relay-genuine");
+    assert_eq!(lookup(), Some(fake.client.clone()), "control lookup");
+    assert_eq!(relay.start(&json!(true), &json!(1800)), Ok(()));
+    relay.close();
+    let launched = fake.launches();
+    assert_eq!(
+        launched
+            .iter()
+            .map(|(_, argv0)| argv0.as_str())
+            .collect::<Vec<_>>(),
+        vec![fake.client.to_str().expect("utf-8 path")],
+        "the control Start ran the bundled file"
+    );
+    // Each refusal: the hooks (and the relay) exist first, as after startup admission; the file
+    // changes afterwards; the Start must refuse and spawn nothing.
+    let other = b"#!/bin/sh\nexit 0\n".to_vec();
+    let genuine_elsewhere = root.join("genuine-elsewhere");
+    std::fs::write(&genuine_elsewhere, &fake.genuine).expect("copy");
+    std::fs::set_permissions(&genuine_elsewhere, std::fs::Permissions::from_mode(0o755))
+        .expect("mode");
+    type Change<'a> = (&'a str, Box<dyn Fn() + 'a>);
+    let changes: Vec<Change> = vec![
+        (
+            "replaced by other bytes",
+            Box::new(|| fake.put(&other, 0o755)),
+        ),
+        (
+            "a symlink to the genuine bytes",
+            Box::new(|| {
+                std::fs::remove_file(&fake.client).expect("remove");
+                std::os::unix::fs::symlink(&genuine_elsewhere, &fake.client).expect("link");
+            }),
+        ),
+        (
+            "the genuine bytes at mode 0644",
+            Box::new(|| fake.put(&fake.genuine, 0o644)),
+        ),
+        (
+            "missing",
+            Box::new(|| std::fs::remove_file(&fake.client).expect("remove")),
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (n, (what, change)) in changes.iter().enumerate() {
+        fake.put(&fake.genuine, 0o755);
+        let (relay, lookup) = start(&format!("relay-{n}"));
+        change();
+        // The guard: a lookup that finds anything here is never started.
+        let found = lookup();
+        if found.is_some() {
+            wrong.push(format!("{what}: the packaged lookup found {found:?}"));
+            relay.close();
+            continue;
+        }
+        let answer = relay.start(&json!(true), &json!(1800));
+        relay.close();
+        if answer != Err("relay_client_installation_required") {
+            wrong.push(format!("{what}: Start answered {answer:?}"));
+        }
+        if fake.launches().len() != 1 {
+            wrong.push(format!(
+                "{what}: a refused Start spawned {:?}",
+                fake.launches()
+            ));
+        }
+    }
+    std::fs::remove_dir_all(&fake.root).unwrap_or(());
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

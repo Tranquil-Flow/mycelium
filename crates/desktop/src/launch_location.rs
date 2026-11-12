@@ -7,12 +7,15 @@
 use std::path::Path;
 
 pub const CODE: &str = "not_installed";
-pub const DOWNLOADED_MESSAGE: &str = "This is the downloaded copy. Mycelium is installed: open Mycelium A13 from the Applications folder in your home folder.";
-pub const MESSAGE: &str = "Mycelium is not installed yet, so it did not start. Open the folder you downloaded and double-click 'Install Mycelium.command' (macOS asks once to confirm it in System Settings > Privacy & Security > Open Anyway). After that, open 'Mycelium A13' from the Applications folder in your home folder.";
+pub const DOWNLOADED_MESSAGE: &str = "This is the downloaded copy. Mycelium is installed: open Mycelium from the Applications folder in your home folder.";
+pub const MESSAGE: &str = "Mycelium is not installed yet, so it did not start. Open the folder you downloaded and double-click 'Install Mycelium.command' (macOS asks once to confirm it in System Settings > Privacy & Security > Open Anyway). After that, open 'Mycelium' from the Applications folder in your home folder.";
 
-/// `~/Library/Application Support/Mycelium/programs` below `home`.
+/// `~/Library/Application Support/org.mycelium.app/programs` below `home` (ruling 25; v0.1.4's
+/// is `Mycelium/programs`).
 pub fn programs_root(home: &Path) -> std::path::PathBuf {
-    home.join("Library/Application Support/Mycelium/programs")
+    home.join("Library/Application Support")
+        .join(crate::install::SUPPORT_FOLDER)
+        .join("programs")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

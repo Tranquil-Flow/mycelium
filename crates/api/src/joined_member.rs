@@ -15,6 +15,7 @@
 //!   target_app.py:330-343) and `_join_flow_status` (app.py:1214-1237);
 //! * `authority.start()` of a joined target (`RemoteMacMember.start`, app.py:613-626) and the
 //!   durable half of a member leave's "no owned compute" proof.
+pub mod work;
 use crate::{
     app_host::{
         self, Authority, CONSENT_FILE, Cell, HANDOFF_FILE, IDENTITY_FILE, ManagedSlot, PENDING_FILE,
@@ -391,11 +392,13 @@ pub fn join_client(origin: &str, test_base: Option<&str>) -> Result<JoinWindowCl
         None => Ok(client),
     }
 }
-/// `_measure_and_sign(client, purpose)`.
+/// `_measure_and_sign(client, purpose)`; `generation` is the membership's
+/// ([`report_generation`]), `None` only for the join request's report before any membership.
 pub fn measure_and_sign(
     root: &Path,
     client: &mut JoinWindowClient,
     purpose: &str,
+    generation: Option<i64>,
 ) -> Result<Value, PublicError> {
     let started = Instant::now();
     let mut clock = move || started.elapsed().as_secs_f64();
@@ -412,7 +415,7 @@ pub fn measure_and_sign(
         &signer,
         &node,
         purpose,
-        None,
+        generation,
         &device,
         &link,
         now(),
@@ -445,15 +448,32 @@ pub fn handoff_seed_key_digest(root: &Path, handoff_value: &Value) -> Result<Str
         .unwrap_or_default()
         .to_owned())
 }
-/// `_auto_report(purpose)` (app.py:1138-1163) as the join answer carries it: the signed device +
-/// relay-link report to the owner's inbox, never failing the caller (a failure is its code).
+/// The generation `peer.signed_capability_link_report` signs (peer.py:1118-1139 @ f4e366e9):
+/// "`join` reports precede membership (no generation); every later report is bound to the
+/// current membership generation" — a join report once the membership exists carries it too
+/// (`purpose != 'join' or self._member is not None`). The owner's compile refuses a report whose
+/// generation is not the member's (`member_capability_report_stale`, chain_compile
+/// `_capability_rows`). With no membership a report other than `join` refuses
+/// (`_require_current`).
+pub fn report_generation(root: &Path, purpose: &str) -> Result<Option<i64>, PublicError> {
+    let generation = crate::peer::load_membership_state(root)?
+        .and_then(|m| m.get("membership_generation").and_then(Value::as_i64));
+    if generation.is_none() && purpose != "join" {
+        return Err(PublicError::new(400, "membership_required"));
+    }
+    Ok(generation)
+}
+/// `_auto_report(purpose)` (app.py:1138-1163): the signed device + relay-link report, bound to
+/// the membership generation, to the owner's inbox, never failing the caller (a failure is its
+/// code). The caller records it (`Recorded::reported`: `last_report`, next periodic report).
 pub fn auto_report(root: &Path, test_base: Option<&str>, purpose: &str) -> Value {
     let mut state = "delivered";
     let mut error = Value::Null;
     let sent = (|| -> Result<(), PublicError> {
         let origin = owner_origin(root).ok_or(PublicError::new(400, "membership_required"))?;
+        let generation = report_generation(root, purpose)?;
         let mut client = join_client(&origin, test_base)?;
-        let report = measure_and_sign(root, &mut client, purpose)?;
+        let report = measure_and_sign(root, &mut client, purpose, generation)?;
         client.member_report(&report).map(drop)
     })();
     if let Err(e) = sent {
@@ -472,7 +492,8 @@ pub fn join_submit(
     quota: &Value,
 ) -> Result<(Value, Vec<Value>), PublicError> {
     let mut client = join_client(&link.origin, test_base)?;
-    let report = measure_and_sign(root, &mut client, "join")?;
+    // The join request precedes the membership: no generation (peer.py:1123-1124).
+    let report = measure_and_sign(root, &mut client, "join", None)?;
     let answer = client.submit(&link.window_id, &link.code, request, &report, quota)?;
     Ok((answer, client.warnings().to_vec()))
 }
@@ -512,6 +533,8 @@ pub fn join_accept(
     cell.with(|c| c.running = true);
     let generation = cell.with(|c| c.session.as_ref().and_then(|s| s.generation()));
     let report = auto_report(&root, test_base, "join");
+    // `self.last_report = record` (`_auto_report`, app.py:1161), shown in `join_flow.last_report`.
+    cell.with(|c| c.recorded.reported(report.clone(), Instant::now()));
     Ok(JoinAccepted {
         membership_state: joined
             .get("membership_state")
@@ -625,12 +648,14 @@ pub fn authority_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
     }
 }
 /// `_join_flow_status()` (app.py:1214-1237): the standing disclosure (the join-consent document),
-/// then the owner's windows, or the joined Mac's standing consent and pending join window.
+/// then the owner's windows, or the joined Mac's standing consent (with the acceptor's last offer),
+/// the standing error, its pending join window and its last report, as the app `recorded` them.
 pub fn join_flow_status(
     root: &Path,
     target: bool,
     windows: &PairingWindows,
     pending: &PendingWindows,
+    recorded: &crate::app_status::Recorded,
 ) -> Json {
     let disclosure = jobj! {
         "text" => standing_consent::DISCLOSURE_TEXT, "digest" => standing_consent::DISCLOSURE_DIGEST,
@@ -642,6 +667,7 @@ pub fn join_flow_status(
             "pending_windows" => pending.json(), "member_reports" => Json::Obj(Vec::new()),
         };
     }
+    let optional = |value: &Option<Value>| value.as_ref().map_or(Json::Null, Json::from);
     let grant = standing_consent::load(root).ok().flatten();
     let join = private_state::load(&root.join("join-window.json"), cap())
         .ok()
@@ -652,10 +678,11 @@ pub fn join_flow_status(
             None => Json::Null,
             Some(g) => jobj! {
                 "state" => &g["state"], "caps" => &g["caps"], "granted_at" => &g["granted_at"],
-                "withdrawn_at" => &g["withdrawn_at"], "last" => Json::Null,
+                "withdrawn_at" => &g["withdrawn_at"], "last" => optional(&recorded.standing_last),
             },
         },
-        "standing_error" => Json::Null, "standing_error_http" => Json::Null,
+        "standing_error" => recorded.standing_error.as_deref().map_or(Json::Null, Json::from),
+        "standing_error_http" => optional(&recorded.standing_error_http),
         "join_window" => match join {
             None => Json::Null,
             Some(j) => jobj! {
@@ -663,7 +690,7 @@ pub fn join_flow_status(
                 "pinned" => !j["seed_key_digest"].is_null(),
             },
         },
-        "last_report" => Json::Null,
+        "last_report" => optional(&recorded.last_report),
     }
 }
 /// `authority.start()` of a joined target (`RemoteMacMember.start` -> `_resume`, app.py:613-626):

@@ -18,13 +18,14 @@
 //! their next exchange and the quit withdrawal is bounded by the caller's budget; whatever is
 //! unfinished stays durable debt for the next start.
 use super::{
-    DirectoryClient, DirectoryPort, Error, Listing, Phase, Status, Step, Stored, SwarmPublisher,
+    DirectoryClient, DirectoryPort, Error, Listing, Phase, Shown, Status, Step, Stored,
+    SwarmPublisher,
     host::{OwnerView, PublisherHost, Stop},
     sync_parent,
 };
 use crate::{
     schema::PublicError,
-    swarm::{docs, json::J},
+    swarm::{docs, json::J, wire},
 };
 use ed25519_dalek::SigningKey;
 use serde_json::{Map, Value, json};
@@ -194,12 +195,31 @@ fn public(error: &Error) -> PublicError {
         .unwrap_or("action_not_completed");
     PublicError::new(409, code)
 }
-fn status_value(origin: &str, status: &Status, failure: Option<&Error>) -> Value {
+/// The `swarm` status field: every key of v0.1.4's `SwarmPublisher.status` (swarm_publish.py:456-472
+/// @ f4e366e9), which the unchanged page's `swarm.js` reads, then this custody's own phase. The
+/// listing key is both the owner and the entry key here (the record's `entry.key`), `attached` is
+/// the accepted record, `link` is `docs.swarm_link` once the listing has a swarm id, and `killed`
+/// is false: the owner's kill switch is not ported (class E), so no listing is ever killed.
+fn status_value(origin: &str, status: &Status, shown: &Shown, failure: Option<&Error>) -> Value {
+    let fingerprint = wire::fingerprint(&J::str(&shown.key)).ok();
+    let link = status
+        .swarm_id
+        .as_deref()
+        .and_then(|id| docs::swarm_link(origin, id, &shown.key).ok());
     json!({
         "enabled": status.enabled,
         "mode": "app",
         "directory": origin,
         "swarm_id": status.swarm_id,
+        "name": shown.name,
+        "access_mode": shown.access_mode,
+        "owner_fingerprint": fingerprint,
+        "entry_fingerprint": fingerprint,
+        "attached": shown.attached,
+        "entry_origin": shown.entry_origin,
+        "heartbeat": shown.heartbeat,
+        "link": link,
+        "killed": false,
         "phase": if failure.is_some() { Phase::Failed } else { status.phase.clone() },
         "protocol_version": status.protocol_version,
         "error_code": failure.map(|e| e.code.clone()).or_else(|| status.error_code.clone()),
@@ -244,7 +264,12 @@ impl AppPublisher {
         lock(&self.snapshot)["phase"] == "withdraw_pending"
     }
     fn refresh(&self, bound: &Bound, failure: Option<&Error>) {
-        *lock(&self.snapshot) = status_value(&bound.origin, &bound.host.status(), failure);
+        *lock(&self.snapshot) = status_value(
+            &bound.origin,
+            &bound.host.status(),
+            &bound.host.shown(),
+            failure,
+        );
     }
     fn db(&self) -> PathBuf {
         self.root.join(DB_FILE)

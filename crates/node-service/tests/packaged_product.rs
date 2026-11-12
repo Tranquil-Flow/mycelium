@@ -8,6 +8,8 @@
 //! newest 3, B15). The routes sit behind the packaged window channel exactly like `/api/status`
 //! (GET) and every other owner action (POST).
 #![cfg(feature = "desktop-shell")]
+#[path = "support/packaged_macs.rs"]
+mod macs;
 use api::{
     gateway::{Qualification, QualificationSource, Unavailable},
     resources::{Observation, Observer},
@@ -336,10 +338,11 @@ fn window_request(window: &str, method: &str, path: &str, headers: &[(&str, &str
 #[test]
 fn packaged_product_routes_follow_the_window_rules_of_status_and_actions() {
     let state = state_root("window");
-    let (core, mut cleanup) = node_service::packaged::core_with(
+    let (core, mut cleanup) = node_service::packaged::core_with_network(
         &state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        macs::test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
@@ -607,29 +610,23 @@ fn served(name: &str) -> (PathBuf, DesktopServices, Value) {
     (root, host, snapshot)
 }
 
-/// `route_source` is `route.public_status` read through the live route (`_follow`,
-/// supervisor.py:2153-2164 @ f4e366e9). The packaged process never opens a qualified live route
-/// (`serving.route_ready: false`), so the read is v0.1.4's `RouteUnavailableError('route_not_open')`,
-/// which `_follow` leaves untyped: `route_source_failed`, never a route invented from the
-/// development slice.
+/// `route_source`: the SHIPPED v0.1.4 Mac app composes its product application through
+/// `build_registry_stack` (supervisor.py:2039-2064, :4370 @ f4e366e9), whose route is the
+/// deployment registry; it answers a degraded `live_route_status.v1` built from a deployment record
+/// (registry.py:823-856) that the packaged process does not have. Until a serving registry is
+/// composed here the route source is absent: `route_source_missing` (the projector's row for a
+/// source with nothing to read, oracle `owner_only`; a v0.2-only code by the 11 Nov ruling on
+/// REVIEW-lanePH2 F1), never a route invented from the development slice.
 #[test]
 fn the_packaged_route_source_reads_the_live_route_it_does_not_have() {
     let (root, host, snapshot) = served("route");
-    let row = source_state(&snapshot, "route-source");
     assert_eq!(
-        sorted(row),
-        sorted(
-            &json!({"authority": "live_router_status", "generation": null,
-                       "observed_at_unix_ms": null, "reason_code": "route_source_failed",
-                       "source_id": "route-source", "status": "missing",
-                       "valid_until_unix_ms": null})
-        ),
-        "{row}"
+        source_state(&snapshot, "route-source")["reason_code"],
+        "route_source_missing",
+        "{}",
+        source_state(&snapshot, "route-source")
     );
-    assert_eq!(
-        source_notice(&snapshot, "route-source").unwrap()["code"],
-        "route_source_failed"
-    );
+    assert_source_as_oracle(&snapshot, "route-source", "owner_only", 0);
     quit(host);
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
@@ -743,10 +740,10 @@ fn the_serving_roots_qualification_record_reaches_the_snapshot() {
     std::fs::remove_dir_all(&root).unwrap_or_default();
 }
 
-/// `assignment_source` (`route.product_assignment_records`, route.py:6910-6948: assignment offers x
-/// placements) is read through the live route; the packaged process has none, so it publishes what
-/// v0.1.4 publishes for a source that cannot be read: `assignment_source_failed` (oracle
-/// `serving[2]`). `recovery_source`: the v0.1.4 Mac app composes its product application through
+/// `assignment_source` (`registry.product_assignment_records()`, the shipped app's registry route,
+/// supervisor.py:2039-2064 @ f4e366e9): with no running deployment it returns `()`
+/// (registry.py:943-946) and the projector publishes `assignment_source_missing`
+/// (projector.py:476-487; oracle `no_a4`). `recovery_source`: the v0.1.4 Mac app composes its product application through
 /// `build_registry_stack` (supervisor.py:2060-2064, 4370), whose route (the deployment registry) has
 /// no `recovery_public_projection`, so no recovery source is composed (supervisor.py:2148, 2202-2207)
 /// and the projector publishes `recovery_source_missing` (projector.py:510-516; oracle `owner_only`).
@@ -754,7 +751,13 @@ fn the_serving_roots_qualification_record_reaches_the_snapshot() {
 #[test]
 fn the_packaged_assignment_and_recovery_sources_publish_what_the_v014_app_publishes() {
     let (root, host, snapshot) = served("assignments");
-    assert_source_as_oracle(&snapshot, "assignment-source", "serving", 2);
+    assert_eq!(
+        source_state(&snapshot, "assignment-source")["reason_code"],
+        "assignment_source_missing",
+        "{}",
+        source_state(&snapshot, "assignment-source")
+    );
+    assert_source_as_oracle(&snapshot, "assignment-source", "no_a4", 0);
     assert_source_as_oracle(&snapshot, "recovery-source", "owner_only", 0);
     let kinds: BTreeSet<&str> = snapshot["entities"]
         .as_array()
@@ -784,10 +787,11 @@ fn the_packaged_status_shows_the_swarm_listing_custody() {
         "http://127.0.0.1:{}",
         directory.local_addr().unwrap().port()
     );
-    let (core, mut cleanup) = node_service::packaged::core_with(
+    let (core, mut cleanup) = node_service::packaged::core_with_network(
         &state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        macs::test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();

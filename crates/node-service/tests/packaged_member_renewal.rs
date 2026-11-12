@@ -114,7 +114,7 @@ fn packaged_member_renewal_survives_failed_passes_while_its_lease_is_valid() {
         NetworkConfig {
             seams,
             renewal: RENEWAL,
-            ..NetworkConfig::default()
+            ..macs::test_network()
         },
     );
     let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));

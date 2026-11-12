@@ -30,7 +30,7 @@
       "tests": ["bundle::*", "bundle_gate::*", "bundle_smoke::built_bundle_launches_to_a_window_unfocused_and_exits_via_exact_pid_apple_event_quit"],
       "obligations": ["O:path:mycelium_a13_packaging/build.py", "O:path:mycelium_a13_macos/package_manifest.py"],
       "incidents": [],
-      "limits": "Local unsigned shell-only bundle: v0.1.4 name/identifier/icon/Info.plist keys, genuine native-input payload copied but not linked or loaded, no Python anywhere, brief unfocused launch-to-window with exact-PID AppleEvent quit. No Developer ID, notarization, Finder launch, real core, or GPU/minimum-OS proof (installer behaviour is the next group); native dylibs record minos 26.x above the claimed 15.6.1. No obligation retirement."
+      "limits": "Local unsigned shell-only bundle: v0.2 own name/identifier (owner ruling 25), v0.1.4 icon/Info.plist key set, genuine native-input payload copied but not linked or loaded, no Python anywhere, brief unfocused launch-to-window with exact-PID AppleEvent quit. No Developer ID, notarization, Finder launch, real core, or GPU/minimum-OS proof (installer behaviour is the next group); (11 Nov, lane REL: the shipped native dylibs now record minos 14.0 and the executable/probe 15.6, at or below the claimed 15.6.1; the min-OS run is still open). No obligation retirement."
     },
     {
       "tests": ["install::*", "install_cli::*", "launch_location::*", "rpath::*", "bundle::a_pinned_native_inputs_manifest_is_used_only_when_its_sha256_matches", "bundle::a_candidate_manifest_with_another_schema_is_not_guessed_at", "bundle_gate::built_executable_carries_exactly_the_relocatable_frameworks_rpath_and_every_rpath_dependency_resolves"],

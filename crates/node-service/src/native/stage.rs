@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::*;
 use backend_mlx::{Context, Session, Worker, admission, payload_id};
-use stage_contract::{Activation, Binding, Input, StageBackend, Step};
+use stage_contract::{Activation, Binding, Input, Limits, StageBackend, Step};
 use std::rc::Rc;
 pub struct NativeStage {
     context: Rc<Context>,
     worker: Worker,
-    session: Session,
+    /// Exactly one stage session; `None` only inside a reset or close.
+    session: Option<Session>,
     binding: Binding,
+    limits: Limits,
+    /// Active bytes right after prepare (the resident weights): a session reset
+    /// must bring the context back to at most this (EP0 residue check).
+    baseline: usize,
 }
 impl NativeStage {
     pub fn prepare(
@@ -114,12 +119,16 @@ impl NativeStage {
             load_generation: generation,
         };
         let session = worker.new_session(binding.clone(), limits)?;
+        context.synchronize()?;
+        let baseline = context.memory_stats()?.0;
         pressure()?;
         Ok(Self {
             context,
             worker,
-            session,
+            session: Some(session),
             binding,
+            limits,
+            baseline,
         })
     }
     /// Export the material actually resident in this worker, after prepare.
@@ -157,24 +166,50 @@ impl NativeStage {
     }
     pub fn step(&mut self, input: Input) -> Result<stage_contract::Output> {
         pressure()?;
+        let session = self.session.as_mut().ok_or("native_session_absent")?;
         let step = Step {
             binding: self.binding.clone(),
-            state_generation: self.session.state_generation(),
-            position: self.session.position(),
+            state_generation: session.state_generation(),
+            position: session.position(),
             payload: payload_id(&input),
             input,
         };
-        let result = if self.session.position() == 0 {
-            self.worker.prefill(&mut self.session, step)?
+        let result = if session.position() == 0 {
+            self.worker.prefill(session, step)?
         } else {
-            self.worker.decode(&mut self.session, step)?
+            self.worker.decode(session, step)?
         };
         pressure()?;
         Ok(result)
     }
+    /// EP0 `session_reset_v1`: release this request's session (its KV), return
+    /// the allocator cache, refuse residue above the post-prepare baseline, and
+    /// open a fresh session under the SAME prepare binding and limits. The
+    /// weights stay resident; prefill vs decode keeps following `position()`.
+    pub fn reset_session(&mut self) -> Result<Value> {
+        use stage_contract::native_session as contract;
+        pressure()?;
+        let session = self.session.take().ok_or("native_session_absent")?;
+        self.worker.release_session(session)?;
+        self.context.synchronize()?;
+        self.context.clear_cache()?;
+        let active = self.context.memory_stats()?.0;
+        if active > self.baseline {
+            return Err("native_residue".into());
+        }
+        let session = self.worker.new_session(self.binding.clone(), self.limits)?;
+        let generation = session.state_generation();
+        self.session = Some(session);
+        pressure()?;
+        Ok(
+            json!({"protocol":contract::REPLY_PROTOCOL,"state_generation":generation,
+            "active_bytes":active,"baseline_bytes":self.baseline}),
+        )
+    }
     pub fn close(mut self) -> Result<Value> {
-        self.worker.cancel(&mut self.session)?;
-        self.worker.release_session(self.session)?;
+        let mut session = self.session.take().ok_or("native_session_absent")?;
+        self.worker.cancel(&mut session)?;
+        self.worker.release_session(session)?;
         self.worker.close()?;
         drop(self.worker);
         self.context.synchronize()?;

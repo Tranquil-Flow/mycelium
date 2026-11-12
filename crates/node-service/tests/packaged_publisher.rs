@@ -10,6 +10,8 @@
 //! The directory is a loopback socket owned by the test that counts connections and never
 //! answers (a slow directory): no test reaches the real directory.
 #![cfg(feature = "desktop-shell")]
+#[path = "support/packaged_macs.rs"]
+mod macs;
 use api::resources::{Observation, Observer};
 use budgets::{BudgetId as B, Entries};
 use desktop::{
@@ -160,10 +162,11 @@ impl Drop for SilentDirectory {
     }
 }
 fn packaged_core(state: &Path) -> (Arc<dyn Core>, AppCleanup) {
-    let (core, mut cleanup) = packaged::core_with(
+    let (core, mut cleanup) = packaged::core_with_network(
         state,
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
         Arc::new(Permissive),
+        macs::test_network(),
     )
     .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();

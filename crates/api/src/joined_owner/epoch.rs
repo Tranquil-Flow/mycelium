@@ -38,7 +38,10 @@ pub enum Carriers {
     },
 }
 
-/// A live epoch. One request; then it retires (`route_dropped`).
+/// A live epoch. A `mycelium.joined_route.v1` epoch serves one request, then
+/// retires (`route_dropped`); a `mycelium.joined_route.v2` epoch (lane EP1)
+/// serves the run's requests one at a time until [`Epoch::close`] or its
+/// retirement ([`Epoch::retired`]).
 pub struct Epoch {
     service: M16Requests,
     handle: RouteHandle,
@@ -47,6 +50,8 @@ pub struct Epoch {
     bearer: String,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
+    connections: Arc<Mutex<std::collections::BTreeMap<u64, TcpStream>>>,
+    stop_limit: Option<m16_route::StopLimit>,
     refusals: Arc<Mutex<Vec<String>>>,
 }
 
@@ -106,6 +111,17 @@ impl Epoch {
         carriers: Carriers,
         codec: Arc<dyn Codec>,
     ) -> Result<Self, PublicError> {
+        Self::open_until(coordinator, envelope, owner, carriers, codec, None)
+    }
+    /// Open with the work port's existing Stop token/timestamp, not a new timer.
+    pub fn open_until(
+        coordinator: Arc<seed::Coordinator>,
+        envelope: Value,
+        owner: iroh::SecretKey,
+        carriers: Carriers,
+        codec: Arc<dyn Codec>,
+        stop_limit: Option<m16_route::StopLimit>,
+    ) -> Result<Self, PublicError> {
         // A lease read the seed refused is one of the epoch's refusals.
         let refusals: Arc<Mutex<Vec<String>>> = Arc::default();
         let seen = refusals.clone();
@@ -121,6 +137,7 @@ impl Epoch {
             codec,
             seed,
             refusals,
+            stop_limit,
         )
     }
     /// [`Epoch::open`] with the seed view the pump reads member leases from.
@@ -140,9 +157,11 @@ impl Epoch {
             codec,
             seed,
             Arc::default(),
+            None,
         )
     }
     /// [`Epoch::open_watched`] whose refusals start in `refusals` (shared with the seed view).
+    #[allow(clippy::too_many_arguments)]
     fn open_with(
         coordinator: Arc<seed::Coordinator>,
         envelope: Value,
@@ -151,6 +170,7 @@ impl Epoch {
         codec: Arc<dyn Codec>,
         seed: SeedMembers,
         refusals: Arc<Mutex<Vec<String>>>,
+        stop_limit: Option<m16_route::StopLimit>,
     ) -> Result<Self, PublicError> {
         let poll = span(B::OwnerPoll)?;
         let connection_budget = span(B::ModelSelection)?;
@@ -176,14 +196,19 @@ impl Epoch {
         let message = host.message().clone();
         let current = currentness(&coordinator);
         let (executor, handle) = match carriers {
-            Carriers::Loopback(peers) => {
-                RouteExecutor::connect(message.clone(), owner, peers, current, codec)
-            }
+            Carriers::Loopback(peers) => RouteExecutor::connect_until(
+                message.clone(),
+                owner,
+                peers,
+                current,
+                codec,
+                stop_limit.clone(),
+            ),
             Carriers::Lan {
                 interface,
                 policy,
                 verified,
-            } => RouteExecutor::connect_lan(
+            } => RouteExecutor::connect_lan_until(
                 message.clone(),
                 owner,
                 verified,
@@ -191,6 +216,7 @@ impl Epoch {
                 policy,
                 current,
                 codec,
+                stop_limit.clone(),
             ),
         }?;
         host.attach(handle.clone())?;
@@ -201,7 +227,16 @@ impl Epoch {
             Arc::new(Ids::default()),
         )?;
         let host_dyn: Arc<dyn crate::m16_requests::Host> = host.clone();
-        let config = Config::new(64, 4, 0.0).map_err(|_| fail("registry_config_invalid"))?;
+        // Lifetime admissions of this epoch: the shipped gateway's max_sessions
+        // (request_gateway/service.py:308), one gateway per run (EP-PLAN U5).
+        let sessions = usize::try_from(
+            B::JoinedEpochMaxSessions
+                .count()
+                .map_err(|_| fail("budget_unavailable"))?
+                .get(),
+        )
+        .map_err(|_| fail("budget_unavailable"))?;
+        let config = Config::new(64, sessions, 0.0).map_err(|_| fail("registry_config_invalid"))?;
         let service = M16Requests::new(runtime, host_dyn, Box::new(executor), config)?;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| fail("joined_owner_gateway_bind_failed"))?;
@@ -217,6 +252,8 @@ impl Epoch {
             bearer,
             stop,
             threads: Vec::new(),
+            connections: Arc::default(),
+            stop_limit,
             refusals,
         };
         // Gateway: one owned thread per connection, all joined on close.
@@ -224,6 +261,7 @@ impl Epoch {
         // F3), so the owned list is bounded by the live connections: at most
         // `max_admitted` holding a slot plus `max_admitted` not yet read.
         let (service, stop) = (epoch.service.clone(), epoch.stop.clone());
+        let sockets = epoch.connections.clone();
         let admitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let unread: Arc<Mutex<std::collections::VecDeque<(u64, TcpStream)>>> = Arc::default();
         let gateway = std::thread::Builder::new()
@@ -252,7 +290,26 @@ impl Epoch {
                     }
                     next += 1;
                     let id = next;
+                    {
+                        let mut active = sockets.lock().unwrap_or_else(|p| p.into_inner());
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        match stream.try_clone() {
+                            Ok(socket) => {
+                                active.insert(id, socket);
+                            }
+                            Err(e) => {
+                                eprintln!("joined_owner_gateway_socket_clone: {e}");
+                                continue;
+                            }
+                        }
+                    }
                     let Some(oldest) = unread_admit(&unread, id, &stream, max_admitted) else {
+                        sockets
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .remove(&id);
                         continue;
                     };
                     if let Some(oldest) = oldest
@@ -262,6 +319,7 @@ impl Epoch {
                     }
                     let (service, own_unread, admitted) =
                         (service.clone(), unread.clone(), admitted.clone());
+                    let own_sockets = sockets.clone();
                     let spawned = std::thread::Builder::new()
                         .name("joined-owner-connection".into())
                         .spawn(move || {
@@ -288,6 +346,10 @@ impl Epoch {
                                 |r| gateway.handle(r),
                             );
                             unread_done(&own_unread, id);
+                            own_sockets
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&id);
                             slot.release(&admitted);
                             if let Err(e) = served {
                                 // Bounded polls end streams; recorded, not dropped.
@@ -298,6 +360,10 @@ impl Epoch {
                         Ok(t) => connections.push(t),
                         Err(e) => {
                             unread_done(&unread, id);
+                            sockets
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&id);
                             eprintln!("joined owner gateway connection thread: {e}");
                         }
                     }
@@ -387,6 +453,20 @@ impl Epoch {
     pub fn qualification(&self) -> Result<Value, PublicError> {
         self.host.qualification()
     }
+    /// The route serves many requests (`mycelium.joined_route.v2`).
+    pub fn multi_request(&self) -> bool {
+        crate::joined_shard::route::multi_request(self.host.message())
+    }
+    /// The epoch can no longer serve: the work port opens the next one (v2:
+    /// a carrier-level failure, death evidence, a generation change, expiry
+    /// or close; v1: after its one request).
+    pub fn retired(&self) -> bool {
+        self.handle
+            .state
+            .lock()
+            .map(|o| o.retired() || (!o.multi && o.request_id.is_some()))
+            .unwrap_or(true)
+    }
     /// Refusals the pump recorded so far (distinct codes, first-seen order).
     pub fn refusals(&self) -> Vec<String> {
         self.refusals
@@ -394,13 +474,28 @@ impl Epoch {
             .unwrap_or_else(|p| p.into_inner())
             .clone()
     }
-    fn shutdown(&mut self) {
+    fn wake_gateway(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        // Close every accepted socket, including admitted bodies/SSE and unread
+        // headers, before joining. Registration uses the same lock and stop flag.
+        for socket in self
+            .connections
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            if let Err(e) = socket.shutdown(std::net::Shutdown::Both) {
+                eprintln!("joined_owner_gateway_shutdown: {e}");
+            }
+        }
         // Wake the accept loop; a refused connect means it already exited.
         if let Err(e) = TcpStream::connect(self.addr) {
             eprintln!("joined owner gateway wake: {e}");
         }
         self.handle.changed.notify_all();
+    }
+    fn shutdown(&mut self) {
+        self.wake_gateway();
         for t in self.threads.drain(..) {
             if t.join().is_err() {
                 eprintln!("joined owner epoch thread panicked");
@@ -408,15 +503,56 @@ impl Epoch {
         }
     }
     /// Stop the gateway and pump, join every owned thread (freeing the port),
-    /// and return the pump's recorded refusals.
-    pub fn close(mut self) -> Vec<String> {
+    /// and return the pump's recorded refusals. A v2 epoch's carrier is closed
+    /// first ([`m16_route::close`]): every member ends its serve with its
+    /// compute closed (an unsettled request is torn down as a retirement).
+    pub fn close(self) -> Vec<String> {
+        let end = self.close_end();
+        self.close_until(end)
+    }
+    fn close_end(&self) -> std::time::Instant {
+        self.stop_limit
+            .as_ref()
+            .and_then(m16_route::StopLimit::end)
+            .unwrap_or_else(|| {
+                let now = std::time::Instant::now();
+                match span(B::CancelAndCleanup) {
+                    Ok(wait) => now + wait,
+                    Err(e) => {
+                        record_code(&self.refusals, e.code);
+                        now
+                    }
+                }
+            })
+    }
+    /// Start closing before collecting member replies, so one held member cannot
+    /// consume another member's discard opportunity. No new thread is spawned.
+    pub fn begin_close_until(&self, end: std::time::Instant) {
+        self.wake_gateway();
+        if let Err(e) = m16_route::begin_close_until(&self.handle, end) {
+            record_code(&self.refusals, e.code);
+        }
+    }
+    /// One original Stop end for carrier, gateway I/O, and joins.
+    pub fn close_until(mut self, end: std::time::Instant) -> Vec<String> {
+        self.wake_gateway();
+        if let Err(e) = m16_route::close_until(&self.handle, end) {
+            record_code(&self.refusals, e.code);
+        }
         self.shutdown();
+        if std::time::Instant::now() > end {
+            record_code(&self.refusals, "owner_target_cleanup_unproven");
+        }
         self.refusals()
     }
 }
 impl Drop for Epoch {
     fn drop(&mut self) {
         if !self.threads.is_empty() {
+            self.wake_gateway();
+            if let Err(e) = m16_route::close_until(&self.handle, self.close_end()) {
+                record_code(&self.refusals, e.code);
+            }
             self.shutdown();
         }
     }
@@ -482,4 +618,61 @@ impl Slot {
             admitted.fetch_sub(1, Ordering::SeqCst);
         }
     }
+}
+
+/// One stage's carrier inputs: its member's held offer and `carrier_address` reply.
+pub struct StageCarrier<'a> {
+    pub node_id: &'a str,
+    pub offer: &'a Value,
+    pub address: &'a Value,
+}
+/// The epoch's carriers for the caller's network choice, handed through
+/// unchanged (moved from the owner example): direct LAN dials only the
+/// member-signed, owner-verified advertisements; loopback dials the reported
+/// endpoint at the generation the route signed.
+pub fn carriers_for(
+    network: &Option<(IpAddr, LanPolicy)>,
+    coordinator: &seed::Coordinator,
+    envelope: &Value,
+    stages: &[StageCarrier<'_>],
+) -> Result<Carriers, crate::compiler_inputs::Error> {
+    use crate::compiler_inputs::Error;
+    Ok(match network {
+        Some((interface, policy)) => Carriers::Lan {
+            verified: stages
+                .iter()
+                .map(|s| {
+                    crate::joined_shard::carrier::verify(
+                        coordinator,
+                        s.offer,
+                        &s.address["advert"],
+                        policy,
+                        crate::app_host::now(),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            interface: *interface,
+            policy: policy.clone(),
+        },
+        None => Carriers::Loopback(
+            stages
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    Ok(StagePeer {
+                        node_id: s.node_id.to_owned(),
+                        endpoint: s.address["endpoint_id"]
+                            .as_str()
+                            .and_then(|e| e.parse().ok())
+                            .ok_or(Error("carrier_address_invalid"))?,
+                        socket: serde_json::from_value(s.address["socket"].clone())
+                            .map_err(|_| Error("carrier_address_invalid"))?,
+                        generation: envelope["message"]["stages"][i]["member"]["generation"]
+                            .as_u64()
+                            .ok_or(Error("route_invalid"))?,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?,
+        ),
+    })
 }

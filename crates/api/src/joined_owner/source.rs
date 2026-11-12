@@ -27,7 +27,11 @@ use std::{
     collections::BTreeMap,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use transport::{Channel, Clock};
@@ -53,6 +57,10 @@ pub struct ShardSource {
     addrs: Vec<SocketAddr>,
     key: Value,
     lan: bool,
+    /// Set by `close`; the source thread serves nothing once it is set.
+    closing: Arc<AtomicBool>,
+    /// The source thread is (about to be) blocked accepting a member.
+    accepting: Arc<AtomicBool>,
 }
 fn budget(id: B) -> Result<budgets::Span, Refusal> {
     id.span(Entries::ZERO)
@@ -67,6 +75,16 @@ impl ShardSource {
         journal: PathBuf,
         lan: Option<(IpAddr, LanPolicy)>,
     ) -> Result<Self, Refusal> {
+        Self::start_with_objects(authority, objects, journal, lan, None)
+    }
+    /// Packaged compiler handoff: carry admission-time source custody into every read.
+    pub fn start_with_objects(
+        authority: Arc<seed::Coordinator>,
+        objects: PathBuf,
+        journal: PathBuf,
+        lan: Option<(IpAddr, LanPolicy)>,
+        pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
+    ) -> Result<Self, Refusal> {
         let wall = budget(B::MemberChosenWall)?;
         let close = budget(B::RouterClose)?;
         let fence = B::ArtifactMaxFence
@@ -77,6 +95,10 @@ impl ShardSource {
             .map_err(|_| refusal("budget_unavailable"))?
             .clock_skew_ms;
         let on_lan = lan.is_some();
+        let poll = budget(B::OwnerPoll)?;
+        let closing = Arc::new(AtomicBool::new(false));
+        let accepting = Arc::new(AtomicBool::new(false));
+        let (stop, waiting) = (closing.clone(), accepting.clone());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (jobs, inbox) = mpsc::channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -151,7 +173,8 @@ impl ShardSource {
                                     clock_skew_ms: skew,
                                     now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
                                 })
-                                .map_err(|e| refusal(format!("source_store_failed:{}", e.0)))?;
+                                .map_err(|e| refusal(format!("source_store_failed:{}", e.0)))?
+                                .with_pinned(pinned.clone());
                                 let end = Instant::now() + Duration::from_millis(wall.millis());
                                 store
                                     .verify_bounded(&hash, &|| {
@@ -196,9 +219,40 @@ impl ShardSource {
                                     Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
                                 )
                                 .map_err(|e| refusal(format!("source_service_failed:{e:?}")))?;
-                                let connection = host
-                                    .accept(&clock, until(wall)?)
-                                    .map_err(|e| refusal(format!("source_accept_failed:{e:?}")))?;
+                                let end = until(wall)?;
+                                // F4: `close` wakes this wait (LocalOnly: it dials the
+                                // source once; direct LAN: slices of OwnerPoll, whose
+                                // in-flight handshakes carry over to the next accept).
+                                waiting.store(true, Ordering::SeqCst);
+                                let accepted = loop {
+                                    if stop.load(Ordering::SeqCst) {
+                                        break Err(refusal("source_closed"));
+                                    }
+                                    let slice = match on_lan {
+                                        true => until(poll)?
+                                            .earliest(end)
+                                            .map_err(|_| refusal("deadline_invalid"))?,
+                                        false => end,
+                                    };
+                                    match host.accept(&clock, slice) {
+                                        Err(transport::Error::Expired)
+                                            if on_lan
+                                                && end.remaining(clock.monotonic()).is_ok() =>
+                                        {
+                                            continue;
+                                        }
+                                        other => {
+                                            break other.map_err(|e| {
+                                                refusal(format!("source_accept_failed:{e:?}"))
+                                            });
+                                        }
+                                    }
+                                };
+                                waiting.store(false, Ordering::SeqCst);
+                                if stop.load(Ordering::SeqCst) {
+                                    return Err(refusal("source_closed"));
+                                }
+                                let connection = accepted?;
                                 rt.block_on(service.serve_connection(connection))
                                     .map_err(|e| refusal(format!("source_serve_failed:{e:?}")))
                             })();
@@ -224,6 +278,8 @@ impl ShardSource {
             addrs: Vec::new(),
             key: Value::Null,
             lan: on_lan,
+            closing,
+            accepting,
         };
         let (endpoint, addrs, key) = match ready.and_then(|r| r) {
             Ok(ready) => ready,
@@ -261,7 +317,11 @@ impl ShardSource {
             .map_err(|_| refusal("source_job_timeout"))?
     }
     fn shutdown(&mut self) -> Result<(), Refusal> {
+        self.closing.store(true, Ordering::SeqCst);
         self.jobs.take();
+        if !self.lan && self.accepting.load(Ordering::SeqCst) {
+            self.wake();
+        }
         match self.thread.take() {
             Some(t) => t.join().map_err(|_| refusal("source_thread_panicked"))?,
             None => Ok(()),
@@ -270,6 +330,55 @@ impl ShardSource {
     /// Close the endpoint and join the thread.
     pub fn close(mut self) -> Result<(), Refusal> {
         self.shutdown()
+    }
+    /// F4 (LocalOnly): dial this source once so an accept waiting for a member
+    /// that will not come (its receive was cancelled or refused) returns now;
+    /// the source thread then serves nothing and closes. A failed wake leaves
+    /// the accept to its own deadline.
+    fn wake(&self) {
+        let woken = (|| -> Result<(), String> {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())?;
+            let clock = crate::managed_carrier::HostClock::default();
+            let until = |id: B| -> Result<budgets::MonoInstant, String> {
+                clock
+                    .monotonic()
+                    .checked_add(budget(id).map_err(|e| e.0)?)
+                    .map_err(|_| "deadline_invalid".to_owned())
+            };
+            let mut host = LoopbackHost::bind_with_secret(
+                &rt,
+                &clock,
+                until(B::SidecarLocalHandshake)?,
+                iroh::SecretKey::generate(),
+            )
+            .map_err(|e| format!("{e:?}"))?;
+            let target = self
+                .addrs
+                .iter()
+                .fold(iroh::EndpointAddr::new(self.endpoint), |a, s| {
+                    a.with_ip_addr(*s)
+                });
+            let dialed = host
+                .connect_channel(
+                    &target,
+                    Channel::ArtifactChunk,
+                    &clock,
+                    until(B::SidecarLocalHandshake)?,
+                )
+                .map(drop)
+                .map_err(|e| format!("{e:?}"));
+            let closed = host
+                .close(&clock, until(B::RouterClose)?)
+                .map_err(|e| format!("{e:?}"));
+            dialed.and(closed)
+        })();
+        if let Err(e) = woken {
+            eprintln!("joined owner source wake: {e}");
+        }
     }
 }
 impl Drop for ShardSource {

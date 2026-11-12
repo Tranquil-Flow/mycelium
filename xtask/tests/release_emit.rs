@@ -156,6 +156,14 @@ impl Sandbox {
             .unwrap_or_else(|| panic!("no line for {cell}: {out}"))
             .to_string()
     }
+    /// `body` plus the line a receipt must carry (review RELF F14): this cell's PASS for this
+    /// candidate manifest.
+    fn states_pass(&self, name: &str, body: &str) -> String {
+        format!(
+            "{body}\n{name}: PASS manifest_sha256 {}\n",
+            shasum(&self.root.join("manifest.json"))
+        )
+    }
     fn pass(&self, name: &str, artifact: &Path) -> Output {
         self.emit(
             "device",
@@ -322,7 +330,10 @@ fn a_symlinked_or_empty_artifact_is_not_evidence() {
 #[test]
 fn a_pass_is_bound_to_the_candidate_bytes_and_the_artifact_digest_and_turns_the_cell_green() {
     let sandbox = Sandbox::new();
-    let artifact = sandbox.artifact("stranger.json", "{\"attempt\":\"A1\"}");
+    let artifact = sandbox.artifact(
+        "stranger.json",
+        &sandbox.states_pass("stranger-install", "{\"attempt\":\"A1\"}"),
+    );
     let out = sandbox.pass("stranger-install", &artifact);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out));
     let records = sandbox.records();
@@ -336,7 +347,7 @@ fn a_pass_is_bound_to_the_candidate_bytes_and_the_artifact_digest_and_turns_the_
     let listed = record["artifacts"].as_array().unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["sha256"], shasum(&artifact).as_str());
-    assert_eq!(listed[0]["bytes"], 16);
+    assert_eq!(listed[0]["bytes"], fs::metadata(&artifact).unwrap().len());
     assert_eq!(
         Path::new(listed[0]["path"].as_str().unwrap()),
         fs::canonicalize(&artifact).unwrap()
@@ -368,7 +379,10 @@ fn emitting_a_pass_for_changed_candidate_bytes_is_refused() {
 #[test]
 fn a_pass_goes_red_when_its_artifact_changes_or_disappears() {
     let sandbox = Sandbox::new();
-    let artifact = sandbox.artifact("r.json", "{\"a\":1}");
+    let artifact = sandbox.artifact(
+        "r.json",
+        &sandbox.states_pass("stranger-install", "{\"a\":1}"),
+    );
     assert_eq!(
         sandbox.pass("stranger-install", &artifact).status.code(),
         Some(0)
@@ -385,7 +399,10 @@ fn a_pass_goes_red_when_its_artifact_changes_or_disappears() {
 #[test]
 fn the_latest_statement_decides_between_not_yet_and_pass() {
     let sandbox = Sandbox::new();
-    let artifact = sandbox.artifact("r.json", "{\"a\":1}");
+    let artifact = sandbox.artifact(
+        "r.json",
+        &sandbox.states_pass("stranger-install", "{\"a\":1}"),
+    );
     let nye = |reason: &str| {
         sandbox.emit(
             "device",
@@ -452,7 +469,10 @@ fn every_receipt_kind_has_an_emitter_and_a_cell_accepts_only_its_own_kind() {
         ("rehearsal", "rehearsal-1"),
         ("release_matrix", "f-incidents"),
     ] {
-        let artifact = sandbox.artifact(&format!("{name}.json"), "{\"a\":1}");
+        let artifact = sandbox.artifact(
+            &format!("{name}.json"),
+            &sandbox.states_pass(name, "{\"a\":1}"),
+        );
         let out = sandbox.emit(
             kind,
             name,

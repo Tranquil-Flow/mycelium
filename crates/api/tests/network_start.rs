@@ -442,7 +442,19 @@ fn network_start_equals_the_executed_oracle_for_the_external_provider() {
 #[test]
 fn a_window_that_runs_out_is_reopened_by_the_same_start() {
     let fx = fixture();
-    let mut app = App::new("window");
+    // The relay reports `Stopping` once its close has published "stopped" (relay.rs `close`): the
+    // status is read after that report, not after a wall-clock poll (LB2 item 6).
+    let (stopping_tx, stopping) = mpsc::channel::<()>();
+    let stopping_tx = Mutex::new(stopping_tx);
+    let observer: ReleaseObserver = Arc::new(move |event| {
+        if event == ReleaseEvent::Stopping {
+            // The receiver is gone only when the test already ended.
+            if stopping_tx.lock().expect("stopping").send(()).is_err() {
+                eprintln!("test_stopping_observer_receiver_closed");
+            }
+        }
+    });
+    let mut app = App::observed("window", Some(observer));
     let start = case(&fx, "w_start_30");
     let body = app.real(&start["request"]["body"]);
     let (status, got, _) = app.post("/api/network/start", &body);
@@ -458,10 +470,9 @@ fn a_window_that_runs_out_is_reopened_by_the_same_start() {
     assert_eq!(got["expires_in_seconds"], 30);
     // the clock passes the window: the relay's lifetime thread closes it ("stopped")
     *app.clock.lock().expect("clock") += 31.5;
-    let t = std::time::Instant::now();
-    while app.network().0["state"] != "stopped" && t.elapsed() < secs(5) {
-        std::thread::sleep(ms(20));
-    }
+    stopping
+        .recv_timeout(secs(30))
+        .expect("the lifetime thread closes the window");
     let want = &case(&fx, "w_status_after_window")["body"]["network"];
     let (net, _) = app.network();
     assert_eq!(

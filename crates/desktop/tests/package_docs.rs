@@ -65,7 +65,7 @@ fn signer(seed: u8) -> Signer {
 /// A finalized bundle directory (app payload + signed documents) for `version`.
 fn bundle(seed: u8, version: &str, floor: &str) -> Scratch {
     let dir = scratch();
-    let exe = dir.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let exe = dir.join("Mycelium.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
     fs::write(&exe, b"exe").unwrap();
     docs::finalize(
@@ -891,13 +891,32 @@ fn signing_key_files_must_hold_exactly_32_raw_bytes_and_are_never_echoed() {
 }
 
 #[test]
-fn the_install_command_asset_is_the_oracles_script_with_one_executable_name_changed() {
+fn the_install_command_asset_is_the_oracles_script_with_the_executable_and_app_names_changed() {
     use sha2::{Digest, Sha256};
+    // The ported texts are the oracle's with the v0.2 executable name and, under owner ruling 25
+    // (v0.2's own identity: a ruling change, not a loosening), the app names `Mycelium.app` /
+    // `Mycelium` in place of `Mycelium A13 Demo.app` / `Mycelium A13`. Each name is swapped back
+    // exactly where it occurs, so every other byte is still compared with the oracle's.
+    let back = |text: &str, pairs: &[(&str, &str, usize)]| {
+        let mut out = text.to_string();
+        for (ours, theirs, count) in pairs {
+            assert_eq!(out.matches(ours).count(), *count, "{ours}");
+            out = out.replace(ours, theirs);
+        }
+        out
+    };
     let ported = docs::INSTALL_COMMAND;
-    assert_eq!(ported.matches("Contents/MacOS/mycelium\"").count(), 1);
-    let oracle = ported.replace(
-        "Contents/MacOS/mycelium\"",
-        "Contents/MacOS/Mycelium A13 Demo\"",
+    let oracle = back(
+        ported,
+        &[
+            (
+                "Contents/MacOS/mycelium\"",
+                "Contents/MacOS/Mycelium A13 Demo\"",
+                1,
+            ),
+            ("$HERE/Mycelium.app\"", "$HERE/Mycelium A13 Demo.app\"", 1),
+            ("open 'Mycelium' in", "open 'Mycelium A13' in", 1),
+        ],
     );
     // `_INSTALL_COMMAND` of finalize_a13_macos.py at f4e366e9 == `Install Mycelium.command` of the
     // real v0.1.2 release (sha256 below).
@@ -905,8 +924,23 @@ fn the_install_command_asset_is_the_oracles_script_with_one_executable_name_chan
         format!("{:x}", Sha256::digest(oracle.as_bytes())),
         "668f9752013f60adc41fa773b2a44dbbc88fb9dc0300c3bc92ecae3dbf30e82e"
     );
+    let readme = back(
+        docs::README,
+        &[
+            (
+                "Mycelium macOS pilot bundle (owner_private_media)\n=================================================\n",
+                "Mycelium A13 macOS pilot bundle (owner_private_media)\n=====================================================\n",
+                1,
+            ),
+            (
+                "~/Applications/Mycelium.app",
+                "~/Applications/Mycelium A13.app",
+                1,
+            ),
+        ],
+    );
     assert_eq!(
-        format!("{:x}", Sha256::digest(docs::README.as_bytes())),
+        format!("{:x}", Sha256::digest(readme.as_bytes())),
         "701c27d9f294038ec60b7b7181ca9f8ea32ad7b4cc5922e81aa4624fa28d8e15"
     );
 }

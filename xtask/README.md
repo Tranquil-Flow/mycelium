@@ -232,4 +232,23 @@ claim table's status is never evidence (only `blocked` blocks). Attempt roots ho
 `events.jsonl`, `set-aside.json`, `promotion-receipt.json` (cites EV ids and log sha256);
 a receipt that stops being true is renamed, never deleted. `release status` is the read-only
 per-cell view; `release publish` is a refusing stub (exit 3) that needs an owner token file.
+
+**Tool cells (lane RELF):** `release-build`, `adhoc-signature`, `bundle-admission` and `relocation`
+are produced by the tool, not by a receipt: `xtask release produce <cell> --lane L --manifest M`
+runs only the cell's own command, `xtask release check-bundle <cell> --manifest M --manifest-sha256
+S`, which re-hashes the frozen exe and bundle before and after and checks the manifest's own
+`bundle_dir` (codesign at the v0.1.4 ad-hoc level; admission against the source tree's pins, closed
+over `Contents/MacOS` and `Contents/Frameworks`; a relocated clone still verifies and admits; the
+recipe's `APP-FILES.sha256`, `CONTENT-MANIFEST.json`, `SIGN-RECEIPT.json` describe these bytes).
+Such a cell (`argv_is_hint`) is green only on a record whose argv IS that command for this
+manifest and whose log has the tool's `PASS manifest_sha256 <S>` line. The model-free launch smoke
+stays an **operator receipt** (`operator_receipt`, shown `[operator receipt]` by `status`): `emit`
+refuses it, and the machine keeps it red, unless one of its artifact files names this candidate's
+manifest sha256 and exe sha256. **Every receipt cell (RELF2, review F14)** — two-path,
+minimum-OS, incident matrix, rehearsals, device cells, final soak and the launch smoke — is green
+only when its files (the artifacts, else the record's log) hold the line
+`<receipt name>: PASS manifest_sha256 <S>` for THIS frozen manifest and no line
+`<receipt name>: <result>` with a result other than `PASS`; `emit --pass` refuses anything else
+(`receipt_unbound`, `receipt_result_failed`), so a summary written for another candidate, or one
+reporting a failure, never turns a cell green. The ledger itself is still unsigned JSONL.
 `xtask retire check` is the R6 test-ID check: see `retirement/README.md`.

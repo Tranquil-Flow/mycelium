@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Local, unsigned `.app` assembly and the no-Python audit.
 //!
-//! Identity policy (S14, v0.2 local bundle): the user-visible name, bundle
-//! identifier, icon, minimum OS and Info.plist key set are the released v0.1.4
-//! values (`Contents/Info.plist` sha256 `e1220422…` in the certified package),
-//! so a later installer can upgrade in place. Only the executable name and the
-//! version string differ, and a test names that difference. Nothing here signs,
+//! Identity policy (owner ruling 25): v0.2 has its own user-visible name `Mycelium` and bundle
+//! identifier `org.mycelium.app`, so it sits beside an installed v0.1.4 and never touches its
+//! files (ruling 20). Icon, minimum OS and the Info.plist key set are the released v0.1.4 values
+//! (`Contents/Info.plist` sha256 `e1220422…` in the certified package); name, identifier,
+//! executable name and version differ, and a test names those differences. Nothing here signs,
 //! notarizes, installs, upgrades or touches an installed application.
 use crate::package::{Entry, Kind, Manifest, PackageError};
 use serde::Deserialize;
@@ -15,8 +15,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const DISPLAY_NAME: &str = "Mycelium A13 Demo";
-pub const BUNDLE_ID: &str = "org.mycelium.a13-macos-demo";
+// Owner ruling 25: v0.2's own identity (v0.1.4: `Mycelium A13 Demo` / `org.mycelium.a13-macos-demo`).
+pub const DISPLAY_NAME: &str = "Mycelium";
+pub const BUNDLE_ID: &str = "org.mycelium.app";
 pub const VERSION: &str = "0.2.0";
 pub const MINIMUM_OS: &str = "15.6.1";
 pub const EXECUTABLE: &str = "mycelium";
@@ -205,7 +206,8 @@ fn destination(file: &SourceFile) -> Result<(String, Kind, u32), BundleError> {
         )),
         // MLX resolves its default library beside `libmlx.dylib` (`Frameworks/mlx.metallib`) and
         // nowhere under `Resources/`; a bundle laid out per the older plan made every worker trap in
-        // `mlx::core::metal::Device::Device()` (L11 round 7, `06-member-crash-*.ips.txt`).
+        // `mlx::core::metal::Device::Device()` (L11 round 7, `06-member-crash-*.ips.txt`). `build`
+        // stores the bytes at `package::METAL_STORE_PATH` and links this path to them (signable).
         "runtime_metal_library" if file_name(file)? == "mlx.metallib" => Ok((
             "Contents/Frameworks/mlx.metallib".to_string(),
             Kind::Metal,
@@ -248,6 +250,8 @@ pub struct Built {
     pub observed_at: String,
     /// `(bundle path, source path, source role, recorded Mach-O build version)`.
     pub sources: Vec<(String, String, String, Option<String>)>,
+    /// The ad-hoc signing receipt once `crate::sign::adhoc` sealed the bundle (`None`: unsigned).
+    pub signature: Option<serde_json::Value>,
 }
 fn copy_file(from: &Path, root: &Path, relative: &str, mode: u32) -> Result<(), BundleError> {
     use std::os::unix::fs::PermissionsExt;
@@ -256,8 +260,50 @@ fn copy_file(from: &Path, root: &Path, relative: &str, mode: u32) -> Result<(), 
     std::fs::copy(from, &to).map_err(io)?;
     std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode)).map_err(io)
 }
+const LICENSE_DIRECTORY: &str = "Contents/Resources/licenses/";
+/// The content-manifest source row of a pinned extra file. Where a local file was taken from (a
+/// CARGO_TARGET_DIR, a scratch copy) is never recorded: its pinned bytes are (two-path repro).
+fn helper_source(source: &Path, pin: &Entry) -> (String, String, String, Option<String>) {
+    use crate::package::{RELAY_CLIENT_BUILD_VERSION, RELAY_CLIENT_PATH, RELAY_CLIENT_SOURCE};
+    if pin.path == RELAY_CLIENT_PATH {
+        return (
+            pin.path.clone(),
+            RELAY_CLIENT_SOURCE.into(),
+            "pinned_relay_client".into(),
+            Some(RELAY_CLIENT_BUILD_VERSION.into()),
+        );
+    }
+    if pin.kind == Kind::Resource {
+        return (
+            pin.path.clone(),
+            "pinned licence notice of a pinned helper (cloudflared 2026.10.2, Apache-2.0; v0.1.4 third_party/cloudflared-LICENSE)".into(),
+            "license_notice".into(),
+            None,
+        );
+    }
+    // A helper built by the recipe like the executable (the resource probe).
+    (
+        pin.path.clone(),
+        format!(
+            "built by the recipe: {}",
+            source
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+        ),
+        "pinned_helper".into(),
+        None,
+    )
+}
 /// Build `<out_dir>/<DISPLAY_NAME>.app` exclusively; remove it again on failure.
 pub fn build(spec: &Spec) -> Result<Built, BundleError> {
+    build_with_helpers(spec, &[])
+}
+/// [`build`] plus pinned extra files (`(source file, pinned entry)`): helper executables
+/// (`Kind::Helper`: the resource probe, the relay client) and their licence notices
+/// (`Kind::Resource` under `Contents/Resources/licenses/`: the relay client's). Each source must
+/// have exactly its pinned bytes; a helper must also have only system/bundle links. Helpers are
+/// copied to the pinned path with mode 0755, notices with 0644.
+pub fn build_with_helpers(spec: &Spec, helpers: &[(&Path, &Entry)]) -> Result<Built, BundleError> {
     let mut limited = Vec::new();
     std::fs::File::open(spec.native_inputs)
         .map_err(io)?
@@ -290,6 +336,16 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
     check_executable_links(spec.executable)?;
     for file in inputs.native_inputs.iter().chain(&inputs.license_notices) {
         verify_source(file)?;
+    }
+    for (source, pin) in helpers {
+        let (bytes, sha) = measure(source)?;
+        let notice = pin.kind == Kind::Resource && pin.path.starts_with(LICENSE_DIRECTORY);
+        if !(pin.kind == Kind::Helper || notice) || bytes != pin.bytes || sha != pin.sha256 {
+            return Err(BundleError::SourceIdentity(source.display().to_string()));
+        }
+        if !notice {
+            check_executable_links(source)?;
+        }
     }
     let (icon_bytes, icon_sha) = measure(spec.icon)?;
     if icon_sha != ICON_SHA256 {
@@ -341,10 +397,34 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
             Kind::Resource,
             0o644,
         ));
+        for (source, pin) in helpers {
+            sources.push(helper_source(source, pin));
+            let mode = if pin.kind == Kind::Helper {
+                0o755
+            } else {
+                0o644
+            };
+            plan.push((
+                source.to_path_buf(),
+                pin.path.clone(),
+                pin.kind.clone(),
+                mode,
+            ));
+        }
         let mut entries = Vec::new();
         for (from, relative, kind, mode) in &plan {
-            copy_file(from, &app, relative, *mode)?;
-            let (bytes, sha256) = measure(&app.join(relative))?;
+            let stored = if *kind == Kind::Metal {
+                // v0.1.4's signable layout: bytes in Resources, a relative link beside libmlx.
+                copy_file(from, &app, crate::package::METAL_STORE_PATH, *mode)?;
+                let link = app.join(relative);
+                std::fs::create_dir_all(link.parent().ok_or(PackageError::Layout)?).map_err(io)?;
+                std::os::unix::fs::symlink(crate::package::METAL_LINK_TARGET, &link).map_err(io)?;
+                crate::package::METAL_STORE_PATH
+            } else {
+                copy_file(from, &app, relative, *mode)?;
+                relative.as_str()
+            };
+            let (bytes, sha256) = measure(&app.join(stored))?;
             entries.push(Entry {
                 path: relative.clone(),
                 kind: kind.clone(),
@@ -379,12 +459,22 @@ pub fn build(spec: &Spec) -> Result<Built, BundleError> {
                 return Err(BundleError::SourceIdentity(relative.clone()));
             }
         }
+        for (_, pin) in helpers {
+            if !manifest
+                .entries
+                .iter()
+                .any(|e| e.path == pin.path && e.sha256 == pin.sha256 && e.bytes == pin.bytes)
+            {
+                return Err(BundleError::SourceIdentity(pin.path.clone()));
+            }
+        }
         Ok(Built {
             app: app.clone(),
             manifest,
             native_inputs_sha256: native_inputs_sha256.clone(),
             observed_at: inputs.observed_at.clone(),
             sources,
+            signature: None,
         })
     })();
     if result.is_err() {
@@ -480,11 +570,20 @@ pub fn content_manifest(built: &Built) -> Result<serde_json::Value, BundleError>
         "identity": {
             "display_name": DISPLAY_NAME, "bundle_identifier": BUNDLE_ID, "version": VERSION,
             "minimum_system_version": MINIMUM_OS, "executable": EXECUTABLE, "icon": ICON_FILE,
-            "policy": "v0.1.4 name, identifier, icon and Info.plist key set retained for in-place upgrade; executable name and version differ",
+            "policy": "owner ruling 25: v0.2's own name and identifier, so it sits beside an installed v0.1.4 and never touches its files; v0.1.4 icon and Info.plist key set; executable name and version differ",
         },
-        "trust_level": {
-            "signed": false, "notarized": false, "developer_id": "v0.3",
-            "note": "unsigned local build; no codesign, no quarantine handling, not installed",
+        "trust_level": match &built.signature {
+            None => serde_json::json!({
+                "signed": false, "notarized": false, "developer_id": "v0.3",
+                "note": "unsigned local build; no codesign, no quarantine handling, not installed",
+            }),
+            Some(receipt) => serde_json::json!({
+                "signed": "ad-hoc", "notarized": false, "developer_id": "v0.3",
+                "note": crate::sign::TRUST_LEVEL,
+                "verify_exit": receipt["verify"]["exit"],
+                "executable_sha256_after_signing": receipt["executable"]["sha256_after"],
+                "code_resources_sha256": receipt["code_resources"]["sha256"],
+            }),
         },
         "native_inputs": {
             "manifest_sha256": built.native_inputs_sha256, "observed_at": built.observed_at,

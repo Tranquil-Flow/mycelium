@@ -55,7 +55,7 @@ fn put(path: &Path, bytes: &[u8], mode: u32) {
 }
 fn bundle(tree: &Tree, label: &str, version: &str, exe: &str) -> PathBuf {
     let dir = tree.path(label);
-    let app = dir.join("Mycelium A13 Demo.app");
+    let app = dir.join("Mycelium.app");
     put(
         &app.join("Contents/MacOS").join(exe),
         format!("exe {version}").as_bytes(),
@@ -127,7 +127,7 @@ fn finalize_install_upgrade_status_rollback_uninstall_keep_user_state_byte_for_b
     let home = tree.path("home");
     let apps = tree.path("apps");
     let (home_arg, apps_arg) = (home.to_str().unwrap(), apps.to_str().unwrap());
-    let state = home.join("Library/Application Support/Mycelium A13 macOS Demo");
+    let state = home.join("Library/Application Support/org.mycelium.app/state");
     for (relative, mode) in [
         ("identity/sidecar.key", 0o600),
         ("authority.json", 0o600),
@@ -174,8 +174,8 @@ fn finalize_install_upgrade_status_rollback_uninstall_keep_user_state_byte_for_b
         (Some("0.2.0"), Some("0.1.4"))
     );
     assert_eq!(
-        fs::read_link(apps.join("Mycelium A13.app")).unwrap(),
-        home.join("Library/Application Support/Mycelium/programs/0.2.0/Mycelium A13 Demo.app")
+        fs::read_link(apps.join("Mycelium.app")).unwrap(),
+        home.join("Library/Application Support/org.mycelium.app/programs/0.2.0/Mycelium.app")
     );
 
     let rolled = json(&tool(&["rollback", home_arg, apps_arg]));
@@ -189,7 +189,7 @@ fn finalize_install_upgrade_status_rollback_uninstall_keep_user_state_byte_for_b
     let removed = json(&tool(&["uninstall", home_arg, apps_arg]));
     assert_eq!(removed["state"], "retained");
     assert_eq!(state_listing(&state), seeded, "uninstall");
-    assert!(fs::symlink_metadata(apps.join("Mycelium A13.app")).is_err());
+    assert!(fs::symlink_metadata(apps.join("Mycelium.app")).is_err());
     assert_eq!(
         json(&tool(&["status", home_arg, apps_arg]))["installed"],
         false

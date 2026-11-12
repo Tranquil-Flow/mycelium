@@ -4,11 +4,13 @@ use super::*;
 use crate::native_worker_link::Link;
 use budgets::{BudgetId, Entries};
 use std::{
+    io,
     os::{fd::OwnedFd, unix::net::UnixStream},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 
+pub(crate) mod guard;
 #[cfg(test)]
 mod tests;
 
@@ -19,10 +21,57 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .millis(),
     ))
 }
+/// The three fallible syscalls on the ONE owned child. Production (`ChildCalls`)
+/// calls `std::process::Child` directly; tests inject failures through the
+/// constructor-only `Worker::from_child_with_custody`, so the retry contract is
+/// exercised without poking at private state.
+pub(crate) trait Custody: Send {
+    fn try_wait(&mut self, child: &mut Child) -> io::Result<Option<ExitStatus>>;
+    fn kill(&mut self, child: &mut Child) -> io::Result<()>;
+    fn wait(&mut self, child: &mut Child) -> io::Result<ExitStatus>;
+}
+pub(crate) struct ChildCalls;
+impl Custody for ChildCalls {
+    fn try_wait(&mut self, child: &mut Child) -> io::Result<Option<ExitStatus>> {
+        child.try_wait()
+    }
+    fn kill(&mut self, child: &mut Child) -> io::Result<()> {
+        child.kill()
+    }
+    fn wait(&mut self, child: &mut Child) -> io::Result<ExitStatus> {
+        child.wait()
+    }
+}
+/// A failed serving-worker start: the error, the guard's verdict when the
+/// guard stopped the worker during prepare (lane MGF F4: its numbers are kept),
+/// and whether the worker ended by itself once its prepare was handed to it
+/// (lane MG2: v0.1.4 `requires_cold_restart`, worker.py:1171,1549-1552).
+#[derive(Debug)]
+pub(crate) struct StartError {
+    pub(crate) error: Error,
+    pub(crate) guard: Option<guard::Failure>,
+    pub(crate) died: bool,
+}
+impl From<Error> for StartError {
+    fn from(error: Error) -> Self {
+        Self {
+            error,
+            guard: None,
+            died: false,
+        }
+    }
+}
 pub(crate) struct Worker {
-    child: Option<Child>,
+    child: guard::Slot,
     link: Link,
     cancel: Arc<AtomicBool>,
+    guard: Option<guard::Guard>,
+    /// The syscall boundary for the one owned child (constructor-only seam;
+    /// production is `ChildCalls`).
+    custody: Box<dyn Custody>,
+    /// This Worker's own SIGKILL was delivered to the owned child. Sticky
+    /// across a failed reap, so a retry never reclassifies our kill as death.
+    kill_sent: bool,
 }
 impl Worker {
     pub(crate) fn start(
@@ -46,7 +95,7 @@ impl Worker {
         source: &Path,
         deadline: Instant,
     ) -> Result<Self> {
-        config.verify()?;
+        config.verify_until(&|| cancel.load(Ordering::SeqCst))?;
         if Instant::now() >= deadline {
             return Err(Error("native_worker_deadline"));
         }
@@ -88,21 +137,50 @@ impl Worker {
     /// exchange (the worker keeps its own flag for later close-class commands),
     /// and a failed start kills and reaps the exact child before returning. A
     /// returned error therefore proves no child remains, unless the code is
-    /// `native_cleanup_unproven` (kill/reap itself failed).
+    /// `native_cleanup_unproven` (kill/reap itself failed). The guard holds the
+    /// worker to the prepare's `memory` and its staging folder to `disk`.
     pub(crate) fn start_scoped_until(
         config: &Config,
         prepare: &Value,
         cancel: Arc<AtomicBool>,
         source: &Path,
         deadline: Instant,
-    ) -> Result<Self> {
-        config.verify()?;
+        disk: guard::Disk,
+    ) -> std::result::Result<Self, StartError> {
+        Self::start_scoped_probed_until(
+            config,
+            prepare,
+            cancel,
+            source,
+            deadline,
+            Some(disk),
+            Box::new(guard::HostProbe),
+        )
+    }
+    /// As `start_scoped_until`, reading the worker's memory through `probe`
+    /// (the guard's constructor-only seam; production passes `HostProbe`).
+    fn start_scoped_probed_until(
+        config: &Config,
+        prepare: &Value,
+        cancel: Arc<AtomicBool>,
+        source: &Path,
+        deadline: Instant,
+        disk: Option<guard::Disk>,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> std::result::Result<Self, StartError> {
+        config.verify_until(&|| cancel.load(Ordering::SeqCst))?;
         if Instant::now() >= deadline {
-            return Err(Error("native_worker_deadline"));
+            return Err(Error("native_worker_deadline").into());
         }
         if cancel.load(Ordering::SeqCst) {
-            return Err(Error("compiler_stopped"));
+            return Err(Error("compiler_stopped").into());
         }
+        // The guard holds the worker to the prepare's `memory`: the member's
+        // consent cap or a tighter share (NativeShard::memory_limit).
+        let memory = prepare["memory"]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or(Error("worker_limits_invalid"))?;
         let (client, server) = UnixStream::pair().map_err(|_| Error("native_socket_failed"))?;
         let home = std::env::var_os("HOME").ok_or(Error("native_shard_path_invalid"))?;
         let profile = super::shard_sandbox::profile(
@@ -119,13 +197,20 @@ impl Worker {
             .stdout(Stdio::from(OwnedFd::from(server)))
             .spawn()
             .map_err(|_| Error("native_worker_start_failed"))?;
-        let mut worker = Self::from_child(child, client, Arc::new(AtomicBool::new(false)))
-            .map_err(|e| match e.0 {
-                "native_worker_kill_failed" | "native_worker_reap_failed" => {
-                    Error("native_cleanup_unproven")
-                }
-                _ => e,
-            })?;
+        let mut worker = Self::from_child_watched(
+            child,
+            client,
+            Arc::new(AtomicBool::new(false)),
+            memory,
+            disk,
+            probe,
+        )
+        .map_err(|e| match e.0 {
+            "native_worker_kill_failed" | "native_worker_reap_failed" => {
+                Error("native_cleanup_unproven")
+            }
+            _ => e,
+        })?;
         let started = worker
             .request_controlled(prepare, &[], deadline, cancel)
             .and_then(|(reply, body)| {
@@ -137,10 +222,21 @@ impl Worker {
             });
         match started {
             Ok(()) => Ok(worker),
-            Err(error) => match worker.kill_and_reap() {
-                Ok(_) => Err(error),
-                Err(_) => Err(Error("native_cleanup_unproven")),
-            },
+            Err(error) => {
+                let guard = worker.guard_failure();
+                match worker.kill_and_reap() {
+                    Ok(evidence) => Err(StartError {
+                        error,
+                        guard,
+                        died: Self::ended_by_itself(&evidence),
+                    }),
+                    Err(_) => Err(StartError {
+                        error: Error("native_cleanup_unproven"),
+                        guard,
+                        died: false,
+                    }),
+                }
+            }
         }
     }
     fn from_child(child: Child, client: UnixStream, cancel: Arc<AtomicBool>) -> Result<Self> {
@@ -154,6 +250,17 @@ impl Worker {
         client: UnixStream,
         cancel: Arc<AtomicBool>,
         wall: Result<Duration>,
+    ) -> Result<Self> {
+        Self::from_child_linked(child, client, cancel, wall, Box::new(ChildCalls))
+    }
+    /// As `from_child_within`, with the syscall boundary given (constructor-only
+    /// seam; production passes `ChildCalls`).
+    fn from_child_linked(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        wall: Result<Duration>,
+        custody: Box<dyn Custody>,
     ) -> Result<Self> {
         let linked = wall.and_then(|wall| {
             Link::new(client, wall).map_err(|error| {
@@ -175,13 +282,35 @@ impl Worker {
             }
         };
         Ok(Self {
-            child: Some(child),
+            child: Arc::new(std::sync::Mutex::new(Some(child))),
             link,
             cancel,
+            guard: None,
+            custody,
+            kill_sent: false,
         })
+    }
+    /// Test-only: as `from_child`, with a scripted syscall boundary (see
+    /// `Custody`). The child is real; only its three calls are intercepted.
+    #[cfg(test)]
+    pub(crate) fn from_child_with_custody(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        custody: Box<dyn Custody>,
+    ) -> Result<Self> {
+        Self::from_child_linked(
+            child,
+            client,
+            cancel,
+            duration(BudgetId::MemberChosenWall),
+            custody,
+        )
     }
     pub(crate) fn pid(&self) -> Result<u32> {
         self.child
+            .lock()
+            .map_err(|_| Error("native_worker_closed"))?
             .as_ref()
             .map(Child::id)
             .ok_or(Error("native_worker_closed"))
@@ -214,6 +343,9 @@ impl Worker {
         deadline: Instant,
     ) -> Result<(Value, Vec<u8>)> {
         use crate::native_worker_link::LinkError;
+        if let Some(failure) = self.guard_failure() {
+            return Err(Error(failure.code));
+        }
         let (reply, body) = self
             .link
             .request_until(
@@ -230,6 +362,11 @@ impl Worker {
                     LinkError::Deadline => "native_worker_deadline",
                     _ => "native_worker_exchange_failed",
                 })
+            })
+            // An exchange broken by the guard's kill reports the guard's code.
+            .map_err(|error| {
+                self.guard_failure()
+                    .map_or(error, |failure| Error(failure.code))
             })?;
         if let Some(error) = reply.get("error") {
             eprintln!("native_worker_refused: {error}");
@@ -252,13 +389,54 @@ impl Worker {
         }
         Ok((reply, body))
     }
+    /// Graceful close for the local qualification path: ONE deadline
+    /// (`MemberChosenWall` from now) covers the request and the exit wait; the
+    /// exit wait never starts a fresh allowance of its own. On failure the
+    /// exact child is released by `Drop`.
     pub(crate) fn close(mut self) -> Result<Value> {
-        self.close_in_place()
+        let end = Instant::now() + duration(BudgetId::MemberChosenWall)?;
+        self.close_in_place_until(end)
     }
-    /// Graceful close that leaves the worker owned on failure, so the caller can
-    /// still kill and reap the exact child.
-    pub(crate) fn close_in_place(&mut self) -> Result<Value> {
-        let (reply, body) = self.request(&json!({"command":"close"}), &[])?;
+    /// Reset the prepared worker's stage session between requests of one
+    /// route epoch (private worker-link `session_reset_v1`, lane EP0). The
+    /// worker's OWN cancel flag governs this exchange, so a route's request
+    /// cancellation can never interrupt it. Returns the worker's session object
+    /// only when its reply has exactly the contract's shape and reports no
+    /// residue (active bytes back at or below the post-prepare baseline).
+    pub(crate) fn reset_session(&mut self, deadline: Instant) -> Result<Value> {
+        use stage_contract::native_session as contract;
+        let (reply, body) =
+            self.request_until(&json!({"command":contract::COMMAND}), &[], deadline)?;
+        let exact = |v: &Value, fields: &[&str]| {
+            v.as_object().is_some_and(|o| {
+                o.len() == fields.len() && fields.iter().all(|k| o.contains_key(*k))
+            })
+        };
+        let session = &reply["session"];
+        let within = matches!(
+            (session["active_bytes"].as_u64(), session["baseline_bytes"].as_u64()),
+            (Some(active), Some(baseline)) if active <= baseline
+        );
+        if !body.is_empty()
+            || !exact(&reply, &["ok", "session"])
+            || reply["ok"] != true
+            || !exact(session, contract::REPLY_FIELDS)
+            || session["protocol"] != contract::REPLY_PROTOCOL
+            || session["state_generation"].as_u64().is_none()
+            || !within
+        {
+            return Err(Error("native_session_reset_invalid"));
+        }
+        Ok(session.clone())
+    }
+    /// Graceful close under the caller's ONE remaining deadline `end` (the
+    /// member's consent/Stop end): the close request and the exit wait both use
+    /// `end`, and neither refreshes an allowance of its own. The exact child
+    /// stays owned on every failure, so the caller can still kill and reap it;
+    /// at expiry the established `stop`/`abort` escalation sends the exact-child
+    /// SIGKILL. Free-form teardown is never retried after a partial exchange.
+    pub(crate) fn close_in_place_until(&mut self, end: Instant) -> Result<Value> {
+        let (reply, body) = self.request_until(&json!({"command":"close"}), &[], end)?;
         if !body.is_empty()
             || reply["ok"] != true
             || reply["stats"]["active_bytes"] != 0
@@ -267,77 +445,207 @@ impl Worker {
         {
             return Err(Error("native_cleanup_unproven"));
         }
-        let deadline = Instant::now() + duration(BudgetId::RouterClose)?;
+        let poll = duration(BudgetId::RegistryPoll)?;
         loop {
-            if let Some(status) = self
-                .child
-                .as_mut()
-                .ok_or(Error("native_worker_closed"))?
-                .try_wait()
-                .map_err(|_| Error("native_worker_reap_failed"))?
             {
-                self.child.take();
-                if !status.success() {
-                    return Err(Error("native_worker_exit_failed"));
+                let Self { child, custody, .. } = self;
+                let mut slot = child
+                    .lock()
+                    .map_err(|_| Error("native_worker_reap_failed"))?;
+                let child = slot.as_mut().ok_or(Error("native_worker_closed"))?;
+                if let Some(status) = custody
+                    .try_wait(child)
+                    .map_err(|_| Error("native_worker_reap_failed"))?
+                {
+                    if !status.success() {
+                        // Reaped, but not a clean exit: keep the handle so an
+                        // abort still reports the OS outcome it observed.
+                        return Err(Error("native_worker_exit_failed"));
+                    }
+                    slot.take();
+                    return Ok(reply["stats"].clone());
                 }
-                return Ok(reply["stats"].clone());
             }
-            if Instant::now() >= deadline {
+            let now = Instant::now();
+            let Some(rest) = end.checked_duration_since(now).filter(|d| !d.is_zero()) else {
                 return Err(Error("native_cleanup_unproven"));
-            }
-            std::thread::yield_now();
+            };
+            std::thread::sleep(rest.min(poll));
         }
     }
 }
 impl Worker {
+    /// Whether `kill_and_reap` evidence shows a worker that ended without this
+    /// process's own kill (lane MG2): it had already exited, or its exit status
+    /// is not the SIGKILL this process just sent (it was already exiting).
+    pub(crate) fn ended_by_itself(evidence: &Value) -> bool {
+        evidence["killed"] == false || evidence["exit_signal"] != libc::SIGKILL
+    }
     /// Interrupted framing cannot carry a graceful close. Kill and wait for the
     /// exact owned child; return reap evidence only after the OS reported its exit.
     /// This is process-release evidence, NOT native-context-closed evidence.
     pub(crate) fn kill_and_reap(mut self) -> Result<Value> {
-        let mut child = self.child.take().ok_or(Error("native_worker_closed"))?;
+        self.kill_and_reap_in_place()
+    }
+    /// As `kill_and_reap`, but the exact child stays owned until the OS reported
+    /// its exit, so the caller can retry the SAME child. On a failed `try_wait`
+    /// no signal is sent (wait ownership may already be lost, and a reused
+    /// numeric pid must never be signalled); on a failed kill or reap the Child
+    /// handle is retained and only the caller's retry signals it again.
+    /// `kill_sent` is sticky, so a retry that finally collects the status still
+    /// reports this Worker's own SIGKILL instead of a natural death.
+    pub(crate) fn kill_and_reap_in_place(&mut self) -> Result<Value> {
+        let Self {
+            child,
+            custody,
+            kill_sent,
+            ..
+        } = self;
+        let mut slot = child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let child = slot.as_mut().ok_or(Error("native_worker_closed"))?;
         let pid = child.id();
-        let killed = match child
-            .try_wait()
-            .map_err(|_| Error("native_worker_reap_failed"))?
-        {
-            Some(_) => false,
-            None => {
-                child
-                    .kill()
+        let status = match custody.try_wait(child) {
+            Ok(Some(status)) => status,
+            Ok(None) => {
+                custody
+                    .kill(child)
                     .map_err(|_| Error("native_worker_kill_failed"))?;
-                true
+                *kill_sent = true;
+                custody
+                    .wait(child)
+                    .map_err(|_| Error("native_worker_reap_failed"))?
             }
+            Err(_) => return Err(Error("native_worker_reap_failed")),
         };
-        let status = child
-            .wait()
-            .map_err(|_| Error("native_worker_reap_failed"))?;
+        slot.take();
         use std::os::unix::process::ExitStatusExt;
         Ok(
-            json!({"worker_pid":pid,"context_closed":false,"worker_reaped":true,"killed":killed,
+            json!({"worker_pid":pid,"context_closed":false,"worker_reaped":true,"killed":*kill_sent,
             "exit_code":status.code(),"exit_signal":status.signal()}),
         )
     }
 }
+impl Worker {
+    /// A worker whose memory is guarded from now on (lane MG): over
+    /// `memory_limit` the guard kills and reaps the exact child; this and every
+    /// later exchange then answers the guard's code.
+    #[cfg(test)]
+    pub(crate) fn from_child_guarded(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> Result<Self> {
+        Self::from_child_watched(child, client, cancel, memory_limit, None, probe)
+    }
+    /// As `from_child_guarded`; with `disk`, the guard also walks the staging
+    /// folder every sample (lane MG2, v0.1.4 worker.py:820-844).
+    pub(crate) fn from_child_watched(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        disk: Option<guard::Disk>,
+        probe: Box<dyn guard::MemoryProbe>,
+    ) -> Result<Self> {
+        Self::from_child_paced(
+            child,
+            client,
+            cancel,
+            memory_limit,
+            disk,
+            probe,
+            Box::new(guard::Clock::new()),
+        )
+    }
+    /// As `from_child_watched`, the guard waiting and timing through `pace`
+    /// (constructor-only seam; production passes `guard::Clock`).
+    pub(crate) fn from_child_paced(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        memory_limit: u64,
+        disk: Option<guard::Disk>,
+        probe: Box<dyn guard::MemoryProbe>,
+        pace: Box<dyn guard::Pace>,
+    ) -> Result<Self> {
+        let mut worker = Self::from_child(child, client, cancel)?;
+        let started = worker.pid().and_then(|pid| {
+            guard::Guard::start(worker.child.clone(), pid, memory_limit, disk, probe, pace)
+        });
+        match started {
+            Ok(guard) => {
+                worker.guard = Some(guard);
+                Ok(worker)
+            }
+            // An unguarded worker never runs: kill and reap the exact child first.
+            Err(error) => match worker.kill_and_reap() {
+                Ok(_) => Err(error),
+                Err(e) => Err(Error(match e.0 {
+                    "native_worker_reap_failed" => "native_worker_reap_failed",
+                    _ => "native_worker_kill_failed",
+                })),
+            },
+        }
+    }
+    /// The guard's verdict, once it stopped the worker.
+    pub(crate) fn guard_failure(&self) -> Option<guard::Failure> {
+        self.guard.as_ref().and_then(guard::Guard::failure)
+    }
+    /// Readings the guard has taken so far.
+    #[cfg(test)]
+    pub(crate) fn guard_samples(&self) -> u64 {
+        self.guard.as_ref().map_or(0, guard::Guard::samples)
+    }
+    /// Test-only: from the next sample on, the running guard also walks
+    /// `root` against `max_disk_bytes` (production passes the folder to
+    /// `from_child_watched`, before the first sample).
+    #[cfg(test)]
+    pub(crate) fn guard_disk(&mut self, root: &Path, max_disk_bytes: u64) -> Result<()> {
+        let disk = guard::Disk::open(root, max_disk_bytes)?;
+        self.guard
+            .as_ref()
+            .ok_or(Error("worker_guard_failed"))?
+            .watch_disk(disk);
+        Ok(())
+    }
+    /// Test-only: wait (bounded) for the guard's verdict.
+    #[cfg(test)]
+    pub(crate) fn guard_wait_until(&self, deadline: Instant) -> Option<guard::Failure> {
+        self.guard.as_ref().and_then(|g| g.wait_until(deadline))
+    }
+}
 impl Drop for Worker {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            match child.try_wait() {
-                Ok(Some(_)) => (),
-                Ok(None) => {
-                    if let Err(e) = child.kill() {
-                        eprintln!("native_worker_kill_failed: {e}");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("native_worker_status_failed: {e}");
-                    if let Err(e) = child.kill() {
-                        eprintln!("native_worker_kill_failed: {e}");
-                    }
-                }
+        if let Some(guard) = self.guard.as_mut() {
+            guard.stop();
+        }
+        let Self { child, custody, .. } = self;
+        let mut slot = child
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(child) = slot.as_mut() else {
+            return;
+        };
+        match custody.try_wait(child) {
+            Ok(Some(_)) => {
+                slot.take();
             }
-            if let Err(e) = child.wait() {
-                eprintln!("native_worker_reap_failed: {e}");
-            }
+            Ok(None) => match custody.kill(child) {
+                Ok(()) => match custody.wait(child) {
+                    Ok(_) => {
+                        slot.take();
+                    }
+                    Err(e) => eprintln!("native_cleanup_unproven: worker_reap_failed: {e}"),
+                },
+                Err(e) => eprintln!("native_cleanup_unproven: worker_kill_failed: {e}"),
+            },
+            // Wait ownership is uncertain: a reused numeric pid must not be
+            // signalled, so the handle is dropped without a kill.
+            Err(e) => eprintln!("native_cleanup_unproven: worker_status_failed: {e}"),
         }
     }
 }

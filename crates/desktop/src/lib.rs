@@ -17,8 +17,10 @@ mod native_probe;
 mod native_quit;
 pub mod package;
 pub mod platform;
+pub mod resource_probe;
 pub mod services;
 #[cfg(feature = "tauri-shell")]
 pub mod shell;
+pub mod sign;
 #[cfg(feature = "tauri-shell")]
 mod webview_policy;

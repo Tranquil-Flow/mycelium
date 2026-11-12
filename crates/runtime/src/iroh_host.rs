@@ -292,6 +292,30 @@ impl Drop for LoopbackHost<'_> {
         self.abort_path_guards();
     }
 }
+/// Poll cancellation without restarting the bind/handshake future or its timeout.
+async fn interruptible<T>(
+    wait: Duration,
+    stopped: &dyn Fn() -> bool,
+    future: impl std::future::Future<Output = Result<T, Error>>,
+) -> Result<T, Error> {
+    let poll = budget(BudgetId::OwnerPoll)?;
+    tokio::time::timeout(wait, async {
+        tokio::pin!(future);
+        loop {
+            if stopped() {
+                return Err(Error::Expired);
+            }
+            tokio::select! {
+                biased;
+                result = &mut future => return result,
+                () = tokio::time::sleep(poll) => {}
+            }
+        }
+    })
+    .await
+    .map_err(|_| Error::Expired)?
+}
+
 pub(crate) fn outside_runtime() -> Result<(), Error> {
     if tokio::runtime::Handle::try_current().is_ok() {
         Err(Error::Unavailable)
@@ -326,6 +350,14 @@ fn self_driven() -> bool {
 ///    queued behind the close datagram has been answered.
 ///
 /// Bounded by `RouterClose`. This does not wait for the 3·PTO drain.
+///
+/// Known gap (REVIEW-laneB20f (1)): the close frame is counted when noq writes
+/// it into a datagram (`poll_transmit`), before the socket send. If that send
+/// hits `WouldBlock` (a full socket send buffer), noq keeps the datagram in its
+/// `buffered_transmit` and this returns with the close still unsent; the next
+/// `block_on` on this runtime sends it. Unlikely on loopback and LAN, and not
+/// reproducible deterministically here (it needs the kernel's send buffer full
+/// at that instant), so no test names it.
 pub(crate) async fn flush_close(
     endpoint: &Endpoint,
     closed: &iroh::endpoint::WeakConnectionHandle,
@@ -362,6 +394,15 @@ pub(crate) async fn flush_finished(send: &iroh::endpoint::SendStream) -> Result<
         .await
         .map(drop)
         .map_err(|_| Error::CleanupUnproven)
+}
+/// The error a call returns for a connection that completed after its
+/// deadline: always that deadline error (REVIEW-laneB20f (2)). A close that
+/// could not be proven is recorded, never put in the deadline error's place.
+fn late_outcome(deadline: Error, closed: Result<(), Error>) -> Error {
+    if let Err(cleanup) = closed {
+        eprintln!("late connection close unproven: {cleanup:?} (returning {deadline:?})");
+    }
+    deadline
 }
 pub(crate) fn allowance(clock: &impl Clock, deadline: MonoInstant) -> Result<Duration, Error> {
     let now = clock.monotonic();
@@ -436,6 +477,36 @@ impl<'a> LoopbackHost<'a> {
             Some((interface, policy)),
         )
     }
+    /// Router-only bind with cancellation observation; identical local/LAN policy.
+    /// No helper thread is spawned or abandoned when cancellation wins.
+    pub fn bind_router_until(
+        runtime: &'a tokio::runtime::Runtime,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        secret: iroh::SecretKey,
+        lan: Option<(IpAddr, LanPolicy)>,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Self, Error> {
+        if lan.as_ref().is_some_and(|(ip, policy)| !policy.allows(*ip)) {
+            return Err(Error::Authentication);
+        }
+        let mode = if lan.is_some() {
+            NetworkMode::DirectLan
+        } else {
+            NetworkMode::LocalOnly
+        };
+        Self::bind_inner_until(
+            runtime,
+            clock,
+            deadline,
+            Some(secret),
+            &[Channel::Router],
+            mode,
+            &Reach::Shipped,
+            lan,
+            stopped,
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     fn bind_inner(
         runtime: &'a tokio::runtime::Runtime,
@@ -446,6 +517,30 @@ impl<'a> LoopbackHost<'a> {
         mode: NetworkMode,
         reach: &Reach,
         lan: Option<(IpAddr, LanPolicy)>,
+    ) -> Result<Self, Error> {
+        Self::bind_inner_until(
+            runtime,
+            clock,
+            deadline,
+            secret,
+            channels,
+            mode,
+            reach,
+            lan,
+            &|| false,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn bind_inner_until(
+        runtime: &'a tokio::runtime::Runtime,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        secret: Option<iroh::SecretKey>,
+        channels: &[Channel],
+        mode: NetworkMode,
+        reach: &Reach,
+        lan: Option<(IpAddr, LanPolicy)>,
+        stopped: &dyn Fn() -> bool,
     ) -> Result<Self, Error> {
         outside_runtime()?;
         let wait = allowance(clock, deadline)?;
@@ -506,10 +601,10 @@ impl<'a> LoopbackHost<'a> {
             if let Some(secret) = secret {
                 builder = builder.secret_key(secret);
             }
-            tokio::time::timeout(wait, builder.bind())
-                .await
-                .map_err(|_| Error::Expired)?
-                .map_err(|_| Error::Unavailable)
+            interruptible(wait, stopped, async {
+                builder.bind().await.map_err(|_| Error::Unavailable)
+            })
+            .await
         })?;
         let host = Self {
             runtime,
@@ -689,8 +784,7 @@ impl<'a> LoopbackHost<'a> {
             }
         };
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
@@ -976,6 +1070,17 @@ impl<'a> LoopbackHost<'a> {
         clock: &impl Clock,
         deadline: MonoInstant,
     ) -> Result<Connection, Error> {
+        self.connect_channel_until(peer, channel, clock, deadline, &|| false)
+    }
+    /// Cancellable dial/handshake, preserving its original absolute deadline.
+    pub fn connect_channel_until(
+        &self,
+        peer: &EndpointAddr,
+        channel: Channel,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+        stopped: &dyn Fn() -> bool,
+    ) -> Result<Connection, Error> {
         outside_runtime()?;
         let endpoint = self.endpoint()?;
         // Reject the entire address, do not silently discard a relay/nonlocal
@@ -984,14 +1089,16 @@ impl<'a> LoopbackHost<'a> {
         let (target, pin) = self.dial_target(peer)?;
         let wait = allowance(clock, deadline)?;
         let connection = self.runtime.block_on(async {
-            tokio::time::timeout(wait, endpoint.connect(target, channel.alpn()))
-                .await
-                .map_err(|_| Error::Expired)?
-                .map_err(|_| Error::Unavailable)
+            interruptible(wait, stopped, async {
+                endpoint
+                    .connect(target, channel.alpn())
+                    .await
+                    .map_err(|_| Error::Unavailable)
+            })
+            .await
         })?;
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
@@ -1041,5 +1148,25 @@ impl<'a> LoopbackHost<'a> {
         wait?;
         allowance(clock, deadline)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod late_close_tests {
+    use super::{Error, late_outcome};
+
+    /// REVIEW-laneB20f (2): a connection that completed after the caller's deadline is closed and
+    /// flushed before the call returns, and the call reports the DEADLINE error even when that close
+    /// could not be proven; the cleanup failure must not replace it.
+    #[test]
+    fn a_late_connection_returns_the_deadline_error_even_when_its_close_is_unproven() {
+        for deadline in [Error::Expired, Error::ClockDomain] {
+            assert_eq!(late_outcome(deadline, Ok(())), deadline);
+            assert_eq!(
+                late_outcome(deadline, Err(Error::CleanupUnproven)),
+                deadline,
+                "the late close's cleanup error replaced the deadline error"
+            );
+        }
     }
 }

@@ -87,7 +87,7 @@ fn launch(args: &[&str], home: &Path) -> Done {
 /// A finalized signed bundle whose app executable is inert data (never run).
 fn bundle(scratch: &Scratch, version: &str) -> PathBuf {
     let dir = scratch.0.join(format!("bundle-{version}"));
-    let exe = dir.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let exe = dir.join("Mycelium.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
     fs::write(&exe, b"inert stand-in, never executed").unwrap();
     fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
@@ -166,7 +166,7 @@ fn the_installer_family_runs_through_the_executable_against_the_given_home_only(
     let scratch = Scratch::new();
     let home = scratch.home();
     let one = bundle(&scratch, "0.2.0");
-    let state = home.join("Library/Application Support/Mycelium A13 macOS Demo");
+    let state = home.join("Library/Application Support/org.mycelium.app/state");
     let done = launch(&["--install", "--bundle", one.to_str().unwrap()], &home);
     assert!(!done.killed);
     assert_eq!(done.code, Some(0), "{}", done.stderr);
@@ -176,8 +176,8 @@ fn the_installer_family_runs_through_the_executable_against_the_given_home_only(
         (Some("install"), Some("0.2.0"))
     );
     assert_eq!(
-        fs::read_link(home.join("Applications/Mycelium A13.app")).unwrap(),
-        home.join("Library/Application Support/Mycelium/programs/0.2.0/Mycelium A13 Demo.app")
+        fs::read_link(home.join("Applications/Mycelium.app")).unwrap(),
+        home.join("Library/Application Support/org.mycelium.app/programs/0.2.0/Mycelium.app")
     );
     assert!(state.is_dir());
     let status: serde_json::Value =
@@ -185,11 +185,7 @@ fn the_installer_family_runs_through_the_executable_against_the_given_home_only(
     assert_eq!(status["current"], "0.2.0");
     // A refused run is one structured stderr line, exit 2.
     let tampered = bundle(&scratch, "0.2.1");
-    fs::write(
-        tampered.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium"),
-        b"x",
-    )
-    .unwrap();
+    fs::write(tampered.join("Mycelium.app/Contents/MacOS/mycelium"), b"x").unwrap();
     let done = launch(
         &["--install", "--bundle", tampered.to_str().unwrap()],
         &home,
@@ -203,7 +199,7 @@ fn the_installer_family_runs_through_the_executable_against_the_given_home_only(
     assert!(
         state.is_dir()
             && !home
-                .join("Library/Application Support/Mycelium/programs")
+                .join("Library/Application Support/org.mycelium.app/programs")
                 .exists()
     );
     let done = launch(&["--uninstall", "--delete-identity-and-state"], &home);

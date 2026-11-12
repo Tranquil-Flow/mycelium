@@ -2,7 +2,7 @@
 //! Explicit launch-to-window smoke of a REAL built bundle (never in the default run):
 //!
 //! ```text
-//! MYCELIUM_BUNDLE_APP="/path/Mycelium A13 Demo.app" cargo test --release --offline --locked -j 2 \
+//! MYCELIUM_BUNDLE_APP="/path/Mycelium.app" cargo test --release --offline --locked -j 2 \
 //!   -p desktop --features tauri-shell --test bundle_smoke -- --ignored --nocapture --test-threads=1
 //! ```
 //!

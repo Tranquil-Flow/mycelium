@@ -86,7 +86,7 @@ impl QualificationSource for Source {
 #[derive(Default)]
 struct Parked {
     /// In the backend and waiting for a release (the probe's `entered` is set at the start of `run`; a
-    /// `hold_after_tokens` request has by then also emitted its tokens, which `quiet()` must see).
+    /// `hold_after_tokens` request only once its tokens are out, which `quiet()` must see).
     entered: HashSet<String>,
     released: HashSet<String>,
     cancelled: Vec<String>,
@@ -121,15 +121,18 @@ impl Backend for ScriptedBackend {
         emit: &mut dyn FnMut(u64, &str) -> Result<(), Refusal>,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Outcome, Refusal> {
-        {
+        let mode = self.modes.get(request_id).map_or("fast", String::as_str);
+        // A `hold_after_tokens` request is parked only once its tokens are out (`wait_release`
+        // marks it then): marked here, `settle()` could let the next op (a source change) run
+        // before the tokens were emitted, and each token revalidates against that source.
+        if mode != "hold_after_tokens" {
             self.parked
                 .lock()
                 .unwrap()
                 .entered
                 .insert(request_id.into());
+            self.changed.notify_all();
         }
-        self.changed.notify_all();
-        let mode = self.modes.get(request_id).map_or("fast", String::as_str);
         let verdict = |c: bool| {
             if c {
                 Outcome::Cancelled

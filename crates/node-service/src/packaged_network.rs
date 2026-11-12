@@ -15,11 +15,16 @@
 //!   Web-PKI path); a test points the member at the owner's loopback relay proxy and local seed.
 //! * `_renew_loop` for a joined target (app.py:911-927, `RemoteMacMember.renew`), skipped once the
 //!   Mac left (`_left`), and the member leave's steps (`member_leave.app_steps`, member_leave.py:192-260).
-use crate::{app_host::ModelSource, router_port::ServingActions};
+use crate::{
+    app_host::ModelSource,
+    packaged_run::{Authority, Managed},
+    router_port::ServingActions,
+};
+mod work;
 use api::{
     actions::{Action, Backend},
-    app_host::{self, Authority, Cell, HostView, NETWORK_FILE, RelayOrigin, Unmanaged, cap},
-    joined_member,
+    app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
+    app_status, joined_member,
     persistent::RelayState,
     preferences::private_state,
     relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend, StartGuard},
@@ -32,7 +37,7 @@ use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -60,20 +65,26 @@ pub struct NetworkConfig {
     /// `_renew_loop`'s period for a joined target (`self.closed.wait(20)`, app.py:917): the app's
     /// `RenewLoopSelfClosedWait`; a test runs the same loop on a shorter budget.
     pub renewal: budgets::BudgetId,
+    /// The installed native sidecar a joined Mac names in its own descriptors (`installed_sidecar`,
+    /// native_runtime.py:8-22 @ f4e366e9): `None` is the app's own, beside the executable
+    /// (`native/mycelium-iroh-sidecar`); a test names an owned executable file it never starts.
+    pub sidecar: Option<PathBuf>,
+    /// v0.1.4's `_device_memory_bytes()` test seam (app.py:1123-1126 @ f4e366e9): the RAM that
+    /// bounds this Mac's per-run memory consent. `None` (the app's own): this Mac's `hw.memsize`.
+    pub device_memory_bytes: Option<u64>,
+    /// Explicit permitted work transport: LocalOnly by default, or a caller-admitted LAN.
+    pub work_network: crate::packaged_work::NetworkChoice,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
     fn default() -> Self {
         Self {
             renewal: budgets::BudgetId::PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917,
-            hooks: Arc::new(|| {
-                Hooks::production(
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|exe| exe.parent().map(Path::to_path_buf)),
-                )
-            }),
+            hooks: Arc::new(|| Hooks::pinned(desktop::package::bundled_relay_client())),
             seams: JoinSeams::default(),
+            sidecar: None,
+            device_memory_bytes: None,
+            work_network: crate::packaged_work::NetworkChoice::default(),
         }
     }
 }
@@ -88,12 +99,22 @@ pub struct Network {
     seams: JoinSeams,
     fenced: AtomicBool,
     left: AtomicBool,
+    /// `DemoApp.demo_target`'s last card (`status_snapshot`), written by the standing loop.
+    demo_target: Mutex<Option<Value>>,
+    /// [`NetworkConfig::sidecar`].
+    sidecar: Option<PathBuf>,
+    /// `_device_memory_bytes()`: the composition's seam, else this Mac's RAM, read once.
+    device_memory: OnceLock<Option<u64>>,
     /// Quit's hold on a relay a Start is still bringing up (`self.guard`, app.py:1344, 1831).
     start_guard: StartGuard,
     /// A member renewal pass is on the wire (`RemoteMacMember.renew` holds the peer lock across
     /// it, peer.py:1037-1060); the leave's `disconnect` waits for it.
     renewing: Mutex<bool>,
     renewed: std::sync::Condvar,
+    work: Mutex<Option<crate::packaged_work::Service>>,
+    work_session: crate::packaged_work::SessionCell,
+    work_network: crate::packaged_work::NetworkChoice,
+    work_closed: AtomicBool,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -116,10 +137,25 @@ impl Network {
             seams: config.seams,
             fenced: AtomicBool::new(false),
             left: AtomicBool::new(false),
+            demo_target: Mutex::default(),
+            sidecar: config.sidecar,
+            device_memory: config
+                .device_memory_bytes
+                .map_or_else(OnceLock::new, |bytes| OnceLock::from(Some(bytes))),
             start_guard: StartGuard::default(),
             renewing: Mutex::new(false),
             renewed: std::sync::Condvar::new(),
+            work: Mutex::default(),
+            work_session: Arc::new(Mutex::new(None)),
+            work_network: config.work_network,
+            work_closed: AtomicBool::new(false),
         })
+    }
+    /// `_device_memory_bytes()` (app.py:1123-1126 @ f4e366e9): the RAM that bounds this Mac's
+    /// per-run memory consent, for the join's caps check and the status's memory choices alike: the
+    /// composition's seam, else `host_memory_bytes()` (this Mac's `hw.memsize`, read once).
+    pub fn device_memory_bytes(&self) -> Option<u64> {
+        *self.device_memory.get_or_init(host_memory_bytes)
     }
     fn fresh(root: &Path, hooks: &RelayHooks) -> OwnerRelay {
         let hooks = hooks.clone();
@@ -161,6 +197,8 @@ impl Network {
     /// bringing up is closed at once and no later Start brings one up (`application_closed`),
     /// then the relay this host keeps is closed.
     pub fn quit(&self) {
+        self.work_closed.store(true, Ordering::SeqCst);
+        self.close_work();
         self.start_guard.close();
         self.close();
     }
@@ -179,6 +217,9 @@ impl Network {
         if left {
             self.left.store(true, Ordering::SeqCst);
         }
+        if fence || left {
+            self.close_work();
+        }
     }
     /// `self.public_relay.proxy.bind_seed(self.authority.seed_server)` once the swarm exists
     /// (app.py:1612-1613) or the authority started again (app.py:1636-1637).
@@ -196,6 +237,10 @@ impl Network {
         // waits for it, or this pass sees `_left` and does not start.
         *lock(&self.renewing) = true;
         app_host::renew_member(&self.cell(authority));
+        self.sync_work_session(authority);
+        if membership_state(authority).as_deref() != Some("current") {
+            self.close_work();
+        }
         *lock(&self.renewing) = false;
         self.renewed.notify_all();
     }
@@ -277,15 +322,15 @@ pub struct PackagedCell<'a> {
     network: &'a Network,
 }
 impl Cell for PackagedCell<'_> {
-    type Managed = Unmanaged;
-    fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, Unmanaged>) -> R) -> R {
+    type Managed = Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> R {
         // The relay's lock is released before the authority's is taken.
         let origin = Origin(self.network.origin());
         let left = self.network.left();
         let mut authority = lock(self.authority);
         f(&mut HostView::new(&mut authority, &origin, false, left))
     }
-    fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, Unmanaged>) -> R) -> Option<R> {
+    fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> Option<R> {
         let origin = Origin(self.network.origin());
         let left = self.network.left();
         let mut authority = self.authority.lock().ok()?;
@@ -351,7 +396,7 @@ impl EndpointHost for Endpoint<'_> {
     /// `_bind_public_routes`: the pairing windows, the member-report inbox and the link probe.
     fn bind_public_routes(&mut self, proxy: &Arc<Proxy>) {
         let authority = self.authority.clone();
-        proxy.bind_local(Some(joined_member::public_route::<Unmanaged>(Arc::new(
+        proxy.bind_local(Some(joined_member::public_route::<Managed>(Arc::new(
             move || {
                 let a = lock(&authority);
                 (a.windows.clone(), a.seed.clone())
@@ -511,33 +556,54 @@ pub fn resume_leave(
     }
 }
 
-/// The parts of v0.1.4's `status()` (app.py:1263-1283) the packaged status takes from this host:
-/// `network`, `installation_role`, `resource_policy`, `authority`, `join_flow` (the join-consent
-/// document, `standing_disclosure`, for both roles) and `leave`.
+/// `host_memory_bytes()` (app.py:267-273): this Mac's physical memory, `None` when unknown. Read
+/// with the same `hw.memsize` probe the native driver uses (native.rs `host`).
+fn host_memory_bytes() -> Option<u64> {
+    let output = crate::spawn::confined_output("/usr/sbin/sysctl", &["-n", "hw.memsize"])
+        .ok()
+        .filter(|output| output.status.success())?;
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+        .filter(|bytes| *bytes > 0)
+}
+
+/// The parts of v0.1.4's `status()` (app.py:1244-1283) the packaged status takes from this host:
+/// `network`, and from the authority, through the builder the headless launcher shares
+/// (`api::app_status::shared`): `role`, `model_contract`, `run_model` (with this Mac's memory
+/// choices), `fast_mode`, `installation_role`, `resource_policy`, `running` (the app's own flag,
+/// replacing the node service's native-request flag), `authority`, `renewal_error`, `leave` and
+/// `join_flow`. A document that is not a JSON object is left as it is, never indexed into a panic
+/// (REVIEW-lanePH2 F8).
 pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {
+    let Some(fields) = status.as_object_mut() else {
+        return;
+    };
     let pending = lock(&network.pending).clone();
-    status["network"] = network.status().to_value();
+    fields.insert("network".into(), network.status().to_value());
     let Some(authority) = authority else {
         // The authority's state was refused at bind (an unreadable or invalid role file among
         // them, app.py:595-611): no role is claimed for it.
         status["installation_role"] = Value::Null;
         return;
     };
-    let a = lock(authority);
-    status["installation_role"] = json!(if a.target { "target" } else { "owner" });
-    status["resource_policy"] = api::preferences::resource_policy::read(&a.root)
-        .ok()
-        .flatten()
-        .unwrap_or(Value::Null);
-    status["authority"] = joined_member::authority_status(&a).to_value();
-    status["join_flow"] =
-        joined_member::join_flow_status(&a.root, a.target, &a.windows, &pending).to_value();
-    status["leave"] = if a.target {
-        let leave = api::leave::MemberLeave::new(&a.root, api::leave::Limits::default());
-        api::leave::status_view(&leave).map_or(Value::Null, |view| Json::from(view).to_value())
-    } else {
-        Value::Null
+    // `os.environ.get(name)`, as the host's own `environment` reads it.
+    let env = |name: &str| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned());
+    let (run_model_env, fast_mode_env) = (
+        env(api::preferences::run_model::ENV),
+        env(api::persistent::TOKEN_PATH_ENV),
+    );
+    let facts = app_status::Facts {
+        run_model_env: run_model_env.as_deref(),
+        fast_mode_env: fast_mode_env.as_deref(),
+        device_memory_bytes: network.device_memory_bytes(),
     };
+    let a = lock(authority);
+    for (key, value) in app_status::shared(&a, &pending, &facts) {
+        fields.insert(key.into(), value.to_value());
+    }
 }
 
 /// The packaged action root's delegate: the node service's serving actions, with
@@ -696,4 +762,255 @@ impl RelayClose {
             }
         }
     }
+}
+
+// ---- PH3b S2: the joined Mac's standing loop (`DemoApp.standing_thread`) and its member card.
+
+/// `app._resource_check()`'s verdict for the private root it is given.
+pub type ResourceGate = Box<dyn Fn(&Path) -> Option<&'static str> + Send + Sync>;
+/// What the packaged member agent reads from its host besides the authority and the network.
+pub struct MemberSeams {
+    /// `self.closed`: Quit's fence (the node service's shutdown).
+    pub closed: Box<dyn Fn() -> bool + Send + Sync>,
+    /// `app._resource_check()`'s observation of this Mac against the saved policy of `root`.
+    pub resource: ResourceGate,
+    /// `DemoApp.acquisition`.
+    pub acquisition: Box<dyn Fn() -> Option<api::acquisition::Acquisition> + Send + Sync>,
+}
+/// The member's one bootstrap worker slot (`app.authority`'s control worker on a joined Mac).
+#[derive(Default)]
+struct MemberSlot {
+    worker: Option<api::member_agent::PumpWorker>,
+    failure: Option<api::bootstrap_process::CleanupFailure>,
+    incarnation: Arc<()>,
+}
+/// The packaged host as `api::member_agent`'s host: the authority's role, `running` and live
+/// lease, the network's `_left`/`_leave_fence` and seed path, the node's Quit fence, the model
+/// source's resource gate and acquisition, and the member's own bootstrap worker.
+pub struct PackagedMember {
+    authority: Arc<Mutex<Authority>>,
+    network: Arc<Network>,
+    seams: MemberSeams,
+    lifecycle: Arc<Mutex<()>>,
+    slot: Mutex<MemberSlot>,
+}
+impl PackagedMember {
+    pub fn new(
+        authority: Arc<Mutex<Authority>>,
+        network: Arc<Network>,
+        seams: MemberSeams,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            authority,
+            network,
+            seams,
+            lifecycle: Arc::default(),
+            slot: Mutex::default(),
+        })
+    }
+    fn state(&self) -> api::member_agent::HostState {
+        let (root, target, running) = {
+            let a = lock(&self.authority);
+            (a.root.clone(), a.target, a.running)
+        };
+        api::member_agent::HostState {
+            root,
+            target,
+            running,
+            left: self.network.left(),
+            closed: (self.seams.closed)(),
+        }
+    }
+}
+impl api::member_agent::MemberHost for PackagedMember {
+    type Worker = api::member_agent::PumpWorker;
+    fn state(&self) -> api::member_agent::OResult<api::member_agent::HostState> {
+        Ok(PackagedMember::state(self))
+    }
+    fn lease(&self) -> Option<f64> {
+        let a = lock(&self.authority);
+        a.session_view.and_then(|(_, lease)| lease).or_else(|| {
+            a.session
+                .as_ref()
+                .and_then(api::member::Session::lease_expires_at)
+        })
+    }
+    /// `DemoApp._resource_check` (app.py:929-947): a member leave fence refuses first.
+    fn resource_check(&self) -> Option<String> {
+        if self.network.fenced() {
+            return Some("owner_stop".into());
+        }
+        let root = lock(&self.authority).root.clone();
+        (self.seams.resource)(&root).map(str::to_owned)
+    }
+    fn acquisition(&self) -> Option<api::acquisition::Acquisition> {
+        (self.seams.acquisition)()
+    }
+    fn member_seed_options(&self) -> SeedOptions {
+        self.network.seams.member_seed.clone()
+    }
+    fn installed_sidecar(&self) -> Result<PathBuf, api::installation_descriptor::Failure> {
+        api::owner_ports::installed_sidecar(self.network.sidecar.clone())
+    }
+    fn lifecycle(&self) -> api::member_agent::OResult<Arc<Mutex<()>>> {
+        Ok(self.lifecycle.clone())
+    }
+    fn slot<R>(
+        &self,
+        f: impl FnOnce(api::member_agent::Slot<'_, Self::Worker>) -> R,
+    ) -> api::member_agent::OResult<R> {
+        let mut slot = lock(&self.slot);
+        let state = PackagedMember::state(self);
+        let MemberSlot {
+            worker,
+            failure,
+            incarnation,
+        } = &mut *slot;
+        Ok(f(api::member_agent::Slot {
+            worker,
+            failure,
+            incarnation,
+            state,
+        }))
+    }
+    fn program(
+        &self,
+        root: &Path,
+    ) -> api::member_agent::OResult<api::bootstrap_process::TrustedBootstrap> {
+        api::member_agent::bootstrap_program(root)
+    }
+    /// `auto_step_context()` (app.py:1168-1172): the binding only while this Mac is a target
+    /// whose membership is `current`; the saved resource policy; the member's join seam.
+    fn accept_context(&self) -> Option<api::member_agent::AcceptContext> {
+        let root = lock(&self.authority).root.clone();
+        let current = membership_state(&self.authority).as_deref() == Some("current");
+        let binding = current
+            .then(|| app_host::membership_binding(&self.network.cell(&self.authority)))
+            .flatten()
+            .map(|b| {
+                json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
+                "seed_key_digest": b.seed_key_digest})
+            });
+        Some(api::member_agent::AcceptContext {
+            policy: api::preferences::resource_policy::read(&root)
+                .ok()
+                .flatten(),
+            binding,
+            join_base: self.network.seams.join_base.clone(),
+        })
+    }
+    /// `DemoApp._next_periodic_report` lives beside `last_report` in the authority's record.
+    fn periodic_report_due(&self) -> bool {
+        lock(&self.authority)
+            .recorded
+            .periodic_report_due(std::time::Instant::now())
+    }
+    fn reported(&self, record: Value) {
+        lock(&self.authority)
+            .recorded
+            .reported(record, std::time::Instant::now());
+    }
+    fn work_enabled(&self) -> bool {
+        true
+    }
+    fn work_announcement(
+        &self,
+        announcement: api::run_exchange::owner_pin::VerifiedAnnouncement,
+    ) -> Result<Option<Value>, String> {
+        self.announce_work(announcement)
+    }
+    fn close_work(&self) {
+        self.network.close_work();
+    }
+    fn work_report(&self) -> Result<Option<Value>, String> {
+        lock(&self.network.work)
+            .as_ref()
+            .map_or(Ok(None), crate::packaged_work::Service::report)
+    }
+    fn work_preview(
+        &self,
+        offer: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<Value, api::standing_acceptor::AcceptFailure> {
+        lock(&self.network.work)
+            .as_ref()
+            .ok_or_else(|| api::standing_acceptor::AcceptFailure::code("member_work_unavailable"))?
+            .preview(offer, limits, policy)
+            .map_err(|code| api::standing_acceptor::AcceptFailure::code(&code))
+    }
+    fn work_accept(
+        &self,
+        preview: &Value,
+        limits: &Value,
+        policy: &Value,
+    ) -> Result<(), api::standing_acceptor::AcceptFailure> {
+        lock(&self.network.work)
+            .as_ref()
+            .ok_or_else(|| api::standing_acceptor::AcceptFailure::code("member_work_unavailable"))?
+            .accept(preview, limits, policy)
+            .map_err(|code| api::standing_acceptor::AcceptFailure::code(&code))
+    }
+    fn spawn(
+        &self,
+        pump: api::target_pump::TargetPump<api::member_agent::RemoteTarget<Self>>,
+        fence: api::managed_carrier::TargetFence,
+        scope: Value,
+    ) -> Self::Worker {
+        api::member_agent::spawn_pump(pump, fence, scope)
+    }
+}
+
+/// One `_standing_loop` (app.py:1201-1212 @ f4e366e9): the member's agent passes and the card
+/// they leave; the agent is closed when the loop ends (`demo_app.close` -> `agent.close()`).
+struct Standing {
+    member: Arc<PackagedMember>,
+    agent: api::member_agent::MemberAgent<PackagedMember>,
+}
+impl Standing {
+    fn pass(&mut self) {
+        self.agent.tick(&self.member);
+        // `_record_status`: the card shows the last completed pass.
+        if let Some(card) = self.agent.status() {
+            *lock(&self.member.network.demo_target) = Some(card);
+        }
+    }
+}
+impl Drop for Standing {
+    fn drop(&mut self) {
+        self.agent.close(&self.member);
+    }
+}
+/// `DemoApp._standing_loop`'s pass for a joined Mac (`_standing_tick` -> `auto_poll_step` ->
+/// `demo_app.auto_step`, demo_app.py:168-173), as one closure for the host's own loop.
+pub fn standing_loop(member: Arc<PackagedMember>) -> impl FnMut() + Send + 'static {
+    let mut standing = Standing {
+        member,
+        agent: api::member_agent::MemberAgent::default(),
+    };
+    move || standing.pass()
+}
+/// `DemoApp.status()['demo_target']` (app.py:1279) = `demo_app.target_status` (demo_app.py:181-197
+/// @ f4e366e9) for a joined Mac: no agent yet -> `joined` / `not_joined` by the membership; else the
+/// agent's last card, `idle` shown as `joined` while the membership is current. An owner's card is
+/// its run's own contributor (none without a run).
+pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, network: &Network) {
+    let Some(authority) = authority else {
+        return;
+    };
+    if !lock(authority).target {
+        return;
+    }
+    let current = membership_state(authority).as_deref() == Some("current");
+    let card = lock(&network.demo_target).clone();
+    status["demo_target"] = match card {
+        None => json!({"state": if current { "joined" } else { "not_joined" }, "detail": null,
+            "progress": null, "phase": null, "run_id": null, "model_id": null, "local": false}),
+        Some(mut card) => {
+            if card["state"] == "idle" && current {
+                card["state"] = json!("joined");
+            }
+            card
+        }
+    };
 }
