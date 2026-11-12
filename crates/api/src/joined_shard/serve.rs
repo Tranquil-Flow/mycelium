@@ -160,6 +160,11 @@ fn budget(id: B) -> Outcome<Duration> {
     ))
 }
 enum Message {
+    /// One bounded, body-free refusal notification per receiver. Invalid peer
+    /// IDs/payloads never enter the work queue, even after compute release.
+    InvalidId {
+        cancellation: bool,
+    },
     Hop(Value, Vec<u8>),
     /// PathCancellation body, receipt time, native-stop result, ACK-delivered report.
     Teardown(
@@ -332,6 +337,7 @@ pub fn serve(
             let request_cancel = request_cancel.clone();
             scope.spawn(move || {
                 let mut expected: u128 = 0;
+                let mut reported_invalid_id = false;
                 loop {
                     let delivery = match receiver.receive(limit) {
                         Ok(d) => d,
@@ -360,15 +366,31 @@ pub fn serve(
                         }
                         continue;
                     };
+                    // EP2H C2: every v2 phase, before copies, queueing, cancel
+                    // flags or ACK. One constant notification per receiver keeps
+                    // invalid traffic from retaining attacker-controlled state.
+                    if multi
+                        && matches!(frame.message_type(), "HopHeader" | "PathCancellation")
+                        && !valid_request_id(&frame.body()["request_id"])
+                    {
+                        if !reported_invalid_id {
+                            reported_invalid_id = true;
+                            if tx
+                                .send(Message::InvalidId {
+                                    cancellation: frame.message_type() == "PathCancellation",
+                                })
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        if let Err(e) = delivery.reject(DispatchRefusal::InvalidFrame) {
+                            eprintln!("serve: invalid request id reject failed: {e:?}");
+                        }
+                        continue;
+                    }
                     match frame.message_type() {
                         "HopHeader" if role == 0 => {
-                            // v2 (lane EPF2, F11): a PREFILL whose request id is
-                            // outside the owner's own grammar is refused, never
-                            // ACKed; the main loop refuses it too and closes the
-                            // compute.
-                            let refused = multi
-                                && frame.body()["phase"] == "PREFILL"
-                                && !valid_request_id(&frame.body()["request_id"]);
                             // Single owner-serial dispatch slot: ACK = queued for compute.
                             if tx
                                 .send(Message::Hop(frame.body().clone(), frame.payload().to_vec()))
@@ -376,11 +398,7 @@ pub fn serve(
                             {
                                 return;
                             }
-                            if refused {
-                                if let Err(e) = delivery.reject(DispatchRefusal::InvalidFrame) {
-                                    eprintln!("serve: delivery.reject failed: {e:?}");
-                                }
-                            } else if delivery.acknowledge().is_err() {
+                            if delivery.acknowledge().is_err() {
                                 return;
                             }
                         }
@@ -507,6 +525,27 @@ pub fn serve(
                     continue;
                 };
                 match received {
+                    Message::InvalidId { cancellation } => {
+                        let already_released = released.is_some();
+                        if !already_released {
+                            released = Some(stop(compute, interrupted)?);
+                        }
+                        failure.get_or_insert_with(|| {
+                            if cancellation {
+                                "route_cancellation_invalid".to_owned()
+                            } else {
+                                "route_request_invalid".to_owned()
+                            }
+                        });
+                        // Preserve the idle-invalid-cancel refusal. An admitted
+                        // or already-released request may still deliver valid
+                        // cleanup on the same connection; invalid IDs never bind it.
+                        if cancellation && path.is_none() && !already_released {
+                            return Ok(json!({"teardown":"path_cancellation",
+                                "failure":failure,"native":released.take(),
+                                "tokens_served":total + t,"stage_index":index}));
+                        }
+                    }
                     Message::Hop(body, payload) => {
                         if cancel.load(Ordering::SeqCst)
                             || failure.is_some()
@@ -734,7 +773,7 @@ pub fn serve(
                         let redial = if (delivered && ack) || !ok || idle_refusal.is_some() {
                             None
                         } else {
-                            linger(s, owner, epoch, base, &fence)?
+                            linger(s, owner, epoch, base, &fence, multi)?
                         };
                         return Ok(
                             json!({"teardown":"path_cancellation","binding_matched":matches,
@@ -778,7 +817,7 @@ pub fn serve(
                         let redial = if delivered || !ok {
                             None
                         } else {
-                            linger(s, owner, epoch, base, &fence)?
+                            linger(s, owner, epoch, base, &fence, multi)?
                         };
                         return Ok(
                             json!({"teardown":"path_cancellation","binding_matched":matches,
@@ -832,7 +871,7 @@ pub fn serve(
         }
     };
     if report["deferred_ack"] == true {
-        report["redial_ack_ms"] = json!(linger(s, owner, epoch, base, &fence)?);
+        report["redial_ack_ms"] = json!(linger(s, owner, epoch, base, &fence, multi)?);
     }
     if multi {
         report["multi_request"] = json!(true);
@@ -855,6 +894,7 @@ fn linger(
     epoch: u64,
     base: ConnectionFence,
     fence: &(dyn Fn() -> ConnectionFence + Sync),
+    multi: bool,
 ) -> Outcome<Option<f64>> {
     let began = Instant::now();
     let window = budget(B::WorkerStartup)?;
@@ -884,7 +924,9 @@ fn linger(
         };
         let frame = router_wire::decode_frame(delivery.payload());
         let valid = frame.as_ref().is_ok_and(|f| {
-            f.message_type() == "PathCancellation" && f.body()["topology_version"] == epoch
+            f.message_type() == "PathCancellation"
+                && f.body()["topology_version"] == epoch
+                && (!multi || valid_request_id(&f.body()["request_id"]))
         });
         if !valid {
             if let Err(e) = delivery.reject(DispatchRefusal::InvalidFrame) {

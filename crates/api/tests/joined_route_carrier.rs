@@ -2853,6 +2853,8 @@ fn product_epoch_records_a_seed_lease_read_failure() {
 struct Raw<'a> {
     /// A request-scoped PathCancellation of this request (control link): ACKed?
     cancel: Box<dyn FnMut(&str) -> bool + 'a>,
+    /// Fresh control connection after a rejected exchange retired the old link.
+    redial_cancel: Box<dyn FnMut(&str) -> bool + 'a>,
     /// The PREFILL of this request (data link): ACKed (queued for compute)?
     prefill: Box<dyn FnMut(&str) -> bool + 'a>,
     /// EP2H: arbitrary request id and token index, including a DECODE before admission.
@@ -2996,6 +2998,21 @@ fn raw_owner(
                 .unwrap();
                 control_ids += 1;
                 raw_send(&mut to_control, clock, fence, control_ids - 1, frame)
+            }),
+            redial_cancel: Box::new(|id| {
+                let c = host
+                    .connect_channel(&addr, channel, clock, until(B::WorkerStartup))
+                    .unwrap();
+                let mut t = IrohTransport::new(c.clone(), &rt, clock, fence, current).unwrap();
+                let frame = protocol::router_wire::encode_frame(
+                    "PathCancellation",
+                    &route::cancellation(message, &raw_path(id)),
+                    &[],
+                )
+                .unwrap();
+                let acked = raw_send(&mut t, clock, fence, 0, frame);
+                c.close(0u32.into(), b"test_redial_done");
+                acked
             }),
             prefill: Box::new(|id| {
                 let frame = protocol::router_wire::encode_frame(
@@ -3455,13 +3472,24 @@ fn a_prefill_of_an_overlong_request_id_is_refused_before_it_runs() {
 fn ep2h_overlong_decode_id_is_refused_before_ack() {
     let began = Instant::now();
     let mut acked = false;
-    let (report, events) = raw_owner(span(B::MemberChosenWall), Script::default(), None, |_, _, raw| {
-        acked = (raw.hop)(&"a".repeat(129), 1);
-        // Legitimate cleanup still works; join all owners before the assertion.
-        assert!((raw.cancel)("route-7-0"));
-    });
-    eprintln!("EP2H_DECODE acked={acked} elapsed={:?} report={report} events={events:?}", began.elapsed());
-    assert!(!acked, "129-byte v2 DECODE was ACKed at the receive boundary");
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            acked = (raw.hop)(&"a".repeat(129), 1);
+            // Legitimate cleanup still works; join all owners before the assertion.
+            assert!((raw.cancel)("route-7-0"));
+        },
+    );
+    eprintln!(
+        "EP2H_DECODE acked={acked} elapsed={:?} report={report} events={events:?}",
+        began.elapsed()
+    );
+    assert!(
+        !acked,
+        "129-byte v2 DECODE was ACKed at the receive boundary"
+    );
     assert_eq!(events, [("close", 0)], "no compute executed");
 }
 
@@ -3469,22 +3497,129 @@ fn ep2h_overlong_decode_id_is_refused_before_ack() {
 fn ep2h_overlong_cancel_after_release_is_refused_before_ack() {
     let began = Instant::now();
     let mut acked = false;
-    let (report, events) = raw_owner(span(B::MemberChosenWall), Script::default(), None, |_, entry, raw| {
-        assert!(!(raw.prefill)(&"a".repeat(129)));
-        let end = Instant::now() + span(B::RouterClose);
-        while entry.released().is_none() && Instant::now() < end {
-            std::thread::yield_now();
-        }
-        assert!(entry.released().is_some(), "compute release established before cancellation");
-        acked = (raw.cancel)(&"a".repeat(129));
-        if !acked {
-            // A valid request cleanup is still permitted after the refusal.
-            assert!((raw.cancel)("route-7-0"));
-        }
-    });
-    eprintln!("EP2H_CANCEL_RELEASED acked={acked} elapsed={:?} report={report} events={events:?}", began.elapsed());
-    assert!(!acked, "129-byte v2 cancellation was ACKed after compute release");
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, entry, raw| {
+            assert!(!(raw.prefill)(&"a".repeat(129)));
+            let end = Instant::now() + span(B::RouterClose);
+            while entry.released().is_none() && Instant::now() < end {
+                std::thread::yield_now();
+            }
+            assert!(
+                entry.released().is_some(),
+                "compute release established before cancellation"
+            );
+            acked = (raw.cancel)(&"a".repeat(129));
+            if !acked {
+                // IrohTransport retires a rejected link; legitimate cleanup
+                // uses the existing owner redial path, not that dead connection.
+                assert!((raw.redial_cancel)("route-7-0"));
+            }
+        },
+    );
+    eprintln!(
+        "EP2H_CANCEL_RELEASED acked={acked} elapsed={:?} report={report} events={events:?}",
+        began.elapsed()
+    );
+    assert!(
+        !acked,
+        "129-byte v2 cancellation was ACKed after compute release"
+    );
     assert_eq!(events, [("close", 0)], "no compute executed");
+}
+
+#[test]
+fn ep2h_all_hop_phases_refuse_invalid_grammar_after_admission() {
+    for id in [
+        "-bad".to_owned(),
+        "a b".to_owned(),
+        "é".to_owned(),
+        "a".repeat(129),
+    ] {
+        for admitted in [false, true] {
+            let mut acked = false;
+            let (report, events) = raw_owner(
+                span(B::MemberChosenWall),
+                Script::default(),
+                None,
+                |_, _, raw| {
+                    if admitted {
+                        assert!((raw.prefill)("route-7-0"));
+                        assert!((raw.forwarded)());
+                    }
+                    acked = (raw.hop)(&id, u64::from(admitted));
+                    assert!((raw.cancel)("route-7-0"));
+                },
+            );
+            assert!(!acked, "invalid hop ACKed: admitted={admitted}, id={id:?}");
+            assert_eq!(report["requests_served"], 0);
+            assert_eq!(
+                events.iter().filter(|(e, _)| *e == "step").count(),
+                usize::from(admitted)
+            );
+        }
+    }
+}
+
+#[test]
+fn ep2h_cancellation_ids_are_checked_after_admission_and_on_redial() {
+    for id in [
+        "-bad".to_owned(),
+        "a b".to_owned(),
+        "é".to_owned(),
+        "a".repeat(129),
+    ] {
+        let mut acked = false;
+        let mut redial_acked = false;
+        let (report, events) = raw_owner(
+            span(B::MemberChosenWall),
+            Script::default(),
+            None,
+            |_, _, raw| {
+                assert!((raw.prefill)("route-7-0"));
+                assert!((raw.forwarded)());
+                acked = (raw.cancel)(&id);
+                if !acked {
+                    redial_acked = (raw.redial_cancel)(&id);
+                    if !redial_acked {
+                        assert!(
+                            (raw.redial_cancel)(&"z".repeat(128)),
+                            "valid maximum-length cleanup redial"
+                        );
+                    }
+                }
+            },
+        );
+        assert!(
+            !acked && !redial_acked,
+            "invalid cancellation ACKed: {id:?}, {report}"
+        );
+        assert_eq!(events, [("step", 0), ("close", 0)]);
+    }
+}
+
+#[test]
+fn ep2h_maximum_length_v2_id_prefill_decode_and_reset_succeed() {
+    let id = "a".repeat(128);
+    let (report, events) = raw_owner(
+        span(B::MemberChosenWall),
+        Script::default(),
+        None,
+        |_, _, raw| {
+            assert!((raw.prefill)(&id));
+            assert!((raw.forwarded)());
+            assert!((raw.hop)(&id, 1));
+            assert!((raw.forwarded)());
+            assert!((raw.cancel)(&id));
+        },
+    );
+    assert_eq!(report["requests_served"], 1);
+    assert_eq!(
+        events,
+        [("step", 0), ("step", 1), ("reset", 0), ("close", 0)]
+    );
 }
 
 // ---- EPF2 F10 (REVIEW-laneEPF R1 residue): one loop pass of a v2 member
