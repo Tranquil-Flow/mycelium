@@ -10,10 +10,15 @@ impl Network {
         self.work_network.clone()
     }
     pub fn close_work(&self) {
-        if let Some(mut work) = lock(&self.work).take()
-            && let Err(code) = work.close()
-        {
+        let mut slot = lock(&self.work);
+        let Some(mut work) = slot.take() else {
+            return;
+        };
+        if let Err(code) = work.close() {
+            // The service still owns member custody: keep the exact owner in its slot so the
+            // next close retries it, instead of dropping it into a false success.
             eprintln!("packaged_work_cleanup_unproven:{code}");
+            *slot = Some(work);
         }
     }
     pub fn sync_work_session(&self, authority: &Mutex<Authority>) {
@@ -50,8 +55,12 @@ impl PackagedMember {
         let mut slot = lock(&self.network.work);
         if let Some(work) = slot.as_mut() {
             if let Err(code) = work.update(announcement.clone()) {
-                // update has closed the old generation. Never retain that link for a new run.
-                *slot = None;
+                // update has closed the old generation. A service whose close proved its
+                // custody is dropped; one that still owes cleanup stays in the slot (fenced
+                // from replacement and stale publication) for a later close to retry.
+                if !work.cleanup_pending() {
+                    *slot = None;
+                }
                 return Err(code);
             }
         } else {
@@ -66,9 +75,8 @@ impl PackagedMember {
             )?);
         }
         if self.network.work_closed.load(Ordering::SeqCst) || self.network.fenced() {
-            if let Some(mut service) = slot.take() {
-                service.close()?;
-            }
+            drop(slot);
+            self.network.close_work();
             return Err("member_work_closed".into());
         }
         slot.as_ref()

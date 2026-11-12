@@ -117,6 +117,19 @@ pub struct ModelHooks {
     pub reverify: Box<dyn Fn() -> Reverify + Send + Sync>,
 }
 
+/// A close that did not prove every member's stage released: the SAME owner objects are kept
+/// (the member Work with its returned links, and the local Service whose control loop those
+/// links reach) so a later Stop/Quit/close retries exactly the unresolved stages, even after
+/// the run's own ports object is gone.
+#[derive(Default)]
+struct WorkDebt {
+    work: Option<api::joined_owner::work::OwnerWork>,
+    local: Option<crate::packaged_work::Service>,
+    /// A close that failed without a member cleanup report (worker panic): no later call may
+    /// declare this owner settled, because no proof of the member stages exists.
+    unprovable: Option<String>,
+}
+
 /// The owner's bootstrap custody beside the run's fields (the headless launcher keeps the same
 /// fields in its Core): the contributor incarnation a bootstrap reservation belongs to, the owner's
 /// own local target worker, a bootstrap whose cleanup is still unproven, the run's compiler as the
@@ -129,6 +142,8 @@ struct Custody {
     compiler: Option<Weak<Mutex<Compiler<PackagedRun>>>>,
     work_stop: Option<api::joined_owner::work::Cancel>,
     work_session: Option<crate::packaged_work::SessionCell>,
+    /// Member Work / local Service retained by a failed work close (never replaced while owed).
+    work_debt: Option<WorkDebt>,
     exchange_resource: Option<(Instant, Option<&'static str>)>,
 }
 

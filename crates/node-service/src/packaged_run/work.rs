@@ -37,6 +37,72 @@ use std::{
 fn refused(code: &str) -> StepError {
     owner_run::OwnerRunError::new(code).into()
 }
+/// Retry the owners a failed close retained: first the member Work (its repeated teardown
+/// retries the exact unproven member links), and only once every member stage is proven,
+/// the local Service whose control loop those links reach. Unresolved owners stay retained.
+pub(super) fn settle_debt(host: &PackagedRun) -> Result<(), String> {
+    let debt = lock(&host.custody).work_debt.take();
+    let Some(mut debt) = debt else {
+        return Ok(());
+    };
+    let mut failure = None;
+    let unprovable = debt.unprovable.clone();
+    if let Some(mut work) = debt.work.take() {
+        if let Err(code) = work.teardown() {
+            failure = Some(code);
+        } else if let Some(code) = work.state()["cleanup_error"].as_str() {
+            eprintln!(
+                "owner_work_cleanup_failed:{code}:{}",
+                work.state()["member_cleanup"]
+            );
+            failure = Some(code.to_owned());
+        } else if let Some(code) = unprovable {
+            // The worker died without reporting per-member cleanup: the retained links are
+            // kept, but no later close turns that absence of evidence into success.
+            eprintln!("owner_work_cleanup_failed:{code}:worker_unproven");
+            failure = Some(code);
+        } else {
+            drop(work.take_members());
+        }
+        if failure.is_some() {
+            debt.work = Some(work);
+        }
+    }
+    if failure.is_none()
+        && let Some(mut service) = debt.local.take()
+    {
+        if let Err(code) = service.close() {
+            eprintln!("member_work_custody_cleanup_failed:{code}");
+            debt.local = Some(service);
+            failure = Some(code);
+        }
+    }
+    if let Some(code) = failure {
+        lock(&host.custody).work_debt = Some(debt);
+        return Err(code);
+    }
+    Ok(())
+}
+/// Keep the exact unresolved owners for the next Stop/Quit/close; never replace an owner that
+/// still owes cleanup (a second failure with debt present is a bug and is logged, not dropped).
+fn retain_debt(
+    host: &PackagedRun,
+    work: Option<api::joined_owner::work::OwnerWork>,
+    local: Option<crate::packaged_work::Service>,
+) {
+    let mut custody = lock(&host.custody);
+    let debt = custody.work_debt.get_or_insert_with(WorkDebt::default);
+    if debt.work.is_none() {
+        debt.work = work;
+    } else if work.is_some() {
+        eprintln!("work_custody_debt_not_replaced");
+    }
+    if debt.local.is_none() {
+        debt.local = local;
+    } else if local.is_some() {
+        eprintln!("work_custody_debt_not_replaced");
+    }
+}
 fn span(id: BudgetId) -> Result<Duration, StepError> {
     id.span(Entries::ZERO)
         .map(|s| Duration::from_millis(s.millis()))
@@ -278,6 +344,9 @@ impl Work {
         codec: Arc<dyn Codec>,
         env: &mut dyn StepEnv,
     ) -> Result<(), StepError> {
+        // A previous close's owners are settled (or still owed) before this run may compose:
+        // no replacement while member custody is unresolved.
+        settle_debt(&self.host).map_err(|code| refused(&code))?;
         if lock(&self.resident).work.is_some() {
             return Err(refused("owner_work_already_composed"));
         }
@@ -431,30 +500,62 @@ impl Work {
     }
     fn teardown(&self) -> Result<(), String> {
         let mut resident = lock(&self.resident);
-        let mut result = Ok(());
+        // Retry a previous close's exact owners first: a new close never proceeds while
+        // custody it did not receive is still owed.
+        settle_debt(&self.host)?;
         if let Some(mut work) = resident.work.take() {
-            result = work.teardown();
-            // Always retrieve custody, even if teardown reports an error. Drop closes only
-            // owner-side control connections; the enrolled member and its service stay joined.
-            let members = work.take_members();
-            drop(members);
-            let state = work.state();
-            if let Some(code) = state["cleanup_error"].as_str() {
+            if let Err(code) = work.teardown() {
+                retain_debt(&self.host, Some(work), resident.local.take());
+                if let Some(debt) = lock(&self.host.custody).work_debt.as_mut() {
+                    debt.unprovable = Some(code.clone());
+                }
+                return Err(code);
+            }
+            if let Some(code) = work.state()["cleanup_error"].as_str() {
                 eprintln!(
                     "owner_work_cleanup_failed:{code}:{}",
-                    state["member_cleanup"]
+                    work.state()["member_cleanup"]
                 );
-                result = Err(code.into());
+                // Keep the member Work (with its returned links) and the local Service whose
+                // control loop those links reach; the next close retries only its open rows.
+                retain_debt(&self.host, Some(work), resident.local.take());
+                return Err(code.into());
             }
+            // Every member stage is proven released: drop the returned owner-side links only
+            // now (dropping a link never proves cleanup, so it is never the exit's substitute).
+            drop(work.take_members());
         }
         if let Some(mut service) = resident.local.take() {
-            result = result.and(service.close());
+            if let Err(code) = service.close() {
+                eprintln!("member_work_custody_cleanup_failed:{code}");
+                retain_debt(&self.host, None, Some(service));
+                return Err(code);
+            }
         }
         lock(&self.host.custody).work_stop = None;
         if let Some(seed) = self.host.with(|c| c.authority.seed.clone()) {
             seed.exchange.set_owner_control(None);
         }
-        result
+        Ok(())
+    }
+    /// True while this run, or the host after its own close failed, still owns cleanup debt.
+    #[cfg(test)]
+    fn retained(&self) -> bool {
+        let resident = lock(&self.resident);
+        resident.work.is_some()
+            || resident.local.is_some()
+            || lock(&self.host.custody).work_debt.is_some()
+    }
+    /// True while the exact member Work (with its returned links) is still owned. A local
+    /// service error alone must not mask a dropped member owner.
+    #[cfg(test)]
+    fn member_work_retained(&self) -> bool {
+        let resident = lock(&self.resident);
+        resident.work.is_some()
+            || lock(&self.host.custody)
+                .work_debt
+                .as_ref()
+                .is_some_and(|debt| debt.work.is_some())
     }
 }
 impl SlicesPort for Work {

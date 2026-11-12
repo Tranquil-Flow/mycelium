@@ -73,6 +73,7 @@ impl StepEnv for Env {
 struct Fixture {
     root: PathBuf,
     host: PackagedRun,
+    network: Arc<Network>,
     member: Arc<PackagedMember>,
     agent: MemberAgent<PackagedMember>,
     remote: String,
@@ -186,7 +187,7 @@ impl Fixture {
         );
         let member = PackagedMember::new(
             Arc::new(Mutex::new(authority)),
-            network,
+            network.clone(),
             MemberSeams {
                 closed: Box::new(|| false),
                 resource: Box::new(|_| None),
@@ -196,6 +197,7 @@ impl Fixture {
         Self {
             root,
             host,
+            network,
             member,
             agent: MemberAgent::default(),
             remote,

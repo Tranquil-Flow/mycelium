@@ -702,8 +702,125 @@ impl OwnerWork {
             }
             let members = t.join().map_err(|_| "ThreadPanicked".to_owned())?;
             self.returned.extend(members);
+        } else {
+            // A repeated close after an exit that left member stages unproven: retry ONLY
+            // those members, over the exact links the worker handed back. The first close
+            // keeps the v0.1.4 contract (status names the debt); the caller retains this
+            // owner until a later close proves every stage released.
+            self.retry_cleanup();
         }
         Ok(())
+    }
+    /// Retry the member stages the exit could not prove released, on the returned links.
+    /// A proven row is never asked again and a timeout keeps its link pending, so the same
+    /// owner retries exactly the unresolved members. The recorded debt is cleared only by
+    /// `inert_bytes_discarded`/`nothing_owned` proofs, never by dropping the link.
+    fn retry_cleanup(&mut self) {
+        let pending: Vec<String> = {
+            let flow = self.shared.lock();
+            if flow.cleanup_error.is_none() {
+                return;
+            }
+            flow.member_cleanup
+                .iter()
+                .filter(|row| row["discarded"] != true)
+                .filter_map(|row| row["node_id"].as_str().map(str::to_owned))
+                .collect()
+        };
+        if pending.is_empty() {
+            self.shared.update(|f| f.cleanup_error = None);
+            return;
+        }
+        let (Some(wall), Ok(poll)) = (
+            self.walls.values().copied().min(),
+            super::span(B::OwnerPoll),
+        ) else {
+            eprintln!("owner work cleanup: retry budget unavailable");
+            return;
+        };
+        let Some(allowance) = stop_allowance(wall, self.stages.len()) else {
+            eprintln!("owner work cleanup: stop allowance unavailable");
+            return;
+        };
+        let end = Instant::now() + allowance;
+        let mut waiting: Vec<usize> = Vec::new();
+        for (i, member) in self.returned.iter_mut().enumerate() {
+            if !pending.contains(&member.node_id) {
+                continue;
+            }
+            let node = member.node_id.clone();
+            match member.link.begin(json!({"command": "discard"})) {
+                Ok(()) => waiting.push(i),
+                Err(Refusal(code)) => Self::row(
+                    &self.shared,
+                    &node,
+                    json!({"node_id": node, "discarded": false, "code": code}),
+                ),
+            }
+        }
+        while !waiting.is_empty() {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            let mut next = Vec::new();
+            for i in waiting {
+                let node = self.returned[i].node_id.clone();
+                let reply = {
+                    let slice = end.saturating_duration_since(Instant::now()).min(poll);
+                    let member = &mut self.returned[i];
+                    member.link.finish(slice)
+                };
+                match reply {
+                    Ok(r) if r["inert_bytes_discarded"] == true || r["nothing_owned"] == true => {
+                        Self::row(
+                            &self.shared,
+                            &node,
+                            json!({"node_id": node, "discarded": true}),
+                        );
+                    }
+                    Ok(_) => Self::row(
+                        &self.shared,
+                        &node,
+                        json!({"node_id": node, "discarded": false,
+                            "code": "member_discard_unconfirmed"}),
+                    ),
+                    Err(Refusal(code)) if code == REPLY_TIMEOUT => next.push(i),
+                    Err(Refusal(code)) => Self::row(
+                        &self.shared,
+                        &node,
+                        json!({"node_id": node, "discarded": false, "code": code}),
+                    ),
+                }
+            }
+            waiting = next;
+        }
+        for i in waiting {
+            let node = self.returned[i].node_id.clone();
+            Self::row(
+                &self.shared,
+                &node,
+                json!({"node_id": node, "discarded": false, "code": REPLY_TIMEOUT}),
+            );
+        }
+        if self
+            .shared
+            .lock()
+            .member_cleanup
+            .iter()
+            .all(|row| row["discarded"] == true)
+        {
+            self.shared.update(|f| f.cleanup_error = None);
+        }
+    }
+    /// Replace one member's cleanup row after a retry (never invents a row for a member the
+    /// exit did not report).
+    fn row(shared: &Arc<Shared>, node: &str, row: Value) {
+        shared.update(|f| {
+            if let Some(slot) = f.member_cleanup.iter_mut().find(|r| r["node_id"] == node) {
+                *slot = row;
+            }
+        });
     }
     /// The Stop the host signals while a step blocks in this port (the slices
     /// step's push, F5): stops the work and cancels the member operation in

@@ -103,6 +103,10 @@ pub struct Service {
     address: Option<iroh::EndpointAddr>,
     carrier: Option<Identity>,
     thread: Option<JoinHandle<Result<()>>>,
+    /// The member-side custody object the operation loop hands back at its exit. Kept until
+    /// `discard` PROVES the owned stage released; a failed close retains this exact owner so a
+    /// later `close` retries only its unresolved custody instead of reporting success.
+    cleanup: Arc<Mutex<Option<work::Work>>>,
 }
 impl Service {
     #[cfg(all(test, feature = "desktop-shell"))]
@@ -162,15 +166,18 @@ impl Service {
         shared.live()?; // refusal precedes sockets, threads, custody and native work
         let (send, ready) = mpsc::sync_channel(1);
         let worker = shared.clone();
+        let cleanup = Arc::new(Mutex::new(None));
+        let handed = cleanup.clone();
         let thread = std::thread::Builder::new()
             .name("mycelium-packaged-work".into())
-            .spawn(move || drive(worker, requests, send, network))
+            .spawn(move || drive(worker, requests, send, network, handed))
             .map_err(|_| "member_work_thread_failed")?;
         let mut service = Self {
             shared,
             address: None,
             carrier: None,
             thread: Some(thread),
+            cleanup,
         };
         let (address, endpoint) = ready
             .recv_timeout(duration(B::RouterClose)?)
@@ -308,8 +315,35 @@ impl Service {
                     .and_then(|r| r)
             })
             .unwrap_or(Ok(()));
+        // The loop hands its custody object back here. Retry (or finish) its ONE discard:
+        // an unproven retire keeps the same Work for the next close; it is never dropped
+        // into a success while the stage bytes are still owned.
+        let cleanup = self.discard();
         self.address = None;
-        cancel.and(input).and(joined)
+        cancel.and(input).and(joined).and(cleanup)
+    }
+    /// True while a failed close still owns member-side custody (a `close` retries it).
+    pub(crate) fn cleanup_pending(&self) -> bool {
+        self.cleanup
+            .lock()
+            .map(|slot| slot.is_some())
+            .unwrap_or(true)
+    }
+    fn discard(&self) -> Result<()> {
+        let mut slot = self
+            .cleanup
+            .lock()
+            .map_err(|_| "member_work_cleanup_poisoned".to_owned())?;
+        let Some(work) = slot.as_mut() else {
+            return Ok(());
+        };
+        match work.discard() {
+            Ok(_) => {
+                *slot = None;
+                Ok(())
+            }
+            Err(code) => Err(code),
+        }
     }
 }
 impl Drop for Service {
@@ -347,6 +381,7 @@ fn drive(
     requests: mpsc::Receiver<Result<work::Operation>>,
     ready: mpsc::SyncSender<Result<(iroh::EndpointAddr, String)>>,
     network: NetworkChoice,
+    cleanup: Arc<Mutex<Option<work::Work>>>,
 ) -> Result<()> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -403,7 +438,7 @@ fn drive(
                         endpoint,
                         lan: network.0.as_ref().map(|(_, p)| p),
                     };
-                    operations(&shared, requests, &side, &signer, &status)
+                    operations(&shared, requests, &side, &signer, &status, &cleanup)
                 })();
                 shared.stop.store(true, Ordering::SeqCst);
                 let control_result = control_thread
@@ -428,6 +463,7 @@ fn operations(
     side: &work::Carrier<'_, '_>,
     carrier: &Identity,
     status: &work::Status,
+    cleanup: &Mutex<Option<work::Work>>,
 ) -> Result<()> {
     let mut work = work::Work::new(shared.root.clone());
     let result = (|| {
@@ -497,9 +533,8 @@ fn operations(
         }
         Ok(())
     })();
-    let cleanup = work.discard().map(drop);
-    if let Err(e) = &cleanup {
-        eprintln!("member_work_custody_cleanup_failed:{e}");
-    }
-    result.and(cleanup)
+    // Hand the exact custody object to the owner of `close`, not to the thread's end: only
+    // the Service may decide that discard is proven (and retry it with after a fault).
+    *cleanup.lock().unwrap_or_else(|p| p.into_inner()) = Some(work);
+    result
 }

@@ -170,12 +170,13 @@ fn review_cleanup_failure_must_retain_retry_owner_and_not_become_success() {
     rescue.mode = Some(stage.clone());
     fs::set_permissions(&stage, fs::Permissions::from_mode(0o755)).unwrap();
     let first = ports.close_work();
-    let retained = {
-        let resident = lock(&ports.work.resident);
-        resident.work.is_some() || resident.local.is_some()
-    };
+    let retained = ports.work.retained();
     let second = ports.close_work();
     let bytes_remain = stage.is_dir();
+    assert!(
+        ports.work.member_work_retained(),
+        "the unresolved member Work owner was dropped before its proof"
+    );
     fs::set_permissions(&stage, fs::Permissions::from_mode(0o700)).unwrap();
     rescue.mode = None;
     let settled = ports.close_work();
@@ -194,4 +195,49 @@ fn review_cleanup_failure_must_retain_retry_owner_and_not_become_success() {
         "same production owner must release custody after fault restoration"
     );
     ports.close_work().unwrap();
+}
+
+/// The member-side network adapter owns the same cleanup debt independently of the owner run:
+/// a real identity fault on the remote member's retained stage keeps the exact Service in its
+/// slot across repeated closes, and only restoring the mode lets THAT owner release it.
+#[test]
+fn network_service_close_retries_only_its_unresolved_cleanup_owner() {
+    let (f, mut ports, state, mut env) = setup();
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    ports.work.node_slice_plans().unwrap();
+    let stage = stage_root(&f.root.join("member"));
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o755)).unwrap();
+    f.network.close_work();
+    assert!(
+        stage.is_dir(),
+        "a failed close must not unlink the member's withheld bytes"
+    );
+    f.network.close_work();
+    assert!(
+        stage.is_dir(),
+        "a repeated close must not become success while bytes remain"
+    );
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o700)).unwrap();
+    f.network.close_work();
+    assert!(
+        !stage.exists(),
+        "the same Service owner must release custody after fault restoration"
+    );
+    f.network.close_work();
+}
+
+fn stage_root(root: &Path) -> PathBuf {
+    let runs = root.join("chain-runs");
+    let mut dirs: Vec<_> = fs::read_dir(&runs)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    dirs.sort();
+    dirs.into_iter()
+        .find(|path| path.join("stage-shards").is_dir())
+        .expect("the member retained one stage root")
+        .join("stage-shards")
 }
