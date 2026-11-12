@@ -318,6 +318,15 @@ pub struct RemoteMember {
     last_op: Arc<AtomicU64>,
 }
 impl RemoteMember {
+    /// Adopt a verified current registration without calling pairing or accept.
+    pub fn already_joined(
+        _owner: iroh::SecretKey,
+        _coordinator: &seed::Coordinator,
+        _verified: &crate::member_control::joined::Verified,
+        _lan: Option<(IpAddr, LanPolicy)>,
+    ) -> Result<Self, Refusal> {
+        Err(Refusal("member_work_unavailable".into()))
+    }
     pub fn start(
         owner: iroh::SecretKey,
         member: iroh::EndpointAddr,
