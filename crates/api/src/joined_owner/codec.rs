@@ -142,7 +142,7 @@ impl NativeCodec {
             h.input.take();
             let end = limit.end();
             h.cleanup_end = Some(h.cleanup_end.map_or(end, |old| old.min(end)));
-            if let Err(cleanup) = settle(&mut h, end, true) {
+            if let Err(cleanup) = settle(&mut h, || limit.end(), true) {
                 eprintln!("tokenizer_cleanup_pending: {}", cleanup.code);
                 return Err(cleanup);
             }
@@ -159,7 +159,7 @@ impl NativeCodec {
         let mut h = self.lock_until(|| end, || Ok(()))?;
         h.input.take();
         h.cleanup_end = Some(h.cleanup_end.map_or(end, |old| old.min(end)));
-        settle(&mut h, end, false)
+        settle(&mut h, || end, false)
     }
     pub fn close(&self) -> Result<(), PublicError> {
         self.close_until(Instant::now() + span(B::RouterClose)?)
@@ -167,9 +167,17 @@ impl NativeCodec {
 }
 /// Never take the Child before a fallible status/kill. try_wait is the proof;
 /// expiry preserves the exact handle and the first cleanup end for later retry.
-fn settle(h: &mut Helper, end: Instant, force: bool) -> Result<(), PublicError> {
-    let end = h.cleanup_end.map_or(end, |old| old.min(end));
+fn settle(
+    h: &mut Helper,
+    remaining_end: impl Fn() -> Instant,
+    force: bool,
+) -> Result<(), PublicError> {
     loop {
+        // A first Stop may arrive AFTER an exchange failed and kill was sent.
+        // Re-read its bound while observing reap, and remember the shortest end.
+        let current = remaining_end();
+        let end = h.cleanup_end.map_or(current, |old| old.min(current));
+        h.cleanup_end = Some(end);
         let Some(child) = h.child.as_mut() else {
             return Ok(());
         };
@@ -245,6 +253,6 @@ impl Codec for NativeCodec {
         if h.input.is_some() {
             return Ok(());
         }
-        settle(&mut h, end, true)
+        settle(&mut h, || end, true)
     }
 }
