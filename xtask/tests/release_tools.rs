@@ -758,3 +758,87 @@ fn a_receipt_cell_accepts_only_a_file_stating_its_pass_for_this_candidate() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Review RELF F15 (surviving mutant X1): the `<manifest_sha256>` arm of the argv match was only
+/// defended by the log check. A record whose argv names ANOTHER manifest's sha256 but whose log
+/// carries this manifest's PASS line (a run for one manifest re-labelled for another) must still
+/// be refused on the argv alone.
+#[test]
+fn a_tool_record_whose_argv_names_another_manifest_is_refused_even_with_this_manifests_log() {
+    let sandbox = Sandbox::new();
+    let out = sandbox.produce("adhoc-signature", &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let records = sandbox.records();
+    assert!(sandbox.cell_line("adhoc-signature").starts_with("green"));
+    let mut relabelled = records[0].clone();
+    relabelled["id"] = json!("EV-20990101-0201");
+    relabelled["at"] = json!(records[0]["at"].as_f64().unwrap() + 1.0);
+    let mine = sandbox.manifest_sha256();
+    let argv: Vec<Value> = records[0]["argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            if a.as_str() == Some(mine.as_str()) {
+                json!("3".repeat(64))
+            } else {
+                a.clone()
+            }
+        })
+        .collect();
+    assert_ne!(
+        json!(argv),
+        records[0]["argv"],
+        "the argv names the manifest sha256"
+    );
+    relabelled["argv"] = json!(argv);
+    sandbox.append(&relabelled);
+    let line = sandbox.cell_line("adhoc-signature");
+    assert!(
+        line.starts_with("RED") && line.contains("tool_argv_not_hint"),
+        "{line}"
+    );
+}
+
+/// Review RELF F15 (surviving mutant X14): the no-python cell's `--bundle` must be the frozen
+/// bundle (`<bundle>` = the manifest's `bundle_dir`); a record of the same tool run over another
+/// bundle (a copy elsewhere) is refused.
+#[test]
+fn a_no_python_record_over_another_bundle_is_refused() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.root.join("repo");
+    let profile_path = sandbox.root.join("profile.json");
+    let mut profile: Value =
+        serde_json::from_str(&fs::read_to_string(&profile_path).unwrap()).unwrap();
+    profile["cells"].as_array_mut().unwrap().push(json!({
+        "id": "no-python", "state": "package", "claim": "CL-T-01", "bind": "bytes",
+        "verify": {"runs": "check", "argv_has": ["no-python", "--bundle"], "argv_is_hint": true},
+        "hint": [env!("CARGO_BIN_EXE_xtask"), "no-python", "--root", repo.to_str().unwrap(),
+                 "--bundle", "<bundle>"]}));
+    fs::write(&profile_path, profile.to_string()).unwrap();
+    let out = sandbox.produce("no-python", &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out));
+    let line = sandbox.cell_line("no-python");
+    assert!(line.starts_with("green"), "{line}");
+    let records = sandbox.records();
+    let copy = sandbox.root.join("elsewhere/Mycelium.app");
+    fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    run(
+        "/usr/bin/ditto",
+        &[sandbox.app().to_str().unwrap(), copy.to_str().unwrap()],
+    );
+    let mut other = records[0].clone();
+    other["id"] = json!("EV-20990101-0202");
+    other["at"] = json!(records[0]["at"].as_f64().unwrap() + 1.0);
+    // The argument after `--bundle` is the frozen bundle (the manifest's `bundle_dir`).
+    let mut argv: Vec<Value> = records[0]["argv"].as_array().unwrap().clone();
+    let at = argv.iter().position(|a| a == "--bundle").unwrap() + 1;
+    argv[at] = json!(copy.display().to_string());
+    other["argv"] = json!(argv);
+    sandbox.append(&other);
+    let line = sandbox.cell_line("no-python");
+    assert!(
+        line.starts_with("RED") && line.contains("tool_argv_not_hint"),
+        "{line}"
+    );
+}
