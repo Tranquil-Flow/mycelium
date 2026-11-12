@@ -154,6 +154,20 @@ fn startup_manifest_identity_is_bound_to_the_verified_executable() {
 }
 
 #[test]
+fn packaged_owner_exposes_slices_publish_and_activation_ports() {
+    let scratch = Scratch::new();
+    let root = scratch.0.join("state");
+    let host = PackagedRun::new(
+        Arc::new(Mutex::new(Authority::load(root.clone()).unwrap())),
+        Network::new(&root, crate::packaged_network::NetworkConfig::default()),
+        NodeService::new(Arc::new(NoNative), "s4cb2-work-port".into(), crate::native::development_qualification().unwrap()),
+        ModelHooks { acquisition: Box::new(|| None), resource_check: Box::new(|| None), reverify: Box::new(|| panic!("no native model")) }, None);
+    let mut ports = PackagedChainPorts::new(&host, None, None);
+    assert!(ports.slices_ports().is_some(), "packaged owner has no slices/work consumer");
+    assert!(ports.work_ports().is_some(), "packaged owner has no publication consumer");
+    assert!(ports.activation_port().is_some(), "packaged owner has no activation consumer");
+}
+#[test]
 fn explicit_expected_identity_reaches_the_packaged_compiler() {
     let scratch = Scratch::new();
     let mut program = scratch.program();
