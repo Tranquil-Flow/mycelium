@@ -1004,6 +1004,11 @@ pub fn build_documents(
 
 pub const INSTALL_COMMAND: &str = include_str!("../package-assets/install-mycelium.command");
 pub const README: &str = include_str!("../package-assets/README-PILOT.txt");
+/// The Gatekeeper/install walkthrough `README-PILOT.txt` points at. It was referenced but never
+/// shipped; it is written into the bundle by [`finalize`] like the README, so the reference resolves
+/// in the folder the reader actually has. Static text: no behaviour, no signature over it.
+pub const QUICKSTART: &str = include_str!("../package-assets/QUICKSTART-MACOS.md");
+pub const QUICKSTART_NAME: &str = "QUICKSTART-MACOS.md";
 pub const COMMAND_NAME: &str = "Install Mycelium.command";
 
 /// Write the finalize outputs next to `<bundle>/Mycelium.app`: signed manifest, install
@@ -1029,6 +1034,7 @@ pub fn finalize(bundle: &Path, signer: &Signer, spec: &FinalizeSpec) -> Result<S
     fs::set_permissions(bundle.join(COMMAND_NAME), fs::Permissions::from_mode(0o755))
         .map_err(|_| Refusal("install_io_error"))?;
     write("README-PILOT.txt", README.as_bytes())?;
+    write(QUICKSTART_NAME, QUICKSTART.as_bytes())?;
     let listing =
         crate::bundle::app_files_listing(&app).map_err(|_| Refusal("payload_special_file"))?;
     write("APP-FILES.sha256", listing.as_bytes())?;

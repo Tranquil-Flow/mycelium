@@ -21,10 +21,22 @@ fail-fast = true
 # so one entry covers all three. It sets only test-group: no timeout, retry or other grouping changes.
 [test-groups]
 hello-bootstrap = { max-threads = 1 }
+# Load-sensitive control-connection tests (12 Nov). Both drive a real listener/control connection
+# whose startup deadline shrinks under load: in the batch-4 whole-workspace gate each failed once
+# while every other test in its binary passed, and each passes every time when run alone
+# (grant_window 5/5, packaged_work 6/6 at 27448aa5). Serialize them the way hello-bootstrap is
+# serialized — one at a time. No timeout, retry, budget or assertion is changed; the tests are
+# unchanged and still fail if the behaviour is wrong.
+lease-control = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'binary_id(=node-service::hello_bootstrap)'
 test-group = 'hello-bootstrap'
+
+[[profile.default.overrides]]
+filter = '''test(=renewals_failing_until_the_lease_runs_out_fence_the_member_exactly_at_its_expiry)
+         | test(=packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership)'''
+test-group = 'lease-control'
 
 # headless-release (B11, gap row 23): api::headless_leave_cleanup runs the RELEASE headless launcher. Each of
 # its tests used to build it itself (a nested `cargo build --release`): on a cold target the first test paid

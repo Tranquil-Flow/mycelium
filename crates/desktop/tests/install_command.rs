@@ -504,6 +504,10 @@ fn sums_cover_the_documents_the_script_checks_and_every_regular_app_file() {
         "install-source.json",
         "Install Mycelium.command",
         "APP-FILES.sha256",
+        // README-PILOT.txt tells the reader "the exact steps are in QUICKSTART-MACOS.md"; the file
+        // must therefore be in the folder it names, and covered by the sums the script verifies.
+        "README-PILOT.txt",
+        "QUICKSTART-MACOS.md",
     ] {
         assert!(listed.iter().any(|l| l == name), "{name}");
     }
