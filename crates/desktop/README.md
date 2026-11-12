@@ -300,6 +300,13 @@ different lengths) on the commit in question; this README makes no claim beyond 
 output, which the release ledger's `two-path-reproducibility` cell records. The ignored test
 `two_path_builds_of_the_same_commit_are_byte_identical` runs it; the tiny-crate proof + control and
 the same-environment-for-two-builders check are in `tests/repro_canonical.rs`.
+The two-builder result recorded for lane RELF at 5232a4a (REPRODUCIBLE, 21 of 21 files) was NOT
+produced by `verify-two-paths.sh` (which builds both sides cold from `git archive`) but by
+`repro/verify-b-only.sh`, committed as it ran (plus the SPDX line; the run's file had sha256
+`f8848d11…`): builder A was the lane's own bundle,
+built by this recipe from the worktree with a WARM target (only `desktop` and `node-service`
+recompiled), and only builder B was a cold `git archive` build under another `HOME`, tree and target
+dir. The claim stays as scoped there: two builders on one Mac, one account, one toolchain and SDK.
 
 ```text
 source $SCRATCH/env.sh   # (pre-round-9 manual recipe) CARGO_TARGET_DIR, MACOSX_DEPLOYMENT_TARGET=15.6, RUSTFLAGS remap, strip,
