@@ -372,12 +372,13 @@ pub(crate) async fn flush_finished(send: &iroh::endpoint::SendStream) -> Result<
         .map_err(|_| Error::CleanupUnproven)
 }
 /// The error a call returns for a connection that completed after its
-/// deadline, given that error and the result of closing the late connection.
+/// deadline: always that deadline error (REVIEW-laneB20f (2)). A close that
+/// could not be proven is recorded, never put in the deadline error's place.
 fn late_outcome(deadline: Error, closed: Result<(), Error>) -> Error {
-    match closed {
-        Ok(()) => deadline,
-        Err(cleanup) => cleanup,
+    if let Err(cleanup) = closed {
+        eprintln!("late connection close unproven: {cleanup:?} (returning {deadline:?})");
     }
+    deadline
 }
 pub(crate) fn allowance(clock: &impl Clock, deadline: MonoInstant) -> Result<Duration, Error> {
     let now = clock.monotonic();
