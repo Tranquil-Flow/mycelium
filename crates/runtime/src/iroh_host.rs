@@ -326,6 +326,14 @@ fn self_driven() -> bool {
 ///    queued behind the close datagram has been answered.
 ///
 /// Bounded by `RouterClose`. This does not wait for the 3·PTO drain.
+///
+/// Known gap (REVIEW-laneB20f (1)): the close frame is counted when noq writes
+/// it into a datagram (`poll_transmit`), before the socket send. If that send
+/// hits `WouldBlock` (a full socket send buffer), noq keeps the datagram in its
+/// `buffered_transmit` and this returns with the close still unsent; the next
+/// `block_on` on this runtime sends it. Unlikely on loopback and LAN, and not
+/// reproducible deterministically here (it needs the kernel's send buffer full
+/// at that instant), so no test names it.
 pub(crate) async fn flush_close(
     endpoint: &Endpoint,
     closed: &iroh::endpoint::WeakConnectionHandle,
@@ -362,6 +370,14 @@ pub(crate) async fn flush_finished(send: &iroh::endpoint::SendStream) -> Result<
         .await
         .map(drop)
         .map_err(|_| Error::CleanupUnproven)
+}
+/// The error a call returns for a connection that completed after its
+/// deadline, given that error and the result of closing the late connection.
+fn late_outcome(deadline: Error, closed: Result<(), Error>) -> Error {
+    match closed {
+        Ok(()) => deadline,
+        Err(cleanup) => cleanup,
+    }
 }
 pub(crate) fn allowance(clock: &impl Clock, deadline: MonoInstant) -> Result<Duration, Error> {
     let now = clock.monotonic();
@@ -689,8 +705,7 @@ impl<'a> LoopbackHost<'a> {
             }
         };
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
@@ -990,8 +1005,7 @@ impl<'a> LoopbackHost<'a> {
                 .map_err(|_| Error::Unavailable)
         })?;
         if let Err(error) = allowance(clock, deadline) {
-            self.close_late(connection)?;
-            return Err(error);
+            return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
         Ok(connection)
