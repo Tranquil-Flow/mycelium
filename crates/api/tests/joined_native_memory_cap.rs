@@ -280,7 +280,8 @@ fn grown_path(prepare: &Value) -> PathBuf {
 /// accepts the prepare, then holds memory during the resident-proof exchange;
 /// `hog_during_prepare` holds memory and never answers the prepare;
 /// `refuse_proof` accepts the prepare and answers the proof with `ok:false`;
-/// `grow_disk` accepts the prepare, then grows the custody folder.
+/// `grow_disk` accepts the prepare, then grows the custody folder;
+/// `exit_during_prepare` exits (status 3) without answering the prepare.
 #[test]
 #[ignore = "fake native worker, run only by the pinned script of run_child"]
 fn fake_native_worker() {
@@ -297,6 +298,10 @@ fn fake_native_worker() {
         serde_json::to_vec(&prepare).unwrap(),
     )
     .unwrap();
+    if mode == "exit_during_prepare" {
+        // Dies by itself while its prepare (the load) is in flight.
+        std::process::exit(3);
+    }
     if mode == "grow_disk" {
         // Accepts the prepare, then grows the custody folder (a sparse file:
         // its length counts, as v0.1.4's st_size) and never answers the proof.
@@ -625,5 +630,123 @@ fn storage_guarded_child() {
     );
     remove_grown();
     native.abort().unwrap();
+    native.discard().unwrap();
+}
+
+// ---- Lane MG2 item 2: any worker death once the load began blocks the run ----
+
+const NATIVE_EXITED: &str = "worker_native_exited";
+
+/// Signal this process's OWN worker child (the pid its spawn returned, via
+/// `worker_pid`) and wait, without reaping it, until it has exited. The
+/// guard thread may reap it first; that also means it is gone.
+fn kill_own_worker(pid: u32) {
+    use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, kill_process, waitid};
+    let pid = Pid::from_raw(i32::try_from(pid).unwrap()).unwrap();
+    kill_process(pid, Signal::KILL).unwrap();
+    match waitid(
+        WaitId::Pid(pid),
+        WaitIdOptions::EXITED | WaitIdOptions::NOWAIT,
+    ) {
+        Ok(status) => assert!(status.is_some(), "the worker has exited"),
+        Err(e) => assert_eq!(e, rustix::io::Errno::CHILD, "already reaped by its guard"),
+    }
+}
+
+/// MG2 item 2 (REVIEW-laneMGF F2 follow-up): a worker that dies for any reason
+/// after its prepare (the load) leaves this run blocked on this member until a
+/// new offer with new custody; the owner's own deliberate abort of a live
+/// worker (an interrupted epoch) does not. v0.1.4 (DemoApp app.py:505 ->
+/// `auto_accept` 1175 -> `_start_offer` target_app.py:189-238 -> `_serve`
+/// managed_runtime.py:447-455 -> `_replace_worker_if_dead` 279-345): a dead
+/// worker whose `requires_cold_restart()` (configure dispatched or load
+/// admitted, worker.py:1171,1368,1549-1552) puts the runtime in `blocked`/
+/// `runtime_cold_restart_required`, never a replacement; `_watch` records
+/// `worker_native_exited` (worker.py:1462-1464).
+#[test]
+fn a_worker_killed_after_prepare_blocks_the_same_run_until_a_new_offer() {
+    run_child("killed_after_prepare_child");
+}
+#[test]
+#[ignore = "child of a_worker_killed_after_prepare_blocks_the_same_run_until_a_new_offer"]
+fn killed_after_prepare_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("mg2-death");
+    set_mode("refuse_proof");
+    assert_eq!(p.prepare(&mut native), Err("native_proof_binding_mismatch"));
+    assert_eq!(prepared_memory(), SMALL_CAP, "the prepare completed");
+    kill_own_worker(native.worker_pid().expect("the prepared worker is owned"));
+    assert_eq!(
+        native.abort().unwrap()["killed"],
+        false,
+        "it died before abort"
+    );
+    set_mode("refuse_proof");
+    assert_eq!(
+        p.prepare(&mut native),
+        Err("runtime_cold_restart_required"),
+        "a fresh prepare after the prepared worker died"
+    );
+    assert!(
+        !fake_dir().join("prepare.json").exists(),
+        "no worker was launched"
+    );
+    assert_eq!(
+        native.worker_failure(),
+        Some(json!({"code":NATIVE_EXITED,"limit_detail":null}))
+    );
+    native.discard().unwrap();
+    // A new run (new offer, new custody) prepares; the owner's own abort of
+    // its live worker (an interrupted epoch) does not block it.
+    let mut next = p.custody("mg2-death-next");
+    set_mode("refuse_proof");
+    assert_eq!(p.prepare(&mut next), Err("native_proof_binding_mismatch"));
+    assert_eq!(next.abort().unwrap()["killed"], true);
+    assert_eq!(next.worker_failure(), None);
+    set_mode("refuse_proof");
+    assert_eq!(p.prepare(&mut next), Err("native_proof_binding_mismatch"));
+    assert_eq!(
+        prepared_memory(),
+        SMALL_CAP,
+        "prepared again after a deliberate abort"
+    );
+    next.abort().unwrap();
+    next.discard().unwrap();
+}
+
+/// MG2 item 2: v0.2's prepare IS the load (v0.1.4 `configure`), dispatched
+/// as soon as the worker is spawned, so a worker that dies while it is in
+/// flight blocks the run as well (v0.1.4 sets `_configure_dispatched` before
+/// sending, worker.py:1171: "even if its reply was lost").
+#[test]
+fn a_worker_that_dies_during_prepare_blocks_the_same_run() {
+    run_child("dies_during_prepare_child");
+}
+#[test]
+#[ignore = "child of a_worker_that_dies_during_prepare_blocks_the_same_run"]
+fn dies_during_prepare_child() {
+    let p = Pair::with_cap(SMALL_CAP);
+    let mut native = p.custody("mg2-dies");
+    set_mode("exit_during_prepare");
+    assert_eq!(p.prepare(&mut native), Err("native_worker_exchange_failed"));
+    assert_eq!(
+        native.worker_pid(),
+        None,
+        "the failed start reaped its child"
+    );
+    set_mode("refuse_proof");
+    assert_eq!(
+        p.prepare(&mut native),
+        Err("runtime_cold_restart_required"),
+        "a fresh prepare after the worker died during prepare"
+    );
+    assert!(
+        !fake_dir().join("prepare.json").exists(),
+        "no worker was launched"
+    );
+    assert_eq!(
+        native.worker_failure(),
+        Some(json!({"code":NATIVE_EXITED,"limit_detail":null}))
+    );
     native.discard().unwrap();
 }
