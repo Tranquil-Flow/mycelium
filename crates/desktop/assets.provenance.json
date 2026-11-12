@@ -17,8 +17,8 @@
   },
   "diverged": {
     "app.js": {
-      "sha256": "cdb383a45ccbca39c1ae57c841801fe074d91efe4fdee9ef98b4d1a9ae01b2eb",
-      "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">."
+      "sha256": "ed94a197bf35abc9cb6007a9a9eda49e2b12e0fd403212dfb3cb388c3a1d0af2",
+      "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">. Disclosure trigger buttons toggle their own <details> panel and keep aria-expanded in step."
     },
     "index.html": {
       "sha256": "a234e17dee19223f473397d8e9f50c38a9e2a98afc402405af44faaf0fbd4feb",

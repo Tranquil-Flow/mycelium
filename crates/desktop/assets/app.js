@@ -617,3 +617,17 @@ $('adaptive-enable').addEventListener('change',()=>void perform('/api/adaptive/p
 $('adaptive-game').addEventListener('change',()=>void perform('/api/adaptive/policy',adaptiveBody(),$('adaptive-game').checked?'Sharing paused: no new work.':'Pause sharing released. Sharing returns only after the calm period.'));
 $('adaptive-stop').addEventListener('click',()=>void perform('/api/adaptive/stop',{},'Stopped taking new work on this Mac.'));
 $('adaptive-resume').addEventListener('click',()=>void perform('/api/adaptive/resume',{},'Serving allowed again after the calm period.'));
+
+// A <button> inside <summary> consumes the activation, so the parent <details> never toggles on
+// its own. Wire the two disclosure rows explicitly and keep aria-expanded in step with the panel.
+for (const trigger of document.querySelectorAll('summary > button.disclosure-btn')) {
+  const panel = trigger.closest('details');
+  if (!panel) continue;
+  trigger.setAttribute('aria-expanded', String(panel.open));
+  trigger.addEventListener('click', (event) => {
+    event.preventDefault();
+    panel.open = !panel.open;
+    trigger.setAttribute('aria-expanded', String(panel.open));
+  });
+  panel.addEventListener('toggle', () => trigger.setAttribute('aria-expanded', String(panel.open)));
+}
