@@ -303,7 +303,10 @@ fn fake_dir() -> PathBuf {
     PathBuf::from(std::env::var_os("MGF_FAKE_DIR").unwrap())
 }
 fn set_mode(mode: &str) {
-    let _ = fs::remove_file(fake_dir().join("prepare.json"));
+    let prepared = fake_dir().join("prepare.json");
+    if prepared.exists() {
+        fs::remove_file(prepared).unwrap();
+    }
     fs::write(fake_dir().join("mode"), mode).unwrap();
 }
 /// The `memory` of the prepare document the fake worker actually received.
