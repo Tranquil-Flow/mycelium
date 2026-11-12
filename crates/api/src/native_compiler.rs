@@ -97,6 +97,14 @@ fn file_pin_until(path: &Path, stopped: &dyn Fn() -> bool) -> Result<Pin> {
         sha256: format!("{:x}", hash.finalize()),
     })
 }
+/// Expected identity captured by the trusted composition at startup. This is an
+/// identity/drift check, not independent publisher or signature authentication.
+#[derive(Clone, Debug)]
+pub struct NativeProgram {
+    pub binary: PathBuf,
+    pub expected: Pin,
+}
+
 pub(crate) struct Config {
     binary: PathBuf,
     pin: Pin,

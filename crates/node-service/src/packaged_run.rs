@@ -48,6 +48,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+mod program_tests;
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -64,6 +67,9 @@ pub struct RunConfig {
     /// The installed native sidecar the owner's descriptor names (`installed_sidecar`,
     /// native_runtime.py:8-22). `None`: beside the executable, `native/mycelium-iroh-sidecar`.
     pub sidecar: Option<PathBuf>,
+    /// Expected installed executable identity from bundle admission. None means
+    /// explicitly unavailable, never development environment selection.
+    pub native_program: Option<api::native_compiler::NativeProgram>,
     /// Filled by the host once it installed the run.
     pub installed: RunSlot,
     /// TEST ONLY (decision U4, PH3B-COMMON; ruling 14): replaces the run's OBSERVE PORT with a test
@@ -419,7 +425,11 @@ struct PackagedChainPorts {
     compiler: SharedCompiler<PackagedRun>,
 }
 impl PackagedChainPorts {
-    fn new(host: &PackagedRun, double: Option<&ObserveTestDouble>) -> Self {
+    fn new(
+        host: &PackagedRun,
+        double: Option<&ObserveTestDouble>,
+        _native_program: Option<api::native_compiler::NativeProgram>,
+    ) -> Self {
         let (observation, compiler) = match double {
             None => {
                 let observation = Observation(Arc::new(Mutex::new(owner_observation::adapter(
@@ -501,11 +511,13 @@ impl OwnerRun {
     pub fn install(host: PackagedRun, config: &RunConfig, renewal: Option<Arc<HostLoop>>) -> Self {
         let chain_host = host.clone();
         let double = config.observe_test_double.clone();
+        let native_program = config.native_program.clone();
         let runs = DemoRuns::new(
             Box::new(move || {
                 Box::new(SharedHostChain::new(PackagedChainPorts::new(
                     &chain_host,
                     double.as_ref(),
+                    native_program.clone(),
                 )))
             }),
             Box::new(|| {
