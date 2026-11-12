@@ -21,8 +21,8 @@
       "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">."
     },
     "index.html": {
-      "sha256": "940b89f7fb719393aa1335d1c8127d58c3a889d2085defe0a8336e0a61f1b33d",
-      "reason": "Adds the ask dialog markup, the site's #page-mycelium / #hyphae canvases for the living background, its module boot script, and drops the pre-ruling-25 page subtitle 'macOS A13 hackathon demo' in favour of 'local swarm demo'."
+      "sha256": "9307aa401308c3965cacff1751bad2469a253d3d82698c11c30581118f002077",
+      "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases"
     },
     "style.css": {
       "sha256": "4a394dbface89eef3a557655138f0bc29e2a4472ef12ecf8fd096c73d75e3be6",
