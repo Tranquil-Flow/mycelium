@@ -317,8 +317,14 @@ pub fn accept_retained(
         protocol::canonical::digest(handoff).map_err(|_| peer("pairing_handoff_invalid"))?;
     let mut accepted = load_accepted(root)?;
     let rejoin = root.join(REJOIN_FILE);
+    // A retained acceptance is replaced by a new invite when this installation's membership has
+    // lapsed. The rejoin marker records that the owner was told; a recorded terminal disposition
+    // (`expired|revoked|stale|unknown`) says the same thing from the other side. Honouring only the
+    // marker meant a Mac whose membership had expired was refused as `pairing_handoff_changed`
+    // forever, because nothing ever wrote the marker for it.
+    let lapsed = rejoin.exists() || load_disposition(root)?.is_some();
     if accepted.is_some()
-        && rejoin.exists()
+        && lapsed
         && accepted
             .as_ref()
             .is_some_and(|a| a["handoff_digest"] != digest)

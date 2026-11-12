@@ -556,15 +556,20 @@ impl PackagedHost {
     /// [`PackagedHost::new`] with the owner's lease renewal period read from `period` instead
     /// of `RenewLoopSelfClosedWait`: a test runs the same composition on a shorter budget.
     pub fn with_renewal_period(node: NodeService, root: PathBuf, period: BudgetId) -> Self {
-        let authority = Authority::load(root.clone()).and_then(|mut authority| {
+        let authority = Authority::load(root.clone()).map(|mut authority| {
             // No relay and no public origin in this process: its seed answers on its own
             // loopback address, never on an origin a saved network file names.
             authority.configured_origin = None;
             let authority = Arc::new(Mutex::new(authority));
             if app_host::resumable(&*authority) {
-                app_host::open_owner_seed(&*authority).map_err(|error| error.code)?;
+                // A seed that cannot be reopened must not cost the app its swarm. Discarding the
+                // loaded authority here is what made a restart report no swarm at all: the persisted
+                // record still answers membership and "Invite a Mac", and the seed is tried again.
+                if let Err(error) = app_host::open_owner_seed(&*authority) {
+                    eprintln!("l11_seed_reopen_refused:{}", error.code);
+                }
             }
-            Ok(authority)
+            authority
         });
         if let Err(code) = &authority {
             eprintln!("l11_authority_load_refused:{code}");

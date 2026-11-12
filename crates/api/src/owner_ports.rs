@@ -440,7 +440,11 @@ impl<H: RunHost> AgentHost for AgentView<'_, H> {
             .flatten()
             .ok_or_else(|| Failure::new("RemoteMacMemberError", "peer_member_not_current"))?;
         // `staging_control_snapshot`: a stopped or expired member cannot describe itself.
-        if lease.is_none_or(|lease| now() >= lease) {
+        // A *missing* lease is not expired: `_start_local_contributor` returns a NEW member whose
+        // lease appears only on the renewal loop's first pass (see `create_local_contributor`
+        // above). Rejecting that made the "This Mac joins the run" step fail on every fresh start,
+        // because the run attaches before the loop has ever renewed.
+        if lease.is_some_and(|lease| now() >= lease) {
             return Err(Failure::new(
                 "RemoteMacMemberError",
                 "peer_member_not_current",

@@ -479,6 +479,30 @@ fn unlink_missing_ok(path: &std::path::Path) -> Result<(), PublicError> {
         _ => Ok(()),
     }
 }
+/// A join that never reached the owner leaves no window to poll.
+///
+/// The join window is process-scoped proof that a submit landed: the page polls exactly this record.
+/// If the submit fails, an older record from a previous attempt would otherwise be polled forever
+/// against its own (usually long-dead) origin, and every one of those polls overwrites
+/// `last-action-error.private.json`, hiding the real failure. Clearing it keeps the failure visible
+/// and stops a loop that can never succeed.
+fn discard_join_state(root: &std::path::Path) -> Result<(), PublicError> {
+    unlink_missing_ok(&root.join(JOIN_STATE))
+}
+/// The submit's outcome as the join window's fate: a submit that failed reached no window, so the
+/// previous attempt's record must not survive to be polled (and to overwrite this failure).
+fn settle_submit(
+    outcome: Result<(Value, Vec<Value>), PublicError>,
+    root: &std::path::Path,
+) -> Result<(Value, Vec<Value>), PublicError> {
+    match outcome {
+        Ok(answer) => Ok(answer),
+        Err(error) => {
+            discard_join_state(root)?;
+            Err(error)
+        }
+    }
+}
 /// `identity_fingerprint`: the first 12 hex digits of the key digest, upper case, in groups of 4.
 pub fn identity_fingerprint(digest: &Value) -> Result<String, PublicError> {
     let text = digest
@@ -586,9 +610,11 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
         let quota = serde_json::json!({
             "storage_bytes": storage, "network_bytes_per_day": storage, "background_allowed": false,
         });
-        let (answer, warnings) = self.host.join_submit(&link, &request, &quota)?;
+        let (answer, warnings) =
+            settle_submit(self.host.join_submit(&link, &request, &quota), &self.root)?;
         let fingerprint = identity_fingerprint(&request["identity_key_digest"])?;
         if answer["state"] != "waiting_for_owner" || answer["fingerprint"] != fingerprint {
+            discard_join_state(&self.root)?;
             return Err(PublicError::new(400, "pairing_window_response_invalid"));
         }
         let request_digest = protocol::canonical::digest(&request)
@@ -1262,5 +1288,45 @@ impl<H: Host, B: Backend> Backend for PersistentBackend<H, B> {
             // The status keeps its previous snapshot; the action's own error is what is answered.
             self.host.publication_failed(&error);
         }
+    }
+}
+
+#[cfg(test)]
+mod join_state_tests {
+    use super::{JOIN_STATE, PublicError, discard_join_state, settle_submit};
+    fn root(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("joinstate-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+    #[test]
+    fn a_failed_join_leaves_no_window_to_poll() {
+        let dir = root("failed");
+        let stale = dir.join(JOIN_STATE);
+        std::fs::write(&stale, b"{}").unwrap();
+        let outcome = settle_submit(
+            Err(PublicError::new(409, "pairing_window_unreachable")),
+            &dir,
+        );
+        assert_eq!(outcome.unwrap_err().code, "pairing_window_unreachable");
+        assert!(
+            !stale.exists(),
+            "a failed submit must not leave the previous attempt's window pollable"
+        );
+        // The failure itself is still what the caller reports, and repeating it is not an error.
+        let _ = discard_join_state(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn a_successful_join_keeps_its_window() {
+        let dir = root("ok");
+        let pending = dir.join(JOIN_STATE);
+        std::fs::write(&pending, b"{}").unwrap();
+        let answer = (serde_json::json!({"state": "waiting_for_owner"}), Vec::new());
+        let kept = settle_submit(Ok(answer), &dir).unwrap();
+        assert_eq!(kept.0["state"], "waiting_for_owner");
+        assert!(pending.exists(), "a window that was reached must stay pollable");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
