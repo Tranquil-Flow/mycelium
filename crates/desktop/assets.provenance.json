@@ -25,7 +25,7 @@
       "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases"
     },
     "style.css": {
-      "sha256": "4a394dbface89eef3a557655138f0bc29e2a4472ef12ecf8fd096c73d75e3be6",
+      "sha256": "91efc23306c41ef1fc62e90fb989dff936e1c21f6b183f19800cf30f48f59755",
       "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art)."
     }
   },
