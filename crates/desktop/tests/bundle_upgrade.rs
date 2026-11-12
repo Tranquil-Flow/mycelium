@@ -10,8 +10,8 @@
 //! Nothing is launched; no GPU, no network, no installed application.
 //!
 //! ```text
-//! MYCELIUM_BUNDLE_APP="/path/default/Mycelium A13 Demo.app" \
-//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium A13 Demo.app" \
+//! MYCELIUM_BUNDLE_APP="/path/default/Mycelium.app" \
+//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium.app" \
 //!   cargo test --offline --locked -j 2 -p desktop --test bundle_upgrade -- --ignored --test-threads=1
 //! ```
 #![cfg(target_os = "macos")]
@@ -106,7 +106,7 @@ fn stage(scratch: &Path, label: &str, app: &Path, version: &str) -> PathBuf {
     assert!(
         Command::new("/usr/bin/ditto")
             .arg(app)
-            .arg(staged.join("Mycelium A13 Demo.app"))
+            .arg(staged.join("Mycelium.app"))
             .status()
             .unwrap()
             .success()

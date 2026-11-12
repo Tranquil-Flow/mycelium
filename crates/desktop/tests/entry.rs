@@ -40,7 +40,7 @@ fn seams() -> Seams {
 }
 fn bundle(dir: &Path) -> PathBuf {
     let b = dir.join("download/mycelium-0.2.0-macos-arm64");
-    let exe = b.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let exe = b.join("Mycelium.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
     fs::write(&exe, b"inert").unwrap();
     docs::finalize(
@@ -58,7 +58,7 @@ fn bundle(dir: &Path) -> PathBuf {
     b
 }
 fn installed_exe(home: &Path) -> PathBuf {
-    let exe = home.join("Library/Application Support/Mycelium/programs/0.2.0/Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let exe = home.join("Library/Application Support/org.mycelium.app/programs/0.2.0/Mycelium.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
     fs::write(&exe, b"inert").unwrap();
     exe
@@ -68,7 +68,7 @@ fn installed_exe(home: &Path) -> PathBuf {
 fn routing_follows_v014_main() {
     let dir = scratch();
     let home = dir.join("home");
-    let downloaded = bundle(&dir).join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let downloaded = bundle(&dir).join("Mycelium.app/Contents/MacOS/mycelium");
     // Bare (and Finder's -psn) outside the install: refused, whatever else is true.
     for argv in [args(&["mycelium"]), args(&["mycelium", "-psn_0_1"])] {
         let Route::Refuse(refusal) = entry::route(&argv, &downloaded, &home) else {
@@ -85,7 +85,7 @@ fn routing_follows_v014_main() {
         );
     }
     let translocated = PathBuf::from(
-        "/private/var/folders/x/AppTranslocation/1/d/Mycelium A13 Demo.app/Contents/MacOS/mycelium",
+        "/private/var/folders/x/AppTranslocation/1/d/Mycelium.app/Contents/MacOS/mycelium",
     );
     let Route::Refuse(refusal) = entry::route(&args(&["mycelium"]), &translocated, &home) else {
         panic!("translocated must refuse");
@@ -121,13 +121,13 @@ fn routing_follows_v014_main() {
 fn the_refusal_names_the_installed_copy_when_there_is_one() {
     let dir = scratch();
     let home = dir.join("home");
-    let downloaded = bundle(&dir).join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let downloaded = bundle(&dir).join("Mycelium.app/Contents/MacOS/mycelium");
     let inside = installed_exe(&home);
     let apps = home.join("Applications");
     fs::create_dir_all(&apps).unwrap();
     std::os::unix::fs::symlink(
         inside.ancestors().nth(3).unwrap(),
-        apps.join("Mycelium A13.app"),
+        apps.join("Mycelium.app"),
     )
     .unwrap();
     let Route::Refuse(refusal) = entry::route(&args(&["mycelium"]), &downloaded, &home) else {
@@ -146,7 +146,7 @@ fn installer_flags_run_install_status_uninstall_with_v014_output_and_defaults() 
     let roots = Roots::new(&dir.join("home"), &dir.join("apps")).unwrap();
     let b = bundle(&dir);
     // `--install` with no --bundle: the folder above the app, as `Path(sys.executable).parents[3]`.
-    let exe = b.join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+    let exe = b.join("Mycelium.app/Contents/MacOS/mycelium");
     let done = entry::run_installer(&args(&["mycelium", "--install"]), &exe, &roots, &seams());
     assert_eq!(done.code, 0, "{}", done.stderr);
     let report: serde_json::Value = serde_json::from_str(&done.stdout).unwrap();
@@ -261,11 +261,11 @@ fn the_product_roots_are_home_and_home_applications() {
     let home = PathBuf::from(std::env::var("HOME").unwrap());
     assert_eq!(
         roots.programs(),
-        home.join("Library/Application Support/Mycelium/programs")
+        home.join("Library/Application Support/org.mycelium.app/programs")
     );
     assert_eq!(
         roots.application_entry(),
-        home.join("Applications/Mycelium A13.app")
+        home.join("Applications/Mycelium.app")
     );
     // Read only: nothing is created or changed by asking.
 }

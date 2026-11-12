@@ -281,20 +281,119 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, (String, u64)>) -> R
         if meta.is_dir() {
             walk(root, &path, out)?;
         } else if meta.is_file() {
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|e| fail("bundle_unreadable", e))?
-                .to_str()
-                .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 path"))?
-                .replace('\\', "/");
+            let relative = relative_name(root, &path)?;
             let digest = file_sha256(&path)
                 .map_err(|e| fail("bundle_unreadable", format!("{}: {e}", path.display())))?;
             out.insert(relative, (digest, meta.len()));
+        } else if meta.file_type().is_symlink() {
+            // v0.1.4's signable layout keeps relative links inside the bundle
+            // (`Frameworks/mlx.metallib -> ../Resources/mlx.metallib`). A link is never followed:
+            // its target text is part of the frozen bytes, and a link out of the bundle is refused.
+            let relative = relative_name(root, &path)?;
+            let target = fs::read_link(&path).map_err(|e| {
+                fail(
+                    "bundle_unreadable",
+                    format!("{}: {}", path.display(), io_text(&e)),
+                )
+            })?;
+            let text = target
+                .to_str()
+                .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 link target"))?;
+            if !link_stays_inside(&relative, &target) || !resolves_inside(root, &path) {
+                return Err(fail(
+                    "bundle_link_outside",
+                    format!("{} -> {text}", path.display()),
+                ));
+            }
+            out.insert(
+                relative,
+                (
+                    format!("link:{}", sha256_bytes(text.as_bytes())),
+                    text.len() as u64,
+                ),
+            );
         } else {
             return Err(fail("bundle_special_file", path.display()));
         }
     }
     Ok(())
+}
+fn relative_name(root: &Path, path: &Path) -> Result<String, String> {
+    Ok(path
+        .strip_prefix(root)
+        .map_err(|e| fail("bundle_unreadable", e))?
+        .to_str()
+        .ok_or_else(|| fail("bundle_unreadable", "non-UTF-8 path"))?
+        .replace('\\', "/"))
+}
+/// Whether the link at `link` resolves inside `root` on disk, following the links its target
+/// passes through (lane RELF item 7, review F5: `esc -> up/../..` with `up -> ..` is lexically
+/// inside but leaves the bundle). Nothing is read through a link; a missing component is taken as
+/// named, so a dangling chain that would land outside is refused too. At most 40 hops.
+fn resolves_inside(root: &Path, link: &Path) -> bool {
+    use std::path::Component;
+    fn resolve(root: &Path, mut at: PathBuf, target: &Path, hops: &mut u32) -> Option<PathBuf> {
+        if target.is_absolute() {
+            return None;
+        }
+        for component in target.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    at.pop();
+                }
+                Component::Normal(name) => {
+                    let next = at.join(name);
+                    let is_link =
+                        fs::symlink_metadata(&next).is_ok_and(|m| m.file_type().is_symlink());
+                    if is_link {
+                        *hops += 1;
+                        if *hops > 40 {
+                            return None;
+                        }
+                        let inner = fs::read_link(&next).ok()?;
+                        at = resolve(root, at, &inner, hops)?;
+                    } else {
+                        at = next;
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => return None,
+            }
+            if !at.starts_with(root) {
+                return None;
+            }
+        }
+        Some(at)
+    }
+    let (Ok(root), Some(parent)) = (fs::canonicalize(root), link.parent()) else {
+        return false;
+    };
+    let (Ok(start), Ok(target)) = (fs::canonicalize(parent), fs::read_link(link)) else {
+        return false;
+    };
+    let mut hops = 0;
+    resolve(&root, start, &target, &mut hops).is_some()
+}
+/// Whether `target`, read relative to the folder holding the link at `relative` (a path inside
+/// the bundle), names a path inside the bundle. Lexical only: nothing is resolved on disk.
+fn link_stays_inside(relative: &str, target: &Path) -> bool {
+    use std::path::Component;
+    if target.is_absolute() {
+        return false;
+    }
+    let mut depth = relative.split('/').count().saturating_sub(1);
+    for component in target.components() {
+        match component {
+            Component::ParentDir => match depth.checked_sub(1) {
+                Some(up) => depth = up,
+                None => return false,
+            },
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    true
 }
 
 // ------------------------------------------------------------------ claims, ledger, profile
@@ -455,6 +554,15 @@ pub struct Verify {
     pub runs: Runs,
     pub min_passed: u64,
     pub required_targets: Vec<String>,
+    /// A tool cell (lane RELF item 4): the record's argv must BE the cell's hint for this
+    /// candidate (`<manifest>` any path, `<manifest_sha256>` this manifest's sha256, `<bundle>` its
+    /// `bundle_dir`), and a hint naming `<manifest_sha256>` needs the tool's
+    /// `: PASS manifest_sha256 <sha256>` line in the log. `produce` runs only that command.
+    pub argv_is_hint: bool,
+    /// An operator's receipt (the launch smoke): labelled so, and one of its artifact files must
+    /// name this candidate (manifest sha256 and exe sha256), so a receipt written for another
+    /// candidate never turns the cell green.
+    pub operator_receipt: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Cell {
@@ -506,6 +614,10 @@ struct RawVerify {
     min_passed: Option<u64>,
     #[serde(default)]
     required_targets: Vec<String>,
+    #[serde(default)]
+    argv_is_hint: bool,
+    #[serde(default)]
+    operator_receipt: bool,
 }
 impl Profile {
     pub fn parse(text: &str, claims: &Claims) -> Result<Self, String> {
@@ -614,6 +726,24 @@ impl Profile {
                 format!("{}: counts only apply to tests cells", raw.id),
             ));
         }
+        if v.argv_is_hint && (runs == Runs::Receipt || raw.hint.is_empty()) {
+            return Err(fail(
+                "profile_invalid",
+                format!("{}: argv_is_hint needs a gate cell with a hint", raw.id),
+            ));
+        }
+        if v.operator_receipt && runs != Runs::Receipt {
+            return Err(fail(
+                "profile_invalid",
+                format!("{}: operator_receipt is for receipt cells", raw.id),
+            ));
+        }
+        if v.argv_is_hint && v.kind.as_deref().is_some_and(|k| k != "gate") {
+            return Err(fail(
+                "profile_invalid",
+                format!("{}: argv_is_hint is for gate records", raw.id),
+            ));
+        }
         if v.argv_has.is_empty() && v.name.is_none() {
             return Err(fail(
                 "profile_verify_unselective",
@@ -634,6 +764,8 @@ impl Profile {
                 runs,
                 min_passed: v.min_passed.unwrap_or(0),
                 required_targets: v.required_targets,
+                argv_is_hint: v.argv_is_hint,
+                operator_receipt: v.operator_receipt,
             },
             hint: raw.hint,
         })
@@ -1084,6 +1216,16 @@ fn judge(env: &Env, cell: &Cell, record: &Record) -> Outcome {
         Ok(sha) => sha,
         Err((code, detail)) => return red(code, id(), detail),
     };
+    if v.argv_is_hint
+        && let Err((code, detail)) = check_tool_run(env, cell, record)
+    {
+        return red(code, id(), detail);
+    }
+    if v.operator_receipt
+        && let Err(detail) = names_candidate(env.manifest, record)
+    {
+        return red("operator_receipt_unbound", id(), detail);
+    }
     Outcome::Green {
         ev: record.id.clone(),
         passed,
@@ -1091,6 +1233,91 @@ fn judge(env: &Env, cell: &Cell, record: &Record) -> Outcome {
     }
 }
 
+/// The record's argv instantiated from the cell's hint for this manifest.
+pub fn hint_matches(hint: &[String], argv: &[String], manifest: &Manifest) -> bool {
+    hint.len() == argv.len()
+        && hint.iter().zip(argv).all(|(h, a)| match h.as_str() {
+            "<manifest>" => !a.is_empty(),
+            "<manifest_sha256>" => *a == manifest.sha256,
+            "<bundle>" => Path::new(a) == manifest.bundle_dir,
+            _ => h == a,
+        })
+}
+/// A tool cell's record: its argv is the cell's own command for this manifest, and (when the
+/// command names the manifest's sha256) its log carries the tool's PASS line for that sha256.
+fn check_tool_run(env: &Env, cell: &Cell, record: &Record) -> Result<(), (&'static str, String)> {
+    let argv = strings(&record.value, "argv").unwrap_or_default();
+    if !hint_matches(&cell.hint, &argv, env.manifest) {
+        return Err((
+            "tool_argv_not_hint",
+            format!(
+                "the record ran {argv:?}, not the cell's own command {:?} for this manifest",
+                cell.hint
+            ),
+        ));
+    }
+    if !cell.hint.iter().any(|h| h == "<manifest_sha256>") {
+        return Ok(());
+    }
+    let name = record
+        .value
+        .get("log")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let path = if Path::new(name).is_absolute() {
+        PathBuf::from(name)
+    } else {
+        env.log_base.join(name)
+    };
+    let log = fs::read(&path).map_err(|e| {
+        (
+            "log_missing",
+            format!("{}: {}", path.display(), io_text(&e)),
+        )
+    })?;
+    let want = format!(": PASS manifest_sha256 {}", env.manifest.sha256);
+    if !String::from_utf8_lossy(&log)
+        .lines()
+        .any(|l| l.contains(&want))
+    {
+        return Err((
+            "tool_log_unbound",
+            format!(
+                "the log has no tool PASS line for manifest {}",
+                env.manifest.sha256
+            ),
+        ));
+    }
+    Ok(())
+}
+/// One artifact file of an operator receipt names this candidate: its manifest sha256 and its exe
+/// sha256 both appear in the file.
+pub fn names_candidate(manifest: &Manifest, record: &Record) -> Result<(), String> {
+    let listed = record
+        .value
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let names = listed.iter().any(|entry| {
+        entry
+            .get("path")
+            .and_then(Value::as_str)
+            .and_then(|p| fs::read(p).ok())
+            .is_some_and(|bytes| {
+                let text = String::from_utf8_lossy(&bytes);
+                text.contains(&manifest.sha256) && text.contains(&manifest.candidate.exe_sha256)
+            })
+    });
+    if names {
+        Ok(())
+    } else {
+        Err(format!(
+            "no artifact of this operator receipt names manifest {} and exe {}",
+            manifest.sha256, manifest.candidate.exe_sha256
+        ))
+    }
+}
 /// A receipt that lists `artifacts` is only as good as those files: each is re-hashed from disk.
 fn check_artifacts(record: &Record) -> Result<(), (&'static str, String)> {
     let Some(listed) = record.value.get("artifacts") else {
@@ -1856,7 +2083,7 @@ pub fn publish(inputs: &Inputs, attempt: &str, token: Option<&Path>) -> Result<(
 
 // ------------------------------------------------------------------ command line
 
-pub(crate) const USAGE: &str = "USAGE: xtask release candidate <sha> --manifest FILE (--attempt ID | --resume ID) [--profile FILE] [--registry DIR] [--attempts DIR] [--stop-after STATE]\n       xtask release emit <kind> <name> (--pass --producer TEXT --artifact FILE... | --not-yet --reason TEXT [--blocker ID]...) [--manifest FILE] [--profile FILE] [--registry DIR]\n       xtask release produce <cell> --lane LANE --manifest FILE [--profile FILE] [--registry DIR] [--guard PATH] [-- <command...>]\n       xtask release publish <sha> --manifest FILE --attempt ID [--owner-token FILE] [--profile FILE] [--registry DIR] [--attempts DIR]";
+pub(crate) const USAGE: &str = "USAGE: xtask release freeze <sha> --exe FILE --bundle DIR --out MANIFEST [--repo DIR]\n       xtask release candidate <sha> --manifest FILE (--attempt ID | --resume ID) [--profile FILE] [--registry DIR] [--attempts DIR] [--stop-after STATE]\n       xtask release emit <kind> <name> (--pass --producer TEXT --artifact FILE... | --not-yet --reason TEXT [--blocker ID]...) [--manifest FILE] [--profile FILE] [--registry DIR]\n       xtask release produce <cell> --lane LANE --manifest FILE [--profile FILE] [--registry DIR] [--guard PATH] [-- <command...>]\n       xtask release publish <sha> --manifest FILE --attempt ID [--owner-token FILE] [--profile FILE] [--registry DIR] [--attempts DIR]";
 
 struct Parsed {
     sha: String,
@@ -1990,12 +2217,18 @@ pub fn cli(args: &[String]) -> Result<u8, String> {
                 return Err(fail("candidate_identity_unknown", &parsed.sha));
             }
             for result in evaluate_all(&loaded.env()) {
+                let operator = loaded
+                    .profile
+                    .cells
+                    .iter()
+                    .any(|c| c.id == result.cell && c.verify.operator_receipt);
                 match &result.outcome {
                     Outcome::Green { ev, passed, .. } => println!(
-                        "green {:<10} {:<20} {} {ev} ({passed} passed)",
+                        "green {:<10} {:<20} {} {ev} ({passed} passed){}",
                         result.state.id(),
                         result.cell,
-                        result.claim
+                        result.claim,
+                        if operator { " [operator receipt]" } else { "" }
                     ),
                     Outcome::Red { code, evs, detail } => println!(
                         "RED   {:<10} {:<20} {} {code} {}: {detail}",
@@ -2022,6 +2255,8 @@ pub fn cli(args: &[String]) -> Result<u8, String> {
             );
             Ok(u8::from(!blocks.is_empty()))
         }
+        "freeze" => crate::release_freeze::cli(rest),
+        "check-bundle" => crate::release_check::cli(rest),
         "emit" => crate::release_emit::emit(rest),
         "produce" => crate::release_emit::produce(rest),
         "publish" => {

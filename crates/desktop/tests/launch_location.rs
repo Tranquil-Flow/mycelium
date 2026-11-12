@@ -15,7 +15,7 @@ fn scratch(name: &str) -> PathBuf {
 fn exe_in(root: &std::path::Path, version: &str) -> PathBuf {
     let exe = root
         .join(version)
-        .join("Mycelium A13 Demo.app/Contents/MacOS/mycelium");
+        .join("Mycelium.app/Contents/MacOS/mycelium");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
     fs::write(&exe, b"x").unwrap();
     exe
@@ -34,7 +34,7 @@ fn installed_translocated_and_elsewhere_are_told_apart() {
         Location::Installed
     );
     let translocated = PathBuf::from(
-        "/private/var/folders/ab/AppTranslocation/0000-1111/d/Mycelium A13 Demo.app/Contents/MacOS/mycelium",
+        "/private/var/folders/ab/AppTranslocation/0000-1111/d/Mycelium.app/Contents/MacOS/mycelium",
     );
     assert_eq!(
         launch_location::classify(&translocated, &programs),
@@ -95,7 +95,7 @@ fn a_downloaded_copy_points_at_the_installed_app_only_when_the_entry_really_reso
     let programs = dir.join("programs");
     let installed = exe_in(&programs, "0.2.0");
     let outside = exe_in(&dir.join("dl"), "x");
-    let entry = dir.join("apps/Mycelium A13.app");
+    let entry = dir.join("apps/Mycelium.app");
     fs::create_dir_all(dir.join("apps")).unwrap();
     let ask = |entry: Option<&std::path::Path>| {
         launch_location::not_installed_refusal(&args(&["mycelium"]), &outside, &programs, entry)

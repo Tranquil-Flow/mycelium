@@ -948,6 +948,9 @@ impl Signer {
     }
 }
 
+/// v0.2's own launchd user-agent label (ruling 25; v0.1.4 declares `org.mycelium.managed-host`,
+/// `finalize_a13_macos.py:45`): declared in the signed manifest, never installed by this tranche.
+pub const LAUNCHD_LABEL: &str = "org.mycelium.app.managed-host";
 pub struct FinalizeSpec<'a> {
     pub version: &'a str,
     pub rollback_floor: &'a str,
@@ -974,8 +977,7 @@ pub fn build_documents(
         "macos_version": spec.minimum_os, "service_manager": "launchd", "install_mode": "launchd_user",
         "rollback_floor": spec.rollback_floor, "lifecycle_support": true, "expert_tools_required": [],
     });
-    let declaration =
-        "launchd user agent org.mycelium.managed-host (declared, not installed by this tranche)";
+    let declaration = "launchd user agent org.mycelium.app.managed-host (declared, not installed by this tranche)";
     let statement = json!({
         "protocol": MANIFEST_PROTOCOL,
         "source_revision": spec.source_revision,
@@ -983,7 +985,7 @@ pub fn build_documents(
         "platform_architecture": {"system": "macos", "machine": "arm64", "macos_version": spec.minimum_os},
         "package_digest": payload_digest, "publisher_identity": publisher, "minimum_os": minimum,
         "service_descriptor": {
-            "launchd_label": "org.mycelium.managed-host", "sha256": digest_of(declaration.as_bytes()),
+            "launchd_label": LAUNCHD_LABEL, "sha256": digest_of(declaration.as_bytes()),
             "install_mode": "launchd_user", "lifecycle_support": true,
         },
         "update_channel": "owner_private_media", "rollback_floor": spec.rollback_floor,
@@ -1004,7 +1006,7 @@ pub const INSTALL_COMMAND: &str = include_str!("../package-assets/install-myceli
 pub const README: &str = include_str!("../package-assets/README-PILOT.txt");
 pub const COMMAND_NAME: &str = "Install Mycelium.command";
 
-/// Write the finalize outputs next to `<bundle>/Mycelium A13 Demo.app`: signed manifest, install
+/// Write the finalize outputs next to `<bundle>/Mycelium.app`: signed manifest, install
 /// source, `APP-FILES.sha256`, the install script, README, artifact identity and `SHA256SUMS`.
 pub fn finalize(bundle: &Path, signer: &Signer, spec: &FinalizeSpec) -> Result<String> {
     let app = bundle.join(crate::install::PAYLOAD_DIRECTORY);

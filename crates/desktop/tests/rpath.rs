@@ -249,7 +249,7 @@ fn bundle_assembly_refuses_an_executable_with_an_absolute_rpath_and_builds_with_
         Some(BundleError::Rpath("/Users/builder/mlx/lib".into()))
     );
     assert!(
-        !out.join("Mycelium A13 Demo.app").exists(),
+        !out.join("Mycelium.app").exists(),
         "a refused build leaves no bundle"
     );
 

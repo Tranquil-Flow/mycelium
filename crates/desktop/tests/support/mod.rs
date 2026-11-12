@@ -82,7 +82,7 @@ pub fn install_scratch(app: &Path, label: &str) -> (PathBuf, PathBuf, PathBuf) {
     assert!(
         Command::new("/usr/bin/ditto")
             .arg(app)
-            .arg(staged.join("Mycelium A13 Demo.app"))
+            .arg(staged.join("Mycelium.app"))
             .status()
             .unwrap()
             .success()
@@ -108,7 +108,7 @@ pub fn install_scratch(app: &Path, label: &str) -> (PathBuf, PathBuf, PathBuf) {
     desktop::install::install(&staged, &roots, &desktop::install::Seams::host()).unwrap();
     let executable = roots
         .version_dir("0.2.0")
-        .join("Mycelium A13 Demo.app/Contents/MacOS/mycelium")
+        .join("Mycelium.app/Contents/MacOS/mycelium")
         .canonicalize()
         .unwrap();
     (fake, fake_home, executable)

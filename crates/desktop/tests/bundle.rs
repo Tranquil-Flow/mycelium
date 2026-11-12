@@ -93,7 +93,7 @@ fn out_dir(tree: &Tree) -> PathBuf {
 // ---- identity -------------------------------------------------------------
 
 #[test]
-fn info_plist_has_the_released_v014_key_set_and_values_except_two_named_differences() {
+fn info_plist_has_the_released_v014_key_set_and_values_except_the_named_differences() {
     // Certified v0.1.4 `Contents/Info.plist` (sha256 e1220422…), read-only oracle.
     let v014 = [
         ("CFBundleDisplayName", "Mycelium A13 Demo"),
@@ -118,8 +118,19 @@ fn info_plist_has_the_released_v014_key_set_and_values_except_two_named_differen
             .unwrap_or_else(|| panic!("{key} missing"));
         keys.push(key.to_string());
         match key {
-            // The only intentional differences: v0.2 executable and version.
+            // The intentional differences: v0.2 executable and version and, under owner ruling 25
+            // (v0.2's own identity, re-pinned as a ruling change, not a loosening), its name and
+            // bundle identifier.
             "CFBundleExecutable" => assert_eq!((value, old), ("mycelium", "Mycelium A13 Demo")),
+            "CFBundleDisplayName" | "CFBundleName" => {
+                assert_eq!((value, old), ("Mycelium", "Mycelium A13 Demo"))
+            }
+            "CFBundleIdentifier" => {
+                assert_eq!(
+                    (value, old),
+                    ("org.mycelium.app", "org.mycelium.a13-macos-demo")
+                )
+            }
             "CFBundleShortVersionString" => assert_eq!(value, "0.2.0"),
             _ => assert_eq!(value, old, "{key}"),
         }
@@ -182,7 +193,7 @@ fn bundle_has_the_documented_layout_modes_and_verifies_against_its_own_manifest(
     let (manifest, exe) = fixture(&tree);
     out(&tree);
     let built = build(&tree, &manifest, &exe).unwrap();
-    assert_eq!(built.app, out_dir(&tree).join("Mycelium A13 Demo.app"));
+    assert_eq!(built.app, out_dir(&tree).join("Mycelium.app"));
     let paths: Vec<_> = built
         .manifest
         .entries
@@ -224,7 +235,12 @@ fn bundle_has_the_documented_layout_modes_and_verifies_against_its_own_manifest(
     assert_eq!(mode("Contents/Frameworks/libmlx.dylib"), 0o755);
     assert_eq!(mode("Contents/Frameworks/mlx.metallib"), 0o644);
     let census = bundle::census(&built.app).unwrap();
-    assert!(census.symlinks.is_empty());
+    // The one link is v0.1.4's signable Metal layout: bytes in Resources, linked beside libmlx.
+    assert_eq!(census.symlinks, ["Contents/Frameworks/mlx.metallib"]);
+    assert_eq!(
+        fs::read_link(built.app.join("Contents/Frameworks/mlx.metallib")).unwrap(),
+        std::path::Path::new(package::METAL_LINK_TARGET)
+    );
     assert_eq!(
         census.files.len(),
         built.manifest.entries.len(),
@@ -271,7 +287,7 @@ fn content_manifest_reports_sizes_sources_trust_level_and_unqualified_minimum_os
             .contains("exceeds LSMinimumSystemVersion 15.6.1")
     }));
     assert_eq!(content["totals"]["regular_files"], 9);
-    assert_eq!(content["totals"]["symlinks"], 0);
+    assert_eq!(content["totals"]["symlinks"], 1, "the Metal link");
     let total: u64 = built.manifest.entries.iter().map(|e| e.bytes).sum();
     assert_eq!(content["totals"]["content_bytes"], total);
     let mlx = content["entries"]
@@ -301,13 +317,13 @@ fn every_native_source_is_identity_checked_and_a_failed_build_leaves_nothing() {
             build(&tree, &manifest, &exe),
             Err(BundleError::SourceIdentity(path)) if path.ends_with(victim)
         ));
-        assert!(!out_dir(&tree).join("Mycelium A13 Demo.app").exists());
+        assert!(!out_dir(&tree).join("Mycelium.app").exists());
         fs::remove_file(tree.path(victim)).unwrap();
         assert!(matches!(
             build(&tree, &manifest, &exe),
             Err(BundleError::Io(_))
         ));
-        assert!(!out_dir(&tree).join("Mycelium A13 Demo.app").exists());
+        assert!(!out_dir(&tree).join("Mycelium.app").exists());
     }
 }
 #[test]
@@ -325,7 +341,7 @@ fn icon_must_be_the_certified_v014_icon() {
         expected_native_inputs_sha256: None,
     });
     assert!(matches!(result, Err(BundleError::SourceIdentity(_))));
-    assert!(!out_dir(&tree).join("Mycelium A13 Demo.app").exists());
+    assert!(!out_dir(&tree).join("Mycelium.app").exists());
 }
 #[test]
 fn native_input_manifest_refusals() {
@@ -357,7 +373,7 @@ fn native_input_manifest_refusals() {
             build(&tree, &manifest, &exe).unwrap_err(),
             BundleError::NativeInputs(expected)
         );
-        assert!(!out_dir(&tree).join("Mycelium A13 Demo.app").exists());
+        assert!(!out_dir(&tree).join("Mycelium.app").exists());
     }
     fs::write(&manifest, b"{}").unwrap();
     assert_eq!(
@@ -553,7 +569,7 @@ fn a_pinned_native_inputs_manifest_is_used_only_when_its_sha256_matches() {
         Some(BundleError::NativeInputs("native_inputs_sha256_mismatch"))
     );
     assert!(
-        !out_dir(&tree).join("Mycelium A13 Demo.app").exists(),
+        !out_dir(&tree).join("Mycelium.app").exists(),
         "nothing assembled on a pin mismatch"
     );
     for malformed in ["", "ABC", &actual.to_uppercase(), &format!("{actual}0")] {
@@ -650,7 +666,7 @@ fn a_candidate_source_that_does_not_match_its_recorded_identity_refuses_assembly
         build_pinned(&tree, &manifest, &exe, Some(&pin)),
         Err(BundleError::SourceIdentity(_))
     ));
-    assert!(!out_dir(&tree).join("Mycelium A13 Demo.app").exists());
+    assert!(!out_dir(&tree).join("Mycelium.app").exists());
 }
 #[test]
 fn an_unknown_schema_is_still_refused_even_with_a_pin() {

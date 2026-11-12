@@ -145,6 +145,56 @@ fn a_stale_lock_of_a_dead_owner_is_broken_and_a_real_directory_is_never_replaced
     fs::remove_dir_all(&base).unwrap();
 }
 
+/// Lane RELF item 5 (review F4, REL-R1): every builder-specific path must stay out of the build's
+/// inputs. Sourcing the recipe's environment for two builders (different HOME, different-length
+/// target dirs, different cargo homes) must give the same canonical path and the same RUSTFLAGS
+/// (RUSTFLAGS text changes the output), and neither may name a HOME or a target dir. The flags
+/// keep LC_UUID (`-no_uuid` is not used) and drop the linker debug map (`-Wl,-S`), whose object
+/// paths made the UUID depend on where objects were built.
+#[test]
+fn the_recipe_environment_is_the_same_for_two_builders() {
+    let show = |home: &str, target: &str, cargo_home: &str| -> String {
+        let script = format!(
+            ". '{}/env.sh' && printf 'CANON=%s\\nRUSTFLAGS=%s\\n' \"$MYCELIUM_CANON\" \"$RUSTFLAGS\"",
+            repro_dir().display()
+        );
+        let out = Command::new("bash")
+            .args(["-c", &script])
+            .env("HOME", home)
+            .env("CARGO_TARGET_DIR", target)
+            .env("CARGO_HOME", cargo_home)
+            .env("MLXC_INCLUDE_DIR", "/pinned/include")
+            .env("MLXC_LIB_DIR", "/pinned/lib")
+            .env_remove("MYCELIUM_CANONICAL_SRC")
+            .env_remove("RUSTFLAGS")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let a = show("/Users/ab", "/Users/ab/t", "/Users/ab/.cargo");
+    let b = show(
+        "/Users/another-builder",
+        "/Volumes/build/much/longer/target-dir",
+        "/opt/cargo-home",
+    );
+    assert_eq!(a, b, "the recipe environment depends on the builder");
+    for needle in [
+        "/Users/ab",
+        "another-builder",
+        "/t\n",
+        "target-dir",
+        "cargo-home\n",
+    ] {
+        assert!(!a.contains(needle), "{needle} in {a}");
+    }
+    assert!(a.contains("-Wl,-S") && !a.contains("no_uuid"), "{a}");
+}
+
 /// Heavy: two full release builds of the committed HEAD from two copies at different paths with
 /// different target dirs, sequentially. `MYCELIUM_REPRO_SCRATCH=<dir under ~/.hermes/cache/scratch>`.
 #[test]

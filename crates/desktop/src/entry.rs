@@ -16,7 +16,7 @@ pub const INSTALLER_ACTIONS: [&str; 4] =
     ["--install", "--uninstall", "--rollback", "--install-status"];
 /// Setting this to `off` suppresses the refusal alert (scripted and test launches only).
 pub const ALERT_ENV: &str = "MYCELIUM_LAUNCH_ALERT";
-const ALERT_TITLE: &str = "Mycelium A13 Demo cannot run on this Mac";
+const ALERT_TITLE: &str = "Mycelium cannot run on this Mac";
 
 #[derive(Debug)]
 pub enum Route {
@@ -129,15 +129,14 @@ pub fn platform_refusal(system: &str, machine: &str, os_version: &str) -> Option
     };
     let message = if system == "Darwin" && machine != "arm64" {
         format!(
-            "This Mac has an Intel processor (macOS {shown}). Mycelium A13 Demo needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser."
+            "This Mac has an Intel processor (macOS {shown}). Mycelium needs an Apple Silicon Mac (M1 or later) with macOS 26.0 or later, because the model runs on the Apple GPU with MLX. You can still use the shared chat page from this Mac's browser."
         )
     } else if system == "Darwin" {
         format!(
-            "This Mac runs macOS {shown}. Mycelium A13 Demo needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser."
+            "This Mac runs macOS {shown}. Mycelium needs macOS 26.0 or later. Update macOS in System Settings > General > Software Update, then open the app again. Until then you can still use the shared chat page from this Mac's browser."
         )
     } else {
-        "This build of Mycelium A13 Demo runs on Apple Silicon Macs with macOS 26.0 or later."
-            .to_string()
+        "This build of Mycelium runs on Apple Silicon Macs with macOS 26.0 or later.".to_string()
     };
     let event = format!(
         "{{\"event\": \"launcher_refused\", \"code\": \"unsupported_platform\", \"observed_platform\": {{\"system\": {}, \"machine\": {}, \"os_version\": {}}}, \"message\": {}}}",
@@ -261,7 +260,7 @@ pub fn run_installer(args: &[String], executable: &Path, roots: &Roots, seams: &
     };
     let result = match action {
         "--install" => {
-            // <bundle>/Mycelium A13 Demo.app/Contents/MacOS/<exe> -> <bundle>
+            // <bundle>/Mycelium.app/Contents/MacOS/<exe> -> <bundle>
             let default = executable.ancestors().nth(4).map(Path::to_path_buf);
             match bundle.or(default) {
                 Some(dir) => install::install(&dir, roots, seams),
