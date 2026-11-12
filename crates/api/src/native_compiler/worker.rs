@@ -20,16 +20,23 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .millis(),
     ))
 }
-/// A failed serving-worker start: the error, and the guard's verdict when the
-/// guard stopped the worker during prepare (lane MGF F4: its numbers are kept).
+/// A failed serving-worker start: the error, the guard's verdict when the
+/// guard stopped the worker during prepare (lane MGF F4: its numbers are kept),
+/// and whether the worker ended by itself once its prepare was handed to it
+/// (lane MG2: v0.1.4 `requires_cold_restart`, worker.py:1171,1549-1552).
 #[derive(Debug)]
 pub(crate) struct StartError {
     pub(crate) error: Error,
     pub(crate) guard: Option<guard::Failure>,
+    pub(crate) died: bool,
 }
 impl From<Error> for StartError {
     fn from(error: Error) -> Self {
-        Self { error, guard: None }
+        Self {
+            error,
+            guard: None,
+            died: false,
+        }
     }
 }
 pub(crate) struct Worker {
@@ -190,10 +197,15 @@ impl Worker {
             Err(error) => {
                 let guard = worker.guard_failure();
                 match worker.kill_and_reap() {
-                    Ok(_) => Err(StartError { error, guard }),
+                    Ok(evidence) => Err(StartError {
+                        error,
+                        guard,
+                        died: Self::ended_by_itself(&evidence),
+                    }),
                     Err(_) => Err(StartError {
                         error: Error("native_cleanup_unproven"),
                         guard,
+                        died: false,
                     }),
                 }
             }
@@ -393,6 +405,12 @@ impl Worker {
     }
 }
 impl Worker {
+    /// Whether `kill_and_reap` evidence shows a worker that ended without this
+    /// process's own kill (lane MG2): it had already exited, or its exit status
+    /// is not the SIGKILL this process just sent (it was already exiting).
+    pub(crate) fn ended_by_itself(evidence: &Value) -> bool {
+        evidence["killed"] == false || evidence["exit_signal"] != libc::SIGKILL
+    }
     /// Interrupted framing cannot carry a graceful close. Kill and wait for the
     /// exact owned child; return reap evidence only after the OS reported its exit.
     /// This is process-release evidence, NOT native-context-closed evidence.

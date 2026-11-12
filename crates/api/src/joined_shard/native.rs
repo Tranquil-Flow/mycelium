@@ -40,6 +40,10 @@ pub fn validate_prepare(offer: &Value, prepare: &Value, reference: &Value) -> Re
     }
     Ok(())
 }
+/// v0.1.4 `_watch`'s code for a worker process that is gone (worker.py:1463-1464).
+fn native_exited() -> Value {
+    json!({"code":"worker_native_exited","limit_detail":null})
+}
 fn stage(prepare: &Value) -> Value {
     json!({"range":[prepare["start"],prepare["end"]],"request_id":prepare["id"],"member_generation":prepare["generation"]})
 }
@@ -176,7 +180,8 @@ pub struct NativeShard {
     memory_share: Option<u64>,
     /// A tighter owner disk share for the worker guard (lane MG2); never above consent.
     storage_share: Option<u64>,
-    /// The last worker's guard verdict, kept after its cleanup.
+    /// The last worker's guard verdict, or `worker_native_exited` for a worker
+    /// that died by itself after its prepare began; kept after its cleanup.
     guard_failure: Option<Value>,
 }
 impl NativeShard {
@@ -291,8 +296,9 @@ impl NativeShard {
         };
         checkpoint()?;
         self.check(current)?;
-        // F2: once the guard killed a worker, this run is over on this member,
-        // as v0.1.4's runtime after a loaded worker died: `blocked`,
+        // F2 / MG2: once a worker died after its prepare (the load) began, by
+        // the guard or by itself, this run is over on this member, as v0.1.4's
+        // runtime after a loaded worker died: `blocked`,
         // `runtime_cold_restart_required`, no replacement (managed_runtime.py:336-345).
         // Only a new offer (new custody, a new NativeShard) prepares again.
         if self.guard_failure.is_some() {
@@ -376,8 +382,12 @@ impl NativeShard {
             Ok(worker) => self.worker = Some(worker),
             Err(started) => {
                 // F4: a guard kill during prepare keeps its verdict and numbers.
+                // MG2: a worker that died by itself once its prepare (the load)
+                // was handed to it blocks this run too.
                 if let Some(failure) = started.guard {
                     self.guard_failure = Some(failure.document());
+                } else if started.died {
+                    self.guard_failure = Some(native_exited());
                 }
                 let e = started.error;
                 // A failed start already killed and reaped its exact child; only
@@ -517,6 +527,12 @@ impl NativeShard {
             self.guard_failure = Some(failure.document());
         }
         let evidence = worker.kill_and_reap().map_err(native)?;
+        // MG2: a prepared worker that ended without this abort's own kill died
+        // after load: the run is blocked as after a guard kill. A live worker
+        // aborted here (interrupted epoch) does not block it.
+        if self.guard_failure.is_none() && Worker::ended_by_itself(&evidence) {
+            self.guard_failure = Some(native_exited());
+        }
         self.cleanup_proven = true;
         Ok(evidence)
     }
@@ -581,7 +597,8 @@ impl NativeShard {
         self.storage_limit()
     }
     /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
-    /// guard stopped the worker; the later errors carry the code only.
+    /// guard stopped the worker, or `worker_native_exited` once a prepared
+    /// worker died by itself (lane MG2); the later errors carry the code only.
     pub fn worker_failure(&self) -> Option<Value> {
         self.worker
             .as_ref()
