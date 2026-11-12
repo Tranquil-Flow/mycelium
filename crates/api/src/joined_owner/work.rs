@@ -411,6 +411,8 @@ struct Flow {
     member_cleanup: Vec<Value>,
     /// Every stage shard is on its member (verified there).
     transferred_all: bool,
+    /// The run's epoch was retired while the run serves on (named code; ruling 23).
+    retired: Option<&'static str>,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -435,7 +437,7 @@ impl Shared {
             "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
             "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
             "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup,
-            "shards_transferred":flow.transferred_all})
+            "shards_transferred":flow.transferred_all,"epoch_retired":flow.retired})
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -535,6 +537,7 @@ impl OwnerWork {
                     cleanup_error: None,
                     member_cleanup: Vec::new(),
                     transferred_all: false,
+                    retired: None,
                 }),
                 changed: Condvar::new(),
             }),
@@ -754,6 +757,7 @@ impl OwnerWork {
             inbox,
             within,
             stop_allowance,
+            ended: Vec::new(),
         };
         let thread = std::thread::Builder::new()
             .name("joined-owner-work".into())
@@ -1007,6 +1011,17 @@ struct Worker {
     within: Duration,
     /// How long the exit waits for the members' stage release.
     stop_allowance: Duration,
+    /// Serve reports of members whose serve ended while the run served on.
+    ended: Vec<Value>,
+}
+/// A member's serve reply as the run's state reports it.
+fn serve_row(node_id: &str, reply: Result<Value, Refusal>) -> Value {
+    match reply {
+        Ok(r) => json!({"node_id":node_id,"teardown":r["teardown"],
+            "failure":r["failure"],"requests_served":r["requests_served"],
+            "requests":r["requests"],"worker_pid":r["worker_pid"]}),
+        Err(Refusal(code)) => json!({"node_id":node_id,"serve_error":code}),
+    }
 }
 impl Worker {
     fn run(mut self) -> Vec<WorkMember> {
@@ -1091,12 +1106,7 @@ impl Worker {
                     continue;
                 };
                 match command.as_str() {
-                    "serve" => reports.push(match reply {
-                        Ok(r) => json!({"node_id":m.node_id,"teardown":r["teardown"],
-                            "failure":r["failure"],"requests_served":r["requests_served"],
-                            "requests":r["requests"],"worker_pid":r["worker_pid"]}),
-                        Err(Refusal(code)) => json!({"node_id":m.node_id,"serve_error":code}),
-                    }),
+                    "serve" => reports.push(serve_row(&m.node_id, reply)),
                     "discard" => {
                         rows[i] = Some(match reply {
                             Ok(r)
@@ -1133,7 +1143,8 @@ impl Worker {
         self.shared.update(|f| {
             f.member_cleanup = rows;
             if let Some(refusals) = refusals {
-                f.serve_reports = reports;
+                f.serve_reports = std::mem::take(&mut self.ended);
+                f.serve_reports.extend(reports);
                 f.serve_reports
                     .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
             }
@@ -1225,10 +1236,67 @@ impl Worker {
         // re-opened or re-prepared: its gateway refuses later chats and the run serves on until
         // Stop, rollover, the ceiling or the monitor ends it (shipped app: `route_not_open`
         // route.py:4614-4620 -> chat 503 `chat_route_not_qualified` chat.py:113-120; no recovery,
-        // ruling 23). The work ends when the run closes its command channel (teardown).
-        match self.inbox.recv() {
-            Ok(_) => Err(refusal("managed_workflow_not_startable")),
-            Err(_) => Ok(()),
+        // ruling 23). The work ends when the run closes its command channel (teardown); until
+        // then the epoch is watched every owner poll (REVIEW-laneEP F3/F9).
+        let poll = super::span(B::OwnerPoll)?;
+        loop {
+            match self.inbox.recv_timeout(poll) {
+                Ok(_) => return Err(refusal("managed_workflow_not_startable")),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if let Some(epoch) = open.as_ref() {
+                self.watch(epoch);
+            }
+        }
+    }
+    /// One owner poll over the serving epoch (REVIEW-laneEP F3/F9). The owner does not watch the
+    /// carrier while idle, so an epoch a member ended (its expiry, deadline or consent) read ready
+    /// until the next chat failed at the carrier or the hop deadline, and an epoch retired by the
+    /// last chat's own failed reset read ready while the next submission was refused. Here, while
+    /// no request is in flight: a member whose `serve` answered ended the epoch
+    /// (`joined_route_member_ended`); an epoch the carrier already retired without a code is
+    /// `route_dropped` (what its next submission answers). The code is the epoch's idle
+    /// retirement, so readiness and every later chat refuse with it at once; the run serves on
+    /// (`api_running`, `epoch_retired`) until Stop, rollover, the ceiling or the monitor.
+    fn watch(&mut self, epoch: &Epoch) {
+        let mut member_ended = false;
+        for m in &mut self.members {
+            if m.link.begun.front().is_some_and(|c| c == "serve")
+                && let Some((_, reply)) = m.link.take(Duration::ZERO)
+            {
+                self.ended.push(serve_row(&m.node_id, reply));
+                member_ended = true;
+            }
+        }
+        // Idle: no request, or the current one torn down AND its terminal published (an epoch
+        // code set earlier would become the in-flight request's own failure).
+        let Ok(current) = epoch.handle().state.lock().map(|o| o.request_id.clone()) else {
+            return;
+        };
+        let published = match &current {
+            None => true,
+            Some(id) => matches!(epoch.service().terminal(id), Ok(Some(_))),
+        };
+        let code = {
+            let Ok(mut o) = epoch.handle().state.lock() else {
+                return;
+            };
+            let idle = o.request_id.is_none()
+                || (published && o.request_id == current && o.teardown_finished);
+            if o.epoch_failure.is_some() || !idle {
+                None
+            } else if o.retired() {
+                Some("route_dropped")
+            } else if member_ended || !self.ended.is_empty() {
+                Some("joined_route_member_ended")
+            } else {
+                None
+            }
+            .inspect(|code| o.epoch_failure = Some(code))
+        };
+        if let Some(code) = code {
+            self.shared.update(|f| f.retired = Some(code));
         }
     }
     fn transfer_all(&mut self, source: &ShardSource) -> Result<Vec<Value>, Refusal> {

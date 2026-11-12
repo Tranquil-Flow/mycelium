@@ -2150,7 +2150,9 @@ fn a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owne
     assert!(ready.to_string().contains("joined_route_member_ended"), "{ready}");
     let posted = Instant::now();
     let (status, refused) = post(&gateway);
-    assert_eq!(status, 409, "{refused}");
+    // The gateway's status for an epoch's idle-retirement code (as `joined_route_member_stale`):
+    // 400 (requests.rs submit table; 409 is only for the qualification-change codes).
+    assert_eq!(status, 400, "{refused}");
     assert!(refused.to_string().contains("joined_route_member_ended"), "{refused}");
     assert!(posted.elapsed() < span(B::OwnerPoll) * 4, "refused promptly");
     let state = work.state();
@@ -2160,9 +2162,10 @@ fn a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owne
     let state = work.state();
     assert_eq!(state["state"], "stopped", "{state}");
     assert_eq!(state["cleanup_error"], Value::Null, "{state}");
-    assert!(
-        state["serve_reports"].as_array().unwrap().iter().any(|r| r["node_id"] == "node-b"),
-        "the ended serve's report is kept: {state}"
+    assert_eq!(
+        state["serve_reports"].as_array().unwrap().iter().filter(|r| r["node_id"].is_string()).count(),
+        2,
+        "the ended serve's report is kept beside the other's: {state}"
     );
 }
 
