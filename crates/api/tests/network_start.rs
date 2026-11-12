@@ -449,7 +449,9 @@ fn a_window_that_runs_out_is_reopened_by_the_same_start() {
     let observer: ReleaseObserver = Arc::new(move |event| {
         if event == ReleaseEvent::Stopping {
             // The receiver is gone only when the test already ended.
-            drop(stopping_tx.lock().expect("stopping").send(()));
+            if stopping_tx.lock().expect("stopping").send(()).is_err() {
+                eprintln!("test_stopping_observer_receiver_closed");
+            }
         }
     });
     let mut app = App::observed("window", Some(observer));
