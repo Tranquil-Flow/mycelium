@@ -53,6 +53,22 @@ pub fn helper_pins() -> Result<Vec<Entry>, PackageError> {
     }
     Ok(pins)
 }
+/// Ruling 31 (RELF2): the only relay client the PACKAGED host may run, for
+/// `api::relay::Hooks::pinned`: [`relay_client_beside`] this process's executable.
+pub fn bundled_relay_client() -> Option<(std::path::PathBuf, String)> {
+    relay_client_beside(&std::env::current_exe().ok()?)
+}
+/// The relay client of the bundle holding `executable` (`<bundle>/Contents/MacOS/mycelium`):
+/// `<bundle>/`[`RELAY_CLIENT_PATH`] with the sha256 `helper-pins.json` pins for it, the same pin
+/// startup admission checks (the one copy of that hash). `None` when there is no such pin.
+pub fn relay_client_beside(executable: &Path) -> Option<(std::path::PathBuf, String)> {
+    let root = executable.parent()?.parent()?.parent()?;
+    let pin = helper_pins()
+        .ok()?
+        .into_iter()
+        .find(|p| p.path == RELAY_CLIENT_PATH)?;
+    Some((root.join(RELAY_CLIENT_PATH), pin.sha256))
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Entry {
@@ -78,6 +94,9 @@ pub enum PackageError {
     /// A file or link beside the executable or in `Frameworks` that the manifest does not pin
     /// (bundle-relative path): admission refuses code it has not checked.
     Unpinned(String),
+    /// A pinned helper (bundle-relative path) that is not an executable regular file: the recipe
+    /// ships helpers at 0o755, and a copy the relay could not execute must not be admitted.
+    NotExecutable(String),
 }
 #[derive(Debug, Eq, PartialEq)]
 pub enum AdmissionError {
@@ -287,6 +306,15 @@ pub const CODE_DIRECTORIES: [&str; 2] = ["Contents/MacOS", "Contents/Frameworks"
 /// can execute it. Directories are walked, never followed.
 pub fn verify_closed(root: &Path, manifest: &Manifest) -> Result<(), PackageError> {
     verify(root, manifest)?;
+    // Review RELF F12(i) / ruling 31: a pinned helper is admitted only as an executable regular
+    // file (`verify` already refused links on its path and other bytes).
+    for entry in manifest.entries.iter().filter(|e| e.kind == Kind::Helper) {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::symlink_metadata(root.join(&entry.path)).map_err(io)?;
+        if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
+            return Err(PackageError::NotExecutable(entry.path.clone()));
+        }
+    }
     fn walk(
         root: &Path,
         dir: &Path,

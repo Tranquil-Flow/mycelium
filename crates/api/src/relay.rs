@@ -125,15 +125,40 @@ impl Hooks {
             release_observer: None,
         }
     }
-    /// Ruling 31 (RELF2): the PACKAGED app's hooks. The relay client is only `client` = (the
-    /// admitted bundled file, the sha256 its pin names), never one found on `PATH`.
-    /// RED stub: today's lookup beside the executable (`<path>/../..` = the exe directory).
+    /// Ruling 31 (RELF2): the PACKAGED app's hooks, [`Hooks::production`] except the client
+    /// lookup. The relay client is only `client` = (the admitted bundled file, the sha256 its pin
+    /// names), never one found on `PATH`; each lookup (one per Start, before the spawn,
+    /// `start_quick`) re-checks it with [`verified_relay_binary`]. `None` (no bundle path or no
+    /// pin) finds nothing: the Start refuses `relay_client_installation_required`.
     pub fn pinned(client: Option<(PathBuf, String)>) -> Self {
-        Self::production(
-            client
-                .and_then(|(path, _)| path.parent().and_then(Path::parent).map(Path::to_path_buf)),
-        )
+        Self {
+            binary: Arc::new(move || {
+                client
+                    .as_ref()
+                    .and_then(|(path, sha256)| verified_relay_binary(path, sha256))
+            }),
+            ..Self::production(None)
+        }
     }
+}
+/// The pinned relay client as it is NOW: `path` opened without following a symlink (and without
+/// blocking on a FIFO), a regular file with an execute bit, whose sha256 is `sha256`. Answers that
+/// same `path` (the spawn runs it) or `None`. Not covered: a same-user writer replacing the file
+/// between this check and the `exec` that follows it in `start_quick` (macOS has no `fexecve`).
+pub fn verified_relay_binary(path: &Path, sha256: &str) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
+        return None;
+    }
+    let mut hash = Sha256::new();
+    std::io::copy(&mut file, &mut hash).ok()?;
+    (format!("{:x}", hash.finalize()) == sha256).then(|| path.to_path_buf())
 }
 /// `installed_relay_binary` (`public_relay.py:250-255`): `<bundled>/native/cloudflared` when it is an
 /// executable file, else `cloudflared` on `PATH`.

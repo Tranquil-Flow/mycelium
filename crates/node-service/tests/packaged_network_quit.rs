@@ -407,9 +407,10 @@ const PATH_CHILD: &str = "RELF2_PACKAGED_PATH_CLIENT_BASE";
 /// whatever `cloudflared` a `PATH` entry provides; v0.2's packaged host deliberately does not.
 /// The app's own composition (`NetworkConfig::default()`), a bundle without a relay client (this
 /// test binary's directory has no `native/cloudflared`), and a fake `cloudflared` first on `PATH`:
-/// the Start must be refused as the shipped page sees a missing client (409
-/// `action_not_completed`, app.py:2010-2013 `public_failure_code`; the private failure record
-/// names the relay's `relay_client_installation_required`) and nothing may run.
+/// the Start must be refused as the shipped page sees a missing client (the relay raises
+/// `ValueError('relay_client_installation_required')`, public_relay.py:328, which the handler
+/// collapses to 409 `action_not_completed`, app.py:2010-2013 `public_failure_code`) and nothing
+/// may run.
 ///
 /// Guard (no real `cloudflared` can start): the child's `PATH` is the fake's directory plus
 /// `/usr/bin:/bin`, and before any Start it asserts that the development lookup
@@ -476,7 +477,7 @@ fn path_client_child(base: &Path) {
         json!({"relay_acknowledged": true, "max_seconds": 1800}),
     );
     let network = mac.status()["network"].clone();
-    let record = std::fs::read(state.join("last-action-error.private.json"))
+    let record = std::fs::read(macs::private(&state).join("last-action-error.private.json"))
         .ok()
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
     assert_eq!(mac.quit(), Ok(Poll::Verified));
@@ -490,13 +491,20 @@ fn path_client_child(base: &Path) {
         "a Start with no bundled relay client: {}",
         started.1
     );
+    // As v0.1.4 records it (app.py:2012-2020 `bounded_action_failure`): the relay's ValueError
+    // carries no `.code`, so the record names the exception, not the relay's own code.
     assert_eq!(
-        record
-            .as_ref()
-            .map(|r| (r["path"].clone(), r["error_code"].clone())),
+        record.as_ref().map(|r| (
+            r["path"].clone(),
+            r["public_code"].clone(),
+            r["exception_type"].clone(),
+            r.get("error_code").cloned()
+        )),
         Some((
             json!("/api/network/start"),
-            json!("relay_client_installation_required")
+            json!("action_not_completed"),
+            json!("ValueError"),
+            None
         )),
         "the private failure record: {record:?}"
     );

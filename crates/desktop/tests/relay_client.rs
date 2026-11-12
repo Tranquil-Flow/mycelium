@@ -323,3 +323,17 @@ fn assembly_places_the_pinned_relay_client_and_its_licence_and_records_their_pro
     );
     assert_eq!(row(RELAY_LICENSE)["kind"], "Resource");
 }
+
+/// Ruling 31 (RELF2): the packaged host's relay hooks (`api::relay::Hooks::pinned`, wired in
+/// node-service `NetworkConfig::default`) get exactly the admitted path of the bundle holding the
+/// executable and the sha256 `helper-pins.json` pins (no second copy of the hash).
+#[test]
+fn the_packaged_relay_client_is_the_admitted_path_with_the_helper_pin() {
+    let bundle = Path::new("/Users/someone/Applications/Mycelium.app");
+    let (path, sha256) =
+        package::relay_client_beside(&bundle.join("Contents/MacOS/mycelium")).unwrap();
+    assert_eq!(path, bundle.join(RELAY));
+    assert_eq!(sha256, V014_RELAY_SHA256);
+    let pins = package::helper_pins().unwrap();
+    assert!(pins.iter().any(|p| p.path == RELAY && p.sha256 == sha256));
+}
