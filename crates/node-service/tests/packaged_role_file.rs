@@ -239,3 +239,86 @@ fn a_refused_installation_state_is_not_rewritten_by_an_action() {
     refused(&created, "target_consent_missing");
     refused(&joined, "target_consent_missing");
 }
+
+/// Every file under `state` (its path below `state`, its bytes and inode), sorted, except the
+/// diagnostic `last-action-error.private.json` a refused action records (review B3F2 F3:
+/// `Authority::load` never reads it).
+fn state_files(state: &Path) -> Vec<(String, Vec<u8>, u64)> {
+    fn walk(root: &Path, dir: &Path, files: &mut Vec<(String, Vec<u8>, u64)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            if meta.is_dir() {
+                walk(root, &path, files);
+            } else if path.file_name() != Some("last-action-error.private.json".as_ref()) {
+                let name = path.strip_prefix(root).unwrap().display().to_string();
+                files.push((name, std::fs::read(&path).unwrap(), meta.ino()));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(state, state, &mut files);
+    files.sort();
+    files
+}
+
+/// The swarm listing routes are refused over a refused installation state as every other action
+/// is (review B3F2 F1, class C). The shipped app never serves over such a state (`DemoApp.start`
+/// raises, app.py:595-611 @ f4e366e9, and the launcher exits, __main__.py:175-205), so its
+/// `/api/swarm/publish` (`swarm_publish.action`, swarm_publish.py:506, reached through app.py:1366)
+/// never runs there. The packaged window stays up: its publish route still passed the owner check
+/// and created `swarm-publisher.sqlite3` and its key in the refused folder.
+#[test]
+fn the_swarm_listing_routes_do_not_write_into_a_refused_installation_state() {
+    let base = state_root("role-nopublish");
+    let state = base.join("member");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
+    write_private(
+        &state,
+        "installation-role.json",
+        json!({"protocol": ROLE_PROTOCOL, "role": "target"})
+            .to_string()
+            .as_bytes(),
+    );
+    // A directory that is never contacted (no listing can become public here); bound so that
+    // nothing else can take the port while the test runs.
+    let directory = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!(
+        "http://127.0.0.1:{}",
+        directory.local_addr().unwrap().port()
+    );
+    let mac = Mac::launch(&state, test_network());
+    let before = state_files(&state);
+    let published = mac.post(
+        "/api/swarm/publish",
+        json!({"directory": origin, "name": "Refused swarm", "access_mode": "request"}),
+    );
+    let after_publish = state_files(&state);
+    let unpublished = mac.post("/api/swarm/unpublish", json!({}));
+    let after_unpublish = state_files(&state);
+    assert_eq!(mac.quit(), Ok(Poll::Verified));
+    drop(directory);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    let names = |files: &[(String, Vec<u8>, u64)]| -> Vec<String> {
+        files.iter().map(|f| f.0.clone()).collect()
+    };
+    assert_eq!(
+        (
+            after_publish == before,
+            after_unpublish == before,
+            names(&after_unpublish)
+        ),
+        (true, true, names(&before)),
+        "/api/swarm/publish (answered {} {}) and /api/swarm/unpublish (answered {} {}) wrote into \
+         the refused state",
+        published.0,
+        published.1,
+        unpublished.0,
+        unpublished.1
+    );
+    refused(&published, "target_consent_missing");
+    refused(&unpublished, "target_consent_missing");
+}
