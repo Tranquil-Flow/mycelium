@@ -51,9 +51,12 @@
   --accent-ink: #f7f2e7;
   --line: #575e48;
   --line-2: #4a503d;
-  --strand: #175624;
-  --glow: #124a1c;
-  --core: #0e3d18;
+  /* The mycelium itself: owner wants it white in light mode (the canvas
+     reads --glow/--core off body at build time). The hue switch stays inert
+     here - this block sits after the glow blocks and wins the tie. */
+  --strand: #f7f2e7;
+  --glow: #f7f2e7;
+  --core: #ffffff;
 }
 /* The owner's white ✳ Mycelium: cream in the header only, where it sits
    outside main (so the 4.5:1 hero gate does not measure it). Dark mode keeps

@@ -10,6 +10,7 @@ gate in test_r11_2c; only the header wordmark is cream (#f7f2e7, 2.03:1 on
 the sage ground), which is outside main and therefore outside that gate.
 """
 from pathlib import Path
+import re
 
 import pytest
 from playwright.sync_api import sync_playwright, expect
@@ -23,6 +24,8 @@ LIGHT = {
     '--bg': '#a6b18b', '--bg-2': '#a6b18b', '--card': '#a6b18b',
     '--ink': '#22261c', '--muted': '#343a2a',
     '--accent': '#0f4218', '--accent-ink': '#f7f2e7',
+    # the drawn mycelium is white in light mode (owner pick, panel B)
+    '--strand': '#f7f2e7', '--glow': '#f7f2e7', '--core': '#ffffff',
 }
 
 
@@ -30,6 +33,9 @@ def light_block(css):
     """The declarations inside the :root[data-theme="light"] rule."""
     sel = css.index(':root[data-theme="light"]')
     body = css[css.index('{', sel) + 1:css.index('}', sel)]
+    # A comment inside the block would otherwise swallow the declaration that
+    # follows it, since comments are not semicolon-terminated.
+    body = re.sub(r'/\*.*?\*/', '', body, flags=re.S)
     return {
         key.strip(): value
         for key, value in (line.split(':', 1) for line in body.split(';') if ':' in line)
