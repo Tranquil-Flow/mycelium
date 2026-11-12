@@ -159,6 +159,13 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
     fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .map_err(|_| failure())?;
     let swarm_id = record["swarm_id"].as_str().ok_or_else(failure)?.to_owned();
+    // A retained contributor membership is pinned to the seed URL it joined, and every quick-tunnel
+    // start mints a new origin. `open_owner_seed` repins the owner's own member; the local
+    // contributor needs the same, or it can never renew against the live seed and "This Mac joins
+    // the run" fails with `RemoteMacMemberError` on every run after the first relay restart.
+    if crate::peer::load_membership_state(&dir)?.is_some() {
+        crate::peer::repin_owner_seed_url(&dir, &runtime.seed_url)?;
+    }
     let (signer, _, node) = identity(&dir)?;
     let options = runtime.options();
     let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
