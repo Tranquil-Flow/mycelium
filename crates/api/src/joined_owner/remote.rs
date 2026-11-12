@@ -49,6 +49,20 @@ impl RemoteChannel {
         member: iroh::EndpointAddr,
         lan: Option<(IpAddr, LanPolicy)>,
     ) -> Result<(Self, mpsc::Receiver<Value>), Refusal> {
+        Self::start_remote(
+            owner,
+            Remote {
+                addr: member,
+                enrolled: None,
+            },
+            lan,
+        )
+    }
+    fn start_remote(
+        owner: iroh::SecretKey,
+        member: Remote,
+        lan: Option<(IpAddr, LanPolicy)>,
+    ) -> Result<(Self, mpsc::Receiver<Value>), Refusal> {
         let budgets = Budgets {
             close: span(B::RouterClose)?,
             call: span(B::SidecarLocalHandshake)?,
@@ -126,7 +140,7 @@ struct Budgets {
 }
 fn drive(
     secret: iroh::SecretKey,
-    member: iroh::EndpointAddr,
+    mut remote: Remote,
     lan: Option<(IpAddr, LanPolicy)>,
     budgets: Budgets,
     commands: mpsc::Receiver<Queued>,
@@ -194,10 +208,6 @@ fn drive(
     if ready.send(Ok(())).is_err() {
         eprintln!("member control starter gone");
     }
-    let mut remote = Remote {
-        addr: member,
-        enrolled: None,
-    };
     // One signed call, bounded by the local handshake budget.
     let call = |remote: &Remote, request: Value| -> Result<Value, String> {
         let deadline = until(budgets.call).ok_or("deadline_invalid")?;
@@ -320,12 +330,32 @@ pub struct RemoteMember {
 impl RemoteMember {
     /// Adopt a verified current registration without calling pairing or accept.
     pub fn already_joined(
-        _owner: iroh::SecretKey,
-        _coordinator: &seed::Coordinator,
-        _verified: &crate::member_control::joined::Verified,
-        _lan: Option<(IpAddr, LanPolicy)>,
+        owner: iroh::SecretKey,
+        coordinator: &seed::Coordinator,
+        verified: &crate::member_control::joined::Verified,
+        lan: Option<(IpAddr, LanPolicy)>,
     ) -> Result<Self, Refusal> {
-        Err(Refusal("member_work_unavailable".into()))
+        if owner.public() != verified.owner() {
+            return Err(Refusal("member_work_run_changed".into()));
+        }
+        crate::joined_shard::verify_registration(coordinator, verified.registration())?;
+        let key = verified.registration()["message"]["member"]["verification_key_digest"]
+            .as_str()
+            .ok_or_else(|| Refusal("member_registration_key_missing".into()))?
+            .to_owned();
+        let (channel, replies) = RemoteChannel::start_remote(
+            owner,
+            Remote {
+                addr: verified.address().clone(),
+                enrolled: Some(key),
+            },
+            lan,
+        )?;
+        Ok(Self {
+            channel,
+            replies,
+            last_op: Arc::new(AtomicU64::new(0)),
+        })
     }
     pub fn start(
         owner: iroh::SecretKey,
