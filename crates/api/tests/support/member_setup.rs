@@ -160,14 +160,28 @@ fn setup(owner_connections: usize, end: End) {
             // Rescue solely after the failing observation, never counted as a
             // pass. Keep all threads owned even for removal mutants.
             operation.cancelled.store(true, Ordering::SeqCst);
-            while connections.len() < 2 {
-                connections.push(
-                    dialer
-                        .connect_channel(&address, transport::Channel::Router, &clock, until())
-                        .unwrap(),
-                );
+            let rescue_end = Instant::now() + test_span(B::CancelAndCleanup);
+            let mut rescuers = Vec::new();
+            loop {
+                if wait.try_recv().is_ok() {
+                    break;
+                }
+                assert!(Instant::now() < rescue_end, "setup rescue failed");
+                // A dial can complete locally just as accept's polling future
+                // expires. Do not mistake that for a member-side accept. Fresh
+                // owned endpoints avoid treating two local completions as proof.
+                let rescue =
+                    LoopbackHost::bind_with_secret(&rt, &clock, until(), owner.clone()).unwrap();
+                match rescue.connect_channel(&address, transport::Channel::Router, &clock, until())
+                {
+                    Ok(c) => connections.push(c),
+                    Err(e) => eprintln!("setup rescue dial: {e:?}"),
+                }
+                rescuers.push(rescue);
             }
-            wait.recv_timeout(test_span(B::CancelAndCleanup)).unwrap();
+            for mut rescue in rescuers {
+                rescue.close(&clock, until()).unwrap();
+            }
         }
         let out = serving.join().unwrap();
         (in_bound, out, elapsed, first_closed)

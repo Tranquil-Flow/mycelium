@@ -168,14 +168,35 @@ fn traffic(end: End) {
             .is_ok();
         if !within {
             cancelled.store(true, Ordering::SeqCst);
-            let second = rescue.connect_channel(
-                &addr,
-                transport::Channel::Router,
-                &clock,
-                until(span(B::RouterClose)),
-            );
-            wait.recv_timeout(span(B::CancelAndCleanup)).unwrap();
-            drop(second);
+            let end = Instant::now() + span(B::CancelAndCleanup);
+            let mut rescuers = Vec::new();
+            let mut links = Vec::new();
+            loop {
+                if wait.try_recv().is_ok() {
+                    break;
+                }
+                assert!(Instant::now() < end, "setup rescue failed");
+                let endpoint = LoopbackHost::bind_with_secret(
+                    &rt,
+                    &clock,
+                    until(span(B::RouterClose)),
+                    owner.clone(),
+                )
+                .unwrap();
+                match endpoint.connect_channel(
+                    &addr,
+                    transport::Channel::Router,
+                    &clock,
+                    until(span(B::OwnerPoll)),
+                ) {
+                    Ok(c) => links.push(c),
+                    Err(e) => eprintln!("setup rescue dial: {e:?}"),
+                }
+                rescuers.push(endpoint);
+            }
+            for mut endpoint in rescuers {
+                endpoint.close(&clock, until(span(B::RouterClose))).unwrap();
+            }
         }
         let result = serving.join().unwrap();
         // Host remains bound here: closure must come from serve, not host Drop.
