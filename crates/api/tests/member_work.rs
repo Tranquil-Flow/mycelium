@@ -113,6 +113,9 @@ impl Joined {
     fn grant(&self) {
         standing_consent::grant(&self.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":600,"max_commands":1000}}), &self.policy, app_host::now(), Some(16_000_000_000)).unwrap();
     }
+    fn grant_wall(&self, wall: Duration) {
+        standing_consent::grant(&self.member_root, &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,"caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":4_000_000_000u64,"max_wall_seconds":wall.as_secs(),"max_commands":1000}}), &self.policy, app_host::now(), Some(16_000_000_000)).unwrap();
+    }
     fn bind(&self) {
         work::bind_consent(&self.member_root, self).unwrap();
     }
@@ -656,4 +659,179 @@ fn a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wa
         ended >= expires_at - poll.as_secs_f64(),
         "served until {ended}, the route expires at {expires_at}"
     );
+}
+
+// EP2F R1/R2: model-free custody and an explicitly controlled resident-proof digest.
+// No worker is spawned. The real signed-route verifier, carrier accept and dispatcher run.
+fn test_span(id: B) -> Duration {
+    Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
+}
+fn idle_route(member: &Joined, work: &Work, owner: iroh::EndpointId, expiry: Value) -> Value {
+    let digest = |v: &Value| protocol::canonical::digest(v).unwrap();
+    let row = member.current(&member.signer).unwrap();
+    let offer = work.native.as_ref().unwrap().offer();
+    let stage = |i: usize, start: u64, end: u64| {
+        json!({"stage_index":i,"placement_id":format!("{}:{start}-{end}",row["node_id"].as_str().unwrap()),
+            "member":row,"carrier_endpoint_id":owner.to_string(),"run":"run-ep2-transfer-0",
+            "offer_digest":digest(offer),"proof_digest":work.proof_digest,"range":[start,end],
+            "worker_pid":4242,"tokens":32,"memory":4_000_000_000u64})
+    };
+    let message = json!({"protocol":api::joined_shard::route::ROUTE_V2,
+        "swarm_id":member.seed.coordinator.swarm_id(),"deployment_id":"12345678-1234-5678-9234-abcdefabcdef",
+        "deployment_epoch":1,"topology_version":1,"model_id":"Qwen/Qwen3-0.6B",
+        "resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca",
+        "manifest_digest":digest(&json!("manifest")),"owner_endpoint_id":owner.to_string(),
+        "stages":[stage(0,0,14),stage(1,14,28)],"issued_at":app_host::now(),"expires_at":expiry,
+        "route_ready":false,"scope":api::joined_shard::route::SCOPE});
+    let signer = member.seed.coordinator.signer();
+    json!({"protocol":"mycelium.joined_shard.signed.v1","signature":signer.sign(&message).unwrap(),
+        "verification_key":signer.public_key_record(),"message":message})
+}
+fn idle_work(member: &Joined) -> Work {
+    let mut work = Work::operator(member.member_root.clone());
+    let (_, shard) = custody(member, "run-ep2-transfer-0");
+    work.shard = Some(shard);
+    // Public prepare starts the consent wall, then refuses unverified custody before spawning.
+    assert!(prepare(&mut work, member).is_err());
+    assert!(work.native.as_ref().unwrap().worker_pid().is_none());
+    work.proof_digest = Some(protocol::canonical::digest(&json!("controlled-proof")).unwrap());
+    work
+}
+
+/// An absent owner must not hold the dispatcher past min(signed expiry + close, own wall).
+/// On a failed bound, dial solely to wake accept, then cancel and join: MQ4 cannot hang the test.
+fn nondialing_owner(own_first: bool) {
+    let member = Joined::new();
+    let poll = test_span(B::OwnerPoll);
+    let wall = test_span(B::WorkerStartup) * 2;
+    member.grant_wall(wall);
+    member.bind();
+    let began = Instant::now();
+    let mut work = idle_work(&member);
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = api::managed_carrier::HostClock::default();
+    let until = || {
+        clock
+            .monotonic()
+            .checked_add(B::RouterClose.span(Entries::ZERO).unwrap())
+            .unwrap()
+    };
+    let mut host = LoopbackHost::bind(&rt, &clock, until()).unwrap();
+    let address = host.address().unwrap();
+    let owner = iroh::SecretKey::generate();
+    let lifetime = if own_first {
+        wall * 2
+    } else {
+        test_span(B::CancelAndCleanup)
+    };
+    let route = idle_route(
+        &member,
+        &work,
+        owner.public(),
+        json!(app_host::now() + lifetime.as_secs_f64()),
+    );
+    let (dispatcher, queue) = work::Dispatcher::new().unwrap();
+    dispatcher
+        .admit(
+            json!({"command":"serve","operation_id":3,"route":route}),
+            Origin::Remote,
+        )
+        .unwrap();
+    let mut operation = queue.recv().unwrap().unwrap();
+    operation.deadline = Instant::now() + poll * 4;
+    let cancelled = operation.cancelled.clone();
+    let (done, wait) = std::sync::mpsc::channel();
+    let expected = if own_first {
+        wall
+    } else {
+        lifetime + test_span(B::RouterClose)
+    };
+    let (in_bound, elapsed, served) = std::thread::scope(|scope| {
+        let serving = scope.spawn(|| {
+            let served = work.serve(
+                Some(&member),
+                &Carrier {
+                    host: &host,
+                    runtime: &rt,
+                    clock: &clock,
+                    endpoint: address.id,
+                    lan: None,
+                },
+                &member.signer,
+                &operation,
+            );
+            let elapsed = began.elapsed();
+            dispatcher
+                .complete(&operation, json!({"served":served}), |_| Ok(()))
+                .unwrap();
+            done.send(()).unwrap();
+            (elapsed, served)
+        });
+        // A timed event, not a sleep used to guess thread readiness: the operation was admitted.
+        if own_first {
+            assert!(matches!(
+                wait.recv_timeout(poll * 2),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ));
+            standing_consent::withdraw(&member.member_root, app_host::now()).unwrap();
+            assert_eq!(
+                dispatcher.cancel(Some(3)).unwrap()["cancel_requested"],
+                true
+            );
+        }
+        let in_bound = wait
+            .recv_timeout((expected + poll * 4).saturating_sub(began.elapsed()))
+            .is_ok();
+        if !in_bound {
+            cancelled.store(true, Ordering::SeqCst);
+            let mut rescue = LoopbackHost::bind_with_secret(&rt, &clock, until(), owner).unwrap();
+            let connections: Vec<_> = (0..2)
+                .map(|_| {
+                    rescue
+                        .connect_channel(&address, transport::Channel::Router, &clock, until())
+                        .unwrap()
+                })
+                .collect();
+            wait.recv_timeout(test_span(B::CancelAndCleanup)).unwrap();
+            drop(connections);
+            rescue.close(&clock, until()).unwrap();
+        }
+        let (elapsed, served) = serving.join().unwrap();
+        (in_bound, elapsed, served)
+    });
+    host.close(&clock, until()).unwrap();
+    // Both user operations are admissible once serve has returned, without owner cooperation.
+    for (id, command) in [(4, "discard"), (5, "leave")] {
+        dispatcher
+            .admit(json!({"command":command,"operation_id":id}), Origin::Remote)
+            .unwrap();
+        let op = queue.recv().unwrap().unwrap();
+        dispatcher
+            .complete(&op, json!({"ok":true}), |_| Ok(()))
+            .unwrap();
+    }
+    assert!(work.discard().is_ok());
+    eprintln!(
+        "EP2F R1 own_first={own_first} elapsed={elapsed:?} expected={expected:?} in_bound={in_bound} served={served:?}"
+    );
+    assert!(
+        in_bound,
+        "non-dialing owner held serve/Leave/discard beyond the member bound: {elapsed:?}"
+    );
+    assert!(
+        elapsed >= expected.saturating_sub(poll),
+        "not an immediate setup refusal: {served:?}"
+    );
+}
+#[test]
+fn r1_nondialing_owner_cannot_hold_serve_or_leave_past_the_members_own_wall() {
+    nondialing_owner(true);
+}
+#[test]
+fn r1_nondialing_owner_is_bounded_by_an_earlier_signed_expiry() {
+    nondialing_owner(false);
 }
