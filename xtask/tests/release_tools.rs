@@ -800,6 +800,47 @@ fn a_tool_record_whose_argv_names_another_manifest_is_refused_even_with_this_man
     );
 }
 
+/// RELF3 F18: the release tool must agree with startup's executable-helper admission.
+#[test]
+fn a_non_executable_pinned_helper_cannot_turn_bundle_admission_green() {
+    use std::os::unix::fs::PermissionsExt;
+    let sandbox = Sandbox::new();
+    let control = sandbox.check("bundle-admission");
+    assert_eq!(
+        control.status.code(),
+        Some(0),
+        "positive control: {}",
+        text(&control)
+    );
+    let manifest_sha = sandbox.manifest_sha256();
+    let helper = sandbox.app().join("Contents/MacOS/native/tool");
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        sandbox.manifest_sha256(),
+        manifest_sha,
+        "mode-only: frozen manifest unchanged"
+    );
+    let direct = sandbox.check("bundle-admission");
+    let produced = sandbox.produce("bundle-admission", &[]);
+    let cell = sandbox.cell_line("bundle-admission");
+    println!(
+        "RELF3_HELPER_MODE direct_exit={:?} produce_exit={:?} cell={cell}\n{}",
+        direct.status.code(),
+        produced.status.code(),
+        text(&direct)
+    );
+    assert_eq!(
+        direct.status.code(),
+        Some(1),
+        "the release tool gave PASS for a pinned Helper with mode0644: {}",
+        text(&direct)
+    );
+    assert!(
+        !cell.starts_with("green"),
+        "non-executable helper turned admission cell green: {cell}"
+    );
+}
+
 /// Review RELF F15 (surviving mutant X14): the no-python cell's `--bundle` must be the frozen
 /// bundle (`<bundle>` = the manifest's `bundle_dir`); a record of the same tool run over another
 /// bundle (a copy elsewhere) is refused.
