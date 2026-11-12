@@ -488,10 +488,7 @@ fn an_unobservable_storage_root_fails_closed() {
     assert_eq!(code(storage_verdict(&root, 1024)), closed, "socket entry");
     std::fs::remove_dir_all(&root).unwrap();
     // One entry more than the budgets row allows (empty files: no size).
-    let cap = BudgetId::PyMyceliumA13MacosWorkerManagedworkerCheckCountL835
-        .count()
-        .unwrap()
-        .get();
+    let cap = BudgetId::WorkerStorageWalkEntries.count().unwrap().get();
     let root = temp_root("entries");
     for i in 0..=cap {
         std::fs::File::create(root.join(i.to_string())).unwrap();

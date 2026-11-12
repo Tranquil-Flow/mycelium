@@ -79,7 +79,7 @@ enum Unwalked {
 /// v0.1.4 `ManagedWorker._check`'s storage walk (worker.py:820-844): every
 /// entry is lstat'ed, never followed. A symlink or any entry other than a
 /// regular file or directory, more than `entries` entries, a level deeper than
-/// `WALK_DEPTH`, a walk not finished by `deadline`, a swapped root or any I/O
+/// `WALK_DEPTH`, a walk not finished within `budget` on `pace`'s clock, a swapped root or any I/O
 /// error fails closed; regular file lengths are summed and the walk stops at
 /// the first total over the limit. Directories are opened relative to their
 /// parent's descriptor with `O_NOFOLLOW`, so the walk never leaves the root.
@@ -266,7 +266,7 @@ impl Guard {
     ) -> Result<Self> {
         let cadence =
             duration(BudgetId::PyMyceliumA13MacosWorkerManagedworkerWatchSelfClosedWaitL1460)?;
-        let entries = BudgetId::PyMyceliumA13MacosWorkerManagedworkerCheckCountL835
+        let entries = BudgetId::WorkerStorageWalkEntries
             .count()
             .map_err(|_| Error("budget_unavailable"))?
             .get();
