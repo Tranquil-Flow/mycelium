@@ -98,6 +98,30 @@ fn rendezvous_reaches_owner_over_existing_seed_tls_without_pairing() {
     assert_eq!(received.registration(), &d["message"]["registration"]);
 }
 #[test]
+fn prior_rendezvous_does_not_acknowledge_new_work_limits() {
+    let p = fixture::Joined::new();
+    let d = document(&p);
+    joined::inbox::publish(&p.client(), &d).unwrap();
+    p.seed.exchange.announce(api::run_exchange::Announce {
+        phase: "work".into(), run_id: Some("run-s4cb2".into()), deployment_id: Some("dep-s4cb2".into()),
+        work_limits: Some(serde_json::json!({"max_rss_bytes":1024,"max_disk_bytes":1024,"max_wall_seconds":budgets::BudgetId::MemberChosenWall.span(budgets::Entries::ZERO).unwrap().millis()/1000,"max_commands":1})),
+        ..Default::default()
+    }).unwrap();
+    let result = p.seed.work_members.get(
+        &p.seed.coordinator,
+        p.session.node_id(),
+        p.owner.public(),
+        "run-s4cb2",
+        "dep-s4cb2",
+        &|a| a.ip().is_loopback(),
+    );
+    assert!(
+        result.is_err(),
+        "compile-phase registration must not acknowledge unseen work limits"
+    );
+    assert_eq!(result.unwrap_err().code, "member_work_share_changed");
+}
+#[test]
 fn stale_generation_and_wrong_signer_are_refused_before_adoption() {
     let mut p = fixture::Joined::new();
     let d = document(&p);
