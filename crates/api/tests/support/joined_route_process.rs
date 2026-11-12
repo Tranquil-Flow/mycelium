@@ -1196,7 +1196,9 @@ fn owner_work_port_serves_five_chats_on_one_epoch() {
         );
     }
     let stop_load = load();
+    let stop_began = Instant::now();
     let stopped = owner.call(json!({"command":"work_stop"}));
+    let whole_stop_ms = ms(stop_began);
     assert_eq!(stopped["state"], "stopped", "{stopped}");
     assert_eq!(stopped["cleanup_error"], Value::Null, "{stopped}");
     assert_eq!(stopped["epoch"], 1, "one epoch served the run: {stopped}");
@@ -1211,13 +1213,14 @@ fn owner_work_port_serves_five_chats_on_one_epoch() {
     }
     let gone_ms = wait_workers_gone(&pids);
     eprintln!(
-        "EP2 stopped {stopped}; workers {pids:?} gone after {gone_ms:.1} ms; load={stop_load}"
+        "EP2 stopped {stopped}; whole Stop {whole_stop_ms:.1} ms; workers {pids:?} gone {gone_ms:.1} ms after return; load={stop_load}"
     );
     if let Some(path) = std::env::var_os("EP2_WORK_EVIDENCE") {
         fs::write(
             path,
             serde_json::to_vec_pretty(&json!({"work":work,"load_at_work":load_work,"chats":chats,
-                "stopped":stopped,"stop_load":stop_load,"workers_gone_ms":gone_ms,
+                "stopped":stopped,"stop_load":stop_load,"whole_stop_ms":whole_stop_ms,
+                "workers_gone_after_stop_return_ms":gone_ms,"workers_gone_ms":gone_ms,
                 "member_pids":member_pids,"route_ready":false}))
             .unwrap(),
         )
