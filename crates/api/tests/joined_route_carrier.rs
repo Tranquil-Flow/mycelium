@@ -3054,10 +3054,10 @@ fn bounded_owner<V: Send + 'static>(
         result
     })
 }
-/// Waits at most `RouterClose` for the member's serve thread to finish.
-fn returned_within_router_close(entry: &Member) -> (bool, Duration) {
+/// Waits at most `bound` for the member's serve thread to finish.
+fn returned_within(entry: &Member, bound: Duration) -> (bool, Duration) {
     let began = Instant::now();
-    while !entry.thread.is_finished() && began.elapsed() < span(B::RouterClose) {
+    while !entry.thread.is_finished() && began.elapsed() < bound {
         std::thread::sleep(span(B::OwnerPoll) / 4);
     }
     (entry.thread.is_finished(), began.elapsed())
@@ -3086,7 +3086,7 @@ fn a_member_returns_when_its_epoch_ends_with_one_cancellation_queued() {
             let acked = (raw.cancel)("queued-0");
             open.send(()).unwrap();
             verdict
-                .send((acked, returned_within_router_close(entry)))
+                .send((acked, returned_within(entry, span(B::RouterClose))))
                 .unwrap();
         })
     });
@@ -3108,7 +3108,10 @@ fn a_member_returns_when_its_epoch_ends_with_one_cancellation_queued() {
 /// TWO cancellations queued (one per link) while a PREFILL step runs; the
 /// member's consent then changes and the step ends: the next pass takes ONE
 /// cancellation and ends the epoch at its check, the other is still queued.
-/// The serve must return within `RouterClose` of the step's release.
+/// The request it admitted is still open, so after its epoch ends the member
+/// waits its bounded re-dial window (`WorkerStartup`, serve.rs `linger`) for
+/// the owner, which does not re-dial here: the serve must return within
+/// `RouterClose` plus that window of the step's release.
 #[test]
 fn a_member_returns_when_its_epoch_ends_with_two_cancellations_queued() {
     let (open, gate) = mpsc::channel();
@@ -3132,7 +3135,10 @@ fn a_member_returns_when_its_epoch_ends_with_two_cancellations_queued() {
             changed.store(true, Ordering::SeqCst);
             open.send(()).unwrap();
             verdict
-                .send((acked, returned_within_router_close(entry)))
+                .send((
+                    acked,
+                    returned_within(entry, span(B::RouterClose) + span(B::WorkerStartup)),
+                ))
                 .unwrap();
         })
     });
@@ -3152,5 +3158,7 @@ fn a_member_returns_when_its_epoch_ends_with_two_cancellations_queued() {
         report["failure"], "joined_native_consent_changed",
         "{report}"
     );
+    assert_eq!(report["deferred_ack"], true, "{report}");
+    assert_eq!(report["redial_ack_ms"], Value::Null, "{report}");
     assert_eq!(events, [("step", 0), ("close", 0)]);
 }
