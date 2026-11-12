@@ -606,7 +606,7 @@ fn the_launch_smoke_is_an_operator_receipt_that_must_name_this_candidate() {
     let mine = receipt(
         "mine.txt",
         format!(
-            "operator receipt\nmanifest_sha256 {}\nexe_sha256 {exe}\n",
+            "operator receipt\nmanifest_sha256 {0}\nexe_sha256 {exe}\nmodel-free-launch-smoke: PASS manifest_sha256 {0}\n",
             sandbox.manifest_sha256()
         ),
     );
@@ -615,4 +615,117 @@ fn the_launch_smoke_is_an_operator_receipt_that_must_name_this_candidate() {
     let line = sandbox.cell_line("model-free-launch");
     assert!(line.starts_with("green"), "{line}");
     assert!(line.contains("operator receipt"), "{line}");
+}
+
+/// Review RELF F14: the plain receipt cells (two-path, minimum-OS, incident matrix, rehearsals,
+/// device cells, final soak) were self-asserted: `emit --pass` re-hashed the artifact but never
+/// read it. The reviewer turned `two-path-reproducibility` green for a later candidate with the
+/// bd03439 summary that had FOUND the reproducibility bug. Every receipt a cell accepts must state
+/// this cell's own result for THIS frozen candidate: a line `<name>: PASS manifest_sha256 <sha256>`;
+/// a receipt for another candidate, or one whose file states a failing result, is refused at emit
+/// and is RED in `status` when appended by hand.
+#[test]
+fn a_receipt_cell_accepts_only_a_file_stating_its_pass_for_this_candidate() {
+    let sandbox = Sandbox::new();
+    let profile_path = sandbox.root.join("profile.json");
+    let mut profile: Value = serde_json::from_str(&fs::read_to_string(&profile_path).unwrap()).unwrap();
+    profile["cells"].as_array_mut().unwrap().push(
+        json!({"id": "two-path-reproducibility", "state": "package", "claim": "CL-T-02",
+        "bind": "bytes", "verify": {"runs": "receipt", "kind": "release_receipt",
+        "name": "two-path-reproducibility"},
+        "hint": ["xtask", "release", "emit", "release_receipt", "two-path-reproducibility"]}),
+    );
+    fs::write(&profile_path, profile.to_string()).unwrap();
+    let mine = sandbox.manifest_sha256();
+    let receipt = |name: &str, body: String| {
+        let path = sandbox.root.join(name);
+        fs::write(&path, body).unwrap();
+        path
+    };
+    let emit = |artifact: &Path| {
+        sandbox.release(&[
+            "emit",
+            "release_receipt",
+            "two-path-reproducibility",
+            "--pass",
+            "--producer",
+            "operator: walk-tail.sh",
+            "--artifact",
+            artifact.to_str().unwrap(),
+        ])
+    };
+    // The reviewer's demonstration: the bd03439 summary (laneREL-bd03439/repro/SUMMARY.txt, its
+    // first and third lines), which names no candidate manifest and reports the finding.
+    let found_the_bug = receipt(
+        "SUMMARY.txt",
+        "verify-two-paths.sh at bd03439 (repro/repro.log): REPRODUCIBLE for A (repro-a/src, target-a) vs B (repro-bb-longer-name/deeper/tree-b, target-b): 19 files identical.\n\
+         FINDING REL-R1: the executable's LC_UUID (16 bytes at file offset 2168, plus the ad-hoc signature that covers it) depends on the CARGO_TARGET_DIR path:\n"
+            .to_string(),
+    );
+    let other_candidate = receipt(
+        "other.txt",
+        format!(
+            "two-path-reproducibility: PASS manifest_sha256 {}\n",
+            "2".repeat(64)
+        ),
+    );
+    let failed_here = receipt(
+        "failed.txt",
+        format!("two-path-reproducibility: FAIL manifest_sha256 {mine}\n"),
+    );
+    let pass_and_fail = receipt(
+        "both.txt",
+        format!(
+            "two-path-reproducibility: PASS manifest_sha256 {mine}\ntwo-path-reproducibility: DIFFERENT manifest_sha256 {mine}\n"
+        ),
+    );
+    let mut wrong = Vec::new();
+    for (what, artifact, code) in [
+        ("the summary that found REL-R1", &found_the_bug, "receipt_unbound"),
+        ("a PASS for another candidate", &other_candidate, "receipt_unbound"),
+        ("a FAIL for this candidate", &failed_here, "receipt_result_failed"),
+        ("a PASS and a failing line", &pass_and_fail, "receipt_result_failed"),
+    ] {
+        let out = emit(artifact);
+        if out.status.code() != Some(2) || !text(&out).contains(code) {
+            wrong.push(format!("emit with {what}: {:?} {}", out.status.code(), text(&out)));
+        }
+    }
+    // The same receipts appended by hand (bypassing emit) for this candidate's bytes: RED.
+    let manifest: Value =
+        serde_json::from_str(&fs::read_to_string(sandbox.manifest_path()).unwrap()).unwrap();
+    let hand = |n: usize, artifact: &Path| {
+        let bytes = fs::read(artifact).unwrap();
+        sandbox.append(
+            &json!({"at": 2.0 + n as f64, "id": format!("EV-20990101-01{n:02}"),
+            "kind": "release_receipt", "lane": "RELEASE", "name": "two-path-reproducibility",
+            "producer": "hand", "artifacts": [{"path": artifact.display().to_string(),
+            "sha256": sha(&bytes), "bytes": bytes.len()}], "candidate": manifest["candidate"],
+            "commit": sandbox.head, "exit": 0, "verdict": "PASS"}),
+        );
+        sandbox.cell_line("two-path-reproducibility")
+    };
+    for (n, (what, artifact, code)) in [
+        ("the summary that found REL-R1", &found_the_bug, "receipt_unbound"),
+        ("a FAIL for this candidate", &failed_here, "receipt_result_failed"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let line = hand(n, artifact);
+        if !(line.starts_with("RED") && line.contains(code)) {
+            wrong.push(format!("hand-appended {what}: {line}"));
+        }
+    }
+    // This candidate's own PASS: green.
+    let pass = receipt(
+        "pass.txt",
+        format!("two-path-reproducibility: PASS manifest_sha256 {mine}\n"),
+    );
+    let out = emit(&pass);
+    let line = sandbox.cell_line("two-path-reproducibility");
+    if out.status.code() != Some(0) || !line.starts_with("green") {
+        wrong.push(format!("this candidate's PASS: {} / {line}", text(&out)));
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
