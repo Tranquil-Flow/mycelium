@@ -147,3 +147,5 @@ M16LiveKvContextTokens
 IrohPrefillProgressLimit
 WorkerStorageWalkEntries
 MemberPeriodicReport
+JoinedEpochMaxSessions
+ResourceProbeNetworkWait
