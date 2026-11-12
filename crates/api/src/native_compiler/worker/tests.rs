@@ -342,6 +342,78 @@ fn session_reset_sends_the_exact_command_and_returns_the_session() {
         Ok(reset_reply("reset_valid").unwrap())
     );
 }
+/// MG2 M12: reproduce the kernel outcome of natural exit after the last live
+/// poll but before a successful kill call. NOWAIT observes exit without taking
+/// the Child's wait ownership. This qualifies real OS evidence plus the
+/// production classifier, not an injected race inside Worker or native MLX.
+#[test]
+fn natural_exit_after_the_last_poll_is_death_even_when_kill_succeeds() {
+    use rustix::process::{Pid, WaitId, WaitIdOptions, WaitOptions, waitid, waitpid};
+    use std::os::unix::process::ExitStatusExt;
+    fn owned_cat() -> Worker {
+        let (client, _server) = UnixStream::pair().unwrap();
+        let child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        // Worker owns kill/reap before any assertion or phase wait can panic.
+        Worker::from_child(child, client, Arc::new(AtomicBool::new(false))).unwrap()
+    }
+    let worker = owned_cat();
+    let pid = Pid::from_raw(worker.pid().unwrap() as i32).unwrap();
+    let raced = {
+        let mut slot = worker.child.lock().unwrap();
+        let child = slot.as_mut().unwrap();
+        assert_eq!(child.try_wait().unwrap(), None, "cat is held by its stdin");
+        drop(child.stdin.take()); // EOF lets this exact child exit naturally.
+        let end = Instant::now() + duration(BudgetId::ModelSelection).unwrap();
+        loop {
+            assert!(Instant::now() < end, "owned child did not exit after EOF");
+            match waitid(
+                WaitId::Pid(pid),
+                WaitIdOptions::EXITED | WaitIdOptions::NOWAIT | WaitIdOptions::NOHANG,
+            ) {
+                Ok(Some(status)) => {
+                    assert_eq!(status.exit_status(), Some(0));
+                    break;
+                }
+                Ok(None) | Err(rustix::io::Errno::INTR) => std::thread::yield_now(),
+                Err(e) => panic!("observing owned child exit failed: {e}"),
+            }
+        }
+        child.kill().unwrap(); // Success does not prove our signal caused death.
+        let status = child.wait().unwrap();
+        assert_eq!(status.code(), Some(0));
+        assert_eq!(status.signal(), None);
+        json!({"worker_pid":pid.as_raw_pid(),"context_closed":false,
+            "worker_reaped":true,"killed":true,
+            "exit_code":status.code(),"exit_signal":status.signal()})
+    };
+    drop(worker);
+    assert_eq!(
+        waitpid(Some(pid), WaitOptions::NOHANG).unwrap_err(),
+        rustix::io::Errno::CHILD
+    );
+    let control = owned_cat().kill_and_reap().unwrap();
+    assert_eq!(control["killed"], true);
+    assert_eq!(control["exit_signal"], libc::SIGKILL);
+    let control_pid = Pid::from_raw(control["worker_pid"].as_u64().unwrap() as i32).unwrap();
+    assert_eq!(
+        waitpid(Some(control_pid), WaitOptions::NOHANG).unwrap_err(),
+        rustix::io::Errno::CHILD
+    );
+    println!("MG2_M12 natural={raced} deliberate={control}");
+    assert!(
+        !Worker::ended_by_itself(&control),
+        "deliberate live kill is not natural death"
+    );
+    assert!(
+        Worker::ended_by_itself(&raced),
+        "a successful kill call cannot hide an earlier natural exit"
+    );
+}
+
 /// EP0: a reply that reports residue (more active memory than the resident
 /// weights), carries an unknown field or another protocol is no reset proof.
 #[test]
