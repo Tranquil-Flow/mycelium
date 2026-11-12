@@ -105,6 +105,25 @@ fn ep2h_native_helper_partial_write_cannot_hide_work_stop() {
     held_helper("write");
 }
 #[test]
+fn ep2h_native_helper_ready_responses_do_not_pay_a_sleep_per_token() {
+    let helper = HelperFixture::new("normal");
+    assert_eq!(helper.codec.decode(11).unwrap(), "<11>");
+    let began = Instant::now();
+    for token in 0..32 {
+        assert_eq!(helper.codec.decode(token).unwrap(), format!("<{token}>"));
+    }
+    let elapsed = began.elapsed();
+    helper.codec.close().unwrap();
+    eprintln!(
+        "EP2H_READY_HELPER exchanges=32 elapsed={elapsed:?} ceiling={:?}",
+        span(B::OwnerPoll)
+    );
+    assert!(
+        elapsed < span(B::OwnerPoll),
+        "ready tokenizer replies must wake I/O instead of sleeping every token"
+    );
+}
+#[test]
 fn ep2h_native_helper_normal_protocol_positive_control() {
     let helper = HelperFixture::new("normal");
     assert_eq!(
