@@ -11,7 +11,7 @@ use std::{
 };
 use tauri::{
     Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
-    menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
 };
 
 pub use crate::core::{Core, Reply};
@@ -299,7 +299,22 @@ fn run<C: Cleanup + Send + 'static>(
         })
         .setup(move |app| {
             let quit = MenuItemBuilder::with_id("quit", "Quit Mycelium").accelerator("CmdOrCtrl+Q").build(app)?;
-            let menu = MenuBuilder::new(app).item(&SubmenuBuilder::new(app, "Mycelium").item(&quit).build()?).build()?;
+            // The standard Edit menu is what makes Cmd+C/V/X/A/Z reach the web view at all: macOS
+            // routes those key equivalents through the menu's selectors, so a menu without them
+            // leaves text fields unable to copy or paste.
+            let edit = SubmenuBuilder::new(app, "Edit")
+                .item(&PredefinedMenuItem::undo(app, None)?)
+                .item(&PredefinedMenuItem::redo(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(app, None)?)
+                .item(&PredefinedMenuItem::copy(app, None)?)
+                .item(&PredefinedMenuItem::paste(app, None)?)
+                .item(&PredefinedMenuItem::select_all(app, None)?)
+                .build()?;
+            let menu = MenuBuilder::new(app)
+                .item(&SubmenuBuilder::new(app, "Mycelium").item(&quit).build()?)
+                .item(&edit)
+                .build()?;
             app.set_menu(menu)?;
             let navigation_app = app.handle().clone();
             let popup_app = app.handle().clone();

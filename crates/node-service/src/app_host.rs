@@ -566,6 +566,9 @@ impl PackagedHost {
             }
             Ok(authority)
         });
+        if let Err(code) = &authority {
+            eprintln!("l11_authority_load_refused:{code}");
+        }
         let renewal = Renewal::start(authority.as_ref().ok(), &node, period);
         let root_for_network = root.clone();
         let host = Self {

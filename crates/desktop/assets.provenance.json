@@ -21,12 +21,12 @@
       "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">."
     },
     "index.html": {
-      "sha256": "9307aa401308c3965cacff1751bad2469a253d3d82698c11c30581118f002077",
-      "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases"
+      "sha256": "a234e17dee19223f473397d8e9f50c38a9e2a98afc402405af44faaf0fbd4feb",
+      "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases The brand mark and wordmark are laid out as a flex pair so the text block centres on the image, and the two 02B disclosures wrap their summary text in a real button so the row is keyboard- and AX-operable."
     },
     "style.css": {
-      "sha256": "91efc23306c41ef1fc62e90fb989dff936e1c21f6b183f19800cf30f48f59755",
-      "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art)."
+      "sha256": "36faf6b13553383071768167e81eac5b34e9c237123e1fba52d5f0cb42a86d2d",
+      "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art). The header mark is 56px with the wordmark block vertically centred against it, and disclosure buttons are styled as plain text inside the summary."
     }
   },
   "added": {
