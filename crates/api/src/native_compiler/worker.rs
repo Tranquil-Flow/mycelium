@@ -60,7 +60,7 @@ impl Worker {
         source: &Path,
         deadline: Instant,
     ) -> Result<Self> {
-        config.verify()?;
+        config.verify_until(&|| cancel.load(Ordering::SeqCst))?;
         if Instant::now() >= deadline {
             return Err(Error("native_worker_deadline"));
         }
@@ -129,7 +129,7 @@ impl Worker {
         deadline: Instant,
         probe: Box<dyn guard::MemoryProbe>,
     ) -> std::result::Result<Self, StartError> {
-        config.verify()?;
+        config.verify_until(&|| cancel.load(Ordering::SeqCst))?;
         if Instant::now() >= deadline {
             return Err(Error("native_worker_deadline").into());
         }
