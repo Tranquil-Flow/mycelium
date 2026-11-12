@@ -19,6 +19,8 @@
 //! `v014-revoke_quit.out`), so no test depends on the power, thermal state or network of the Mac it
 //! runs on.
 #![cfg(feature = "desktop-shell")]
+#[path = "support/packaged_macs.rs"]
+mod macs;
 use api::{
     acquisition::{HttpTransport, Transport},
     resources::{Observation, Observer},
@@ -552,8 +554,13 @@ fn packaged_core(
     repository: &Repository,
     observed: &Observed,
 ) -> (Arc<dyn Core>, AppCleanup) {
-    let (core, mut cleanup) =
-        packaged::core_with(state, repository.transport(), Arc::new(observed.clone())).unwrap();
+    let (core, mut cleanup) = packaged::core_with_network(
+        state,
+        repository.transport(),
+        Arc::new(observed.clone()),
+        macs::test_network(),
+    )
+    .unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
     (core, cleanup)
 }

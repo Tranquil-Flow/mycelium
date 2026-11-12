@@ -7,12 +7,12 @@
 mod macs;
 use desktop::lifecycle::Poll;
 use macs::{Mac, consent, private, state_root};
-use node_service::packaged_network::NetworkConfig;
 use serde_json::json;
 use std::path::Path;
 
 fn launch(state: &Path) -> Mac {
-    Mac::launch(state, NetworkConfig::default())
+    // No relay client lookup can find a `cloudflared` on this Mac (REVIEW-laneB3F item 2).
+    Mac::launch(state, macs::test_network())
 }
 fn refusal(answer: &(u16, serde_json::Value)) -> (u16, String) {
     (
