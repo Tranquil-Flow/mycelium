@@ -145,6 +145,13 @@ fn mono(clock: &HostClock, span: Duration) -> Outcome<MonoInstant> {
         ))
         .map_err(|_| "deadline_invalid".into())
 }
+/// v2 (lane EPF2, REVIEW-laneEPF F11): a request id this member may keep for
+/// its epoch is one the owner could have admitted: the shipped gateway's
+/// grammar, at most 128 bytes (v0.1.4 mycelium_request_gateway contracts.py:27,
+/// admission service.py:468; v0.2 owner m16_requests.rs:496).
+fn valid_request_id(id: &Value) -> bool {
+    id.as_str().is_some_and(crate::registry::valid_request_id)
+}
 fn budget(id: B) -> Outcome<Duration> {
     Ok(Duration::from_millis(
         id.span(Entries::ZERO)
@@ -326,6 +333,13 @@ pub fn serve(
                     };
                     match frame.message_type() {
                         "HopHeader" if role == 0 => {
+                            // v2 (lane EPF2, F11): a PREFILL whose request id is
+                            // outside the owner's own grammar is refused, never
+                            // ACKed; the main loop refuses it too and closes the
+                            // compute.
+                            let refused = multi
+                                && frame.body()["phase"] == "PREFILL"
+                                && !valid_request_id(&frame.body()["request_id"]);
                             // Single owner-serial dispatch slot: ACK = queued for compute.
                             if tx
                                 .send(Message::Hop(frame.body().clone(), frame.payload().to_vec()))
@@ -333,7 +347,11 @@ pub fn serve(
                             {
                                 return;
                             }
-                            if delivery.acknowledge().is_err() {
+                            if refused {
+                                if let Err(e) = delivery.reject(DispatchRefusal::InvalidFrame) {
+                                    eprintln!("serve: delivery.reject failed: {e:?}");
+                                }
+                            } else if delivery.acknowledge().is_err() {
                                 return;
                             }
                         }
@@ -472,6 +490,9 @@ pub fn serve(
                                 if multi {
                                     // A new request only on a clean session (path
                                     // unbound), never a settled one, within bounds.
+                                    if !valid_request_id(&body["request_id"]) {
+                                        return Err("route_request_invalid".into());
+                                    }
                                     let id = body["request_id"].as_str().unwrap_or_default();
                                     if served.contains(id) || skipped.contains(id) {
                                         return Err("route_request_settled".into());
@@ -597,6 +618,10 @@ pub fn serve(
                         let idle_refusal = match request_id.as_deref() {
                             _ if admitted || released.is_some() => None,
                             None | Some("") => Some("route_cancellation_invalid"),
+                            // Lane EPF2 (F11): kept ids are bounded in length too.
+                            Some(_) if !valid_request_id(&body["request_id"]) => {
+                                Some("route_cancellation_invalid")
+                            }
                             Some(id) if served.contains(id) || skipped.contains(id) => {
                                 Some("route_request_settled")
                             }
