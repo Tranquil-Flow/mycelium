@@ -61,7 +61,7 @@
   },
   "icon": {
     "source": "authored: W2 colony mark (icons/icon.png regenerated from the chosen mark)",
-    "sha256": "c5e4708c6fac2ead3f0a6b63202618c1cbd821ff960a10d0d84380d44a189968",
+    "sha256": "b5d98ade7dbfcc7ae6c139ad02d0e686746da77c83d2945c202cb82ac2238ccf",
     "reason": "macOS icons carry their own squircle mask; the tile was square and read as a foreign shape in the Dock."
   },
   "app_icon": {

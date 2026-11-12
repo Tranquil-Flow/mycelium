@@ -23,7 +23,7 @@ pub const MINIMUM_OS: &str = "15.6.1";
 pub const EXECUTABLE: &str = "mycelium";
 pub const ICON_FILE: &str = "icon-windowed.icns";
 /// Certified v0.1.4 `Contents/Resources/icon-windowed.icns` (APP-FILES.sha256).
-pub const ICON_SHA256: &str = "717e8368c3f751762628737df23a36c47d4bc31e0bad0e773e1bc32f5bf0af42";
+pub const ICON_SHA256: &str = "676400a536e2dc3e71d97a4b80dc50f1032a5739d8aa3b34fc55de133bfd646e";
 pub const NATIVE_INPUT_SCHEMA: &str = "mycelium.foundation.native-input-evidence.v1";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
