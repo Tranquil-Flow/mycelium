@@ -7,7 +7,9 @@
 //! dropped; then the compute's session is reset and only then ACKed, and the
 //! member serves the next PREFILL. A settled request id is refused (bounded
 //! set). The epoch ends with the compute closed when the owner closes it, at
-//! the operator's cancel or deadline, at the route's signed expiry, or after a
+//! the operator's cancel or deadline, at the route's signed expiry, when the
+//! member's own consent ends (all checked on every loop pass, whatever the
+//! traffic; lane EPF), or after a
 //! failure; a reset that fails is never ACKed (compute closed, delivery
 //! rejected, a bounded owner re-dial acknowledged instead).
 //!
@@ -68,6 +70,11 @@ pub trait StageCompute {
     fn reset(&mut self, _current: Current<'_>) -> Result<Value, Error> {
         Err(Error("joined_native_reset_unsupported"))
     }
+    /// The member's own consent, checked WITHOUT spending anything (lane
+    /// EPF, REVIEW-laneEP R1): membership current, consent granted and
+    /// unchanged, its wall (from the first prepare) and command allowance not
+    /// spent. A v2 serve checks it on every loop pass, whatever the traffic.
+    fn live(&self, current: Current<'_>) -> Result<(), Error>;
 }
 impl StageCompute for NativeShard {
     fn offer(&self) -> &Value {
@@ -94,6 +101,9 @@ impl StageCompute for NativeShard {
     }
     fn reset(&mut self, current: Current<'_>) -> Result<Value, Error> {
         NativeShard::reset(self, &|| current())
+    }
+    fn live(&self, current: Current<'_>) -> Result<(), Error> {
+        NativeShard::live(self, &|| current())
     }
 }
 /// Serving context: the member's carrier host and the operator operation bounds.
@@ -271,6 +281,9 @@ pub fn serve(
     let stages = message["stages"].as_array().ok_or("route_invalid")?.len();
     // v2: settled request ids (refused if replayed) and per-request summaries.
     let mut served: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // v2 (lane EPF): ids seen only as an idle cancellation (no request ran
+    // here): settled tombstones, counted with `served` against the bound.
+    let mut skipped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut requests: Vec<Value> = Vec::new();
     let report = std::thread::scope(|scope| -> Outcome<Value> {
         for (role, mut receiver) in receivers.into_iter().enumerate() {
@@ -371,7 +384,7 @@ pub fn serve(
             });
         }
         drop(tx);
-        let (served, requests) = (&mut served, &mut requests);
+        let (served, skipped, requests) = (&mut served, &mut skipped, &mut requests);
         let outcome = (|| -> Outcome<Value> {
             let mut path: Option<route::Path> = None;
             // v2: tokens of the requests already settled on this epoch.
@@ -385,30 +398,8 @@ pub fn serve(
             let mut step_ms = Vec::new();
             loop {
                 let received = match rx.recv_timeout(poll) {
-                    Ok(m) => m,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        // v2: the route's signed expiry also ends the epoch.
-                        let expired = multi && crate::app_host::now() >= expires_at;
-                        if s.check().is_err() || expired {
-                            cancel.store(true, Ordering::SeqCst);
-                            data_cancel.request_cancel();
-                            let native_stop = match released.take() {
-                                Some(v) => v,
-                                None => stop(compute, interrupted)?,
-                            };
-                            if expired {
-                                // A request still open is settled by the owner's
-                                // re-dial against the closed compute.
-                                return Ok(json!({"teardown":"route_expired","native":native_stop,
-                                    "tokens_served":total + t,"failure":failure,"stage_index":index,
-                                    "deferred_ack":path.is_some()}));
-                            }
-                            return Ok(
-                                json!({"teardown":"operator_cancelled","native":native_stop,"failure":failure}),
-                            );
-                        }
-                        continue;
-                    }
+                    Ok(m) => Some(m),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
                     Err(mpsc::RecvTimeoutError::Disconnected) => {
                         let native_stop = match released.take() {
                             Some(v) => v,
@@ -418,6 +409,50 @@ pub fn serve(
                             json!({"teardown":"carrier_lost","native":native_stop,"tokens_served":t,"failure":failure}),
                         );
                     }
+                };
+                // v1: the operation bounds when no message came (unchanged).
+                // v2 (lane EPF, REVIEW-laneEP R1): on EVERY pass, whatever the
+                // owner sends, the operation bounds, the route's signed expiry
+                // and the member's own consent (non-consuming: wall, commands,
+                // membership current, consent unchanged) end the epoch with
+                // the compute closed (v0.1.4 worker.py:985-1000, :1453-1459,
+                // :800-818: the worker ends at its wall whatever the traffic).
+                let ending: Option<(&'static str, Option<String>)> =
+                    if s.check().is_err() && (multi || received.is_none()) {
+                        Some(("operator_cancelled", None))
+                    } else if multi && crate::app_host::now() >= expires_at {
+                        Some(("route_expired", None))
+                    } else if multi && released.is_none() {
+                        compute
+                            .live(s.current)
+                            .err()
+                            .map(|e| ("member_consent_ended", Some(e.0.to_owned())))
+                    } else {
+                        None
+                    };
+                if let Some((teardown, code)) = ending {
+                    cancel.store(true, Ordering::SeqCst);
+                    data_cancel.request_cancel();
+                    let native_stop = match released.take() {
+                        Some(v) => v,
+                        None => stop(compute, interrupted)?,
+                    };
+                    if failure.is_none() {
+                        failure = code;
+                    }
+                    if teardown == "operator_cancelled" {
+                        return Ok(
+                            json!({"teardown":"operator_cancelled","native":native_stop,"failure":failure}),
+                        );
+                    }
+                    // A request still open is settled by the owner's re-dial
+                    // against the closed compute.
+                    return Ok(json!({"teardown":teardown,"native":native_stop,
+                        "tokens_served":total + t,"failure":failure,"stage_index":index,
+                        "deferred_ack":path.is_some()}));
+                }
+                let Some(received) = received else {
+                    continue;
                 };
                 match received {
                     Message::Hop(body, payload) => {
@@ -433,10 +468,10 @@ pub fn serve(
                                     // A new request only on a clean session (path
                                     // unbound), never a settled one, within bounds.
                                     let id = body["request_id"].as_str().unwrap_or_default();
-                                    if served.contains(id) {
+                                    if served.contains(id) || skipped.contains(id) {
                                         return Err("route_request_settled".into());
                                     }
-                                    if served.len() >= capacity {
+                                    if served.len() + skipped.len() >= capacity {
                                         return Err("route_request_capacity".into());
                                     }
                                     if crate::app_host::now() >= expires_at {
@@ -545,6 +580,26 @@ pub fn serve(
                                 .is_none_or(|p| body == route::cancellation(&message, p));
                         let request_id = body["request_id"].as_str().map(str::to_owned);
                         let reset_began = Instant::now();
+                        // A request this member admitted (its path is bound).
+                        let admitted = path.is_some();
+                        // An idle cancellation (no request ran here) is not free
+                        // (lane EPF, REVIEW-laneEP R1): its id becomes a settled
+                        // tombstone counted against the epoch's lifetime bound,
+                        // and a repeat, a malformed id or one past the bound is
+                        // refused (v0.1.4 relay.py:718-743 records a pending
+                        // cancellation of an unseen path and refuses one when
+                        // its table is full). Refusing ends this epoch.
+                        let idle_refusal = match request_id.as_deref() {
+                            _ if admitted || released.is_some() => None,
+                            None | Some("") => Some("route_cancellation_invalid"),
+                            Some(id) if served.contains(id) || skipped.contains(id) => {
+                                Some("route_request_settled")
+                            }
+                            Some(_) if served.len() + skipped.len() >= capacity => {
+                                Some("route_request_capacity")
+                            }
+                            Some(_) => None,
+                        };
                         // ACK means released. A reset keeps this member serving;
                         // anything else closes the compute and ends its epoch, and
                         // only a release the owner already expects is ACKed.
@@ -552,6 +607,10 @@ pub fn serve(
                             Some(v) => (Ok(v), true, false),
                             None if !matches || interrupted => {
                                 (stop(compute, interrupted), false, false)
+                            }
+                            None if idle_refusal.is_some() => {
+                                failure = idle_refusal.map(str::to_owned);
+                                (stop(compute, false), false, false)
                             }
                             None if path.is_none() => (Ok(json!({"session":"clean"})), true, true),
                             None => match compute.reset(s.current) {
@@ -575,11 +634,18 @@ pub fn serve(
                             acked.recv_timeout(budget(B::RouterClose)?).unwrap_or(false);
                         let reset_ms = reset_began.elapsed().as_secs_f64() * 1000.0;
                         if serving && delivered {
+                            // Only an admitted request is served (and reported).
                             if let Some(id) = request_id.clone() {
-                                served.insert(id);
+                                if admitted {
+                                    served.insert(id);
+                                } else {
+                                    skipped.insert(id);
+                                }
                             }
-                            requests.push(json!({"request_id":request_id,"tokens_served":t,
-                                "reset_ms":reset_ms,"step_ms":step_ms}));
+                            if admitted {
+                                requests.push(json!({"request_id":request_id,"tokens_served":t,
+                                    "reset_ms":reset_ms,"step_ms":step_ms}));
+                            }
                             total += t;
                             path = None;
                             t = 0;
@@ -604,7 +670,9 @@ pub fn serve(
                             }
                         }
                         let native_stop = native_stop?;
-                        let redial = if (delivered && ack) || !ok {
+                        // A refused idle cancellation: no request of the owner's
+                        // waits on this member, so there is nothing to re-dial.
+                        let redial = if (delivered && ack) || !ok || idle_refusal.is_some() {
                             None
                         } else {
                             linger(s, owner, epoch, base, &fence)?

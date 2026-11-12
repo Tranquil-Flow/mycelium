@@ -547,6 +547,10 @@ impl StageCompute for Controlled<'_> {
     fn offer(&self) -> &Value {
         &self.offer
     }
+    /// EPF's per-pass liveness (test double): the member's membership is current.
+    fn live(&self, current: serve::Current<'_>) -> Result<(), Error> {
+        current().map(|_| ())
+    }
     fn worker_pid(&self) -> Option<u32> {
         self.owned.then_some(CONTROLLED_PID)
     }
