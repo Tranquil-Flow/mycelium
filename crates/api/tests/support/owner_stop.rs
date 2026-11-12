@@ -102,14 +102,14 @@ fn ep2g_stop_held_gateway_and_member_close_share_the_first_stop_end() {
     let elapsed = first_stop.elapsed();
     // Rescue the controlled member only after measuring; never count rescue as success.
     release.send(()).unwrap();
-    if result.is_err() {
-        if let Err(e) = silent.shutdown(std::net::Shutdown::Both) {
-            assert_eq!(
-                e.kind(),
-                std::io::ErrorKind::NotConnected,
-                "rescue shutdown: {e}"
-            );
-        }
+    if result.is_err()
+        && let Err(e) = silent.shutdown(std::net::Shutdown::Both)
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::NotConnected,
+            "rescue shutdown: {e}"
+        );
     }
     let mut work = thread.join().unwrap();
     let state = result

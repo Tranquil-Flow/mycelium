@@ -720,7 +720,8 @@ impl Executor for RouteExecutor {
             .count()
             .map_err(|_| error("budget_unavailable"))?
             .get();
-        let alive = !self.observed.shutdown.finished.load(Ordering::SeqCst);
+        let alive =
+            self.commands.is_some() && !self.observed.shutdown.finished.load(Ordering::SeqCst);
         if alive && o.teardown_attempts < allowed {
             o.teardown_busy = true;
             drop(o);
@@ -2218,7 +2219,6 @@ mod tests {
             codec: Arc::new(Text),
             path: None,
             teardown_sent: false,
-            thread: None,
             cancel: Arc::new(AtomicBool::new(false)),
             multi: false,
         }
