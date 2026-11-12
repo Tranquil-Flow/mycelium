@@ -71,6 +71,8 @@ _DIRECTORY_ASSET_PATHS = frozenset(
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.js",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/swarms.css",
         _hosted.DIRECTORY_MOUNT_PREFIX + "/site.css",
+        # Fraunces headlines (owner pick): self-hosted webfont, same origin.
+        _hosted.DIRECTORY_MOUNT_PREFIX + "/fonts/fraunces-latin-wght-normal.woff2",
     }
 )
 # STAGING ONLY: the r9 "electric" background renderer behind the staging style
