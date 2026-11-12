@@ -10,6 +10,28 @@ use api::{
 use node_service::packaged_work::Service;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership() {
+    use api::member_agent::MemberAgent;
+    use node_service::{packaged_network::{Network, NetworkConfig, PackagedMember, MemberSeams}, packaged_run::Authority};
+    let p = fixture::Joined::new();
+    p.announced();
+    api::preferences::private_state::store(&p.member_root.join("installation-role.json"),
+        &json!({"protocol":"mycelium.a13_installation_role.v1","role":"target"}), app_host::cap()).unwrap();
+    let mut authority = Authority::load(p.member_root.clone()).unwrap();
+    authority.target = true;
+    authority.running = true;
+    authority.session = Some(p.session.clone());
+    let network = Network::new(&p.member_root, NetworkConfig { seams: node_service::packaged_network::JoinSeams { member_seed: p.seed.options(), ..Default::default() }, ..Default::default() });
+    let member = PackagedMember::new(Arc::new(Mutex::new(authority)), network.clone(), MemberSeams { closed: Box::new(|| false), resource: Box::new(|_| None), acquisition: Box::new(|| None) });
+    let mut agent = MemberAgent::default();
+    agent.tick(&member);
+    let result = p.seed.work_members.get(&p.seed.coordinator, p.session.node_id(), p.owner.public(), "run-s4cb2", "dep-s4cb2", &|a| a.ip().is_loopback());
+    assert!(result.is_ok(), "packaged standing producer missing: {result:?}");
+    agent.close(&member);
+    network.quit();
+}
 #[test]
 fn enrolled_packaged_control_dispatches_without_pair_request_and_closes_all_owned_loops() {
     let p = fixture::Joined::new();
