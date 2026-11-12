@@ -174,6 +174,8 @@ pub struct NativeShard {
     consent: serde_json::Map<String, Value>,
     /// A tighter owner share for the worker guard (lane MG); never above consent.
     memory_share: Option<u64>,
+    /// A tighter owner disk share for the worker guard (lane MG2); never above consent.
+    storage_share: Option<u64>,
     /// The last worker's guard verdict, kept after its cleanup.
     guard_failure: Option<Value>,
 }
@@ -211,6 +213,7 @@ impl NativeShard {
             cleanup_proven: true,
             consent,
             memory_share: None,
+            storage_share: None,
             guard_failure: None,
         })
     }
@@ -550,17 +553,32 @@ impl NativeShard {
     }
     /// The storage the worker guard holds the custody's staging folder to
     /// (lane MG2): the member's own consent `storage_bytes`, or a tighter share
-    /// set by `limit_storage_to`. NOT BUILT YET (MG2 RED): the consent cap only.
+    /// set by `limit_storage_to`.
     pub fn storage_limit(&self) -> Result<u64> {
+        let cap = self.consent_storage()?;
+        Ok(self.storage_share.map_or(cap, |share| share.min(cap)))
+    }
+    fn consent_storage(&self) -> Result<u64> {
         self.consent["caps"]["storage_bytes"]
             .as_u64()
             .filter(|n| *n > 0)
             .ok_or(fail("joined_native_consent_invalid"))
     }
-    /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-258):
-    /// NOT BUILT YET (MG2 RED): accepts and ignores the share.
+    /// v0.1.4 `standing_limits(grant, required=)` (standing_consent.py:252-260):
+    /// an owner's announced disk share may only TIGHTEN the guard; a share above
+    /// the member's storage cap is refused `member_storage_cap_below_share`.
     pub fn limit_storage_to(&mut self, share_disk_bytes: u64) -> Result<u64> {
-        Ok(share_disk_bytes)
+        if share_disk_bytes == 0 {
+            return Err(fail("member_resources_invalid"));
+        }
+        if share_disk_bytes > self.consent_storage()? {
+            return Err(fail("member_storage_cap_below_share"));
+        }
+        self.storage_share = Some(
+            self.storage_share
+                .map_or(share_disk_bytes, |held| held.min(share_disk_bytes)),
+        );
+        self.storage_limit()
     }
     /// The worker guard's verdict (`code` + v0.1.4 `limit_detail`), once the
     /// guard stopped the worker; the later errors carry the code only.

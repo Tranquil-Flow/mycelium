@@ -430,6 +430,7 @@ impl Worker {
     /// A worker whose memory is guarded from now on (lane MG): over
     /// `memory_limit` the guard kills and reaps the exact child; this and every
     /// later exchange then answers the guard's code.
+    #[cfg(test)]
     pub(crate) fn from_child_guarded(
         child: Child,
         client: UnixStream,
@@ -477,11 +478,16 @@ impl Worker {
     pub(crate) fn guard_samples(&self) -> u64 {
         self.guard.as_ref().map_or(0, guard::Guard::samples)
     }
-    /// NOT BUILT (lane MG item 4, design in REPORT-laneMG.md): v0.1.4's disk
-    /// guard (worker.py:820-844) has no v0.2 counterpart yet. Test-only stub so
-    /// the ignored RED compiles; it watches nothing.
+    /// Test-only: from the next sample on, the running guard also walks
+    /// `root` against `max_disk_bytes` (production passes the folder to
+    /// `from_child_watched`, before the first sample).
     #[cfg(test)]
-    pub(crate) fn guard_disk(&mut self, _root: &Path, _max_disk_bytes: u64) -> Result<()> {
+    pub(crate) fn guard_disk(&mut self, root: &Path, max_disk_bytes: u64) -> Result<()> {
+        let disk = guard::Disk::open(root, max_disk_bytes)?;
+        self.guard
+            .as_ref()
+            .ok_or(Error("worker_guard_failed"))?
+            .watch_disk(disk);
         Ok(())
     }
     /// Test-only: wait (bounded) for the guard's verdict.
