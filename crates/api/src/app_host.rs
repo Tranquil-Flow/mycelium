@@ -612,7 +612,17 @@ impl<M: ManagedSlot> Authority<M> {
         let legacy = if target {
             None
         } else {
-            PersistedAuthority::load(&root).map_err(|e| e.code)?
+            match PersistedAuthority::load(&root) {
+                Ok(legacy) => legacy,
+                Err(error) => {
+                    // An unreadable legacy record is not fatal while the swarm record is present:
+                    // `owner_authority()` answers from that record instead. Failing the whole load
+                    // here is what leaves a reinstalled app reporting no swarm at all, which locks
+                    // "Invite a Mac" and every gate that reads the authority.
+                    eprintln!("l11_authority_legacy_unreadable:{}", error.code);
+                    None
+                }
+            }
         };
         // `authority.start()`: what `create_swarm` prepared before a failure, with no metadata
         // committed, is a partial state (authority.py:389-391).
