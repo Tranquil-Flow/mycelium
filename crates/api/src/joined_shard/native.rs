@@ -325,14 +325,9 @@ impl NativeShard {
         let reference = native_compiler::reference().map_err(native)?;
         let id = &reference["recorded"]["identity"];
         let m = &self.received.offer["message"];
-        let consent = standing_consent::load(&self.received.root)
-            .map_err(|_| fail("joined_shard_consent_required"))?
-            .ok_or(fail("joined_shard_consent_required"))?;
-        let memory = consent["caps"]["max_memory_bytes"]
-            .as_u64()
-            .filter(|n| *n > 0)
-            .ok_or(fail("joined_native_consent_invalid"))?;
-        let memory = self.memory_share.map_or(memory, |share| share.min(memory));
+        // The ONE source of the worker's limit (prepare `memory` = guard limit):
+        // the consent `check()` proved equal to disk, or a tighter share (R1).
+        let memory = self.memory_limit()?;
         let request_id = digest(&self.received.offer)?;
         let prepare = json!({"command":shard::COMMAND,"checkpoint":self.received.path(),
             "start":range[0],"end":range[1],"total":28,"memory":memory,"tokens":tokens,
