@@ -1,2 +1,4 @@
 Checking fixture
 Finished
+stranger-install: PASS manifest_sha256 3f38f51aaf5cece17a68ee6ee1369d5cbacf85eaf563741362c3c43a2f8a0a08
+relocation-receipt: PASS manifest_sha256 3f38f51aaf5cece17a68ee6ee1369d5cbacf85eaf563741362c3c43a2f8a0a08

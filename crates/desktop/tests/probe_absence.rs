@@ -5,8 +5,8 @@
 //! bundle. Two explicit checks over REAL built bundles (reads bytes only, never launches):
 //!
 //! ```text
-//! MYCELIUM_BUNDLE_APP="/path/Mycelium A13 Demo.app" \
-//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium A13 Demo.app" \
+//! MYCELIUM_BUNDLE_APP="/path/Mycelium.app" \
+//! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium.app" \
 //!   cargo test --offline --locked -j 2 -p desktop --test probe_absence -- --ignored --test-threads=1
 //! ```
 //!

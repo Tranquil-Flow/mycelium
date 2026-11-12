@@ -395,3 +395,118 @@ fn quit_while_a_start_waits_for_the_old_relays_release_starts_no_new_relay() {
     );
     assert_eq!(launches, old, "a Start after Quit began launched a tunnel");
 }
+
+/// The env var that turns [`the_packaged_host_never_runs_a_relay_client_found_on_path`] into its
+/// own child (the base directory), so `PATH` is set for the child process only.
+const PATH_CHILD: &str = "RELF2_PACKAGED_PATH_CLIENT_BASE";
+
+/// Ruling 31 (RELF2, review RELF F12/M1): the PACKAGED app never runs a relay client found on
+/// `PATH`. v0.1.4 falls back to `shutil.which('cloudflared')` when its bundled file is not an
+/// executable file (`public_relay.py:250-255`, reached by `DemoApp._start_public_relay`,
+/// app.py:711-712 -> `TemporaryHttpsRelay.start` :327-328), so a Finder-launched app would run
+/// whatever `cloudflared` a `PATH` entry provides; v0.2's packaged host deliberately does not.
+/// The app's own composition (`NetworkConfig::default()`), a bundle without a relay client (this
+/// test binary's directory has no `native/cloudflared`), and a fake `cloudflared` first on `PATH`:
+/// the Start must be refused as the shipped page sees a missing client (the relay raises
+/// `ValueError('relay_client_installation_required')`, public_relay.py:328, which the handler
+/// collapses to 409 `action_not_completed`, app.py:2010-2013 `public_failure_code`) and nothing
+/// may run.
+///
+/// Guard (no real `cloudflared` can start): the child's `PATH` is the fake's directory plus
+/// `/usr/bin:/bin`, and before any Start it asserts that the development lookup
+/// (`installed_relay_binary`) finds exactly the fake and nothing beside the executable.
+#[test]
+fn the_packaged_host_never_runs_a_relay_client_found_on_path() {
+    if let Some(base) = std::env::var_os(PATH_CHILD) {
+        return path_client_child(Path::new(&base));
+    }
+    let base = state_root("path-client");
+    let fake = FakeTunnel::new(&base, false);
+    let bin = base.join("path-bin");
+    std::fs::DirBuilder::new().mode(0o700).create(&bin).unwrap();
+    std::os::unix::fs::symlink(&fake.script, bin.join("cloudflared")).unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "the_packaged_host_never_runs_a_relay_client_found_on_path",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
+        .env(PATH_CHILD, &base)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+    let launches = fake.launches();
+    for pid in &launches {
+        kill(*pid);
+    }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    assert_eq!(
+        launches,
+        Vec::<i32>::new(),
+        "the packaged host ran the relay client found on PATH:\n{text}"
+    );
+    assert!(output.status.success(), "child:\n{text}");
+}
+fn path_client_child(base: &Path) {
+    let exe = std::env::current_exe().unwrap();
+    let exe_dir = exe.parent().unwrap();
+    assert!(
+        std::fs::symlink_metadata(exe_dir.join("native/cloudflared")).is_err(),
+        "guard: a relay client beside the test executable"
+    );
+    assert_eq!(
+        api::relay::installed_relay_binary(Some(exe_dir)),
+        Some(base.join("path-bin/cloudflared")),
+        "guard: the only relay client this process can find must be the fake"
+    );
+    let state = base.join("owner");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
+    let mac = Mac::launch(&state, NetworkConfig::default());
+    let started = mac.post(
+        "/api/network/start",
+        json!({"relay_acknowledged": true, "max_seconds": 1800}),
+    );
+    let network = mac.status()["network"].clone();
+    let record = std::fs::read(macs::private(&state).join("last-action-error.private.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+    assert_eq!(mac.quit(), Ok(Poll::Verified));
+    println!(
+        "RELF2_PATH_CHILD started={} network={network} record={record:?}",
+        started.1
+    );
+    assert_eq!(
+        (started.0, started.1["error"].clone()),
+        (409, json!("action_not_completed")),
+        "a Start with no bundled relay client: {}",
+        started.1
+    );
+    // As v0.1.4 records it (app.py:2012-2020 `bounded_action_failure`): the relay's ValueError
+    // carries no `.code`, so the record names the exception, not the relay's own code.
+    assert_eq!(
+        record.as_ref().map(|r| (
+            r["path"].clone(),
+            r["public_code"].clone(),
+            r["exception_type"].clone(),
+            r.get("error_code").cloned()
+        )),
+        Some((
+            json!("/api/network/start"),
+            json!("action_not_completed"),
+            json!("ValueError"),
+            None
+        )),
+        "the private failure record: {record:?}"
+    );
+    assert_ne!(network["state"], "relay_process_running", "{network}");
+}

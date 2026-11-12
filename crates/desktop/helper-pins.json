@@ -1,0 +1,14 @@
+[
+  {
+    "path": "Contents/MacOS/native/resource_probe",
+    "kind": "Helper",
+    "bytes": 675232,
+    "sha256": "f2a4417f71db3d9ecc010b554ef5a7ef623d875d24b968627bee09a621a22bd1"
+  },
+  {
+    "path": "Contents/MacOS/native/cloudflared",
+    "kind": "Helper",
+    "bytes": 25972048,
+    "sha256": "41423e7c363eed5ec73087cd21b04590e454bd0dc9284f5bd77eada147342c7f"
+  }
+]

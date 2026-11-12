@@ -66,13 +66,7 @@ impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             renewal: budgets::BudgetId::PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917,
-            hooks: Arc::new(|| {
-                Hooks::production(
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|exe| exe.parent().map(Path::to_path_buf)),
-                )
-            }),
+            hooks: Arc::new(|| Hooks::pinned(desktop::package::bundled_relay_client())),
             seams: JoinSeams::default(),
         }
     }

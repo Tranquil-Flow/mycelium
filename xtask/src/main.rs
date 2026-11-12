@@ -6,7 +6,7 @@ use std::{
     process::ExitCode,
 };
 use xtask::{
-    gate, groups, lint,
+    gate, groups, lint, no_python,
     policy::{Allowlist, Date},
     preflight::Preflight,
     provenance, quick, release, retention, retire, workspace,
@@ -18,7 +18,7 @@ fn read(root: &Path, name: &str) -> Result<String, String> {
 fn run() -> Result<bool, String> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or(
-        "USAGE: cargo xtask <lint|preflight|gate|release|retire|retention|behaviours|quick> [--root PATH] [--group ID]",
+        "USAGE: cargo xtask <lint|preflight|gate|release|retire|retention|behaviours|quick|no-python> [--root PATH] [--group ID]",
     )?;
     if command != "lint" && command != "preflight" {
         return Err(format!("USAGE: unknown command {command}"));
@@ -148,6 +148,7 @@ fn main() -> ExitCode {
         ("retention", retention::cli),
         ("behaviours", groups::behaviours_main),
         ("quick", quick::cli),
+        ("no-python", no_python::cli),
     ] {
         if arguments.first().map(String::as_str) == Some(word) {
             return match handler(&arguments[1..]) {

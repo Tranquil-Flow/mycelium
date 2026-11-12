@@ -224,15 +224,17 @@ before full integration; preserve F16's missing loaded-profile p99 blocker.
 
 ## Local unsigned bundle (round 4; not a release)
 
-`desktop-package bundle` assembles `Mycelium A13 Demo.app` into a caller-owned output
+`desktop-package bundle` assembles `Mycelium.app` into a caller-owned output
 directory, exclusively (refuses an existing app, removes a failed one). It never installs,
 signs, notarizes, registers or launches anything, and its tests refuse any bundle path outside a
 `.hermes/cache/scratch/` directory.
 
-- **Identity (policy):** display/bundle name, bundle identifier `org.mycelium.a13-macos-demo`,
+- **Identity (owner ruling 25):** v0.2 has its own name `Mycelium` and bundle identifier
+  `org.mycelium.app`, so it sits beside an installed v0.1.4 (`Mycelium A13 Demo`,
+  `org.mycelium.a13-macos-demo`) and never reads, writes or deletes its files (ruling 20).
   `icon-windowed.icns` (byte-identical to the certified v0.1.4 icon), `LSMinimumSystemVersion
-  15.6.1` and the Info.plist key set are the released v0.1.4 values so a later installer can upgrade
-  in place. Differences, named in a test: executable `mycelium` and version `0.2.0`. Window title
+  15.6.1` and the Info.plist key set are v0.1.4's. Differences, named in a test: name, bundle
+  identifier, executable `mycelium` and version `0.2.0`. Window title
   `Mycelium`. The packaged Tauri identity is `tauri.packaged.conf.json`, merged via `TAURI_CONFIG`
   at build time; `tauri.conf.json` stays the development identity.
 - **Native payload:** `libjaccl/libmlx/libmlxc.dylib` and `mlx.metallib` are copied from the
@@ -256,6 +258,25 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
   SLICE-1's operator fixture and the qualification identity is the development one; there is no
   pairing UI. Its own entry in the admission manifest is self-measured (layout only; the real
   seal is the v0.3 signature), and the dylibs are loaded by dyld before the admission runs.
+- **Relay client (cloudflared), lane RELF:** v0.1.4 bundles `cloudflared` beside its code and its
+  licence in `third_party/` (`scripts/build_a13_macos.py:285-288,318,325`: whatever `cloudflared`
+  was on the builder's PATH, unpinned). v0.2 pins ONE binary in `helper-pins.json`: the exact bytes
+  v0.1.4's release ships (cloudflared 2026.10.2 arm64, 25972048 B, sha256 `41423e7c…342c7f`; the
+  Homebrew 2026.10.2 bottle re-signed ad-hoc: with both signatures removed it equals Homebrew's
+  `eeb8f9bd…` binary except the 3-byte `__LINKEDIT` vmsize field). It ships at
+  `Contents/MacOS/native/cloudflared` (where `api::relay::installed_relay_binary` looks) with its
+  existing ad-hoc signature kept, and its Apache-2.0 licence at
+  `Contents/Resources/licenses/cloudflared-LICENSE` (`58d1e17f…`). `repro/build-bundle.sh` needs
+  `MYCELIUM_RELAY_CLIENT` / `MYCELIUM_RELAY_LICENSE` pointing at local copies (on m4pro: the
+  unpacked v0.1.4 release under `mycelium-m4-program/incident/deepcheck-v014-20261107T180822Z/unpacked/`
+  and `/opt/homebrew/Cellar/cloudflared/2026.10.2/LICENSE`); nothing is downloaded and other bytes
+  are refused. Its `LC_BUILD_VERSION` minos is **26.0**, above `LSMinimumSystemVersion` 15.6.1, as in
+  v0.1.4: `CONTENT-MANIFEST.json` lists it as a minimum-OS finding (the relay is the owner's; a
+  15.6.1 owner cannot start it).
+- **Admission is closed over the code directories:** startup admission (and `desktop-package admit`)
+  refuses any file or link in `Contents/MacOS` or `Contents/Frameworks` that the manifest does not
+  pin (`PackageError::Unpinned`), so a planted `native/cloudflared` or an extra dylib is refused
+  before anything can execute it. Dylibs are still loaded by dyld before admission (F8).
 - **Outputs next to the app:** `CONTENT-MANIFEST.json` (entries, sizes, sources, trust level,
   minimum-OS findings) and `APP-FILES.sha256` (`shasum -c` compatible).
 - **No Python:** `bundle::audit_no_python` (names, shebangs, marker bytes across read boundaries,
@@ -265,19 +286,35 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
 **Reproducible build (round 9).** `crates/desktop/repro/build-bundle.sh OUT_DIR [probe]` is the canonical
 recipe (env in `repro/env.sh`; Python-free). tauri bakes the absolute `CARGO_MANIFEST_DIR` into the
 exe and `--remap-path-prefix` cannot reach a string literal, so the build runs through one fixed
-symlink (`repro/canonical.sh`, default `~/.hermes/cache/scratch/mycelium-canonical-src`, override
-`MYCELIUM_CANONICAL_SRC`; mkdir lock) and two builds of one commit from different worktrees and
-target dirs give byte-identical bundles (`repro/verify-two-paths.sh SCRATCH`, ignored test
-`two_path_builds_of_the_same_commit_are_byte_identical`; tiny-crate proof + control in
-`tests/repro_canonical.rs`). The canonical sha is for one builder `$HOME` and one canonical path.
+symlink (`repro/canonical.sh`, default `/Users/Shared/mycelium-v02-canonical-src`, override
+`MYCELIUM_CANONICAL_SRC`; mkdir lock). Before lane RELF the executable was NOT reproducible across
+target dirs or builders (finding REL-R1, review F4): its `LC_UUID` (16 bytes, and the ad-hoc
+signature over it) depended on the `CARGO_TARGET_DIR` path, and it carried the canonical source path,
+then under the builder's `$HOME` (username included). Lane RELF item 5 changed the recipe: the
+canonical path is no longer under `$HOME`, `CARGO_TARGET_DIR` and `CARGO_HOME` are reached through
+fixed links beside it (`$MYCELIUM_CANON.target`, `.cargo-home`), `RUSTFLAGS` is the same text for
+every builder, and the linker writes no debug map (`-Wl,-S`; `LC_UUID` is kept, no `-no_uuid`).
+Whether two builders now get byte-identical bundles is decided only by running
+`repro/verify-two-paths.sh SCRATCH` (two builders: different tree, target dir and `HOME`, all of
+different lengths) on the commit in question; this README makes no claim beyond that script's
+output, which the release ledger's `two-path-reproducibility` cell records. The ignored test
+`two_path_builds_of_the_same_commit_are_byte_identical` runs it; the tiny-crate proof + control and
+the same-environment-for-two-builders check are in `tests/repro_canonical.rs`.
+The two-builder result recorded for lane RELF at 5232a4a (REPRODUCIBLE, 21 of 21 files) was NOT
+produced by `verify-two-paths.sh` (which builds both sides cold from `git archive`) but by
+`repro/verify-b-only.sh`, committed as it ran (plus the SPDX line; the run's file had sha256
+`f8848d11…`): builder A was the lane's own bundle,
+built by this recipe from the worktree with a WARM target (only `desktop` and `node-service`
+recompiled), and only builder B was a cold `git archive` build under another `HOME`, tree and target
+dir. The claim stays as scoped there: two builders on one Mac, one account, one toolchain and SDK.
 
 ```text
 source $SCRATCH/env.sh   # (pre-round-9 manual recipe) CARGO_TARGET_DIR, MACOSX_DEPLOYMENT_TARGET=15.6, RUSTFLAGS remap, strip,
                           # TAURI_CONFIG="$(cat crates/desktop/tauri.packaged.conf.json)"
 cargo build --release --offline --locked -j 2 -p desktop --features tauri-shell --bin mycelium --bin desktop-package
 desktop-package bundle target/release/mycelium evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns OUT_DIR
-MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium A13 Demo.app" cargo test --release --offline --locked -j 2 -p desktop --test bundle_gate -- --ignored --test-threads=1
-MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium A13 Demo.app" cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell --test bundle_smoke -- --ignored --nocapture --test-threads=1
+MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium.app" cargo test --release --offline --locked -j 2 -p desktop --test bundle_gate -- --ignored --test-threads=1
+MYCELIUM_BUNDLE_APP="OUT_DIR/Mycelium.app" cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell --test bundle_smoke -- --ignored --nocapture --test-threads=1
 ```
 
 `bundle_smoke` executes only the scratch bundle's own executable (no `open`, no name or bundle-id
@@ -310,9 +347,14 @@ mycelium (--install [--bundle DIR] | --uninstall [--delete-identity-and-state] |
   fixtures refused with the install root, Applications folder and state byte-identical afterwards.
   `finalize` writes the documents with a key FILE (32 raw bytes, never printed); tests use throw-away
   seeds, the production signer is never read.
-- **Same layout as v0.1.4** under `HOME`: programs `Library/Application Support/Mycelium/programs/<version>`
-  (+ `versions.json`, `.install.lock`), link `APPLICATIONS/Mycelium A13.app`, state
-  `Library/Application Support/Mycelium A13 macOS Demo`; the record is v0.1.4's, kept as JSON so unknown
+- **v0.1.4's layout under v0.2's own folder** (ruling 25) under `HOME`: programs
+  `Library/Application Support/org.mycelium.app/programs/<version>` (+ `versions.json`,
+  `.install.lock`), link `APPLICATIONS/Mycelium.app`, state `Library/Application
+  Support/org.mycelium.app/state` (v0.1.4: `Mycelium/programs`, `Mycelium A13.app`, `Mycelium A13
+  macOS Demo`; test `ruling20_v02_install_upgrade_rollback_uninstall_and_launch_routing_beside_v014_touch_no_v014_path`:
+  install, upgrade, rollback and both uninstalls are real, the launch is routing only and its first
+  writes are simulated; a real model-free launch + Quit beside a seeded v0.1.4 tree is the lane-RELF
+  smoke receipt, not a test); the record is v0.1.4's, kept as JSON so unknown
   fields survive; owner-only checks are v0.1.4's (directory exactly 0700, record exactly 0600, one link,
   no link on the path; missing parents are made 0700).
 - **Order (v0.1.4's):** verify before any write; lock; `<version>.partial` staging by `/usr/bin/ditto`;
@@ -323,7 +365,7 @@ mycelium (--install [--bundle DIR] | --uninstall [--delete-identity-and-state] |
   even the running version (deferred self-removal as v0.1.4: `running_version_removed_after_exit`),
   and keeps state unless `--delete-identity-and-state`.
 - **`Install Mycelium.command`** is v0.1.4's script byte for byte except the executable name
-  (`mycelium`), pinned by the sha256 of the real v0.1.2 release's script. It runs
+  (`mycelium`) and the app name (`Mycelium.app`, ruling 25), pinned by the sha256 of the real v0.1.2 release's script. It runs
   `<app>/Contents/MacOS/mycelium --install --bundle <folder>`.
 - **Entry routing (`entry`)**: a bare launch (or `-psn_*`) outside `programs/<version>` prints a
   `launcher_refused` event, shows an alert (`MYCELIUM_LAUNCH_ALERT=off` suppresses it for scripted

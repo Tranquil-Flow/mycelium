@@ -158,11 +158,12 @@ pub fn emit(args: &[String]) -> Result<u8, String> {
     }
     let registry = registry_of(&options)?;
     let profile = load_profile(&options, &registry)?;
-    if !profile
+    let cell = profile
         .cells
         .iter()
-        .any(|c| c.verify.kind == *kind && c.verify.name.as_deref() == Some(name.as_str()))
-    {
+        .find(|c| c.verify.kind == *kind && c.verify.name.as_deref() == Some(name.as_str()));
+    let operator = cell.is_some_and(|c| c.verify.operator_receipt);
+    if cell.is_none() {
         return Err(fail(
             "emit_unknown_cell",
             format!(
@@ -225,6 +226,27 @@ pub fn emit(args: &[String]) -> Result<u8, String> {
             .ok_or_else(|| usage("--manifest is required for --pass"))?;
         let manifest = Manifest::load(Path::new(manifest_path))?;
         manifest.verify_bytes()?;
+        if operator {
+            // An operator receipt must name the candidate it was taken on (lane RELF item 4).
+            let probe = release::Record {
+                id: String::new(),
+                kind: kind.clone(),
+                at: 0.0,
+                value: json!({"artifacts": artifacts}),
+            };
+            release::names_candidate(&manifest, &probe)
+                .map_err(|why| fail("operator_receipt_unbound", why))?;
+            entries.push(("operator_receipt", Value::from(true)));
+        }
+        // Every receipt states this cell's PASS for this candidate (review RELF F14).
+        let files = options
+            .artifacts
+            .iter()
+            .map(|p| {
+                fs::read(p).map_err(|e| fail("artifact_missing", format!("{p}: {}", io_text(&e))))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        release::receipt_result(&manifest, name, &files).map_err(|(code, why)| fail(code, why))?;
         entries.push(("artifacts", Value::from(artifacts)));
         entries.push(("candidate", manifest.candidate.to_json()));
         entries.push((
@@ -288,8 +310,31 @@ pub fn produce(args: &[String]) -> Result<u8, String> {
         ));
     }
     let argv = match &options.tail {
+        Some(_) if cell.verify.argv_is_hint => {
+            return Err(fail(
+                "produce_tool_cell_runs_its_own_command",
+                format!(
+                    "{cell_id} is produced only by its own command: {:?}",
+                    cell.hint
+                ),
+            ));
+        }
         Some(tail) if !tail.is_empty() => tail.clone(),
         Some(_) => return Err(usage("nothing follows `--`")),
+        None if cell.verify.argv_is_hint => {
+            let loaded = Manifest::load(Path::new(manifest))?;
+            let path =
+                fs::canonicalize(manifest).map_err(|e| fail("manifest_unreadable", io_text(&e)))?;
+            cell.hint
+                .iter()
+                .map(|h| match h.as_str() {
+                    "<manifest>" => path.display().to_string(),
+                    "<manifest_sha256>" => loaded.sha256.clone(),
+                    "<bundle>" => loaded.bundle_dir.display().to_string(),
+                    _ => h.clone(),
+                })
+                .collect()
+        }
         None => cell.hint.clone(),
     };
     let lacks: Vec<&String> = cell
