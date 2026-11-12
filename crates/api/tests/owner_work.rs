@@ -454,6 +454,30 @@ impl TestMember {
             return Err(Refusal("test_member_not_prepared".into()));
         };
         let serve_for = script.serve_for.unwrap_or(span(B::MemberChosenWall));
+        if let Some((entered, release)) = script.setup_hold.take() {
+            // The preceding member has both peers; this member accepts the
+            // first and deliberately withholds its second handshake.
+            let first = host
+                .accept(
+                    clock,
+                    clock
+                        .monotonic()
+                        .checked_add(B::WorkerStartup.span(Entries::ZERO).unwrap())
+                        .unwrap(),
+                )
+                .unwrap();
+            entered.send(()).unwrap();
+            release.recv_timeout(span(B::WorkerStartup) * 2).unwrap();
+            let closed = rt.block_on(async {
+                tokio::time::timeout(span(B::OwnerPoll) * 2, first.closed())
+                    .await
+                    .is_ok()
+            });
+            self.control
+                .record(&self.seen, ("partial_closed", u64::from(closed)));
+            first.close(0u32.into(), b"test rescue after observation");
+            return Err(Refusal("test_held_setup_released".into()));
+        }
         if script.old_member {
             let row = self
                 .session
@@ -513,6 +537,10 @@ struct Serving {
     reset_fails: bool,
     /// The step with this global index signals `.1`, then waits for `.2` (a chat in flight).
     hold: Option<(u64, mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    /// EP2G: hold before accepting the owner's dial, independently of Stop.
+    setup_hold: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    /// Controlled member close, not evidence of a native process.
+    close_hold: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
     /// The member's own serve deadline (its consent wall ending while the epoch is idle);
     /// default: the member's chosen wall.
     serve_for: Option<Duration>,
@@ -591,6 +619,10 @@ impl StageCompute for Controlled<'_> {
         ))
     }
     fn close(&mut self) -> Result<Value, Error> {
+        if let Some((entered, release)) = self.script.close_hold.take() {
+            entered.send(()).unwrap();
+            release.recv_timeout(span(B::WorkerStartup) * 2).unwrap();
+        }
         self.owned = false;
         self.log(("close", 0));
         Ok(json!({"context_closed":true}))
@@ -1530,6 +1562,8 @@ fn teardown_hands_every_member_back_in_stage_order_started_or_not() {
 // on it (chat.py:300-398 -> `route.infer`, route.py:4592-4620); Stop / rollover / ceiling tear the
 // route down (demo_chain.py:1322-1335).
 
+#[path = "support/owner_stop.rs"]
+mod ep2g_stop;
 #[path = "support/sse_client.rs"]
 mod sse_client;
 
