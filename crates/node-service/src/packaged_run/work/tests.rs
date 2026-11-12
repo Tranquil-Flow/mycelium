@@ -263,6 +263,31 @@ impl Drop for Fixture {
     }
 }
 #[test]
+fn local_work_session_tracks_renewal_and_contributor_removal() {
+    let f = Fixture::new();
+    let work = Work::new(f.host.clone());
+    f.host.with(|_| ());
+    let cell = lock(&work.resident).local_session.clone();
+    assert!(
+        lock(&cell).is_some(),
+        "local work must observe enrolled Session, not a lease-frozen clone"
+    );
+    let session = f
+        .host
+        .with(|c| c.run.contributor.as_mut().unwrap().session.take());
+    assert!(
+        lock(&cell).is_some(),
+        "renewal flight retains the lease-bounded snapshot"
+    );
+    f.host
+        .with(|c| c.run.contributor.as_mut().unwrap().session = session);
+    f.host.with(|c| c.run.contributor = None);
+    assert!(
+        lock(&cell).is_none(),
+        "contributor removal must invalidate resident work"
+    );
+}
+#[test]
 fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
     let mut f = Fixture::new();
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
