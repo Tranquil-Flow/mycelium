@@ -1,15 +1,59 @@
 {
   "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
   "source_directory": "mycelium_a13_macos/web",
-  "assets": {
-    "app.js": "8596c79e4279ba80c97f966dd65900fbab89f74aaf4c5a1b29fbf261f8d86a61",
+  "_comment": [
+    "Assets carried over from the v0.1.4 oracle, split by whether v0.2 still ships them byte-identically.",
+    "The theme round deliberately changed three page assets and added the site's living-background",
+    "renderer, so the old 'every asset matches the oracle' claim is no longer true and must not be",
+    "asserted. What remains true is recorded under `unchanged` and still checked digest-for-digest;",
+    "each divergence carries the reason it happened, so the difference is evidence rather than drift."
+  ],
+  "unchanged": {
     "chat.css": "5dce5ce7198071e9186a65ecb02cf1277fa3c492a255af5c6bba91c0c8e7b7dd",
     "chat.html": "68ae69a0e7225a301b1ee349fbd6ed4ecca8699e6f759c69b53770e7774b8463",
     "chat.js": "7200b21c023a5e1800ca8d5d547f7ad3dc2cc0209cf3bee2081e293958bb4e91",
-    "index.html": "550bdcee38a8a491ad273f7ca03477aafc06ddebdc6fdbe88bb724cf33115fa8",
     "run.js": "300684580a99adaa9254888015a83a17a3a77e07f9b56b7bb30f5593efa96f84",
-    "style.css": "ac6004edd1c4abf74bdc2f8ac1cf8adf0c0767242c1ddfc82d6759c0d63cba72",
     "swarm.js": "1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe"
+  },
+  "diverged": {
+    "app.js": {
+      "sha256": "cdb383a45ccbca39c1ae57c841801fe074d91efe4fdee9ef98b4d1a9ae01b2eb",
+      "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">."
+    },
+    "index.html": {
+      "sha256": "cf809f93a67a03a7054f89990f525a03050a8e20078a19f9700a36e22c127d7b",
+      "reason": "Adds the ask dialog markup, the site's #page-mycelium / #hyphae canvases for the living background, its module boot script, and drops the pre-ruling-25 page subtitle 'macOS A13 hackathon demo' in favour of 'local swarm demo'."
+    },
+    "style.css": {
+      "sha256": "dfcbb2f759498e4b8d2956330ef07abb155526e68f3ace6eea38339aecded5e9",
+      "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art)."
+    }
+  },
+  "added": {
+    "OFL-Fraunces.txt": {
+      "sha256": "cd3384cafac6f2bddc3955273958a2e029f97027c8037ac539ef5744a77b579e",
+      "source": "mycelium_swarm_directory/web/fonts/OFL-Fraunces.txt (SIL OFL 1.1, shipped beside the font)"
+    },
+    "fraunces-latin-wght-normal.woff2": {
+      "sha256": "7f9d191d999336d3b9790afa72e1358e50a13b06d4f289341e92a311967a80f9",
+      "source": "mycelium_swarm_directory/web/fonts/fraunces-latin-wght-normal.woff2 (the file the website ships)"
+    },
+    "mycelium-boot.js": {
+      "sha256": "033439da2eb53eca740e22fc56f45c3824c636d663161ed91f7ee9d6737bcf6d",
+      "source": "app-local: boots createHero/createField, dark Green only (no hue or theme switch)"
+    },
+    "mycelium-field.js": {
+      "sha256": "1f55fe0033ff030e907d0577167e34676c9639caf16cc91fb0f09eca388d2c01",
+      "source": "mycelium_swarm_directory/web/mycelium-field.js (verbatim)"
+    },
+    "mycelium-geometry.js": {
+      "sha256": "1eb2aeac5210f59df07e1c39457c00d6fb1dd084f8f266e10a58f4d252000591",
+      "source": "mycelium_swarm_directory/web/mycelium-geometry.js (verbatim)"
+    },
+    "mycelium-hero.js": {
+      "sha256": "18c88c92850d49093b08f43e949ae4a4348dd5b5844247f6d7a6548c18efa5a6",
+      "source": "mycelium_swarm_directory/web/mycelium-hero.js (verbatim)"
+    }
   },
   "icon": {
     "source": "apps/node-app/src-tauri/icons/icon.png",
