@@ -1142,9 +1142,11 @@ impl Worker {
         let unproven = rows.iter().any(|r| r["discarded"] != true);
         self.shared.update(|f| {
             f.member_cleanup = rows;
-            if let Some(refusals) = refusals {
+            if refusals.is_some() || !self.ended.is_empty() || !reports.is_empty() {
                 f.serve_reports = std::mem::take(&mut self.ended);
                 f.serve_reports.extend(reports);
+            }
+            if let Some(refusals) = refusals {
                 f.serve_reports
                     .extend(refusals.iter().map(|code| json!({"pump_refusal":code})));
             }
@@ -1209,7 +1211,7 @@ impl Worker {
                 offer,
             })
             .collect();
-        let epoch = deliver(
+        let delivered = deliver(
             &self.coordinator,
             envelope,
             owner,
@@ -1217,7 +1219,12 @@ impl Worker {
             &self.network,
             self.codec.clone(),
             self.within,
-        )?;
+        );
+        drop(stages);
+        let epoch = match delivered {
+            Ok(epoch) => epoch,
+            Err(e) => return Err(self.v2_refused().unwrap_or(e)),
+        };
         let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
             "qualification":epoch.qualification().ok(),
             "route_expires_at":epoch.host().message()["expires_at"],
@@ -1249,6 +1256,22 @@ impl Worker {
                 self.watch(epoch);
             }
         }
+    }
+    /// EP2 item 3 (REVIEW-laneEP F4): a member whose serve already refused the route this owner
+    /// signed with `joined_shard_signature_invalid` runs a build before EP1 (its v1-only route
+    /// check refuses the v2 marker): the failed delivery is named
+    /// `joined_route_member_v2_unsupported` (the member's code stays in its serve report).
+    fn v2_refused(&mut self) -> Option<Refusal> {
+        let mut old = false;
+        for m in &mut self.members {
+            if m.link.begun.front().is_some_and(|c| c == "serve")
+                && let Some((_, reply)) = m.link.take(Duration::ZERO)
+            {
+                old |= matches!(&reply, Err(Refusal(c)) if c == "joined_shard_signature_invalid");
+                self.ended.push(serve_row(&m.node_id, reply));
+            }
+        }
+        old.then(|| refusal("joined_route_member_v2_unsupported"))
     }
     /// One owner poll over the serving epoch (REVIEW-laneEP F3/F9). The owner does not watch the
     /// carrier while idle, so an epoch a member ended (its expiry, deadline or consent) read ready
