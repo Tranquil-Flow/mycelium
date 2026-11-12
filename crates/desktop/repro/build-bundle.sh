@@ -4,7 +4,6 @@
 # Needs CARGO_TARGET_DIR (explicit). OUT_DIR must not exist. `probe` builds the test-only
 # qualification-probe executable instead of the default one.
 # Needs MYCELIUM_RELAY_CLIENT and MYCELIUM_RELAY_LICENSE: local files holding the pinned relay client
-# (and the pinned iroh sidecar beside it, or MYCELIUM_IROH_SIDECAR).
 # (`helper-pins.json`: cloudflared 2026.10.2 arm64, sha256 41423e7c..., the exact binary v0.1.4
 # bundles) and its licence (sha256 58d1e17f..., `package::RELAY_LICENSE_SHA256`). Nothing is
 # downloaded: `desktop-package bundle` refuses any other bytes. Where to take them from on the build
@@ -16,9 +15,6 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 out=${1:?OUT_DIR}; variant=${2:-default}
 relay=${MYCELIUM_RELAY_CLIENT:?set MYCELIUM_RELAY_CLIENT to the pinned cloudflared file}
 relay_license=${MYCELIUM_RELAY_LICENSE:?set MYCELIUM_RELAY_LICENSE to the pinned cloudflared licence file}
-# The native iroh transport sits beside the relay client in the v0.1.4 bundle; the run spawns it
-# to reach other Macs, so it must be packaged and pinned like any other helper.
-iroh_sidecar=${MYCELIUM_IROH_SIDECAR:-$(dirname "$relay")/mycelium-iroh-sidecar}
 [ ! -e "$out" ] || { echo "OUT_DIR exists: $out" >&2; exit 1; }
 case "$variant" in
   default) feat=packaged ;;
@@ -43,7 +39,6 @@ mkdir -p "$out"
 nice -n 19 "$CARGO_TARGET_DIR/release/desktop-package" bundle "$exe" \
   evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns "$out" \
   --resource-probe "$CARGO_TARGET_DIR/release/resource_probe" \
-  --relay-client "$relay" --relay-license "$relay_license" \
-  --iroh-sidecar "$iroh_sidecar" --sign-adhoc
+  --relay-client "$relay" --relay-license "$relay_license" --sign-adhoc
 rm -f "$exe"
 echo BUNDLE_DONE "$out"

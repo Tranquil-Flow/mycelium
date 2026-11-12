@@ -273,14 +273,6 @@ fn helper_source(source: &Path, pin: &Entry) -> (String, String, String, Option<
             Some(RELAY_CLIENT_BUILD_VERSION.into()),
         );
     }
-    if pin.path == crate::package::IROH_SIDECAR_PATH {
-        return (
-            pin.path.clone(),
-            "pinned native transport: the iroh sidecar bytes v0.1.4 ships (Contents/Frameworks/mycelium_a13_macos/native/mycelium-iroh-sidecar)".into(),
-            "pinned_iroh_sidecar".into(),
-            None,
-        );
-    }
     if pin.kind == Kind::Resource {
         return (
             pin.path.clone(),
