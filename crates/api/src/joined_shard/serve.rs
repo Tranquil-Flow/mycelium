@@ -145,6 +145,13 @@ fn mono(clock: &HostClock, span: Duration) -> Outcome<MonoInstant> {
         ))
         .map_err(|_| "deadline_invalid".into())
 }
+/// v2 (lane EPF2, REVIEW-laneEPF F11): a request id this member may keep for
+/// its epoch is one the owner could have admitted: the shipped gateway's
+/// grammar, at most 128 bytes (v0.1.4 mycelium_request_gateway contracts.py:27,
+/// admission service.py:468; v0.2 owner m16_requests.rs:496).
+fn valid_request_id(id: &Value) -> bool {
+    id.as_str().is_some_and(crate::registry::valid_request_id)
+}
 fn budget(id: B) -> Outcome<Duration> {
     Ok(Duration::from_millis(
         id.span(Entries::ZERO)
@@ -278,6 +285,18 @@ pub fn serve(
             B::PyFinalScriptsRunA11RouteBenchmarkTargetTpotMsL398C12
         })
     };
+    // v2 (lane EPF2, REVIEW-laneEPF F10): a step and its forwarding exchange
+    // also end by the route's signed expiry (the consent wall caps the step
+    // in native.rs).
+    let hop_wait = |t: u64| -> Outcome<Duration> {
+        let wait = hop_budget(t)?;
+        if !multi {
+            return Ok(wait);
+        }
+        let left = Duration::try_from_secs_f64((expires_at - crate::app_host::now()).max(0.0))
+            .unwrap_or(Duration::ZERO);
+        Ok(wait.min(left))
+    };
     let stages = message["stages"].as_array().ok_or("route_invalid")?.len();
     // v2: settled request ids (refused if replayed) and per-request summaries.
     let mut served: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -286,6 +305,11 @@ pub fn serve(
     let mut skipped: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut requests: Vec<Value> = Vec::new();
     let report = std::thread::scope(|scope| -> Outcome<Value> {
+        // The queue ends with this closure, before the scope joins the
+        // receiver threads (lane EPF2, REVIEW-laneEPF N1): a PathCancellation
+        // still queued when the epoch ends drops its verdict sender with it,
+        // so the receiver waiting on that verdict refuses it and returns.
+        let rx = rx;
         for (role, mut receiver) in receivers.into_iter().enumerate() {
             let (tx, cancel, data_cancel) = (tx.clone(), cancel.clone(), &data_cancel);
             let request_cancel = request_cancel.clone();
@@ -321,6 +345,13 @@ pub fn serve(
                     };
                     match frame.message_type() {
                         "HopHeader" if role == 0 => {
+                            // v2 (lane EPF2, F11): a PREFILL whose request id is
+                            // outside the owner's own grammar is refused, never
+                            // ACKed; the main loop refuses it too and closes the
+                            // compute.
+                            let refused = multi
+                                && frame.body()["phase"] == "PREFILL"
+                                && !valid_request_id(&frame.body()["request_id"]);
                             // Single owner-serial dispatch slot: ACK = queued for compute.
                             if tx
                                 .send(Message::Hop(frame.body().clone(), frame.payload().to_vec()))
@@ -328,7 +359,11 @@ pub fn serve(
                             {
                                 return;
                             }
-                            if delivery.acknowledge().is_err() {
+                            if refused {
+                                if let Err(e) = delivery.reject(DispatchRefusal::InvalidFrame) {
+                                    eprintln!("serve: delivery.reject failed: {e:?}");
+                                }
+                            } else if delivery.acknowledge().is_err() {
                                 return;
                             }
                         }
@@ -467,6 +502,9 @@ pub fn serve(
                                 if multi {
                                     // A new request only on a clean session (path
                                     // unbound), never a settled one, within bounds.
+                                    if !valid_request_id(&body["request_id"]) {
+                                        return Err("route_request_invalid".into());
+                                    }
                                     let id = body["request_id"].as_str().unwrap_or_default();
                                     if served.contains(id) || skipped.contains(id) {
                                         return Err("route_request_settled".into());
@@ -506,7 +544,7 @@ pub fn serve(
                                 None
                             };
                             let step_began = Instant::now();
-                            let deadline = Instant::now() + hop_budget(t)?;
+                            let deadline = Instant::now() + hop_wait(t)?;
                             let bytes = compute
                                 .step(
                                     tokens.as_deref(),
@@ -555,7 +593,7 @@ pub fn serve(
                                 channel: Channel::Router,
                                 message_id: sent.to_be_bytes(),
                                 payload: frame,
-                                deadline: mono(s.clock, hop_budget(t)?)?,
+                                deadline: mono(s.clock, hop_wait(t)?)?,
                                 maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
                             };
                             transport::exchange(&mut sender, &request, s.clock)
@@ -592,6 +630,10 @@ pub fn serve(
                         let idle_refusal = match request_id.as_deref() {
                             _ if admitted || released.is_some() => None,
                             None | Some("") => Some("route_cancellation_invalid"),
+                            // Lane EPF2 (F11): kept ids are bounded in length too.
+                            Some(_) if !valid_request_id(&body["request_id"]) => {
+                                Some("route_cancellation_invalid")
+                            }
                             Some(id) if served.contains(id) || skipped.contains(id) => {
                                 Some("route_request_settled")
                             }
