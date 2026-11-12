@@ -53,6 +53,10 @@
     "mycelium-hero.js": {
       "sha256": "18c88c92850d49093b08f43e949ae4a4348dd5b5844247f6d7a6548c18efa5a6",
       "source": "mycelium_swarm_directory/web/mycelium-hero.js (verbatim)"
+    },
+    "mark.svg": {
+      "sha256": "aa4451a9a8cf6092869993115895461fb2e8b55ca83da211922bb1490e65b4c0",
+      "reason": "mycelium colony mark (W2) replacing the inherited asterisk glyph; drawn for both the site and the app"
     }
   },
   "icon": {

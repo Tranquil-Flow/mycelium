@@ -41,6 +41,7 @@ fn asset(path: &str) -> Option<Reply> {
         "/run.js" => ("text/javascript", include_bytes!("../assets/run.js")),
         "/swarm.js" => ("text/javascript", include_bytes!("../assets/swarm.js")),
         "/style.css" => ("text/css", include_bytes!("../assets/style.css")),
+        "/mark.svg" => ("image/svg+xml", include_bytes!("../assets/mark.svg")),
         "/mycelium-boot.js" => (
             "text/javascript",
             include_bytes!("../assets/mycelium-boot.js"),
