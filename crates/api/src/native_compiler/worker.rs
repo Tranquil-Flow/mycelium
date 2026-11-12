@@ -4,8 +4,9 @@ use super::*;
 use crate::native_worker_link::Link;
 use budgets::{BudgetId, Entries};
 use std::{
+    io,
     os::{fd::OwnedFd, unix::net::UnixStream},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},
 };
 
@@ -19,6 +20,27 @@ fn duration(id: BudgetId) -> Result<Duration> {
             .map_err(|_| Error("budget_unavailable"))?
             .millis(),
     ))
+}
+/// The three fallible syscalls on the ONE owned child. Production (`ChildCalls`)
+/// calls `std::process::Child` directly; tests inject failures through the
+/// constructor-only `Worker::from_child_with_custody`, so the retry contract is
+/// exercised without poking at private state.
+pub(crate) trait Custody: Send {
+    fn try_wait(&mut self, child: &mut Child) -> io::Result<Option<ExitStatus>>;
+    fn kill(&mut self, child: &mut Child) -> io::Result<()>;
+    fn wait(&mut self, child: &mut Child) -> io::Result<ExitStatus>;
+}
+pub(crate) struct ChildCalls;
+impl Custody for ChildCalls {
+    fn try_wait(&mut self, child: &mut Child) -> io::Result<Option<ExitStatus>> {
+        child.try_wait()
+    }
+    fn kill(&mut self, child: &mut Child) -> io::Result<()> {
+        child.kill()
+    }
+    fn wait(&mut self, child: &mut Child) -> io::Result<ExitStatus> {
+        child.wait()
+    }
 }
 /// A failed serving-worker start: the error, the guard's verdict when the
 /// guard stopped the worker during prepare (lane MGF F4: its numbers are kept),
@@ -44,6 +66,9 @@ pub(crate) struct Worker {
     link: Link,
     cancel: Arc<AtomicBool>,
     guard: Option<guard::Guard>,
+    /// The syscall boundary for the one owned child (constructor-only seam;
+    /// production is `ChildCalls`).
+    custody: Box<dyn Custody>,
 }
 impl Worker {
     pub(crate) fn start(
@@ -223,6 +248,17 @@ impl Worker {
         cancel: Arc<AtomicBool>,
         wall: Result<Duration>,
     ) -> Result<Self> {
+        Self::from_child_linked(child, client, cancel, wall, Box::new(ChildCalls))
+    }
+    /// As `from_child_within`, with the syscall boundary given (constructor-only
+    /// seam; production passes `ChildCalls`).
+    fn from_child_linked(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        wall: Result<Duration>,
+        custody: Box<dyn Custody>,
+    ) -> Result<Self> {
         let linked = wall.and_then(|wall| {
             Link::new(client, wall).map_err(|error| {
                 eprintln!("native_socket_failed: {error}");
@@ -247,7 +283,25 @@ impl Worker {
             link,
             cancel,
             guard: None,
+            custody,
         })
+    }
+    /// Test-only: as `from_child`, with a scripted syscall boundary (see
+    /// `Custody`). The child is real; only its three calls are intercepted.
+    #[cfg(test)]
+    pub(crate) fn from_child_with_custody(
+        child: Child,
+        client: UnixStream,
+        cancel: Arc<AtomicBool>,
+        custody: Box<dyn Custody>,
+    ) -> Result<Self> {
+        Self::from_child_linked(
+            child,
+            client,
+            cancel,
+            duration(BudgetId::MemberChosenWall),
+            custody,
+        )
     }
     pub(crate) fn pid(&self) -> Result<u32> {
         self.child
@@ -403,6 +457,13 @@ impl Worker {
             std::thread::yield_now();
         }
     }
+    /// As `close_in_place`, bounded by the caller's remaining deadline `end`.
+    /// F1 RED seam: the carried deadline is not applied yet; the next commit
+    /// replaces this body (the request and exit wait must both use `end`).
+    pub(crate) fn close_in_place_until(&mut self, end: Instant) -> Result<Value> {
+        let _ = end;
+        self.close_in_place()
+    }
 }
 impl Worker {
     /// Whether `kill_and_reap` evidence shows a worker that ended without this
@@ -414,28 +475,35 @@ impl Worker {
     /// Interrupted framing cannot carry a graceful close. Kill and wait for the
     /// exact owned child; return reap evidence only after the OS reported its exit.
     /// This is process-release evidence, NOT native-context-closed evidence.
-    pub(crate) fn kill_and_reap(self) -> Result<Value> {
-        let mut child = self
-            .child
+    pub(crate) fn kill_and_reap(mut self) -> Result<Value> {
+        self.kill_and_reap_in_place()
+    }
+    /// As `kill_and_reap`, but the exact child stays owned until the OS reported
+    /// its exit, so the caller can retry the SAME child. F1 RED seam: this body
+    /// still takes the child out before the fallible calls (the defect); the
+    /// next commit retains it on failure and never signals after a failed wait.
+    pub(crate) fn kill_and_reap_in_place(&mut self) -> Result<Value> {
+        let Self { child, custody, .. } = self;
+        let mut owned = child
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
             .ok_or(Error("native_worker_closed"))?;
-        let pid = child.id();
-        let killed = match child
-            .try_wait()
+        let pid = owned.id();
+        let killed = match custody
+            .try_wait(&mut owned)
             .map_err(|_| Error("native_worker_reap_failed"))?
         {
             Some(_) => false,
             None => {
-                child
-                    .kill()
+                custody
+                    .kill(&mut owned)
                     .map_err(|_| Error("native_worker_kill_failed"))?;
                 true
             }
         };
-        let status = child
-            .wait()
+        let status = custody
+            .wait(&mut owned)
             .map_err(|_| Error("native_worker_reap_failed"))?;
         use std::os::unix::process::ExitStatusExt;
         Ok(
@@ -540,27 +608,27 @@ impl Drop for Worker {
         if let Some(guard) = self.guard.as_mut() {
             guard.stop();
         }
-        let owned = self
-            .child
+        let Self { child, custody, .. } = self;
+        let mut owned = child
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some(mut child) = owned {
-            match child.try_wait() {
+        if let Some(child) = owned.as_mut() {
+            match custody.try_wait(child) {
                 Ok(Some(_)) => (),
                 Ok(None) => {
-                    if let Err(e) = child.kill() {
+                    if let Err(e) = custody.kill(child) {
                         eprintln!("native_worker_kill_failed: {e}");
                     }
                 }
                 Err(e) => {
                     eprintln!("native_worker_status_failed: {e}");
-                    if let Err(e) = child.kill() {
+                    if let Err(e) = custody.kill(child) {
                         eprintln!("native_worker_kill_failed: {e}");
                     }
                 }
             }
-            if let Err(e) = child.wait() {
+            if let Err(e) = custody.wait(child) {
                 eprintln!("native_worker_reap_failed: {e}");
             }
         }
