@@ -27,6 +27,15 @@ def test_glow_preference_motion_and_reserved_layout(local, width, height, theme)
         assert before == page.locator('#hyphae').evaluate('(c)=>c.toDataURL()')
         assert page.evaluate('window.__pulseMetrics.paused && window.__understoryMetrics.paused')
         assert sum(page.evaluate('window.__cls')) == 0
+        if theme == 'light':
+            # Light mode has no Green/Blue switch (owner, 12 Nov): the hue is
+            # not editable on a hueless ground, so take the hue flow through
+            # Dark and check the switch comes back with it.
+            expect(page.get_by_label('Mycelium glow')).not_to_be_visible()
+            expect(page.locator('.theme-switch')).to_be_visible()
+            page.get_by_role('button', name='Dark', exact=True).click()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'dark')
+            expect(page.get_by_label('Mycelium glow')).to_be_visible()
         page.get_by_role('button',name='Blue',exact=True).click()
         expect(page.locator('html')).to_have_attribute('data-glow', 'blue')
         assert page.evaluate('localStorage.getItem("mycelium-site-glow-v1")') == 'blue'
@@ -37,6 +46,12 @@ def test_glow_preference_motion_and_reserved_layout(local, width, height, theme)
         expect(page.locator('html')).to_have_attribute('data-glow','blue')
         expect(page.locator('#page-mycelium')).to_have_attribute('data-spore-nodes','0')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        if theme == 'light':
+            # Back to Light: the switch stays gone and the stored hue survives.
+            page.get_by_role('button', name='Light', exact=True).click()
+            expect(page.locator('html')).to_have_attribute('data-theme', 'light')
+            expect(page.get_by_label('Mycelium glow')).not_to_be_visible()
+            assert page.evaluate('localStorage.getItem("mycelium-site-glow-v1")') == 'blue'
         assert not errors
         browser.close()
 

@@ -60,18 +60,23 @@
   --line-2: #4a503d;
   /* The mycelium itself: owner wants it white in light mode (the canvas
      reads --glow/--core off body at build time), so this block still wins
-     the tie over the hue blocks for the ART. Motion is a separate layer:
-     --pulse-* below keeps the Green/Blue switch live in light mode, with
-     deep tones that read on the sage ground (2.95:1 glow, 4.44:1 core). */
+     the tie over the hue blocks for the ART. Light mode is HUELESS (owner,
+     12 Nov): no Green/Blue switch, and motion runs cream/bright white too
+     instead of the dark palette's green or blue. */
   --strand: #f7f2e7;
   --glow: #f7f2e7;
   --core: #ffffff;
-  --pulse-glow: #0b6b28;
-  --pulse-core: #084d1f;
+  --pulse-glow: #ffffff;
+  --pulse-core: #ffffff;
 }
-:root[data-theme="light"][data-glow="blue"] {
-  --pulse-glow: #04629e;
-  --pulse-core: #063f6e;
+/* Light mode has no Green/Blue switch: only Dark/Light stays in the header.
+   A stored hue still applies the moment the visitor returns to dark, so the
+   choice is preserved, just not editable on a hueless ground.
+   NOTE: three header groups share .glow-switch - the hue group, the theme
+   group (.theme-switch) and the staging style group (.style-switch) - so the
+   selector must name the hue group by its label or it hides all three. */
+:root[data-theme="light"] .glow-switch[aria-label="Mycelium glow"] {
+  display: none;
 }
 /* The owner's white ✳ Mycelium: cream in the header only, where it sits
    outside main (so the 4.5:1 hero gate does not measure it). Dark mode keeps

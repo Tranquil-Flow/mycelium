@@ -119,18 +119,25 @@ def test_theme_choice_applies_persists_and_keeps_the_hero_readable(local):
         browser.close()
 
 
-def test_motion_follows_the_hue_in_light_mode_while_the_art_stays_white():
-    """Owner, 12 Nov: the Green/Blue switch must change the pulse effects in
-    light mode (it did nothing), and the background mycelium must be visible.
-    The art tokens stay the owner's white; only --pulse-* moves with the hue.
-    In dark, pulse == glow by construction, so dark rendering is unchanged."""
+def test_light_mode_is_hueless_with_white_pulses_and_no_glow_switch():
+    """Owner, 12 Nov (second pass): light mode drops the Green/Blue switch
+    entirely and the pulses run cream/bright white instead of the dark
+    palette's green or blue. Dark keeps both: --pulse-* equals --glow/--core
+    there, so dark rendering is unchanged by construction."""
     css = (WEB / 'design.css').read_text()
     light = light_block(css)
     assert light['--glow'] == '#f7f2e7' and light['--core'] == '#ffffff', 'art stays white'
-    assert light['--pulse-glow'] == '#0b6b28' and light['--pulse-core'] == '#084d1f'
-    blue_light = re.search(r':root\[data-theme="light"\]\[data-glow="blue"\]\s*\{[^}]*\}', css).group(0)
-    assert '--pulse-glow: #04629e' in blue_light and '--pulse-core: #063f6e' in blue_light
-    assert '--glow:' not in blue_light, 'blue must not recolour the art'
+    assert light['--pulse-glow'] == '#ffffff' and light['--pulse-core'] == '#ffffff'
+    # A stored hue must not leak into a hueless light mode.
+    assert not re.search(r':root\[data-theme="light"\]\[data-glow=', css)
+    hide_match = re.search(
+        r':root\[data-theme="light"\] \.glow-switch\[aria-label="Mycelium glow"\]\s*\{[^}]*\}', css)
+    assert hide_match, 'light mode must hide only the Green/Blue switch'
+    assert 'display: none' in hide_match.group(0), hide_match.group(0)
+    # The theme and staging style groups share .glow-switch and must survive.
+    assert 'theme-switch' not in hide_match.group(0)
+    assert 'style-switch' not in hide_match.group(0)
+    # Dark keeps the hue and keeps pulse == glow.
     dark = re.search(r'^:root\s*\{[^}]*\}', css, re.M).group(0)
     assert '--pulse-glow: #35df47' in dark and '--glow: #35df47' in dark
     blue_dark = re.search(r':root\[data-glow="blue"\]\s*\{[^}]*\}', css).group(0)
@@ -142,14 +149,14 @@ def test_motion_follows_the_hue_in_light_mode_while_the_art_stays_white():
     assert 'pulseGlow' in field and 'pulseCore' in field
 
 
-def test_the_hue_switch_changes_the_pulse_tokens_in_a_real_browser(local):
+def test_the_glow_switch_is_gone_in_light_and_pulses_stay_white(local):
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        for hue, want in (('green', '#0b6b28'), ('blue', '#04629e')):
+        for stored_hue in ('green', 'blue'):
             context = browser.new_context(
                 viewport={'width': 1440, 'height': 900}, color_scheme='dark')
             context.add_init_script("localStorage.setItem('mycelium-site-theme-v1','light')")
-            context.add_init_script(f"localStorage.setItem('mycelium-site-glow-v1','{hue}')")
+            context.add_init_script(f"localStorage.setItem('mycelium-site-glow-v1','{stored_hue}')")
             page = context.new_page()
             page.goto(local['directory'].origin + '/', wait_until='networkidle')
             page.evaluate('document.fonts.ready')
@@ -157,9 +164,21 @@ def test_the_hue_switch_changes_the_pulse_tokens_in_a_real_browser(local):
                 "getComputedStyle(document.documentElement).getPropertyValue('--pulse-glow').trim()")
             art = page.evaluate(
                 "getComputedStyle(document.documentElement).getPropertyValue('--glow').trim()")
-            assert pulse == want, (hue, pulse)
-            assert art == '#f7f2e7', (hue, 'art must stay white', art)
+            assert pulse == '#ffffff', (stored_hue, 'light pulses are white', pulse)
+            assert art == '#f7f2e7', (stored_hue, 'art must stay white', art)
+            expect(page.get_by_label('Mycelium glow')).not_to_be_visible()
+            expect(page.locator('.theme-switch')).to_be_visible()
             context.close()
+        # Dark keeps the switch, with the stored hue still selected.
+        context = browser.new_context(
+            viewport={'width': 1440, 'height': 900}, color_scheme='dark')
+        context.add_init_script("localStorage.setItem('mycelium-site-theme-v1','dark')")
+        context.add_init_script("localStorage.setItem('mycelium-site-glow-v1','blue')")
+        page = context.new_page()
+        page.goto(local['directory'].origin + '/', wait_until='networkidle')
+        expect(page.get_by_label('Mycelium glow')).to_be_visible()
+        expect(page.locator('[data-glow-choice=blue]')).to_have_attribute('aria-pressed', 'true')
+        context.close()
         browser.close()
 
 
