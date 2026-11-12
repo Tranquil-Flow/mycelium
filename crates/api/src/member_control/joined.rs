@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Already-enrolled work-control rendezvous, not a pairing request.
+pub mod inbox;
 use super::*;
 use crate::{
     member::Session,

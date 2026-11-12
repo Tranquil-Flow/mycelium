@@ -69,10 +69,23 @@ fn rendezvous_reaches_owner_over_existing_seed_tls_without_pairing() {
     let p = fixture::Joined::new();
     let d = document(&p);
     let result = p.client().post(stage_contract::member_work::PATH, &d);
-    assert!(result.is_ok(), "signed rendezvous is not mounted: {result:?}");
+    assert!(
+        result.is_ok(),
+        "signed rendezvous is not mounted: {result:?}"
+    );
     let ack = result.unwrap();
-    assert_eq!(ack["message"]["document_digest"], protocol::canonical::digest(&d).unwrap());
-    assert_eq!(ack["verification_key"], p.seed.coordinator.signer().public_key_record());
+    assert_eq!(
+        ack["message"]["document_digest"],
+        protocol::canonical::digest(&d).unwrap()
+    );
+    assert_eq!(
+        ack["verification_key"],
+        p.seed.coordinator.signer().public_key_record()
+    );
+    joined::inbox::publish(&p.client(), &d).unwrap();
+    let received = p.seed.work_members.get(&p.seed.coordinator, p.session.node_id(), p.owner.public(),
+        "run-s4cb2", "dep-s4cb2", &|a| a.ip().is_loopback()).unwrap();
+    assert_eq!(received.registration(), &d["message"]["registration"]);
 }
 #[test]
 fn stale_generation_and_wrong_signer_are_refused_before_adoption() {

@@ -244,6 +244,8 @@ impl ManagedSlot for Unmanaged {
 pub struct SeedRuntime<M: ManagedSlot = Unmanaged> {
     pub coordinator: Arc<::seed::Coordinator>,
     pub exchange: Arc<RunExchange>,
+    /// Current signed work-control rendezvous, independent of observation descriptors.
+    pub work_members: Arc<crate::member_control::joined::inbox::Inbox>,
     pub clock_offsets: Arc<crate::clock_offset::PeerClockOffsets>,
     pub capability_reports: Mutex<BTreeMap<String, Value>>,
     server: Mutex<Option<::seed::server::Server>>,
@@ -464,8 +466,12 @@ pub fn run_seed<M: ManagedSlot>(
             .map_err(|_| failure())?,
     ));
     let mailbox_routes = Arc::new(crate::managed_routes::DispatchSlot::default());
+    let work_members = Arc::new(crate::member_control::joined::inbox::Inbox::new(
+        exchange.clone(),
+    ));
     let routes = Arc::new(crate::managed_routes::Routes(vec![
         routes,
+        work_members.clone(),
         Arc::new(crate::managed_routes::MailboxRoutes(mailbox_routes.clone())),
     ]));
     let server = ::seed::server::Server::bind_tls_on_with_routes(
@@ -488,6 +494,7 @@ pub fn run_seed<M: ManagedSlot>(
         address: server.address(),
         coordinator,
         exchange,
+        work_members,
         clock_offsets,
         capability_reports: Mutex::new(BTreeMap::new()),
         server: Mutex::new(Some(server)),
