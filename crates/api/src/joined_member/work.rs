@@ -1069,9 +1069,9 @@ impl Work {
             .as_deref()
             .ok_or("native_proof_required")?;
         let current = || member.current(signer);
-        // One epoch per run, but never beyond this member's own wall. Carrier setup does not
-        // poll live consent until both owner connections arrive, so its accept deadline MUST
-        // retain this independent bound. Re-preparing cannot extend the first prepare's wall.
+        // One epoch per run, but never beyond this member's own wall. Carrier setup polls
+        // cancellation/live consent too; retain this independent bound throughout the serve.
+        // Re-preparing cannot extend the first prepare's wall.
         let consented = match self.consent_deadline {
             Some(end) => end,
             None => consent_end(&self.root, Instant::now())?,

@@ -229,26 +229,43 @@ pub fn serve(
     )
     .map_err(|_| "budget_unavailable")?;
     let worker_pid = compute.worker_pid();
-    let mut connections = Vec::new();
-    let setup = s.until(None)?;
-    while connections.len() < 2 {
-        // Within the one setup deadline: a failed inbound handshake (stale or
-        // refused path) or an unpinned dialer is dropped, never served and
-        // never allowed to abort the owner's route (no remote kill switch).
-        let c = match s.host.accept(s.clock, setup) {
-            Ok(c) => c,
-            Err(transport::Error::Authentication) => continue,
-            Err(e) => {
-                // Compute is still owned here: release it before refusing.
-                stop(compute, false)?;
-                return Err(format!("route_accept_failed:{e:?}"));
+    let mut connections: Vec<iroh::endpoint::Connection> = Vec::new();
+    let setup = (|| -> Outcome<()> {
+        let poll = budget(B::OwnerPoll)?;
+        loop {
+            // Recheck on EVERY pass, even after refused handshakes/unpinned
+            // traffic and after the second successful accept. The short accept
+            // window observes Stop; it never renews the route or consent wall.
+            s.check()?;
+            compute.live(s.current).map_err(|e| e.0.to_owned())?;
+            if crate::app_host::now() >= expires_at {
+                return Err("route_expired".into());
             }
-        };
-        if c.remote_id() != owner {
-            c.close(2u32.into(), b"unpinned route owner");
-            continue;
+            if connections.len() == 2 {
+                return Ok(());
+            }
+            let c = match s.host.accept(s.clock, s.until(Some(poll))?) {
+                Ok(c) => c,
+                Err(transport::Error::Expired | transport::Error::Authentication) => continue,
+                Err(e) => return Err(format!("route_accept_failed:{e:?}")),
+            };
+            // Authentication is not membership: an unpinned dialer cannot
+            // become a remote kill switch for the signed owner's route.
+            if c.remote_id() != owner {
+                c.close(2u32.into(), b"unpinned route owner");
+                continue;
+            }
+            connections.push(c);
         }
-        connections.push(c);
+    })();
+    if let Err(code) = setup {
+        for c in &connections {
+            c.close(0u32.into(), b"route setup ended");
+        }
+        // No request started. Abort/reap rather than waiting for the native
+        // graceful-close command's independent (longer) allowance.
+        stop(compute, true)?;
+        return Err(code);
     }
     let base = ConnectionFence {
         endpoint_id: *owner.as_bytes(),
