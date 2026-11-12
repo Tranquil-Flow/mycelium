@@ -65,6 +65,16 @@ fn an_existing_join_produces_a_signed_current_control_binding_without_pairing_ag
     );
 }
 #[test]
+fn rendezvous_reaches_owner_over_existing_seed_tls_without_pairing() {
+    let p = fixture::Joined::new();
+    let d = document(&p);
+    let result = p.client().post(stage_contract::member_work::PATH, &d);
+    assert!(result.is_ok(), "signed rendezvous is not mounted: {result:?}");
+    let ack = result.unwrap();
+    assert_eq!(ack["message"]["document_digest"], protocol::canonical::digest(&d).unwrap());
+    assert_eq!(ack["verification_key"], p.seed.coordinator.signer().public_key_record());
+}
+#[test]
 fn stale_generation_and_wrong_signer_are_refused_before_adoption() {
     let mut p = fixture::Joined::new();
     let d = document(&p);
