@@ -1079,13 +1079,27 @@ impl Work {
         let close = budgets::BudgetId::RouterClose
             .span(budgets::Entries::ZERO)
             .map_err(|_| "budget_unavailable")?;
-        let now = std::time::Instant::now();
-        let expiry = operation.request["route"]["message"]["expires_at"]
+        // Verify the peer's envelope and its binding BEFORE deriving any local deadline.
+        // The carrier rechecks live membership at entry; this check protects the conversion.
+        let wall_now = app_host::now();
+        let (_, message) = joined_shard::route::verify_member_epoch(
+            &operation.request["route"],
+            &current().map_err(|e| e.0.to_owned())?,
+            native.offer(),
+            proof_digest,
+            wall_now,
+        )
+        .map_err(|_| "route_invalid")?;
+        let remaining = message["expires_at"]
             .as_f64()
-            .filter(|e| e.is_finite())
-            .map(|e| now + std::time::Duration::from_secs_f64((e - app_host::now()).max(0.0)))
-            .map(|at| at + Duration::from_millis(close.millis()))
-            .unwrap_or(operation.deadline);
+            .filter(|e| e.is_finite() && *e > wall_now)
+            .ok_or("route_invalid")?
+            - wall_now;
+        let remaining = Duration::try_from_secs_f64(remaining).map_err(|_| "route_invalid")?;
+        let expiry = Instant::now()
+            .checked_add(remaining)
+            .and_then(|at| at.checked_add(Duration::from_millis(close.millis())))
+            .ok_or("route_invalid")?;
         stage::serve(
             &stage::Serve {
                 host: carrier_side.host,
