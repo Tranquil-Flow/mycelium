@@ -403,6 +403,9 @@ impl<H: MemberHost> MemberAgent<H> {
                 return;
             };
             if grant.as_ref().and_then(|g| g.get("binding")) != Some(binding) {
+                // Silent before: a grant bound to an earlier membership stopped every pass here,
+                // so a joined Mac produced no card and no report while looking healthy.
+                eprintln!("l11_member_gate:consent_binding_mismatch");
                 host.close_work();
                 return;
             }

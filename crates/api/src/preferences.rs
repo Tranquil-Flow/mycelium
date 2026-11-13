@@ -764,6 +764,55 @@ pub mod standing_consent {
             Err(StandingError("standing_consent_state_invalid"))
         }
     }
+    /// The stored grant, usable only for `binding`.
+    ///
+    /// A grant bound to another swarm, node or seed key is a leftover from an earlier membership.
+    /// Treating it as a grant is what made a freshly joined Mac silently do nothing: the agent's
+    /// gate dropped every pass, wrote no card and logged nothing, so the owner's run only ever said
+    /// "1 of 2 Macs reported".
+    pub fn for_binding(
+        root: &Path,
+        binding: &Value,
+    ) -> Result<Option<Map<String, Value>>, StandingError> {
+        let Some(record) = load(root)? else {
+            return Ok(None);
+        };
+        let usable = record["state"] == "granted" && record["binding"] == *binding;
+        Ok(usable.then_some(record))
+    }
+    /// Drop any *bound* grant before a new join.
+    ///
+    /// `grant` answers with the stored record whenever it is not `withdrawn`, so a Mac that had
+    /// already granted consent to an earlier swarm kept that record through every later join -- and
+    /// its binding could never match the new membership. The member then passed no gate, wrote no
+    /// card and logged nothing. A join always starts from a fresh, unbound grant.
+    pub fn clear_bound(root: &Path) -> Result<bool, StandingError> {
+        let Some(record) = load(root)? else {
+            return Ok(false);
+        };
+        if record["binding"].is_null() {
+            return Ok(false);
+        }
+        std::fs::remove_file(root.join(FILE))
+            .map_err(|_| StandingError("standing_consent_state_invalid"))?;
+        Ok(true)
+    }
+    /// Drop a grant another membership bound, so a new join cannot inherit it. Fail-closed: the
+    /// member then has to grant again instead of quietly running on a stranger's consent.
+    pub fn clear_if_stale(root: &Path, binding: &Value) -> Result<bool, StandingError> {
+        let Some(record) = load(root)? else {
+            return Ok(false);
+        };
+        let stale = record["state"] == "granted"
+            && !record["binding"].is_null()
+            && record["binding"] != *binding;
+        if !stale {
+            return Ok(false);
+        }
+        std::fs::remove_file(root.join(FILE))
+            .map_err(|_| StandingError("standing_consent_state_invalid"))?;
+        Ok(true)
+    }
     /// The caps a grant would record, checked without touching any state: the
     /// acknowledged disclosure and `_caps(caps, policy, device_memory_bytes)`.
     /// v0.1.4 runs exactly this before any role change (`app.py:1751-1757`).

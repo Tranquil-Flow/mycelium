@@ -603,6 +603,9 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
         protocol::consent::caps(&standing["caps"], consent, &memory_value)
             .map_err(|e| PublicError::new(400, e.0))?;
         self.become_target(consent)?;
+        // A grant bound to an earlier swarm cannot authorize this membership; drop it so the grant
+        // below is the fresh, unbound one this join actually carries.
+        standing_consent::clear_bound(&self.root).map_err(|e| PublicError::new(409, e.0))?;
         standing_consent::grant(&self.root, &body["standing_consent"], consent, now, memory)
             .map_err(|e| PublicError::new(400, e.0))?;
         let request = self.host.pair_request()?.to_value();
