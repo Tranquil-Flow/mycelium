@@ -244,19 +244,35 @@ pub fn parse_join_text(text: &Value, now: &Value) -> Result<(JoinLink, Option<f6
     }
     let host = host.strip_suffix('/').unwrap_or(&host);
     let host = host.strip_suffix(TUNNEL_SUFFIX).unwrap_or(host);
-    let tunnel = !host.is_empty()
-        && host.split('-').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        });
-    if !tunnel || py_strip(code_text).is_empty() {
+    // Still a tunnel host, or the bare suffix itself: not a usable relay name, and not a named
+    // origin either. Reject rather than accept a doubled `…trycloudflare.com.trycloudflare.com`.
+    if host == TUNNEL_SUFFIX.trim_start_matches('.') || host.ends_with(TUNNEL_SUFFIX) {
         return Err(invalid_code());
     }
+    // A relay name is `[a-z0-9-]` and gets `.trycloudflare.com` appended; a named tunnel is a dotted
+    // origin that must be used exactly as typed. Before this, the one origin that survives an owner
+    // restart could not be entered at all, so every join had to use a quick tunnel whose origin dies
+    // with the next launch -- which strands every member's lease.
+    let labelled = |value: &str| {
+        !value.is_empty()
+            && value.split(['-', '.']).all(|part| {
+                !part.is_empty()
+                    && part
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            })
+    };
+    if !labelled(host) || py_strip(code_text).is_empty() {
+        return Err(invalid_code());
+    }
+    let origin = if host.contains('.') {
+        format!("https://{host}")
+    } else {
+        format!("https://{host}{TUNNEL_SUFFIX}")
+    };
     let (window_id, code) = normalized_code(code_text)?;
     let link = JoinLink {
-        origin: format!("https://{host}{TUNNEL_SUFFIX}"),
+        origin,
         window_id,
         code,
         seed_key_digest: None,

@@ -81,6 +81,20 @@ fn parse_join_text_matches_the_oracle_on_every_input() {
                     failures.push(format!("{label}: {error:?} ({ty}, {module}) != {err}"));
                 }
             }
+            // DOCUMENTED DIVERGENCE (owner ruling 12 Nov: "it's ok to break parity if we are
+            // essentially fixing bugs/issues/making the product better"). v0.1.4 rejected a dotted
+            // host because quick tunnels were the only kind. A named tunnel origin
+            // (`demo.mycelium.now`) is the only one that survives an owner restart, and it could not
+            // be typed into the join field at all -- which is why every join pinned a quick-tunnel
+            // origin that died on the next launch and stranded the member's lease. A dotted,
+            // non-IP host now parses to that origin; `crates/api/tests/join_link_host.rs` pins the
+            // exact origins, and malformed tunnel hosts are still refused.
+            (Ok(_), None)
+                if text.as_str().is_some_and(|t| {
+                    t.split_whitespace()
+                        .next()
+                        .is_some_and(|h| h.contains('.') && h.parse::<std::net::IpAddr>().is_err())
+                }) => {}
             (got, want) => failures.push(format!("{label}: {got:?} vs oracle {want:?}")),
         }
     }
