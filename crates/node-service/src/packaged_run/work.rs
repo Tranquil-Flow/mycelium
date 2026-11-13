@@ -38,6 +38,21 @@ fn refused(code: &str) -> StepError {
     owner_run::OwnerRunError::new(code).into()
 }
 
+/// The document `prepare` hands the workflow. A stage-sharded compile retains its shard document;
+/// a whole-snapshot run has none, and `_step_slices` (`demo_chain.py:838-839`) passes exactly then
+/// ("whole snapshots: no slice to fetch") because every member binds the copy it already holds.
+fn work_document(sharded: bool, shards: Option<&Value>) -> Result<Value, StepError> {
+    match (sharded, shards) {
+        (true, Some(document)) => Ok(document.clone()),
+        (true, None) => Err(refused("compiler_outputs_changed")),
+        (false, _) => Ok(serde_json::json!({
+            "protocol": "mycelium.source_whole_snapshot.v1",
+            "node_files": {},
+            "node_slice_plans": {},
+        })),
+    }
+}
+
 /// Tokens one native stage prepares for: the oracle's prompt plus the challenge's own output.
 ///
 /// The packed oracle keeps every recorded value under `recorded` (`native_compiler.rs:493` reads
@@ -299,17 +314,24 @@ impl Work {
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
             let tokens = challenge_tokens(&oracle)?;
-            let objects = objects::view(
-                artifact.root(),
-                artifact.stage_shards().map_err(|e| refused(e.0))?,
-            )?;
+            // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
+            // fetch. v0.1.4 binds the snapshot each member already holds
+            // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
+            // shard document to read. Reading it unconditionally refused every packaged run at
+            // this step with `compiler_outputs_changed`.
+            let document = work_document(request.stage_sharded, artifact.stage_shards().ok())?;
+            let objects = if request.stage_sharded {
+                objects::view(artifact.root(), &document)?
+            } else {
+                objects::view_whole(artifact.root())?
+            };
             (
                 (
                     Plan {
                         run_id: state.run_id.clone(),
                         deployment_id: state.deployment_id.clone(),
                         model: json!({"model_id":model.model_id,"resolved_commit":model.resolved_commit,"manifest_digest":model.manifest_digest}),
-                        document: artifact.stage_shards().map_err(|e| refused(e.0))?.clone(),
+                        document,
                         objects: objects.path,
                         journal: artifact.root().join("work-source"),
                         ranges: request
@@ -798,5 +820,26 @@ mod challenge_tokens_tests {
             prompt + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS
         );
         assert!(reference.get("workload").is_none(), "no top-level workload");
+    }
+}
+
+#[cfg(test)]
+mod work_document_tests {
+    //! A packaged run is never stage-sharded (`slice_mode: false`), yet `prepare` used to read the
+    //! shard document unconditionally and refuse `compiler_outputs_changed` at the slices step.
+    //! v0.1.4 passes that step for whole snapshots (`demo_chain.py:838-839`).
+    #[test]
+    fn a_whole_snapshot_run_composes_without_a_shard_document() {
+        let document = super::work_document(false, None).expect("whole document");
+        assert_eq!(document["protocol"], "mycelium.source_whole_snapshot.v1");
+        assert!(document["node_files"].as_object().unwrap().is_empty());
+        assert!(document["node_slice_plans"].as_object().unwrap().is_empty());
+
+        let shards = serde_json::json!({"node_files":{"n":[{"path":"deployment/s.safetensors"}]}});
+        assert_eq!(super::work_document(true, Some(&shards)).unwrap(), shards);
+        match super::work_document(true, None) {
+            Err(super::StepError::Refused(e)) => assert_eq!(e.code, "compiler_outputs_changed"),
+            other => panic!("a sharded run without its document must refuse: {other:?}"),
+        }
     }
 }

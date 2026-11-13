@@ -90,6 +90,34 @@ pub(super) fn view(root: &Path, document: &Value) -> Result<View, StepError> {
         pinned: Arc::new(pinned),
     })
 }
+/// A whole-snapshot run prepares no stage-image bytes: every member binds the snapshot it already
+/// holds (`bind_hf_prepositions`, `managed_transfers.py:22-131`), so the content-addressed view
+/// exists for the workflow's own journal but pins nothing.
+pub(super) fn view_whole(root: &Path) -> Result<View, StepError> {
+    use std::{
+        fs,
+        os::unix::fs::{DirBuilderExt, MetadataExt},
+    };
+    let invalid = || refused("compiler_objects_invalid");
+    let objects = root.join("work-objects");
+    let metadata = match fs::DirBuilder::new().mode(0o700).create(&objects) {
+        Ok(()) => fs::symlink_metadata(&objects),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => fs::symlink_metadata(&objects),
+        Err(_) => return Err(invalid()),
+    }
+    .map_err(|_| invalid())?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o7777 != 0o700
+        || metadata.uid() != rustix::process::getuid().as_raw()
+    {
+        return Err(invalid());
+    }
+    Ok(View {
+        path: objects,
+        pinned: Arc::new(runtime::artifact_journal::PinnedObjects::new()),
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;
