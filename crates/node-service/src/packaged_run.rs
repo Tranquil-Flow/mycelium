@@ -175,6 +175,10 @@ pub struct WeakRun {
     sidecar: Option<PathBuf>,
 }
 impl PackagedRun {
+    /// `_relay_is_serving` (app.py:770-777): the relay's renewal probe reads this host's run state.
+    pub fn set_serving(&self, serving: bool) {
+        self.network.set_serving(serving);
+    }
     pub fn new(
         authority: Arc<Mutex<Authority>>,
         network: Arc<Network>,
@@ -600,6 +604,16 @@ impl OwnerRun {
         let result = lock(&self.runs).demo_action(action, body, &mut facts);
         if result.is_ok() && action == Action::DemoStop {
             self.host.stop_work();
+        }
+        // `_relay_is_serving` (app.py:770-777): the relay's renewal probe reads the run's state. Set it
+        // from the action that just settled, not from a view that may not have caught up yet.
+        if result.is_ok() {
+            let serving = match action {
+                Action::DemoStart => true,
+                Action::DemoStop => false,
+                _ => self.active(),
+            };
+            self.host.set_serving(serving);
         }
         result
     }

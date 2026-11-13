@@ -115,6 +115,10 @@ pub struct Network {
     work_session: crate::packaged_work::SessionCell,
     work_network: crate::packaged_work::NetworkChoice,
     work_closed: AtomicBool,
+    /// `_relay_is_serving` (app.py:770-777): raised by the run chain while an owner run is active, so
+    /// a relay may extend its window only then. The packaged host has no swarm publisher yet, so the
+    /// published-listing half of the v0.1.4 predicate has nothing to read; it arrives with one.
+    serving: std::sync::Arc<AtomicBool>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -149,7 +153,18 @@ impl Network {
             work_session: Arc::new(Mutex::new(None)),
             work_network: config.work_network,
             work_closed: AtomicBool::new(false),
+            serving: std::sync::Arc::new(AtomicBool::new(false)),
         })
+    }
+    /// The signal `_relay_is_serving` answers from: the run chain raises it for the length of a run.
+    pub fn set_serving(&self, serving: bool) {
+        self.serving.store(serving, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// The probe a relay reads when it decides whether its window may extend. Cloned into the relay's
+    /// lifetime thread, so it shares the flag rather than borrowing this host.
+    fn serving_probe(&self) -> Probe {
+        let flag = self.serving.clone();
+        std::sync::Arc::new(move || Ok(flag.load(std::sync::atomic::Ordering::SeqCst)))
     }
     /// `_device_memory_bytes()` (app.py:1123-1126 @ f4e366e9): the RAM that bounds this Mac's
     /// per-run memory consent, for the join's caps check and the status's memory choices alike: the
@@ -276,9 +291,11 @@ impl Network {
             Self::fresh(&self.root, &self.hooks),
         );
         relay.set_start_guard(self.start_guard.clone());
-        // `_relay_is_serving`: the packaged host has no owner run, so the relay never extends
-        // itself; it closes at the end of the granted window.
-        let probe: Probe = Arc::new(|| Ok(false));
+        // `_relay_is_serving` (app.py:770-777): the relay extends its own window only while an owner
+        // run is active. This host reports the run chain's signal; it used to answer false always,
+        // which is why the card could promise a renewal every 30 minutes and show 0 renewals while
+        // the tunnel closed mid-run at its first deadline.
+        let probe = self.serving_probe();
         let outcome = relay.start_public_relay(
             body,
             &mut Endpoint {
@@ -1025,4 +1042,24 @@ pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, n
             card
         }
     };
+}
+
+#[cfg(test)]
+mod serving_probe_tests {
+    //! `_relay_is_serving` answered false unconditionally, so the packaged app's relay could never
+    //! extend its window: the card promised a renewal every 30 minutes and the tunnel closed at its
+    //! first deadline, mid-run. The probe must follow the run's own signal instead.
+    #[test]
+    fn the_relay_probe_reports_serving_only_while_a_run_is_active() {
+        let root = std::env::temp_dir().join(format!("net-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("scratch root");
+        let network = super::Network::new(&root, super::NetworkConfig::default());
+        let probe = network.serving_probe();
+        assert!(!probe().expect("probe"), "no run has started");
+        network.set_serving(true);
+        assert!(probe().expect("probe"), "an active run may extend the window");
+        network.set_serving(false);
+        assert!(!probe().expect("probe"), "the run ended");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
