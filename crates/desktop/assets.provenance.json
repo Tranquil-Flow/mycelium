@@ -27,6 +27,10 @@
     "style.css": {
       "sha256": "36faf6b13553383071768167e81eac5b34e9c237123e1fba52d5f0cb42a86d2d",
       "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art). The header mark is 56px with the wordmark block vertically centred against it, and disclosure buttons are styled as plain text inside the summary."
+    },
+    "mycelium-field.js": {
+      "sha256": "6d6b3a73e02e122a8a8a8f20f302042a068928834a3ea231c7d853f023461d9e",
+      "reason": "Was carried verbatim from mycelium_swarm_directory/web. The life layer's 128 px tiles left whole colonies clipped as squares: a tile first painted while its neighbourhood was empty kept `cands = false` for good, so strands that grew into it later were never drawn there and terminated on the tile edge. Candidates are now recomputed until a tile has held a strand, boxes are tested with a 2 px bleed so both sides of an edge draw the same geometry, and the hero art fades in over its first 200 px instead of starting on a hard line under the header."
     }
   },
   "added": {
@@ -41,10 +45,6 @@
     "mycelium-boot.js": {
       "sha256": "033439da2eb53eca740e22fc56f45c3824c636d663161ed91f7ee9d6737bcf6d",
       "source": "app-local: boots createHero/createField, dark Green only (no hue or theme switch)"
-    },
-    "mycelium-field.js": {
-      "sha256": "1f55fe0033ff030e907d0577167e34676c9639caf16cc91fb0f09eca388d2c01",
-      "source": "mycelium_swarm_directory/web/mycelium-field.js (verbatim)"
     },
     "mycelium-geometry.js": {
       "sha256": "1eb2aeac5210f59df07e1c39457c00d6fb1dd084f8f266e10a58f4d252000591",

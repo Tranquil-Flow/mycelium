@@ -691,6 +691,7 @@ const MP = Object.freeze({ GAIN: 0.92, FAST: 38, SLOW: 22, CUTOFF: 600, LAMBDA: 
 const LIFE_HZ = 15, // life ticks per second (each repaints only what changed)
   LIFE_TILE = 128, // CSS px; the life layer is a page-anchored grid of tiles
   LIFE_PAD = 192, // tiles kept above and below the viewport
+  HERO_FADE = 200, // CSS px the hero art fades in over from its own top edge
   // A strand repaints when its tip has moved 1 CSS px (2 device px at DPR2):
   // at 8-20 px/s that is 8-20 repaints a second, not one every tick.
   LIFE_STEP = 1;
@@ -2231,12 +2232,18 @@ export function createField({ stage, state, reduce }) {
     // Tiles no living strand reaches stay 1x1 placeholders for good; the rest
     // keep their backing store (re-allocating a tile whenever its strands
     // had all died back cost more than the paint).
-    if (tl.cands === undefined) {
+    // A strand that merely grazes the tile edge is drawn on both sides of it, so the two tiles
+    // meet on the same geometry instead of one of them ending the strand on a 128 px line.
+    const BLEED = 2;
+    // Candidates are recomputed until a tile has actually held a strand: a tile first painted while
+    // its neighbourhood was empty used to stay `cands = false` forever, so strands that grew into it
+    // later were never drawn there and terminated on the tile edge (the "square colonies" artifact).
+    if (tl.cands !== true) {
       tl.cands = false;
       for (const base of copiesIn(Y0, Y1))
         for (const p of lifeNear(Y0 - base, Y1 - base)) {
           const b = p.box;
-          if (!(b[2] < X0 || b[0] > X1 || b[3] + base < Y0 || b[1] + base > Y1)) tl.cands = true;
+          if (!(b[2] < X0 - BLEED || b[0] > X1 + BLEED || b[3] + base < Y0 - BLEED || b[1] + base > Y1 + BLEED)) tl.cands = true;
         }
       if (scene?.lifeChanges && scene.hero.top + scene.hero.H > Y0 && scene.hero.top < Y1) tl.cands = true;
     }
@@ -2257,7 +2264,7 @@ export function createField({ stage, state, reduce }) {
     for (const base of copiesIn(Y0, Y1)) {
       for (const p of lifeNear(Y0 - base, Y1 - base)) {
         const b = p.box;
-        if (b[2] < X0 || b[0] > X1 || b[3] + base < Y0 || b[1] + base > Y1) continue;
+        if (b[2] < X0 - BLEED || b[0] > X1 + BLEED || b[3] + base < Y0 - BLEED || b[1] + base > Y1 + BLEED) continue;
         drawn += lifeStrand(p, t);
       }
       g.setTransform(d, 0, 0, d, -X0 * d, (base - Y0) * d);
@@ -2269,6 +2276,25 @@ export function createField({ stage, state, reduce }) {
         g.setTransform(d, 0, 0, d, -X0 * d, (top - Y0) * d);
         g.lineCap = "butt";
         drawn += scene.drawLife(g, t, A, X0, X1, Y0 - top, Y1 - top);
+      }
+      // The hero art has a real top edge; painted at full strength it reads as a knife-cut under the
+      // header. Fade it in over the first HERO_FADE page px so the art arrives instead of starting.
+      const fadeTop = top,
+        fadeBottom = top + HERO_FADE;
+      if (drawn && fadeTop < Y1 && fadeBottom > Y0) {
+        const y0 = (Math.max(Y0, fadeTop) - Y0) * d,
+          y1 = (Math.min(Y1, fadeBottom) - Y0) * d,
+          ramp = g.createLinearGradient(0, y0, 0, y1);
+        // destination-out over the band alone: fully erased at the art's top edge, untouched at the
+        // band's bottom, and no pixels outside the band are affected.
+        ramp.addColorStop(0, "rgba(0,0,0,1)");
+        ramp.addColorStop(1, "rgba(0,0,0,0)");
+        g.save();
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.globalCompositeOperation = "destination-out";
+        g.fillStyle = ramp;
+        g.fillRect(0, y0, full, Math.max(1, y1 - y0));
+        g.restore();
       }
     }
     tl.dirty = false;
