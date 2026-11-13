@@ -240,18 +240,29 @@ fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Resu
     let Some(state) = crate::peer::load_membership_state(dir)? else {
         return Ok(());
     };
+    // An existing grant is the user's: never re-grant over it (different caps are a refusal, not an
+    // update). Only a fresh worker - or one whose grant was withdrawn - needs one recorded.
+    if standing_consent::load(dir).map_err(|e| PublicError::new(409, e.0))?.is_some_and(|record| record["state"] != "withdrawn") {
+        return Ok(());
+    }
     let storage = policy
         .get("storage_bytes")
         .and_then(Value::as_u64)
         .unwrap_or(4_000_000_000);
+    // The bounds the app's own grant uses: the user's storage limit, the member's chosen wall from
+    // the budget table, and the same memory/command ceilings the join path records.
+    // Caps are integers (`_int_in`): a float wall is refused as `standing_consent_caps_invalid`.
+    let wall = budgets::BudgetId::MemberChosenWall
+        .span(budgets::Entries::ZERO)
+        .map_or(1800u64, |s| s.millis() / 1000);
     let body = json!({
         "acknowledged": true,
         "disclosure_digest": standing_consent::DISCLOSURE_DIGEST,
         "caps": {
             "storage_bytes": storage,
-            "max_memory_bytes": 12_884_901_888u64,
-            "max_wall_seconds": 1800u64,
-            "max_commands": 5000u64,
+            "max_memory_bytes": 4_000_000_000u64,
+            "max_wall_seconds": wall,
+            "max_commands": 1000u64,
         },
     });
     standing_consent::grant(dir, &body, policy, now(), None)
