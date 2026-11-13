@@ -453,29 +453,7 @@ impl<H: ChainHost> TargetHost for Host<H> {
 }
 /// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
 pub fn program(root: &Path) -> OResult<TrustedBootstrap> {
-    let config = private_state::load(
-        &root.join("bootstrap-program.json"),
-        private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
-    )
-    .map_err(|e| OwnerError(e.0))?
-    .ok_or(OwnerError("native_bootstrap_unavailable"))?;
-    let config = Value::Object(config);
-    if config.as_object().is_none_or(|o| o.len() != 4)
-        || config["protocol"] != "mycelium.bootstrap_program.v1"
-    {
-        return Err(OwnerError("native_bootstrap_configuration_invalid"));
-    }
-    let text = |k: &str| {
-        config[k]
-            .as_str()
-            .ok_or(OwnerError("native_bootstrap_configuration_invalid"))
-    };
-    TrustedBootstrap::open(
-        Path::new(text("path")?),
-        text("sha256")?,
-        text("source_sha")?,
-    )
-    .map_err(OwnerError)
+    crate::bootstrap_process::installed_program(root).map_err(OwnerError)
 }
 /// Drive a started pump on its own thread until Stop (or its stop command) and close it there.
 pub fn spawn<H: TargetHost + 'static>(

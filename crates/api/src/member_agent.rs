@@ -1594,31 +1594,10 @@ pub fn spawn_pump<T: TargetHost + 'static>(
         failure: None,
     }
 }
-/// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
+/// The hello-only program this installation runs: `bootstrap-program.json` when an operator admitted
+/// one, else the model-free child sealed into the bundle beside this executable.
 pub fn bootstrap_program(root: &Path) -> OResult<TrustedBootstrap> {
-    let config = private_state::load(
-        &root.join("bootstrap-program.json"),
-        private_state::private_json_limit().map_err(|e| OwnerError(e.0))?,
-    )
-    .map_err(|e| OwnerError(e.0))?
-    .ok_or(OwnerError("native_bootstrap_unavailable"))?;
-    let config = Value::Object(config);
-    if config.as_object().is_none_or(|o| o.len() != 4)
-        || config["protocol"] != "mycelium.bootstrap_program.v1"
-    {
-        return Err(OwnerError("native_bootstrap_configuration_invalid"));
-    }
-    let text = |k: &str| {
-        config[k]
-            .as_str()
-            .ok_or(OwnerError("native_bootstrap_configuration_invalid"))
-    };
-    TrustedBootstrap::open(
-        Path::new(text("path")?),
-        text("sha256")?,
-        text("source_sha")?,
-    )
-    .map_err(OwnerError)
+    crate::bootstrap_process::installed_program(root).map_err(OwnerError)
 }
 #[allow(unsafe_code)] // geteuid(2) has no preconditions
 fn effective_uid() -> u32 {

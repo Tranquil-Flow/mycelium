@@ -18,6 +18,60 @@ use std::{
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, &'static str>;
+/// The v0.1.4 oracle commit this tree ports; `source_sha` of a program sealed into the bundle.
+const SEALED_PROGRAM_SOURCE: &str = "f4e366e98a1f705dfaf182897044500d290dbd7f";
+/// The admitted hello program for this installation.
+///
+/// `bootstrap-program.json` is the record an operator writes to name the program; no installed copy of
+/// this product ever wrote one -- only test fixtures do -- so both the member's stage and the owner
+/// contributor's stage stopped with `native_bootstrap_unavailable` on every packaged run. The model-free
+/// child ships inside the signed bundle beside the executable, so its own bytes are the pin: the digest
+/// is read from the file that will be executed and the source revision is the oracle commit ported here.
+pub fn installed_program(root: &Path) -> Result<TrustedBootstrap> {
+    match admitted(root) {
+        Err("native_bootstrap_unavailable") => sealed(),
+        other => other,
+    }
+}
+fn admitted(root: &Path) -> Result<TrustedBootstrap> {
+    let config = crate::preferences::private_state::load(
+        &root.join("bootstrap-program.json"),
+        crate::preferences::private_state::private_json_limit().map_err(|e| e.0)?,
+    )
+    .map_err(|e| e.0)?
+    .ok_or("native_bootstrap_unavailable")?;
+    let config = Value::Object(config);
+    if config.as_object().is_none_or(|o| o.len() != 4)
+        || config["protocol"] != "mycelium.bootstrap_program.v1"
+    {
+        return Err("native_bootstrap_configuration_invalid");
+    }
+    let text = |k: &str| {
+        config[k]
+            .as_str()
+            .ok_or("native_bootstrap_configuration_invalid")
+    };
+    TrustedBootstrap::open(
+        Path::new(text("path")?),
+        text("sha256")?,
+        text("source_sha")?,
+    )
+}
+/// The child sealed beside this executable (`<exe dir>/native/mycelium-hello-bootstrap`).
+fn sealed() -> Result<TrustedBootstrap> {
+    let exe = std::env::current_exe().map_err(|_| "native_bootstrap_unavailable")?;
+    let path = exe
+        .parent()
+        .ok_or("native_bootstrap_unavailable")?
+        .join("native")
+        .join("mycelium-hello-bootstrap");
+    let bytes = fs::read(&path).map_err(|_| "native_bootstrap_unavailable")?;
+    let digest = protocol::canonical::sha256_prefixed(&bytes);
+    let sha256 = digest
+        .strip_prefix("sha256:")
+        .ok_or("native_bootstrap_unavailable")?;
+    TrustedBootstrap::open(&path, sha256, SEALED_PROGRAM_SOURCE)
+}
 fn duration(id: B) -> Result<Duration> {
     id.span(Entries::ZERO)
         .map(|s| Duration::from_millis(s.millis()))
