@@ -1056,3 +1056,20 @@ fn an_app_stop_never_shows_the_native_chat_chat_cancelled() {
         "/api/stop"
     );
 }
+
+/// The invite card asks for `<img src="/api/pair/window/qr/{id}.svg">` and nothing served that path --
+/// the only source hit was the auth allowlist, so every QR in the app was a broken image. This pins the
+/// route to the host: an unknown window must refuse *for being unknown*, not fall through as a 404.
+#[test]
+fn the_invite_qr_route_is_served_by_the_host() {
+    let (_private, host) = host();
+    let reply = answered_within(&host, "GET", "/api/pair/window/qr/ZZZZ.svg", json!({}))
+        .expect("the QR route must answer rather than hang");
+    assert_ne!(reply.status, 404, "the QR route must be served, not unknown");
+    let body = String::from_utf8_lossy(&reply.body);
+    assert!(
+        body.contains("pairing_window_unknown") || body.contains("authority_state_invalid"),
+        "expected a named refusal, got {} {body}",
+        reply.status
+    );
+}
