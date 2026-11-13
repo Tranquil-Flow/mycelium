@@ -625,8 +625,13 @@ fn handle(shared: &Arc<ProxyShared>, mut stream: TcpStream) {
     stream.shutdown(Shutdown::Both).unwrap_or(());
 }
 fn route_unknown(path: &str) -> bool {
+    // The packaged member's work binding (`stage_contract::member_work::PATH`) is served by the
+    // seed's `Inbox` extension, so it must reach the backend like `/seed/` and `/managed-control/`.
+    // Without it the relay answers `relay_route_unknown` (404) and the member's publication loop
+    // retries against a route that does exist.
     let known = path.starts_with("/seed/")
         || path.starts_with("/managed-control/")
+        || path == stage_contract::member_work::PATH
         || path.starts_with(SWARM_PREFIX)
         || LOCAL_PREFIXES.iter().any(|p| path.starts_with(p))
         || chat_path(path);
@@ -1933,5 +1938,23 @@ mod lifetime_guard_tests {
         assert!(events.try_recv().is_err(), "no closer waited for a release");
         drop(relay);
         std::fs::remove_dir_all(&root).expect("scratch root");
+    }
+}
+
+#[cfg(test)]
+mod member_work_route_tests {
+    //! A joined Mac registers its packaged work binding at
+    //! `stage_contract::member_work::PATH`, which the owner's seed serves from
+    //! `member_control::joined::inbox::Inbox`. The relay forwards only the paths in its own
+    //! table, so a missing prefix answers `relay_route_unknown` (404) and the member's
+    //! publication loop retries forever.
+    use super::*;
+
+    #[test]
+    fn the_member_work_registration_is_forwarded_and_not_refused_as_unknown() {
+        assert!(!route_unknown(stage_contract::member_work::PATH));
+        assert!(!route_unknown("/member-work/v1/register"));
+        assert!(route_unknown("/member-work"));
+        assert!(route_unknown("/member-work/../seed/identity"));
     }
 }
