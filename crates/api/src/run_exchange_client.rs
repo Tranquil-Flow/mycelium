@@ -213,7 +213,13 @@ impl ExchangeClient {
         }
         let report = crate::run_exchange::validate_report(&report)
             .map_err(|_| ClientError::new("demo_report_invalid"))?;
-        self.call(PATH_REPORT, REPORT, json!({"report": report}))
+        eprintln!("l10_member_report_sending");
+        let outcome = self.call(PATH_REPORT, REPORT, json!({"report": report}));
+        match &outcome {
+            Ok(_) => eprintln!("l10_member_report_ok"),
+            Err(error) => eprintln!("l10_member_report_failed:{error:?}"),
+        }
+        outcome
     }
 }
 

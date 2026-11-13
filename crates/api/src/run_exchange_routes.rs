@@ -122,6 +122,7 @@ impl SignedRoutes<'_> {
         member: &Value,
         now: f64,
     ) -> Result<Value, ContractError> {
+        eprintln!("l10_verify:{path}");
         use budgets::{BudgetId, Entries};
         request_node(path, envelope, self.swarm_id)?;
         let protocol = if path == PATH_READ { READ } else { REPORT };
@@ -194,8 +195,21 @@ impl SignedRoutes<'_> {
         member: &Value,
         now: f64,
     ) -> Result<Value, ContractError> {
-        let verified = self.verify_guarded(path, envelope, member, now)?;
-        self.complete_guarded(path, verified, now, None, None)
+        // Log-only: a member that never calls these routes and a member whose call is refused look
+        // identical from the owner's side ("N of M Macs reported"), so name which one happened.
+        let verified = match self.verify_guarded(path, envelope, member, now) {
+            Ok(verified) => verified,
+            Err(error) => {
+                eprintln!("l10_route_reject:{path}:{}", error.0);
+                return Err(error);
+            }
+        };
+        let outcome = self.complete_guarded(path, verified, now, None, None);
+        match &outcome {
+            Ok(_) => eprintln!("l10_route_ok:{path}"),
+            Err(error) => eprintln!("l10_route_reject:{path}:{}", error.0),
+        }
+        outcome
     }
     fn complete_guarded(
         &self,
@@ -205,6 +219,7 @@ impl SignedRoutes<'_> {
         prepared: Option<Value>,
         received_at: Option<f64>,
     ) -> Result<Value, ContractError> {
+        eprintln!("l10_complete:{path}");
         use budgets::{BudgetId, Entries};
         use serde_json::json;
         let seconds = |id: BudgetId| {
@@ -245,6 +260,7 @@ impl SignedRoutes<'_> {
             .signer
             .sign(&response)
             .map_err(|_| ContractError("managed_control_signer_invalid"))?;
+        eprintln!("l10_complete_ok:{path}");
         Ok(
             json!({"protocol":protocol::managed::SIGNED_ENVELOPE_PROTOCOL,"statement":response,"signature":signature,"verification_key":self.signer.public_key_record()}),
         )

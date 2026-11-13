@@ -411,7 +411,9 @@ pub fn run_descriptors_step(
         stale: BTreeSet::new(),
         stale_since: BTreeMap::new(),
     };
-    wait_with(
+    // Log-only: keep the probes reachable even when the wait itself fails, which is the case that
+    // actually stops the run ("N of M Macs reported") -- the `?` used to skip them entirely.
+    let waited = wait_with(
         env,
         |env| {
             port.tick_local();
@@ -421,7 +423,12 @@ pub fn run_descriptors_step(
         "member_descriptors_timeout",
         interval,
     )
-    .map(|_| ())?;
+    .map(|_| ());
+    eprintln!("l10_desc_wait:{:?}", waited.as_ref().map(|_| "ok"));
+    eprintln!("l10_desc_expected:{expected:?}");
+    eprintln!("l10_desc_seen:{:?}", collector.seen.keys().collect::<Vec<_>>());
+    eprintln!("l10_desc_reasons:{:?}", collector.reasons);
+    waited?;
     // The step proceeds with the Macs that reported; the compiler decides if enough.
     let reports = run_reports(port, state)?;
     let wall = env.wall();

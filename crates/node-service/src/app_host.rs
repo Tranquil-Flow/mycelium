@@ -701,6 +701,12 @@ impl PackagedHost {
     /// closed when the loop ends (Quit, `demo_app.close` -> `agent.close()`, demo_app.py:205-207).
     pub fn with_member_agent(mut self) -> Self {
         let Ok(authority) = &self.authority else {
+            // Silent before: a target whose authority failed to load simply never ran its standing
+            // loop, so nothing ever polled the owner and the run reported "N-1 of N Macs reported".
+            eprintln!(
+                "l11_member_agent_skipped:{}",
+                self.authority.as_ref().err().copied().unwrap_or("unknown")
+            );
             return self;
         };
         let node = self.node.clone();

@@ -971,8 +971,14 @@ impl Standing {
     fn pass(&mut self) {
         self.agent.tick(&self.member);
         // `_record_status`: the card shows the last completed pass.
+        // Log-only, on change: a joined Mac that never reports looks identical in the owner's run
+        // to a Mac that is not there at all, so record what this pass actually produced.
         if let Some(card) = self.agent.status() {
-            *lock(&self.member.network.demo_target) = Some(card);
+            let mut slot = lock(&self.member.network.demo_target);
+            if slot.as_ref() != Some(&card) {
+                eprintln!("l11_standing_card:{card}");
+            }
+            *slot = Some(card);
         }
     }
 }
