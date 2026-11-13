@@ -587,7 +587,23 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
             return Err(PublicError::new(400, "already_joined"));
         }
         let now = self.host.now_seconds();
-        let link = self.host.parse_join_text(&body["join"], now)?;
+        // A bare code names no relay; when this Mac already knows one (a lapse, a rejoin, or a kept
+        // identity), it is enough. With no remembered relay, keep the honest refusal rather than
+        // guessing: a Mac that has never joined cannot know where the code lives.
+        let link = match self.host.parse_join_text(&body["join"], now) {
+            Ok(link) => link,
+            Err(err) => {
+                let remembered = crate::peer::load_membership_state(&self.root)
+                    .ok()
+                    .flatten()
+                    .and_then(|state| state.get("origin").and_then(Value::as_str).map(str::to_owned));
+                match remembered.filter(|_| crate::join_link::is_bare_code(&body["join"])) {
+                    Some(origin) => crate::join_link::link_for_known_origin(&origin, &body["join"])
+                        .map_err(|_| err)?,
+                    None => return Err(err),
+                }
+            }
+        };
         // The grant is validated against THIS consent before any role change.
         let standing = body["standing_consent"].as_object();
         let standing = standing

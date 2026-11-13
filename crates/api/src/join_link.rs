@@ -279,3 +279,26 @@ pub fn parse_join_text(text: &Value, now: &Value) -> Result<(JoinLink, Option<f6
     };
     Ok((link, None))
 }
+
+/// A pasted code with no relay name (`ABCD-EFGH-JKMN`). It names no origin, so on its own it cannot
+/// become a join link: only a Mac that already knows the relay it last joined through can resolve it.
+pub fn is_bare_code(text: &Value) -> bool {
+    text.as_str()
+        .map(py_strip)
+        .filter(|t| !t.is_empty() && !t.contains(' '))
+        .is_some_and(|t| normalized_code(t).is_ok())
+}
+
+/// A bare code with the relay this Mac already knows (`membership.state.json`'s origin).
+pub fn link_for_known_origin(origin: &str, text: &Value) -> Result<JoinLink, PublicError> {
+    let raw = text.as_str().map(py_strip).ok_or_else(invalid_code)?;
+    let (window_id, code) = normalized_code(raw)?;
+    let origin = canonical_https_origin(&Value::String(origin.to_owned()))
+        .map_err(|_| invalid_code())?;
+    Ok(JoinLink {
+        origin,
+        window_id,
+        code,
+        seed_key_digest: None,
+    })
+}
