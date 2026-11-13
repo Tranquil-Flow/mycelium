@@ -712,21 +712,28 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
                 progress,
             })
         };
-        let Ok(acquisition) = self.acquisition() else {
-            // `_ensure_whole_model` (demo_target.py:600-607): with no acquisition of its own, a
-            // joined Mac STARTS one for the announced model and reports progress. v0.2 refused
-            // here instead, so a member without the snapshot could never serve and the owner's
+        // `_ensure_whole_model` (demo_target.py:594-607): this Mac's own acquisition must be the
+        // announced model. A Mac left holding an acquisition for a different run model used to keep
+        // it and answer `demo_model_mismatch` forever, because the reopen branch below only ran when
+        // this Mac had no acquisition at all. v0.1.4 posted the announced choice to `/api/run-model`
+        // and reopened its acquisition, so the announced model replaced whatever was held.
+        let mut current = self.acquisition().ok();
+        let held = current.as_ref().map(|acquisition| {
+            let model = acquisition.model();
+            (model.model_id.to_owned(), model.resolved_commit.to_owned())
+        });
+        if held.as_ref() != Some(&want) {
+            // `_ensure_whole_model` (demo_target.py:600-607): with no acquisition of its own, or one
+            // for another model, a joined Mac STARTS one for the announced model and reports
+            // progress. v0.2 refused here instead, so a member could never serve and the owner's
             // run waited on "Joined Macs report in" for a Mac that was healthy but starving.
             let choice = a["model"]["choice"].clone();
             return match self.host.start_whole_model(&choice) {
                 Ok(()) => waiting("downloading_model", None, None),
                 Err(code) => waiting("error", Some(&code), None),
             };
-        };
-        let model = acquisition.model();
-        if (model.model_id.to_owned(), model.resolved_commit.to_owned()) != want {
-            return waiting("error", Some("demo_model_mismatch"), None);
         }
+        let acquisition = current.take().unwrap_or_else(|| unreachable!("checked above"));
         let status = acquisition.status();
         let progress =
             json!({"done_bytes": status.downloaded_bytes, "total_bytes": status.total_bytes});
