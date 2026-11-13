@@ -155,6 +155,13 @@ pub trait MemberHost: Send + Sync + Sized + 'static {
     fn resource_check(&self) -> Option<String>;
     /// `DemoApp.acquisition`.
     fn acquisition(&self) -> Option<Acquisition>;
+    /// `demo_target._ensure_whole_model` (demo_target.py:543-612): this joined Mac opens its own
+    /// acquisition of the owner's announced model and starts it under its standing consent —
+    /// `self.app.action('/api/run-model', {'choice'})` then `/api/model/download` with the same
+    /// cap. The default refuses by name, so a host without a model source never pretends to fetch.
+    fn start_whole_model(&self, _choice: &Value) -> Result<(), String> {
+        Err("member_model_download_not_ported".into())
+    }
     /// How this member reaches the owner's seed.
     fn member_seed_options(&self) -> SeedOptions;
     /// `installed_sidecar()` (`native_runtime.py:8-22`).
@@ -434,7 +441,11 @@ impl<H: MemberHost> MemberAgent<H> {
             if let Err(code) = publication {
                 host.close_work();
                 eprintln!("member_work_publication:{code}");
-                return;
+                // `auto_poll_step` (standing_consent.py:357-363) reports BEFORE it accepts, and a
+                // refusal to accept work never suppresses the report. Returning here was the v0.2
+                // divergence: a joined Mac whose resource policy denies work (a battery-only Mac
+                // with `ac_only`) then never reported in at all, so the owner's run waited on
+                // "Joined Macs report in" forever while that Mac looked healthy on its own page.
             }
         }
         // `if report_due: outcome['report'] = app.auto_report('periodic')` (standing_consent.py:
@@ -702,7 +713,15 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
             })
         };
         let Ok(acquisition) = self.acquisition() else {
-            return waiting("error", Some("member_model_download_not_ported"), None);
+            // `_ensure_whole_model` (demo_target.py:600-607): with no acquisition of its own, a
+            // joined Mac STARTS one for the announced model and reports progress. v0.2 refused
+            // here instead, so a member without the snapshot could never serve and the owner's
+            // run waited on "Joined Macs report in" for a Mac that was healthy but starving.
+            let choice = a["model"]["choice"].clone();
+            return match self.host.start_whole_model(&choice) {
+                Ok(()) => waiting("downloading_model", None, None),
+                Err(code) => waiting("error", Some(&code), None),
+            };
         };
         let model = acquisition.model();
         if (model.model_id.to_owned(), model.resolved_commit.to_owned()) != want {

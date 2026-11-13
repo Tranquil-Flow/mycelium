@@ -776,6 +776,9 @@ pub struct MemberSeams {
     pub resource: ResourceGate,
     /// `DemoApp.acquisition`.
     pub acquisition: Box<dyn Fn() -> Option<api::acquisition::Acquisition> + Send + Sync>,
+    /// `_ensure_whole_model` (demo_target.py:600-607): start this Mac's own acquisition of the
+    /// owner's announced model, so a joined Mac with no snapshot fetches one instead of refusing.
+    pub start_whole_model: Box<dyn Fn(&Value) -> Result<(), String> + Send + Sync>,
 }
 /// The member's one bootstrap worker slot (`app.authority`'s control worker on a joined Mac).
 #[derive(Default)]
@@ -845,6 +848,9 @@ impl api::member_agent::MemberHost for PackagedMember {
     }
     fn acquisition(&self) -> Option<api::acquisition::Acquisition> {
         (self.seams.acquisition)()
+    }
+    fn start_whole_model(&self, choice: &Value) -> Result<(), String> {
+        (self.seams.start_whole_model)(choice)
     }
     fn member_seed_options(&self) -> SeedOptions {
         self.network.seams.member_seed.clone()

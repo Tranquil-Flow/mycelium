@@ -279,6 +279,51 @@ impl ModelSource {
         // Plain values and a cloneable handle: a panicked holder cannot leave them half-written.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    /// A joined Mac's `_ensure_whole_model` (demo_target.py:600-607): save the owner's announced
+    /// choice for this root, open THIS Mac's own acquisition (the target cache) and start it under
+    /// the standing consent's cap — the two actions v0.1.4 posted to its own `/api/run-model` and
+    /// `/api/model/download`. Returning a refusal here is what used to leave a joined Mac with no
+    /// snapshot unable to serve at all (`member_model_download_not_ported`).
+    pub fn start_member_whole_model(&self, root: &Path, choice: &Value) -> Result<(), String> {
+        let name = choice
+            .as_str()
+            .ok_or_else(|| "demo_model_choice_unknown".to_owned())?;
+        run_model::save_choice(root, name).map_err(|e| e.code.to_owned())?;
+        let cap = api::preferences::standing_consent::load(root)
+            .ok()
+            .flatten()
+            .and_then(|grant| grant.get("caps").and_then(|c| c["storage_bytes"].as_u64()))
+            .ok_or_else(|| "standing_consent_required".to_owned())?;
+        let consent = serde_json::json!({
+            "download_acknowledged": true,
+            "max_download_bytes": cap,
+            "storage_limit_bytes": cap,
+        });
+        let transport = || self.transport.clone();
+        let site = AcquisitionSite {
+            root,
+            sources: &self.sources,
+            target: true,
+            run_model_env: None,
+            transport: &transport,
+        };
+        let mut state = self.lock();
+        let Acquisitions {
+            acquisition,
+            active,
+            policy_error,
+            ..
+        } = &mut *state;
+        let mut view = AcquisitionView {
+            acquisition,
+            active,
+            policy_error,
+        };
+        app_host::open_acquisition(&mut view, &site).map_err(|e| e.code.to_owned())?;
+        app_host::acquisition_start(&mut view, &consent)
+            .map(|_| ())
+            .map_err(|e| e.code.to_owned())
+    }
     /// One `api::app_host` acquisition step for the owner whose private root is `root`.
     fn step<R>(
         &self,
@@ -711,6 +756,7 @@ impl PackagedHost {
         };
         let node = self.node.clone();
         let (resource, acquisition) = (self.model.clone(), self.model.clone());
+        let start_source = acquisition.clone();
         let seams = crate::packaged_network::MemberSeams {
             closed: Box::new(move || node.closed().unwrap_or(true)),
             // `app._resource_check()`: this Mac observed now against the saved policy; without
@@ -733,6 +779,16 @@ impl PackagedHost {
                     .as_ref()
                     .and_then(|source| source.lock().acquisition.clone())
             }),
+            start_whole_model: {
+                let acquisition = start_source;
+                let root = self.root.clone();
+                Box::new(move |choice: &Value| {
+                    let source = acquisition
+                        .as_ref()
+                        .ok_or_else(|| "member_model_download_not_ported".to_owned())?;
+                    source.start_member_whole_model(&root, choice)
+                })
+            },
         };
         let member = crate::packaged_network::PackagedMember::new(
             authority.clone(),

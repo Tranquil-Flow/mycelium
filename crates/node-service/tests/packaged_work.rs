@@ -47,7 +47,10 @@ fn packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership()
             closed: Box::new(|| false),
             resource: Box::new(|_| None),
             acquisition: Box::new(|| None),
-        },
+            start_whole_model: Box::new(|_| {
+                Err("member_model_download_not_ported".to_string())
+            }),
+            },
     );
     let mut agent = MemberAgent::default();
     agent.tick(&member);

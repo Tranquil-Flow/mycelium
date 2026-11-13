@@ -192,7 +192,10 @@ impl Fixture {
                 closed: Box::new(|| false),
                 resource: Box::new(|_| None),
                 acquisition: Box::new(|| None),
-            },
+                start_whole_model: Box::new(|_| {
+                    Err("member_model_download_not_ported".to_string())
+                }),
+                },
         );
         Self {
             root,
