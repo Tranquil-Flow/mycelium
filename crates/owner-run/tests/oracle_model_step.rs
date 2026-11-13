@@ -187,6 +187,7 @@ fn run(
     let input = StepInput {
         rollover: cfg["reason"] == "rollover",
         rollover_binding: cfg.get("binding").filter(|b| !b.is_null()).cloned(),
+        slice_staging: false,
     };
     let result = run_model_step(&mut env, &mut port, &input);
     (result, env, port.log)

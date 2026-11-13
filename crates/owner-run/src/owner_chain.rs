@@ -160,6 +160,7 @@ impl<P: ChainPorts> OwnerChain<P> {
                 let input = StepInput {
                     rollover: state.reason == Reason::Rollover,
                     rollover_binding: state.rollover_binding.clone(),
+                    slice_staging: ports.model.slice_staging(),
                 };
                 state.model = Some(run_model_step(env, ports.model, &input)?);
                 Ok(())

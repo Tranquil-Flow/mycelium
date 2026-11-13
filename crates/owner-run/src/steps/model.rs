@@ -58,6 +58,11 @@ pub enum Reverify {
 
 /// The host's side of the step.
 pub trait ModelPort {
+    /// Whether this host stages by slice regardless of the source-size window.
+    fn slice_staging(&self) -> bool {
+        false
+    }
+
     /// `app.installation_role == 'owner' and app.running`.
     fn owner_and_running(&self) -> bool;
     /// `app.authority.status().get('swarm_created')`.
@@ -88,6 +93,10 @@ pub struct StepInput {
     pub rollover: bool,
     /// `ctx.state.get('rollover_binding')`.
     pub rollover_binding: Option<Value>,
+    /// The host stages by slice whatever the source size (the packaged two-Mac flow). The ported
+    /// window (`slice_fetch_permitted`) is for 8B-14B sources; a host that has only the slice
+    /// stage flavour must slice smaller ones too, or it has no stage at all.
+    pub slice_staging: bool,
 }
 
 /// What the step leaves in `ctx.state` (and `app._chain_slice_fetch`).
@@ -119,6 +128,12 @@ fn not_prepared() -> StepError {
 }
 
 /// `serving.slice_fetch_permitted(source_bytes, architecture=, model=)`.
+/// Whether this run stages by slice: the host's own requirement, or the ported source-size window.
+/// A host with only the slice stage flavour must slice a small source too (see `StepInput`).
+pub fn staging_slices(staging: bool, source_bytes: &Value, model: &PreparedModel) -> bool {
+    staging || slice_fetch_permitted(source_bytes, model)
+}
+
 pub fn slice_fetch_permitted(source_bytes: &Value, model: &PreparedModel) -> bool {
     if !model.shape_registered {
         return false;
@@ -207,7 +222,7 @@ pub fn run_model_step(
             _ => return Err(OwnerRunError::new("rollover_model_changed").into()),
         }
     }
-    let slice_mode = slice_fetch_permitted(&source.source_bytes, &model);
+    let slice_mode = staging_slices(input.slice_staging, &source.source_bytes, &model);
     check_owner_storage(port, &model)?;
     let head = if slice_mode {
         " · each Mac fetches only its slice"
@@ -259,4 +274,38 @@ fn check_owner_storage(port: &mut dyn ModelPort, model: &PreparedModel) -> Resul
 
 fn gb_signed(value: i128) -> String {
     format!("{:.1} GB", value as f64 / 1e9)
+}
+
+#[cfg(test)]
+mod staging_slices_tests {
+    //! The packaged two-Mac flow stages by slice whatever the source size; the ported window is
+    //! 4 GB..32 GB for registered qwen3 shapes (`serving.py:54`: "Qwen3 8B..14B slice").
+    use super::*;
+
+    fn shape() -> PreparedModel {
+        PreparedModel {
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            architecture: "qwen3".into(),
+            label: "Qwen3-0.6B".into(),
+            choice: None,
+            shape_registered: true,
+            owner_storage_need: 4_000_000_000,
+        }
+    }
+
+    #[test]
+    fn a_host_that_stages_by_slice_slices_a_source_below_the_window() {
+        let source = serde_json::json!(1_519_209_243u64);
+        assert!(!slice_fetch_permitted(&source, &shape()));
+        assert!(staging_slices(true, &source, &shape()));
+    }
+
+    #[test]
+    fn the_ported_window_still_applies_to_a_host_without_the_requirement() {
+        let small = serde_json::json!(1_519_209_243u64);
+        let large = serde_json::json!(8_000_000_000u64);
+        assert!(!staging_slices(false, &small, &shape()));
+        assert!(staging_slices(false, &large, &shape()));
+    }
 }

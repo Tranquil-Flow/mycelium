@@ -357,6 +357,13 @@ impl ChainHost for PackagedRun {
 #[derive(Clone)]
 struct ModelPorts(PackagedRun);
 impl owner_chain::ChainPorts for ModelPorts {
+    /// The packaged two-Mac flow stages by slice: its member side has only the slice stage flavour
+    /// (`MemberShard::begin` requires a `mycelium.a13_node_slice_plan.v1` recipe and a
+    /// `deployment/<name>` row). The whole-snapshot stage flavour is v0.3 (roadmap item 23), so a
+    /// source below the ported 4 GB window still stages by slice here.
+    fn slice_staging(&self) -> bool {
+        true
+    }
     fn owner_and_running(&self) -> bool {
         self.0.with(|c| !c.authority.target && c.authority.running)
     }

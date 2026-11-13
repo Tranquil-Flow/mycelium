@@ -24,6 +24,10 @@ use serde_json::Value;
 
 /// What the host must answer for the model step (`demo_chain.py:442-507` reads these from `app`).
 pub trait ChainPorts: Send {
+    /// Whether this host stages by slice whatever the source size (see `ModelPort::slice_staging`).
+    fn slice_staging(&self) -> bool {
+        false
+    }
     /// `app.installation_role == 'owner' and app.running`.
     fn owner_and_running(&self) -> bool;
     /// `app.authority.status().get('swarm_created')`.
@@ -95,6 +99,10 @@ impl<P: ChainPorts> ModelAdapter<P> {
     }
 }
 impl<P: ChainPorts> ModelPort for ModelAdapter<P> {
+    fn slice_staging(&self) -> bool {
+        self.ports.slice_staging()
+    }
+
     fn owner_and_running(&self) -> bool {
         self.ports.owner_and_running()
     }
