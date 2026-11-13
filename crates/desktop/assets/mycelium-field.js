@@ -3049,6 +3049,18 @@ export function createField({ stage, state, reduce }) {
     }
     x.clearRect(0, 0, scene.hero.W, scene.hero.H);
     x.drawImage(hc, 0, 0, scene.hero.W, scene.hero.H);
+    // Fade the art in from its own top edge: the hero raster is a rectangle, so painted as-is it reads
+    // as a knife-cut under the header. This canvas is page-anchored, so the ramp travels with the art
+    // (a viewport mask cannot follow it).
+    const fade = Math.min(scene.hero.H, HERO_FADE),
+      ramp = x.createLinearGradient(0, 0, 0, fade);
+    ramp.addColorStop(0, "rgba(0,0,0,1)");
+    ramp.addColorStop(1, "rgba(0,0,0,0)");
+    x.save();
+    x.globalCompositeOperation = "destination-out";
+    x.fillStyle = ramp;
+    x.fillRect(0, 0, scene.hero.W, fade);
+    x.restore();
     scene.drawIntroCores?.(x);
   }
   let heroY = NaN,
