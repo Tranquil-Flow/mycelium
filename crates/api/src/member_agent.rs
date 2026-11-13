@@ -765,7 +765,14 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
                 Some(json!({"done_bytes": 0, "total_bytes": 0})),
             ),
             Err(error) if error.code() == "source_not_on_disk" => {
-                waiting("error", Some("member_model_download_not_ported"), None)
+                // The acquisition's snapshot is gone (a wiped or relocated cache). `_ensure_whole_model`
+                // has no give-up case: a state that is neither prepared nor acquiring starts again
+                // from the pinned source, so a joined Mac re-fetches instead of refusing the run.
+                let choice = a["model"]["choice"].clone();
+                match self.host.start_whole_model(&choice) {
+                    Ok(()) => waiting("downloading_model", None, None),
+                    Err(code) => waiting("error", Some(&code), None),
+                }
             }
             Err(error) => waiting("error", Some(error.code()), None),
         }
