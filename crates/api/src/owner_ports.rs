@@ -208,6 +208,11 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
     if session.is_none() {
         return Err(failure());
     }
+    // The owner's own worker is a member like every other one: a shard receive loads
+    // `standing-consent.json` from the worker's root (`NativeShard::try_new`). Record the grant the
+    // user acknowledged (`peer_visibility` in the resource policy) and bind it to the membership this
+    // worker just accepted, so its own stage is served like a peer's.
+    grant_self_consent(&dir, &node, &policy)?;
     let lease = session_lease(&session);
     host.with(|c| {
         c.run.contributor = Some(ContributorState {
@@ -221,6 +226,43 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
         "created" => true, "physical_hosts" => 1u64, "node_id" => node,
         "membership_state" => "current", "route_ready" => false,
     })
+}
+
+
+/// `grant_standing_consent` + `bind_standing_consent` (`standing_consent.py:139,161`) for the
+/// owner's own worker.
+///
+/// Caps come from the resource policy the user chose (the storage limit is theirs; the wall and
+/// command budgets are this app's own grant defaults) and the grant is bound to the membership the
+/// worker just accepted, so a different owner never inherits it.
+fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Result<(), PublicError> {
+    use crate::preferences::standing_consent;
+    let Some(state) = crate::peer::load_membership_state(dir)? else {
+        return Ok(());
+    };
+    let storage = policy
+        .get("storage_bytes")
+        .and_then(Value::as_u64)
+        .unwrap_or(4_000_000_000);
+    let body = json!({
+        "acknowledged": true,
+        "disclosure_digest": standing_consent::DISCLOSURE_DIGEST,
+        "caps": {
+            "storage_bytes": storage,
+            "max_memory_bytes": 12_884_901_888u64,
+            "max_wall_seconds": 1800u64,
+            "max_commands": 5000u64,
+        },
+    });
+    standing_consent::grant(dir, &body, policy, now(), None)
+        .map_err(|e| PublicError::new(409, e.0))?;
+    let binding = json!({
+        "swarm_id": state.get("swarm_id").cloned().unwrap_or(Value::Null),
+        "node_id": node,
+        "seed_key_digest": state.get("seed_key_digest").cloned().unwrap_or(Value::Null),
+    });
+    standing_consent::bind(dir, &binding, now()).map_err(|e| PublicError::new(409, e.0))?;
+    Ok(())
 }
 
 /// One pass of the contributor's half of `DemoApp._renew_loop` (`contributor.renew()`).
