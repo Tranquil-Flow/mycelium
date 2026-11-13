@@ -180,12 +180,20 @@ impl Fail {
     }
 }
 
-fn internal() -> Fail {
+fn internal(detail: &str) -> Fail {
     // The wire code for an unlisted failure is deliberately generic, which hides the cause from
-    // the peer entirely. Leave the bytes alone and record the fact that this path fired so the
-    // owner's log can name the route that failed.
+    // the peer entirely. Leave the bytes alone and record the fact that this path fired, plus the
+    // underlying code, so the owner's log can name what actually went wrong.
     eprintln!("seed_http_internal_fired");
+    eprintln!("{}", internal_probe(detail));
     Fail::with_status("seed_http_internal_error", 500)
+}
+
+/// The probe line that carries the real cause past a deliberately generic wire code. Kept pure so a
+/// test can pin its shape, and free of newlines so it cannot forge a second log line.
+pub fn internal_probe(detail: &str) -> String {
+    let detail = detail.replace(['\n', '\r'], " ");
+    format!("l11_seed_internal_detail:{detail}")
 }
 
 /// One response: status, extra-header flavour and body.
@@ -527,7 +535,7 @@ fn frame_limit() -> Result<i128, Fail> {
     BudgetId::PyMyceliumSeedHttpMaxHttpFrameBytesL55
         .bytes()
         .map(|b| i128::from(b.get()))
-        .map_err(|_| internal())
+        .map_err(|_| internal("frame_limit"))
 }
 
 /// `_read_body`.
@@ -555,13 +563,13 @@ fn read_body<R: BufRead>(
         *close = true;
         return Err(Fail::new("seed_http_frame_too_large"));
     }
-    let wanted = usize::try_from(length).map_err(|_| internal())?;
+    let wanted = usize::try_from(length).map_err(|_| internal("content_length"))?;
     let mut raw = Vec::with_capacity(wanted);
     reader
         .by_ref()
         .take(wanted as u64)
         .read_to_end(&mut raw)
-        .map_err(|_| internal())?;
+        .map_err(|_| internal("body_read"))?;
     if raw.len() != wanted {
         return Err(Fail::new("seed_http_body_truncated"));
     }
@@ -598,12 +606,15 @@ fn post_route(
             coordinator
                 .accept_join_value(&body["invite_token"], &body["join_envelope"])
                 .map_err(|e| {
+                    // `accident` means the coordinator hit an internal fault; the wire must stay
+                    // generic, but throwing away `e.code` here is what made step 7 unreachable:
+                    // the owner's log said only `managed_control_internal_error`.
                     if e.accident {
-                        return internal();
+                        return internal(&e.code);
                     }
                     match join_status(&e.code) {
                         Some(status) => Fail::with_status(&e.code, status),
-                        None => internal(),
+                        None => internal(&e.code),
                     }
                 })
         }
@@ -768,4 +779,21 @@ pub fn serve_stream_with_routes<S: Read + Write>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod internal_probe_tests {
+    use super::internal_probe;
+
+    #[test]
+    fn the_probe_names_the_underlying_code() {
+        let line = internal_probe("seed_invite_expired");
+        assert_eq!(line, "l11_seed_internal_detail:seed_invite_expired");
+    }
+
+    #[test]
+    fn the_probe_cannot_forge_a_second_log_line() {
+        let line = internal_probe("boom\nseed_http_internal_fired");
+        assert!(!line.contains('\n'), "a detail must not break the log line: {line}");
+    }
 }

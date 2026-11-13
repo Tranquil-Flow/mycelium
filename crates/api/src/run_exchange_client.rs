@@ -229,6 +229,10 @@ fn seed_code(code: &str, status: Option<u16>) -> String {
     match (code, status) {
         ("seed_http_unreachable", None) => "managed_control_unreachable".into(),
         ("seed_http_remote_error" | "seed_http_internal_error", _) => {
+            // The wire code a caller sees is deliberately generic; the owner's log is not. Without
+            // this, a step-7 failure read only `managed_control_internal_error` and the seed's own
+            // account of the fault was lost between two processes.
+            eprintln!("l11_seed_refusal_masked:{code}:status={status:?}");
             "managed_control_internal_error".into()
         }
         _ => code.to_owned(),
