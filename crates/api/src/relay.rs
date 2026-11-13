@@ -1634,7 +1634,14 @@ impl StartGuard {
             relay.close();
             return Err(PublicError::new(400, "application_closed"));
         }
-        guarded.relay = Some(relay.inner.clone());
+        // Adopting a new relay must close the one it displaces. The guard holds `Arc<Inner>`, and
+        // `Inner` has no `Drop` — only `Relay` does — so simply overwriting the slot orphaned the
+        // previous relay's child process (`cloudflared`), which then outlived every later Quit.
+        let previous = guarded.relay.replace(relay.inner.clone());
+        drop(guarded);
+        if let Some(previous) = previous.filter(|p| !Arc::ptr_eq(p, &relay.inner)) {
+            close(&previous);
+        }
         Ok(())
     }
 }
