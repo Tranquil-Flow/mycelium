@@ -219,6 +219,10 @@ pub struct PrepareInput<'a> {
     pub owner_node_id: Option<&'a str>,
     /// `app._chain_slice_fetch`.
     pub slice_mode: bool,
+    /// The host stages by slice whatever the source size (a host with only the slice stage
+    /// flavour). Only this skips the ported 4 GB..32 GB window below; the window itself is
+    /// unchanged for every other run.
+    pub slice_staging: bool,
     /// `{'gossip': [owner signer record], 'load_proof': target keys}`.
     pub keys: &'a Value,
     pub deployment_id: &'a str,
@@ -515,7 +519,7 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
     {
         return Err(Refusal::code("member_capability_report_required"));
     }
-    if input.slice_mode {
+    if input.slice_mode && !input.slice_staging {
         let architecture = if spec.shape.qk_norm { "qwen3" } else { "qwen2" };
         if !slice_fetch_permitted(input.source_bytes, architecture, true) {
             return Err(Refusal::code("slice_fetch_model_not_permitted"));

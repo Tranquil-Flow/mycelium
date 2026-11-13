@@ -800,6 +800,7 @@ pub fn public_compile<H: ChainHost>(
         current_members: &input.current_members,
         records: Some(&records),
         owner_node_id: local.as_deref(),
+        slice_staging: false,
         slice_mode: false,
         keys: &input.keys,
         deployment_id: &prepared.deployment,

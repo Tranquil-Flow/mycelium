@@ -134,6 +134,7 @@ fn replay(name: &str, rec: &Value) -> Result<(), String> {
         current_members: &current,
         records: Some(&records),
         owner_node_id: local,
+        slice_staging: false,
         slice_mode: i["slice_mode"].as_bool().unwrap(),
         keys: &i["keys"],
         deployment_id: i["deployment_id"].as_str().unwrap(),

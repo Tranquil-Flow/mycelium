@@ -104,6 +104,8 @@ pub struct StepInput {
 pub struct ModelStepOutput {
     pub prepared: PreparedSource,
     pub slice_mode: bool,
+    /// `slice_mode` holds although the ported source-size window would not permit it.
+    pub forced_slice: bool,
     pub manifest_digest: String,
     pub choice: Option<String>,
     pub model_id: String,
@@ -231,6 +233,7 @@ pub fn run_model_step(
     };
     env.progress(&format!("{}{head}", model.model_id));
     Ok(ModelStepOutput {
+        forced_slice: input.slice_staging && !slice_fetch_permitted(&source.source_bytes, &model),
         slice_mode,
         manifest_digest: source.manifest_digest.clone(),
         choice: model.choice.clone(),

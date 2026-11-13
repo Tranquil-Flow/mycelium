@@ -176,6 +176,12 @@ pub fn run_compile_step(
         current_members: &inputs.current_members,
         records: Some(&records),
         owner_node_id: local.as_deref(),
+        // True only when the model step sliced against the ported window (a host with only the slice
+        // stage flavour); the planner's re-check still guards every ordinary run.
+        slice_staging: state
+            .model
+            .as_ref()
+            .is_some_and(|m| m.forced_slice),
         slice_mode,
         keys: &inputs.keys,
         deployment_id: &state.deployment_id,

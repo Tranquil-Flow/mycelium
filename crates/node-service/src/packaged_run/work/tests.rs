@@ -414,6 +414,7 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
     state.proposal = Some(proposal.clone());
     use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
     state.model = Some(ModelStepOutput {
+            forced_slice: false,
         model_id: "Qwen/Qwen3-0.6B".into(),
         resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
         manifest_digest: "sha256:00".into(),
