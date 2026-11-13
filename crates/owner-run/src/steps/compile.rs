@@ -119,9 +119,15 @@ pub fn run_compile_step(
     state: &mut RunState,
     interval: f64,
 ) -> Result<(), StepError> {
-    let context = compile
-        .compile_context()
-        .map_err(|e| e.into_step_error("chain_compile_failed"))?;
+    let context = match compile.compile_context() {
+        Ok(context) => context,
+        Err(error) => {
+            // `code_or` falls back to a generic code when the port's error carries no closed code, which
+            // is exactly what happened here: the step reported `chain_compile_failed` and hid the reason.
+            eprintln!("L11_COMPILE_CONTEXT_REFUSED:{error:?}");
+            return Err(error.into_step_error("chain_compile_failed"));
+        }
+    };
     let nodes: Vec<String> = context.facts.keys().cloned().collect();
     let local = state.local_node.clone();
     let slice_mode = state.model.as_ref().is_some_and(|m| m.slice_mode);
@@ -203,13 +209,18 @@ pub fn run_compile_step(
             match compile.poll_build() {
                 BuildPoll::Pending => Ok(None),
                 BuildPoll::Done(Ok(out)) => Ok(Some(prepared.finish(&out))),
-                BuildPoll::Done(Err(_)) => {
-                    // `state.get('state') == 'failed'` -> OwnerRunError(error_code)
+                BuildPoll::Done(Err(error)) => {
+                    // `state.get('state') == 'failed'` -> OwnerRunError(error_code). The port's own
+                    // error is the evidence: reporting the constant `failed_state()` code here hid a
+                    // real build refusal behind "chain compile failed" with nothing logged.
+                    eprintln!("L11_CHAIN_BUILD_REFUSED:{error:?}");
                     let failed = failed_state();
-                    let code = failed["error_code"]
-                        .as_str()
-                        .unwrap_or("chain_compile_failed");
-                    Err(OwnerRunError::new(code).into())
+                    let code = error.code_or(
+                        failed["error_code"]
+                            .as_str()
+                            .unwrap_or("chain_compile_failed"),
+                    );
+                    Err(OwnerRunError::new(&code).into())
                 }
             }
         },

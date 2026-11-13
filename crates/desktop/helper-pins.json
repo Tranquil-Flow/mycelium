@@ -20,7 +20,7 @@
   {
     "path": "Contents/MacOS/native/mycelium-hello-bootstrap",
     "kind": "Helper",
-    "bytes": 1214272,
-    "sha256": "c512809f4ddc6da74b3b840aea2ebea9e7ee7ad6f1db7eb747575199a3b57ea7"
+    "bytes": 1051616,
+    "sha256": "aa83c2178c9302391dd65fd64bfaef26952d9185fe6dcd3dea7659fd3330f946"
   }
 ]

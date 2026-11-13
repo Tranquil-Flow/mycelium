@@ -214,6 +214,7 @@ fn layout(manifest: &Manifest) -> Result<(), PackageError> {
                 entry.path == RESOURCE_PROBE_PATH
                     || entry.path == RELAY_CLIENT_PATH
                     || entry.path == IROH_SIDECAR_PATH
+                    || entry.path == HELLO_BOOTSTRAP_PATH
             }
         };
         if !kind_ok {
