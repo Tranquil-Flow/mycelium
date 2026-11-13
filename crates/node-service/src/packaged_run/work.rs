@@ -37,6 +37,18 @@ use std::{
 fn refused(code: &str) -> StepError {
     owner_run::OwnerRunError::new(code).into()
 }
+
+/// Tokens one native stage prepares for: the oracle's prompt plus the challenge's own output.
+///
+/// The packed oracle keeps every recorded value under `recorded` (`native_compiler.rs:493` reads
+/// `reference["recorded"]` for exactly this reason), so a read at the document's top level finds
+/// nothing and answers `native_reference_invalid` even though the constant is valid JSON.
+fn challenge_tokens(reference: &Value) -> Result<usize, StepError> {
+    let prompt = reference["recorded"]["workload"]["prompt_ids"]
+        .as_array()
+        .ok_or_else(|| refused("native_reference_invalid"))?;
+    Ok(prompt.len() + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS)
+}
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
 /// the local Service whose control loop those links reach. Unresolved owners stay retained.
@@ -286,11 +298,7 @@ impl Work {
             let oracle: Value =
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
-            let tokens = oracle["workload"]["prompt_ids"]
-                .as_array()
-                .ok_or_else(|| refused("native_reference_invalid"))?
-                .len()
-                + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS;
+            let tokens = challenge_tokens(&oracle)?;
             let objects = objects::view(
                 artifact.root(),
                 artifact.stage_shards().map_err(|e| refused(e.0))?,
@@ -768,5 +776,27 @@ impl PackagedChainPorts {
     }
     pub(super) fn close_work(&mut self) -> Result<(), String> {
         self.work.teardown()
+    }
+}
+
+#[cfg(test)]
+mod challenge_tokens_tests {
+    //! A joined Mac's prepare step needs the token count of the recorded workload. The packed
+    //! oracle keeps every recorded value under `recorded`; reading the document's top level found
+    //! nothing and answered `native_reference_invalid` on a two-Mac run.
+    #[test]
+    fn the_packed_oracle_yields_the_recorded_prompt_plus_the_challenge_output() {
+        let reference: serde_json::Value =
+            serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
+                .expect("the shipped oracle is JSON");
+        let prompt = reference["recorded"]["workload"]["prompt_ids"]
+            .as_array()
+            .expect("the oracle records its workload")
+            .len();
+        assert_eq!(
+            super::challenge_tokens(&reference).expect("tokens"),
+            prompt + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS
+        );
+        assert!(reference.get("workload").is_none(), "no top-level workload");
     }
 }
