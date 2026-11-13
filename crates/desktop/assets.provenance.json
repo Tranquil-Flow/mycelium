@@ -21,8 +21,8 @@
       "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">. Disclosure trigger buttons toggle their own <details> panel and keep aria-expanded in step. A claimed pairing card now scrolls into view and focuses its Approve button once: below the fold the action was unreachable without scrolling and returned -25202 to assistive presses, so owners could mint code after code without ever approving one."
     },
     "index.html": {
-      "sha256": "a234e17dee19223f473397d8e9f50c38a9e2a98afc402405af44faaf0fbd4feb",
-      "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases The brand mark and wordmark are laid out as a flex pair so the text block centres on the image, and the two 02B disclosures wrap their summary text in a real button so the row is keyboard- and AX-operable."
+      "sha256": "40bf92fd5949ccc15a51ac60e75779330bf9e40e84df4116b1139785203426d4",
+      "reason": "dark site theme, colony mark, full-bleed hero art and a join disclosure dialog; the v0.1.4 page carried the asterisk glyph and none of the renderer canvases The brand mark and wordmark are laid out as a flex pair so the text block centres on the image, and the two 02B disclosures wrap their summary text in a real button so the row is keyboard- and AX-operable. The run section is written for a first-time user of any OS: no 'demo', no 'Macs', plain steps."
     },
     "style.css": {
       "sha256": "36faf6b13553383071768167e81eac5b34e9c237123e1fba52d5f0cb42a86d2d",
