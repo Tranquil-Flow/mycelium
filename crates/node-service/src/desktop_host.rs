@@ -543,6 +543,30 @@ impl DesktopServices {
             return reply;
         }
         match (request.method.as_str(), request.target.as_str()) {
+            // The invite card's `<img src="/api/pair/window/qr/{window_id}.svg">` (run.js `renderQr`).
+            // Nothing served this path before -- the only source hit was the auth allowlist in
+            // `api::desktop` -- so every invite QR in the app was a broken image.
+            ("GET", target) if target.starts_with("/api/pair/window/qr/") => {
+                let id = target
+                    .trim_start_matches("/api/pair/window/qr/")
+                    .trim_end_matches(".svg");
+                let windows = self
+                    .authority
+                    .as_ref()
+                    .ok_or_else(|| err("authority_state_invalid"))?
+                    .lock()
+                    .map_err(|_| err("desktop_poisoned"))?
+                    .windows
+                    .clone();
+                let svg = windows
+                    .link_svg(&serde_json::json!(id))
+                    .ok_or_else(|| err("pairing_window_unknown"))?;
+                Ok(Reply {
+                    status: 200,
+                    content_type: "image/svg+xml",
+                    body: svg,
+                })
+            }
             ("GET", "/api/status") => {
                 // The node's published document with the owner's listing custody (v0.1.4 `swarm`).
                 let mut status = self.node.published_status()?;

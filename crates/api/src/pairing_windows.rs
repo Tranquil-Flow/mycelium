@@ -318,6 +318,25 @@ impl PairingWindows {
                 .count()
         })
     }
+    /// The SVG QR of an open window's own join link, for the invite card's
+    /// `<img src="/api/pair/window/qr/{window_id}.svg">`. Only a window still open carries a join link
+    /// (the same gate `owner_view` applies), so a closed window has no QR to scan.
+    pub fn link_svg(&self, window_id: &Value) -> Option<Vec<u8>> {
+        self.with(|inner, now| {
+            let id = window_id.as_str()?;
+            let window = inner.windows.iter_mut().find(|w| w.id == id)?;
+            window.refresh(now);
+            if window.state != State::Open {
+                return None;
+            }
+            let link = serde_json::json!({
+                "protocol": JOIN_LINK_PROTOCOL, "origin": window.origin, "window_id": window.id,
+                "code": window.code, "seed_key_digest": window.seed_key_digest,
+                "expires_at": Number::from_f64(window.expires_at),
+            });
+            crate::qr::svg(&encode_join_link(&link).ok()?).ok()
+        })
+    }
     /// `revoke(window_id)`: no refresh, so an expired window becomes `revoked`.
     pub fn revoke(&self, window_id: &Value) -> Result<Json, PublicError> {
         self.with(|inner, _| {
