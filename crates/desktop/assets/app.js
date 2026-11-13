@@ -292,12 +292,29 @@ async function refresh(announce=true) {
     }
   }
 }
+// A join that failed says why, in the place where the person is looking. The state machine only knows
+// "expired/stale/unknown", which rendered as "your membership lapsed" even when the code was never
+// accepted in the first place.
+let joinError=null;
+const JOIN_FIXES={
+  join_code_invalid:'That code was not recognised. Check every character, or ask the owner for a fresh one.',
+  join_link_expired:'That join link has expired. Ask the owner to create a new one.',
+  pairing_window_expired:'The owner’s join window closed before this device checked in. Ask them to open a new one, then try again.',
+  pairing_window_unknown:'That join window is no longer open. Ask the owner to open a new one.',
+  seed_http_unreachable:'This device could not reach the owner’s device. Check both are online, then try again.',
+  managed_control_unreachable:'This device could not reach the owner’s device. Check both are online, then try again.',
+  join_state_invalid:'The join was refused because the saved state on this device does not match. Withdraw standing consent, then try again.',
+};
+function joinHintFor(code){
+  const text=JOIN_FIXES[code]||`The join was refused (${code}). Ask the owner for a fresh code, then try again.`;
+  return `${text} — code: ${code}`;
+}
 async function perform(path, body, success) {
   if(busy)return;
   busy=true;
   for(const button of document.querySelectorAll('button'))button.disabled=true;
   try {const result=await api(path,body);await refresh(false);notice(success);return result;}
-  catch(error){notice(error.userMessage ? `Action not completed: ${error.userMessage}${error.fix?.action==='start_relay'?' Use “Start public relay” in the invite section.':''}` : `Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
+  catch(error){if(path.startsWith('/api/join'))joinError=error.message||'join_failed';notice(error.userMessage ? `Action not completed: ${error.userMessage}${error.fix?.action==='start_relay'?' Use “Start public relay” in the invite section.':''}` : `Action not completed: ${humanError(error.message)} Existing identity and evidence are retained.`);}
   finally{
     busy=false;
     for(const button of document.querySelectorAll('button'))button.disabled=false;
@@ -530,6 +547,7 @@ function renderJoinFlow(value,target,a){
   $('join-cancel').hidden=!waiting;
   const lapsed=target && ['expired','stale','unknown'].includes(a.membership_state);
   $('join-hint').textContent=joined || waiting || (owner && !!a.swarm_created) ? ''
+    : joinError ? joinHintFor(joinError)
     : lapsed && $('visibility').checked && $('standing-confirm').checked ? 'Your membership lapsed. Ask the owner for a new join code: this Mac keeps its identity and the downloaded model.'
     : !$('visibility').checked ? 'Tick the cooperative-peer visibility box in step 01 to enable “Join with code”.'
     : !$('standing-confirm').checked ? 'Tick the standing-consent box above to enable “Join with code”.' : '';
@@ -600,6 +618,7 @@ $('join-with-code').addEventListener('click',()=>{
     max_wall_seconds:Number($('standing-wall').value),max_commands:5000}}},
     'Request sent through the owner’s relay. Waiting for one-click approval.');
 });
+$('join-code').addEventListener('input',()=>{joinError=null;});
 $('join-cancel').addEventListener('click',()=>void perform('/api/join/window/cancel',{},'Join cancelled on this Mac.'));
 $('standing-withdraw').addEventListener('click',async()=>{
   if(!(await ask('Withdraw standing consent? Automatic acceptance and running work stop now. Membership is kept.')))return;

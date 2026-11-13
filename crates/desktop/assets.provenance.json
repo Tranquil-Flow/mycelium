@@ -17,8 +17,8 @@
   },
   "diverged": {
     "app.js": {
-      "sha256": "94af39e16f825f5052747bf35dfef7b7a029a94e6d21527762545afd54612398",
-      "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">. Disclosure trigger buttons toggle their own <details> panel and keep aria-expanded in step. A claimed pairing card now scrolls into view and focuses its Approve button once: below the fold the action was unreachable without scrolling and returned -25202 to assistive presses, so owners could mint code after code without ever approving one."
+      "sha256": "18d0731f18072ba85982a0ef91196f9fa9528fea13917c9de35da979db54985d",
+      "reason": "Every action gated on window.confirm silently did nothing: WKWebView implements no JavaScript dialogs, so confirm() returns false without drawing. That killed create-with-relay, start-public-relay, use-my-own-address, revoke-member and withdraw-standing-consent, leaving the two-Mac join path unreachable with no error. Those five sites now await an in-page <dialog id=\"ask-dialog\">. Disclosure trigger buttons toggle their own <details> panel and keep aria-expanded in step. A claimed pairing card now scrolls into view and focuses its Approve button once: below the fold the action was unreachable without scrolling and returned -25202 to assistive presses, so owners could mint code after code without ever approving one. A failed join now names its real code and a next action beside the field instead of leaving the stale 'membership lapsed' line as the only explanation."
     },
     "index.html": {
       "sha256": "40bf92fd5949ccc15a51ac60e75779330bf9e40e84df4116b1139785203426d4",
