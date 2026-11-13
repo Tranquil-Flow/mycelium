@@ -5,8 +5,8 @@
 use desktop::{
     bundle::{self, BundleError},
     package::{
-        self, Entry, IROH_SIDECAR_PATH, Kind, Manifest, PackageError, RELAY_CLIENT_PATH,
-        RESOURCE_PROBE_PATH,
+        self, Entry, HELLO_BOOTSTRAP_PATH, IROH_SIDECAR_PATH, Kind, Manifest, PackageError,
+        RELAY_CLIENT_PATH, RESOURCE_PROBE_PATH,
     },
 };
 use sha2::{Digest, Sha256};
@@ -77,11 +77,17 @@ fn bundle_with_probe(root: &Path, probe_path: &str) -> Manifest {
 fn the_shipped_helper_pin_is_the_resource_probe_where_the_observer_looks() {
     let pins = package::helper_pins().unwrap();
     // The pinned helper set, exactly: the resource probe (REL item 4), the relay client
-    // (`native/cloudflared`, RELF item 3), and the native iroh transport a run spawns to reach a
-    // peer. Named as a set rather than a count so a new helper cannot slip in unrecorded.
+    // (`native/cloudflared`, RELF item 3), the native iroh transport a run spawns to reach a
+    // peer, and the model-free hello child "Native hello on every Mac" starts. Named as a set
+    // rather than a count so a new helper cannot slip in unrecorded.
     let mut paths: Vec<&str> = pins.iter().map(|p| p.path.as_str()).collect();
     paths.sort_unstable();
-    let mut expected = vec![RESOURCE_PROBE_PATH, RELAY_CLIENT_PATH, IROH_SIDECAR_PATH];
+    let mut expected = vec![
+        RESOURCE_PROBE_PATH,
+        RELAY_CLIENT_PATH,
+        IROH_SIDECAR_PATH,
+        HELLO_BOOTSTRAP_PATH,
+    ];
     expected.sort_unstable();
     assert_eq!(paths, expected, "{pins:?}");
     assert!(pins.iter().all(|p| p.kind == Kind::Helper));

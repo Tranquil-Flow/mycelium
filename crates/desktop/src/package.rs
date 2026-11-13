@@ -22,6 +22,12 @@ pub const RELAY_CLIENT_PATH: &str = "Contents/MacOS/native/cloudflared";
 /// user, executable, not writable by others). Without it every packaged run stops at "joined Macs
 /// report in" with `native_sidecar_installation_invalid`.
 pub const IROH_SIDECAR_PATH: &str = "Contents/MacOS/native/mycelium-iroh-sidecar";
+/// The model-free hello program a run's "Native hello on every Mac" step starts
+/// (`api::member_agent::bootstrap_program` reads `bootstrap-program.json`; this tree builds the
+/// program at `node-service --bin mycelium-hello-bootstrap`). Without it that step stops with
+/// `native_bootstrap_unavailable`: v0.1.4 ran the hello inside the member's own runtime, v0.2 runs
+/// this admitted child instead, so the child has to travel with the app.
+pub const HELLO_BOOTSTRAP_PATH: &str = "Contents/MacOS/native/mycelium-hello-bootstrap";
 /// Where the relay client's licence ships (v0.1.4: `Resources/third_party/cloudflared-LICENSE`,
 /// `build_a13_macos.py:325`; v0.2 keeps every notice under `Resources/licenses/`).
 pub const RELAY_LICENSE_PATH: &str = "Contents/Resources/licenses/cloudflared-LICENSE";

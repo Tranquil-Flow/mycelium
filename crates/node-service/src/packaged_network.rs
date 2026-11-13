@@ -883,7 +883,12 @@ impl api::member_agent::MemberHost for PackagedMember {
         &self,
         root: &Path,
     ) -> api::member_agent::OResult<api::bootstrap_process::TrustedBootstrap> {
-        api::member_agent::bootstrap_program(root)
+        match api::member_agent::bootstrap_program(root) {
+            Ok(program) => Ok(program),
+            // No admitted-program record: fall back to the hello child sealed into this bundle.
+            Err(error) if error.0 == "native_bootstrap_unavailable" => bundled_hello_program(),
+            Err(error) => Err(error),
+        }
     }
     /// `auto_step_context()` (app.py:1168-1172): the binding only while this Mac is a target
     /// whose membership is `current`; the saved resource policy; the member's join seam.
@@ -1025,4 +1030,27 @@ pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, n
             card
         }
     };
+}
+
+/// The hello child that travels with this bundle (`Contents/MacOS/native/mycelium-hello-bootstrap`).
+///
+/// `bootstrap-program.json` is the admitted-program record, but no installed copy of this product
+/// ever wrote one -- only test fixtures do -- so "Native hello on every Mac" stopped with
+/// `native_bootstrap_unavailable` on every packaged run. The child is sealed into the bundle, so its
+/// own bytes are the pin: the hash is read from the file that will be executed, and the source
+/// revision is the v0.1.4 oracle commit this tree ports (`mycelium-iroh-sidecar @ f4e366e9`).
+fn bundled_hello_program() -> api::member_agent::OResult<api::bootstrap_process::TrustedBootstrap> {
+    const SOURCE_SHA: &str = "f4e366e98a1f705dfaf182897044500d290dbd7f";
+    let unavailable = || runtime::managed_owner::OwnerError("native_bootstrap_unavailable");
+    let exe = std::env::current_exe().map_err(|_| unavailable())?;
+    let path = exe
+        .parent()
+        .ok_or_else(unavailable)?
+        .join("native")
+        .join("mycelium-hello-bootstrap");
+    let bytes = std::fs::read(&path).map_err(|_| unavailable())?;
+    let digest = protocol::canonical::sha256_prefixed(&bytes);
+    let sha256 = digest.strip_prefix("sha256:").ok_or_else(unavailable)?;
+    api::bootstrap_process::TrustedBootstrap::open(&path, sha256, SOURCE_SHA)
+        .map_err(runtime::managed_owner::OwnerError)
 }

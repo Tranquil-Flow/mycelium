@@ -32,7 +32,7 @@ canon_acquire "$ROOT" "$real_target" "$real_cargo_home"; trap canon_release EXIT
 export CARGO_TARGET_DIR=$MYCELIUM_CANON_TARGET CARGO_HOME=$MYCELIUM_CANON_CARGO_HOME
 cd "$ROOT"
 m="$MYCELIUM_CANON/Cargo.toml"
-nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p node-service --features "$feat" --bin mycelium
+nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p node-service --features "$feat" --bin mycelium --bin mycelium-hello-bootstrap
 nice -n 19 cargo build --release --offline --locked -j 2 --manifest-path "$m" -p desktop --bin desktop-package --bin resource_probe
 exe=$(mktemp "${TMPDIR:-/tmp}/mycelium-exe.XXXXXX")
 cp "$CARGO_TARGET_DIR/release/mycelium" "$exe"
@@ -43,6 +43,7 @@ nice -n 19 "$CARGO_TARGET_DIR/release/desktop-package" bundle "$exe" \
   evidence/foundation-exit/native-inputs.json crates/desktop/icons/icon-windowed.icns "$out" \
   --resource-probe "$CARGO_TARGET_DIR/release/resource_probe" \
   --relay-client "$relay" --relay-license "$relay_license" \
-  --iroh-sidecar "$iroh_sidecar" --sign-adhoc
+  --iroh-sidecar "$iroh_sidecar" \
+  --hello-bootstrap "$CARGO_TARGET_DIR/release/mycelium-hello-bootstrap" --sign-adhoc
 rm -f "$exe"
 echo BUNDLE_DONE "$out"
