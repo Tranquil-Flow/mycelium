@@ -580,7 +580,11 @@ fn the_packaged_chain_forwards_rollover_ceiling_and_monitor_to_its_owner_workflo
         CeilingProbe::Code(ceiling.clone())
     );
     assert_eq!(ports.monitor(&serving), MonitorProbe::Code(ceiling));
-    assert_eq!(ports.rollover_due(&state), Some(false), "no publish clock yet");
+    assert_eq!(
+        ports.rollover_due(&state),
+        Some(false),
+        "no publish clock yet"
+    );
     assert_eq!(ports.ceiling_reached(&state), CeilingProbe::Code(None));
     assert_eq!(ports.monitor(&state), MonitorProbe::Code(None));
     ports.close_work().unwrap();

@@ -540,6 +540,20 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
         };
         work.and(compilation).and(observation)
     }
+    /// The serving run's probes go to its resident owner workflow (lane SRV), never the trait
+    /// defaults, which would never roll over, never reach the ceiling and never fail a serving run.
+    fn rollover_due(&mut self, state: &owner_run::state::RunState) -> Option<bool> {
+        self.work.rollover_due(state)
+    }
+    fn ceiling_reached(
+        &mut self,
+        state: &owner_run::state::RunState,
+    ) -> owner_run::machine::CeilingProbe {
+        self.work.ceiling_reached(state)
+    }
+    fn monitor(&mut self, state: &owner_run::state::RunState) -> owner_run::machine::MonitorProbe {
+        self.work.monitor(state)
+    }
     fn slices_ports(&mut self) -> Option<owner_run::steps::slices::SlicesPorts<'_>> {
         Some(self.slices())
     }

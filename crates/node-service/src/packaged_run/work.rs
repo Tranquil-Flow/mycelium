@@ -21,12 +21,13 @@ use api::{
 };
 use owner_run::{
     chain::StepEnv,
+    machine::{CeilingProbe, MonitorProbe},
     runner::Chain,
     state::RunState,
     steps::{
         activate::ActivationPort,
         exchange::{Announcement, ClockSkew, MemberRow, ReportsPort},
-        publish::{WorkPort, WorkPorts},
+        publish::{Fence, ServingIdentity, WorkPort, WorkPorts},
         slices::{SlicesPort, SlicesPorts},
     },
 };
@@ -567,6 +568,29 @@ impl Work {
         }
         Ok(())
     }
+    /// `chain.rollover_due(ctx)`, `ceiling_reached(ctx)` and `monitor(ctx)` of a serving run
+    /// (`demo_chain.py:1132-1186`) over its resident workflow, whose clock is the Runner's. With
+    /// no workflow resident the run cannot be serving: the probes answer as a chain without them.
+    pub(super) fn rollover_due(&self, state: &RunState) -> Option<bool> {
+        lock(&self.resident)
+            .work
+            .as_ref()
+            .and_then(|work| work.rollover_due(state))
+    }
+    pub(super) fn ceiling_reached(&self, state: &RunState) -> CeilingProbe {
+        lock(&self.resident)
+            .work
+            .as_ref()
+            .map_or(CeilingProbe::Unavailable, |work| {
+                work.ceiling_reached(state)
+            })
+    }
+    pub(super) fn monitor(&self, state: &RunState) -> MonitorProbe {
+        lock(&self.resident)
+            .work
+            .as_ref()
+            .map_or(MonitorProbe::Code(None), |work| work.monitor(state))
+    }
     /// True while this run, or the host after its own close failed, still owns cleanup debt.
     #[cfg(test)]
     fn retained(&self) -> bool {
@@ -625,6 +649,35 @@ impl WorkPort for Work {
             .as_mut()
             .ok_or_else(|| refused("owner_work_unavailable"))?
             .workflow_state()
+    }
+    /// `needs_identity` / `current` over the run's resident workflow; with none resident, the
+    /// run's own compile decides whether one was required (`demo_chain.py:988-992`).
+    fn serving_identity(&mut self, state: &RunState) -> Result<ServingIdentity, StepError> {
+        Ok(match lock(&self.resident).work.as_ref() {
+            Some(work) => work.serving_identity_of(state),
+            None if owner_run::steps::serving::needs_identity(state) => ServingIdentity::Changed,
+            None => ServingIdentity::Absent,
+        })
+    }
+    /// `self._exchange()` before any lock (`demo_chain.py:1057`), then the resident lock (the
+    /// app's guard over installing and retiring the run's workflow, :1073), then the owner run's
+    /// Stop fence and the workflow lock inside `OwnerWork::commit_serving_on`.
+    fn commit_serving(
+        &mut self,
+        state: &RunState,
+        announcement: &Announcement,
+        work_limits: Option<&Value>,
+        fence: Fence<'_>,
+    ) -> Result<(), StepError> {
+        let exchange = owner_ports::ensure_exchange(&self.host)
+            .ok_or_else(|| refused("owner_exchange_unavailable"))?;
+        let resident = lock(&self.resident);
+        match resident.work.as_ref() {
+            Some(work) => {
+                work.commit_serving_on(state, &exchange, announcement, work_limits, fence)
+            }
+            None => fence(&mut || Err(refused("serving_workflow_identity_changed"))),
+        }
     }
 }
 impl ActivationPort for Work {
