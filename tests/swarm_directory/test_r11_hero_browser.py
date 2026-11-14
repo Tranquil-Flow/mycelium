@@ -190,7 +190,15 @@ def test_hyphal_knots_are_sparse_irregular_tangles_on_strands(local):
         plain = [k for k in knots if not k['primordium']]
         radii = sorted(k['r'] for k in plain)
         # Heavy-tailed sizes: mostly tiny, a few larger; never uniform beads.
-        assert radii[len(radii) // 2] < 1.6 and radii[-1] <= 3.01 and radii[-1] > 1.8 * radii[0], radii
+        # Median bound re-measured after Fraunces (owner option a, 13 Nov): the
+        # headline grew 132 -> 198 px and the knots re-plotted into the settled
+        # layout, moving the median 1.483 -> 1.776 (deterministic; identical on
+        # the unmodified tree, so not from the readback round). A visual audit
+        # against design/refs/hyphal-knots found even the largest plain knot
+        # (2.94) reading as a dense tangle of distinct hyphae, so the art is
+        # right and the pre-Fraunces bound was not. 1.9 keeps headroom over both
+        # eras: 1.483 and 1.776 pass, a median at 2.0 or above still fails.
+        assert radii[len(radii) // 2] < 1.9 and radii[-1] <= 3.01 and radii[-1] > 1.8 * radii[0], radii
         prim = [k for k in knots if k['primordium']]
         assert all(k['colonyDistance'] < 0.75 and k['r'] <= 4.01 and k['el'] >= 1.4 for k in prim), prim
         # Irregular spacing: nearest-neighbour distances vary widely (groups and gaps).
