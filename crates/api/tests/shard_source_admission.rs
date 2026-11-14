@@ -164,10 +164,14 @@ impl Drop for Pair {
     }
 }
 
+/// What the test runs as the member's `receive`.
+type Receive<'a> = Box<dyn FnMut(&Value) -> Result<Value, Refusal> + 'a>;
+/// One intruder attempt: the source's answer (or why there is none) and its close code.
+type Attempt = (Result<Vec<u8>, String>, Option<u64>);
 /// The member side of `transfer`: its own consent answer, and `receive` run by the test.
 struct Member<'a> {
     root: PathBuf,
-    receive: Box<dyn FnMut(&Value) -> Result<Value, Refusal> + 'a>,
+    receive: Receive<'a>,
     reply: Option<Result<Value, Refusal>>,
 }
 impl MemberLink for Member<'_> {
@@ -271,7 +275,7 @@ fn source_address(command: &Value) -> iroh::EndpointAddr {
 fn an_unrelated_key_cannot_consume_the_job(lan: Option<(IpAddr, LanPolicy)>) {
     let pair = Pair::new();
     let (source, recipe, file) = pair.source(lan);
-    let mut intruder: Option<(Result<Vec<u8>, String>, Option<u64>)> = None;
+    let mut intruder: Option<Attempt> = None;
     let mut served: Option<Result<(), String>> = None;
     let mut member = Member {
         root: pair.member_root.clone(),
