@@ -8,7 +8,7 @@ use owner_run::machine::{OwnerRunError, Reason};
 use owner_run::state::RunState;
 use owner_run::steps::exchange::{Announcement, ClockSkew, MemberRow, ReportsPort};
 use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
-use owner_run::steps::publish::{ServingIdentity, WorkPort};
+use owner_run::steps::publish::{Fence, ServingIdentity, WorkPort};
 use owner_run::steps::serving::run_serving_step;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -189,27 +189,32 @@ impl WorkPort for Workflow {
             ServingIdentity::Changed
         })
     }
+    /// The re-checks and the announcement run inside the owner's Stop fence, as the oracle's
+    /// `with app.guard, owner._lock, workflow._lock` scope does (`demo_chain.py:1073-1097`).
     fn commit_serving(
         &mut self,
         _: &RunState,
         a: &Announcement,
         work_limits: Option<&Value>,
+        fence: Fence<'_>,
     ) -> Result<(), StepError> {
-        if let Some(code) = self.fence {
-            return Err(OwnerRunError::new(code).into());
-        }
-        let model = &self.spec["model"];
-        assert_eq!(a.model_id, model["model_id"]);
-        assert_eq!(a.resolved_commit, model["resolved_commit"]);
-        let per_node = a
-            .per_node
-            .as_ref()
-            .map(|rows| Value::Object(rows.iter().cloned().collect::<serde_json::Map<_, _>>()));
-        self.rec.lock().unwrap().calls.push(json!(["announce", {
-            "phase": a.phase, "run_id": a.run_id, "deployment_id": a.deployment_id,
-            "model": model, "slice_mode": a.slice_mode, "manifest_digest": a.manifest_digest,
-            "work_limits": work_limits, "per_node": per_node}]));
-        Ok(())
+        fence(&mut || {
+            if let Some(code) = self.fence {
+                return Err(OwnerRunError::new(code).into());
+            }
+            let model = &self.spec["model"];
+            assert_eq!(a.model_id, model["model_id"]);
+            assert_eq!(a.resolved_commit, model["resolved_commit"]);
+            let per_node = a
+                .per_node
+                .as_ref()
+                .map(|rows| Value::Object(rows.iter().cloned().collect::<serde_json::Map<_, _>>()));
+            self.rec.lock().unwrap().calls.push(json!(["announce", {
+                "phase": a.phase, "run_id": a.run_id, "deployment_id": a.deployment_id,
+                "model": model, "slice_mode": a.slice_mode, "manifest_digest": a.manifest_digest,
+                "work_limits": work_limits, "per_node": per_node}]));
+            Ok(())
+        })
     }
 }
 fn state_of(spec: &Value) -> RunState {

@@ -21,20 +21,27 @@ pub trait WorkPort {
     fn serving_identity(&mut self, _state: &RunState) -> Result<ServingIdentity, StepError> {
         Err(super::not_ported("serving"))
     }
-    /// The lifecycle-fenced publication of `_step_serving` (`demo_chain.py:1058-1098`):
-    /// under the host's own workflow fence, re-check that this workflow is still the
-    /// run's, `api_running`, not stopped and that its LIVE startup qualified the route
-    /// (`serving_workflow_identity_changed`, `route_qualification_failed`), then commit
-    /// the `serving` announcement. Nothing is announced when a re-check refuses.
+    /// The lifecycle-fenced publication of `_step_serving` (`demo_chain.py:1056-1098`).
+    /// First, outside every lock, whatever may call out or serialise (the exchange lookup and
+    /// `prepare_announcement`, :1056-1063); then, inside `fence` (the owner run's Stop fence,
+    /// [`crate::chain::StepEnv::fenced`]) and under the host's own workflow lock, re-check that
+    /// this workflow is still the run's, `api_running`, not stopped, still bound to this run
+    /// (`serving_workflow_identity_changed`) and that its LIVE startup qualified the route
+    /// (`route_qualification_failed`), then commit the `serving` announcement in memory.
+    /// Nothing is announced when a re-check refuses or the fence reports a Stop.
     fn commit_serving(
         &mut self,
         _state: &RunState,
         _announcement: &super::exchange::Announcement,
         _work_limits: Option<&Value>,
+        _fence: Fence<'_>,
     ) -> Result<(), StepError> {
         Err(super::not_ported("serving"))
     }
 }
+/// The owner run's Stop fence a host runs its serving commit inside (`StepEnv::fenced`).
+pub type Fence<'a> =
+    &'a mut dyn FnMut(&mut dyn FnMut() -> Result<(), StepError>) -> Result<(), StepError>;
 /// What the host knows about the workflow the serving step looks at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServingIdentity {

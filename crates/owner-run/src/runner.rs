@@ -9,6 +9,8 @@
 //! then `queue`. `status()` is the oracle's live `OwnerRun.status()` (ceiling, rollover and monitor
 //! checks, then the snapshot); `snapshot()` is `status_snapshot()` (never ticks anything).
 #[cfg(test)]
+mod fence_tests;
+#[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
 mod probe_tests;

@@ -3,10 +3,11 @@
 //! Activation remains the real closed refusal. Rollover case injects the captured
 //! prior context, not a fake successful serving run or automatic-rollover claim.
 use super::*;
+use owner_run::machine::MonitorProbe;
 use owner_run::machine::{OwnerRunError, Reason};
 use owner_run::runner::Chain;
 use owner_run::steps::activate::ActivationPort;
-use owner_run::steps::publish::{WorkPort, WorkPorts};
+use owner_run::steps::publish::{Fence, ServingIdentity, WorkPort, WorkPorts};
 use owner_run::steps::slices::{SlicesPort, SlicesPorts};
 use std::sync::mpsc;
 
@@ -140,11 +141,45 @@ impl WorkPort for Workflow {
         if self.cfg["stop_targets"] == true && *lock(&self.stage) == "targets" {
             self.hold()?;
         }
+        if self.serving_host() && *lock(&self.stage) == "serving" {
+            // Scripted, labelled: a workflow whose startup challenge qualified the route.
+            return Ok(json!({"state":"api_running","error_code":null,
+                "startup":{"startup_qualification_complete":true,
+                "unavailable_deployment_count":0,"url":"http://127.0.0.1:4385/"}}));
+        }
         Ok(if self.cfg["workflow_failed"] == true {
             json!({"state":"failed","error_code":"workflow_died"})
         } else {
             json!({"state":"awaiting_activation"})
         })
+    }
+    fn serving_identity(&mut self, _: &RunState) -> Result<ServingIdentity, StepError> {
+        if !self.serving_host() {
+            return Err(owner_run::steps::not_ported("serving"));
+        }
+        Ok(ServingIdentity::Current)
+    }
+    fn commit_serving(
+        &mut self,
+        _: &RunState,
+        a: &Announcement,
+        _: Option<&Value>,
+        fence: Fence<'_>,
+    ) -> Result<(), StepError> {
+        if !self.serving_host() {
+            return Err(owner_run::steps::not_ported("serving"));
+        }
+        let calls = self.calls.clone();
+        fence(&mut || {
+            lock(&calls).push(json!(["commit_serving", a.phase]));
+            Ok(())
+        })
+    }
+}
+impl Workflow {
+    /// A test-only host that lends the serving collaborators (never set by a captured case).
+    fn serving_host(&self) -> bool {
+        self.cfg["serving_host"] == true
     }
 }
 impl ActivationPort for Workflow {
@@ -170,6 +205,8 @@ struct Host {
     reports: Reports,
     source: Source,
     workflow: Workflow,
+    /// `chain.monitor(ctx)` calls (only a serving run is monitored).
+    monitored: Arc<Mutex<u32>>,
 }
 impl ChainPorts for Host {
     fn ports(&mut self) -> Ports<'_> {
@@ -198,6 +235,10 @@ impl ChainPorts for Host {
     }
     fn teardown(&mut self, failed: bool, env: &mut dyn StepEnv) -> Result<(), String> {
         self.base.teardown(failed, env)
+    }
+    fn monitor(&mut self, _: &RunState) -> MonitorProbe {
+        *lock(&self.monitored) += 1;
+        MonitorProbe::Code(None)
     }
 }
 struct PriorContext {
@@ -238,6 +279,15 @@ impl Chain for PriorContext {
     fn teardown(&mut self, f: bool, e: &mut dyn StepEnv) -> Result<(), String> {
         self.inner.teardown(f, e)
     }
+    fn rollover_due(&mut self) -> Option<bool> {
+        self.inner.rollover_due()
+    }
+    fn ceiling_reached(&mut self) -> owner_run::machine::CeilingProbe {
+        self.inner.ceiling_reached()
+    }
+    fn monitor(&mut self) -> MonitorProbe {
+        self.inner.monitor()
+    }
 }
 fn replay(name: &str, case: &Value) {
     let rec = Arc::new(Mutex::new(Record::default()));
@@ -272,6 +322,7 @@ fn replay(name: &str, case: &Value) {
         source: Source {
             cfg: case["cfg"].clone(),
         },
+        monitored: Arc::default(),
     };
     let sink = Arc::new(Mutex::new(RunState::new("", "", Reason::Start)));
     let chain = PriorContext {
@@ -458,4 +509,113 @@ fn activation_through_owner_chain_and_runner_matches_oracle() {
         replay(name, case);
         println!("ORACLE-ACTIVATE-CHAIN-R17 {name}");
     }
+}
+
+/// Proves: B-RUN-10 (a host that lends the serving collaborators takes the run through `serving` on
+/// the real Runner and OwnerChain: the route origin is published, the run stays `serving` while the
+/// owner's live status keeps monitoring it, and a Stop then tears it down with failed=false).
+/// Scripted, labelled host IO: no native worker, route or chat is involved.
+#[test]
+fn a_serving_run_stays_serving_and_monitored_until_stop_tears_it_down() {
+    let f: Value =
+        serde_json::from_str(include_str!("../fixtures/oracle_chain_activate_r17.json")).unwrap();
+    let mut case = f["cases"]["whole"].clone();
+    case["cfg"]["serving_host"] = json!(true);
+    let rec = Arc::new(Mutex::new(Record::default()));
+    let calls = Arc::new(Mutex::new(vec![]));
+    let work_calls = Arc::new(Mutex::new(vec![]));
+    let stage = Arc::new(Mutex::new(String::new()));
+    let monitored = Arc::new(Mutex::new(0));
+    let (entered, _entered) = mpsc::channel();
+    let (_release, release) = mpsc::channel();
+    let mut base = case_ports(&rec, &case);
+    base.compile.delay = 0;
+    let host = Host {
+        workflow: Workflow {
+            cfg: case["cfg"].clone(),
+            stage: stage.clone(),
+            calls: work_calls.clone(),
+            entered,
+            release,
+            released: false,
+        },
+        base,
+        reports: Reports {
+            base: case_ports(&rec, &case).exchange,
+            cfg: case["cfg"].clone(),
+            calls: calls.clone(),
+            work: false,
+            stage: stage.clone(),
+            work_calls: work_calls.clone(),
+        },
+        source: Source {
+            cfg: case["cfg"].clone(),
+        },
+        monitored: monitored.clone(),
+    };
+    let chain = PriorContext {
+        inner: OwnerChain::new(host),
+        binding: None,
+        calls,
+        work_calls: work_calls.clone(),
+        stage,
+        activation: true,
+    };
+    let runner = Runner::spawn(
+        Box::new(chain),
+        Box::new(|| Identity {
+            run_id: "run-1".into(),
+            deployment_id: "dep-1".into(),
+        }),
+        Arc::new(SimClock(Mutex::new(0.0))),
+        Timing {
+            poll: support::tick(),
+            rebuild_join: Timing::registered().rebuild_join,
+        },
+    )
+    .unwrap();
+    runner.start("start", None).unwrap();
+    eventually("the run leaves its steps", || {
+        matches!(
+            runner.snapshot()["state"].as_str(),
+            Some("serving" | "failed" | "stopped")
+        )
+    });
+    let serving = runner.snapshot();
+    assert_eq!(serving["state"], "serving", "{serving}");
+    assert_eq!(serving["route_ready"], true, "{serving}");
+    assert_eq!(
+        serving["registry_origin"], "http://127.0.0.1:4385",
+        "{serving}"
+    );
+    assert_eq!(serving["steps"][9]["detail"], "route ready: open the chat");
+    assert!(
+        lock(&work_calls).contains(&json!(["commit_serving", "serving"])),
+        "the serving announcement went through the fenced commit: {:?}",
+        lock(&work_calls)
+    );
+    let before = *lock(&monitored);
+    for _ in 0..2 {
+        assert_eq!(runner.status()["state"], "serving");
+    }
+    assert!(
+        *lock(&monitored) >= before + 2,
+        "every live status monitors the serving run"
+    );
+    assert!(
+        lock(&rec).teardowns.is_empty(),
+        "nothing torn down while serving"
+    );
+    runner.stop();
+    eventually("the stopped run settles", || {
+        !runner.thread_alive() && runner.quiescent()
+    });
+    let end = runner.snapshot();
+    runner.close();
+    assert_eq!(end["state"], "stopped", "{end}");
+    assert_eq!(
+        json!(lock(&rec).teardowns),
+        json!([false]),
+        "one Stop teardown"
+    );
 }

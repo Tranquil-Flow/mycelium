@@ -19,7 +19,10 @@ const FIXTURES: [&str; 4] = [
 #[test]
 fn every_unported_step_is_an_explicit_tagged_refusal() {
     let names: Vec<&str> = NOT_PORTED.iter().map(|(n, _, _)| *n).collect();
-    assert_eq!(names, ["serving"]);
+    assert!(
+        names.is_empty(),
+        "every step of the ten is ported: {names:?}"
+    );
     assert!(closed_code(NOT_PORTED_CODE));
     for (step, tag, seam) in NOT_PORTED {
         let owner_run::chain::StepError::Refused(e) = not_ported(step) else {
@@ -36,6 +39,22 @@ fn every_unported_step_is_an_explicit_tagged_refusal() {
             "{tag} {seam}"
         );
     }
+}
+
+/// Proves: B-RUN-03 (a host that never lends the serving collaborators keeps the exact refusal it had
+/// while the step was unported: same code, tag and seam, so legacy hosts and their tests do not move).
+#[test]
+fn a_host_without_the_serving_seam_keeps_the_legacy_refusal_text() {
+    let owner_run::chain::StepError::Refused(e) = not_ported("serving") else {
+        panic!("refusal expected");
+    };
+    assert_eq!(e.code, NOT_PORTED_CODE);
+    assert_eq!(
+        e.message.as_deref(),
+        Some(
+            "The serving step is not ported to the Rust run chain yet (NP-SLICE1-serving, waiting for seam SE-L9-RUN-SESSION); the previous release runs it."
+        )
+    );
 }
 
 /// Proves: B-RUN-03 (v0.1.4 never produces the code, so it cannot hide a ported outcome: it is absent from
