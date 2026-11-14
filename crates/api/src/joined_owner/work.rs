@@ -471,6 +471,7 @@ impl Shared {
     fn commit_serving(
         &self,
         stop: &AtomicBool,
+        _exiting: &AtomicBool,
         current: impl FnOnce() -> bool,
         publish: impl FnOnce(),
     ) -> Result<(), &'static str> {
@@ -684,6 +685,7 @@ impl OwnerWork {
             self.shared
                 .commit_serving(
                     &self.stop,
+                    &self.exiting,
                     || self.current(state),
                     || {
                         exchange.commit_announcement(prepared, false);
@@ -1130,6 +1132,10 @@ fn signal_stop(shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) 
         stop.store(true, Ordering::SeqCst);
     });
 }
+/// The worker's exit begins: from here its route and gateway close.
+fn begin_exit(_shared: &Shared, exiting: &AtomicBool) {
+    exiting.store(true, Ordering::SeqCst);
+}
 /// `prepared = exchange.prepare_announcement(...)` (demo_chain.py:1059-1066): validate and
 /// serialise the `serving` announcement, read the exchange's clock, before any lifecycle lock.
 pub fn prepare_serving(
@@ -1389,7 +1395,7 @@ impl Worker {
         // A Stop that arrived while working ends the workflow `stopped`
         // (whatever the interrupted member operation answered).
         let stopping = self.stop.load(Ordering::SeqCst);
-        self.exiting.store(true, Ordering::SeqCst);
+        begin_exit(&self.shared, &self.exiting);
         // F4: ONE deadline for the whole exit, from the Stop (or from now on a failure).
         let from = match *self.stop_at.lock().unwrap_or_else(|p| p.into_inner()) {
             Some(at) if stopping => at,
@@ -1884,6 +1890,7 @@ mod serving_fence_tests {
             let mut published = false;
             let result = worker.commit_serving(
                 &flag,
+                &AtomicBool::new(false),
                 || true,
                 || {
                     entered_tx.send(()).expect("test receives the entry");
@@ -1917,7 +1924,29 @@ mod serving_fence_tests {
             "the Stop is a workflow-lock write"
         );
         let mut published = false;
-        let result = shared.commit_serving(&stop, || true, || published = true);
+        let result =
+            shared.commit_serving(&stop, &AtomicBool::new(false), || true, || published = true);
+        assert_eq!(result, Err("serving_workflow_identity_changed"));
+        assert!(!published);
+    }
+
+    /// Proves: B-RUN-10 (astra "Worker exit qualification limit": a fatal worker exit stops the
+    /// workflow being publishable under the workflow lock BEFORE the exit closes its gateway, as
+    /// v0.1.4's workflow writes its terminal state under `self._lock` before its `finally` cleanup
+    /// (workflow.py:337-351): once the exit began, the fence refuses and publishes nothing; and
+    /// the exit's start is a workflow-lock write, so it lands before a parked commit's re-checks or
+    /// after its publication, never between them.)
+    #[test]
+    fn a_worker_exit_is_seen_by_the_fence_before_its_gateway_closes() {
+        let shared = shared(RUNNING, qualified(json!(0)));
+        let stop = AtomicBool::new(false);
+        let exiting = AtomicBool::new(false);
+        let before = shared.lock().version;
+        begin_exit(&shared, &exiting);
+        let written = shared.lock().version > before;
+        let mut published = false;
+        let result = shared.commit_serving(&stop, &exiting, || true, || published = true);
+        assert!(written, "the exit's start is a workflow-lock write");
         assert_eq!(result, Err("serving_workflow_identity_changed"));
         assert!(!published);
     }
@@ -1967,7 +1996,12 @@ mod serving_fence_tests {
         for (state, startup, current, want) in cases {
             let shared = shared(state, startup.clone());
             let mut published = 0;
-            let result = shared.commit_serving(&stop, || current, || published += 1);
+            let result = shared.commit_serving(
+                &stop,
+                &AtomicBool::new(false),
+                || current,
+                || published += 1,
+            );
             assert_eq!(result, want, "{state} {startup:?} {current}");
             assert_eq!(published, usize::from(want.is_ok()), "{state} {startup:?}");
         }
