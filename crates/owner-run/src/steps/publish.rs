@@ -15,6 +15,16 @@ pub trait WorkPort {
     fn start_serving(&mut self, proposal: &Value) -> Result<Value, PortError>;
     /// Existing workflow.status(); null only when the workflow is genuinely absent.
     fn workflow_state(&mut self) -> Result<Value, StepError>;
+    /// The serving step's read of the workflow (`{} if workflow is None else workflow.status()`,
+    /// `demo_chain.py:1007, 1017`, and the post-wait `workflow.status()`, :1030): `None` when the
+    /// host has no workflow, `Some(status)` for a present one whatever its status is. A present
+    /// workflow whose status is `null` is not an absent one: the step's `.get` on it raises.
+    /// The default keeps the [`WorkPort::workflow_state`] contract (`null` only when absent); a
+    /// host that can tell absence apart answers here.
+    fn serving_status(&mut self) -> Result<Option<Value>, StepError> {
+        let status = self.workflow_state()?;
+        Ok((!status.is_null()).then_some(status))
+    }
     /// `needs_identity(workflow)` / `current(workflow)` of `_step_serving`
     /// (`demo_chain.py:988-1004 @ f4e366e9`), read from the host's own run state.
     /// A host that has not wired the serving step refuses by name, never answers.

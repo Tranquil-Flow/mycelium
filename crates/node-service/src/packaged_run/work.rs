@@ -676,6 +676,14 @@ impl WorkPort for Work {
             None => Ok(Value::Null),
         }
     }
+    /// The serving step's read: absent only when no workflow is resident; a resident workflow's
+    /// status is passed on as it is (a present `null` raises in the step, demo_chain.py:1017).
+    fn serving_status(&mut self) -> Result<Option<Value>, StepError> {
+        match lock(&self.resident).work.as_mut() {
+            Some(work) => work.workflow_state().map(Some),
+            None => Ok(None),
+        }
+    }
     /// `needs_identity` / `current` over the run's resident workflow; with none resident, the
     /// run's own compile decides whether one was required (`demo_chain.py:988-992`).
     fn serving_identity(&mut self, state: &RunState) -> Result<ServingIdentity, StepError> {

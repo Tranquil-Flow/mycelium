@@ -86,13 +86,13 @@ fn exception(class: &str) -> StepError {
 
 /// `{} if workflow is None else workflow.status()` (`demo_chain.py:1007, 1017`) and the post-wait
 /// `workflow.status()` (:1030), then `.get`: no `or {}` on the whole status. Only a genuinely absent
-/// workflow (`null`, the [`WorkPort::workflow_state`] contract) reads as `{}`; a present workflow
-/// whose status is not a mapping, falsy or not, has no `.get` (`AttributeError`).
+/// workflow ([`WorkPort::serving_status`] `None`) reads as `{}`; a present workflow whose status is
+/// not a mapping, `null` included, has no `.get` (`AttributeError`).
 fn serving_status(workflow: &mut dyn WorkPort) -> Result<Value, StepError> {
-    match workflow.workflow_state()? {
-        Value::Null => Ok(Value::Object(Map::new())),
-        status @ Value::Object(_) => Ok(status),
-        _ => Err(exception("AttributeError")),
+    match workflow.serving_status()? {
+        None => Ok(Value::Object(Map::new())),
+        Some(status @ Value::Object(_)) => Ok(status),
+        Some(_) => Err(exception("AttributeError")),
     }
 }
 

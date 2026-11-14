@@ -1219,6 +1219,10 @@ impl WorkPort for OwnerWork {
     fn workflow_state(&mut self) -> Result<Value, StepError> {
         Ok(self.state())
     }
+    /// This workflow is the run's own and always present to the step that borrows it.
+    fn serving_status(&mut self) -> Result<Option<Value>, StepError> {
+        Ok(Some(self.state()))
+    }
     fn serving_identity(&mut self, state: &RunState) -> Result<ServingIdentity, StepError> {
         Ok(self.serving_identity_of(state))
     }

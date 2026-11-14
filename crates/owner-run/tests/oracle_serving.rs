@@ -175,6 +175,14 @@ impl WorkPort for Workflow {
         }
         Ok(frame(&self.spec["workflow"], rec.time))
     }
+    /// `{} if workflow is None else workflow.status()`: the double's workflow is absent only for
+    /// `no_workflow`; a present one may answer any status, `None` included.
+    fn serving_status(&mut self) -> Result<Option<Value>, StepError> {
+        if self.spec["no_workflow"] == true {
+            return Ok(None);
+        }
+        self.workflow_state().map(Some)
+    }
     /// `needs_identity` and `current` exactly as `demo_chain.py:988-1004` evaluates them.
     fn serving_identity(&mut self, state: &RunState) -> Result<ServingIdentity, StepError> {
         let spec = &self.spec;
