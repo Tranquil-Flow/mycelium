@@ -194,7 +194,10 @@ fn a_vm_or_internet_sharing_bridge_never_wins_by_name() {
     );
     assert_eq!(
         chosen(
-            &[bridge("bridge100", "192.168.64.1"), tunnel("utun4", "10.8.0.2")],
+            &[
+                bridge("bridge100", "192.168.64.1"),
+                tunnel("utun4", "10.8.0.2")
+            ],
             Some(ip("10.8.0.2"))
         ),
         Selection::LocalOnly(ONLY_BRIDGE_INTERFACES)
@@ -323,7 +326,12 @@ fn raw_sockaddr_bytes_decode_in_network_order() {
         Some(ip("192.168.64.1"))
     );
     let mut v6 = vec![28, libc::AF_INET6 as u8, 0x1f, 0x90, 0, 0, 0, 0];
-    v6.extend("fd12:3456::7".parse::<std::net::Ipv6Addr>().unwrap().octets());
+    v6.extend(
+        "fd12:3456::7"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets(),
+    );
     v6.extend([0, 0, 0, 4]);
     assert_eq!(sockaddr_ip(&v6), Some(ip("fd12:3456::7")));
     // An AF_LINK entry, a truncated sockaddr, an empty one: no address.
@@ -512,6 +520,10 @@ fn bridges_are_recognised_by_type_not_by_name() {
     eprintln!("bridges on this Mac: {expected:?}");
     assert_eq!(bridge_interfaces().unwrap(), expected);
     for address in interface_addresses().unwrap() {
-        assert_eq!(address.bridge, expected.contains(&address.name), "{address:?}");
+        assert_eq!(
+            address.bridge,
+            expected.contains(&address.name),
+            "{address:?}"
+        );
     }
 }

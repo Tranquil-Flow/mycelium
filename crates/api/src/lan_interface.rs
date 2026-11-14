@@ -3,25 +3,38 @@
 //!
 //! The direct-LAN carrier (`runtime::iroh_host::LoopbackHost::bind_lan`) needs ONE private interface
 //! address. [`select`] is the pure rule over a list of interface addresses; [`this_mac`] reads the
-//! list from the kernel (`getifaddrs(3)`) and asks the routing table which source address the
-//! default route would use. Nothing here sends a packet, resolves a name or contacts a peer.
+//! list from the kernel (`getifaddrs(3)`) and reads the default route's source address from the
+//! kernel's routing table (`sysctl(3)` `NET_RT_DUMP`, the table `netstat -rn` prints). Nothing here
+//! opens a socket of any kind, sends a packet, resolves a name or contacts a peer: both reads copy
+//! kernel tables into this process. (Round 1 asked the kernel with a UDP socket bound on 0.0.0.0 and
+//! connected to 192.0.2.1, the one wildcard bind on the work path, REVIEW-laneLAN F5 / LAN-A5; it
+//! is gone, so the work path has no exception to the no-wildcard rule of `runtime::iroh_host`.)
 //!
-//! The rule, in order:
+//! The rule (owner ruling for this release: both Macs are on one ordinary private network), in
+//! order:
 //! 1. Candidates: interfaces that are up and running, not loopback and not point-to-point (VPN and
 //!    tailnet tunnels such as `utun*` are point-to-point: a private address on a tunnel is not the
 //!    network the other Mac shares), whose address is RFC 1918, IPv4 link-local (169.254/16) or
 //!    IPv6 unique-local (fc00::/7), and which `LanPolicy::private_only` admits. Never a public,
 //!    CGNAT/tailnet (100.64/10), loopback, unspecified, multicast or IPv6 link-local address (the
 //!    last needs a scope id the bind does not carry).
-//! 2. The candidate whose address is the default route's source wins: that is the network this Mac
-//!    actually uses, so it is the one a second Mac on the same Wi-Fi or Ethernet shares.
-//! 3. Otherwise: RFC 1918 before IPv4 link-local before IPv6 unique-local, then interface name, then
-//!    address (byte order). The input order never matters.
-//! 4. No candidate: [`Selection::LocalOnly`] with the reason; the transport stays on 127.0.0.1.
+//! 2. The candidate whose address is the source of the primary IPv4 default route wins: that is
+//!    the network this Mac actually uses, so it is the one a second Mac on the same Wi-Fi or
+//!    Ethernet shares.
+//! 3. Otherwise (no default route, or its source is not a candidate: a full-tunnel VPN, Wi-Fi gone)
+//!    no guess is made between networks. Bridges are set aside by their interface TYPE
+//!    (`IFT_BRIDGE`, the `AF_LINK` entry's `if_data.ifi_type` in the same `getifaddrs` list, never
+//!    the name): a VM or Internet Sharing bridge (`bridge100`, usually 192.168.64.1) is a network
+//!    this Mac hosts, not one the other Mac is on. Exactly one remaining interface: its address
+//!    (IPv4 before IPv6 unique-local on that one link; two addresses of the best class on it are
+//!    still ambiguous). Several interfaces: [`AMBIGUOUS_PRIVATE_INTERFACES`]. Only bridges:
+//!    [`ONLY_BRIDGE_INTERFACES`]. None: [`NO_PRIVATE_ADDRESS`].
+//! 4. A refusal is [`Selection::LocalOnly`] with its reason: the transport stays on 127.0.0.1, and
+//!    an owner run with a joined Mac refuses by that name before it dials anything.
 use runtime::iroh_host::LanPolicy;
 use std::{
     collections::BTreeSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 /// One address of one interface, as `getifaddrs(3)` reports it.
@@ -60,6 +73,12 @@ pub const ONLY_BRIDGE_INTERFACES: &str = "only_bridge_interfaces";
 
 /// `IFT_BRIDGE` (`<net/if_types.h>`: 0xd1, "Transparent bridge interface"); not in `libc`.
 const IFT_BRIDGE: u8 = 0xd1;
+/// `RTF_IFSCOPE` (`<net/route.h>`): a route scoped to one interface, not the primary one.
+const RTF_IFSCOPE: i32 = 0x0100_0000;
+/// `RTAX_DST`, `RTAX_NETMASK`, `RTAX_IFA` (`<net/route.h>`): sockaddr slots of a route message.
+const RTAX_DST: usize = 0;
+const RTAX_NETMASK: usize = 2;
+const RTAX_IFA: usize = 5;
 
 /// RFC 1918 = 0, IPv4 link-local = 1, IPv6 unique-local = 2; anything else is not a candidate.
 fn class(ip: IpAddr) -> Option<u8> {
@@ -71,17 +90,36 @@ fn class(ip: IpAddr) -> Option<u8> {
     }
 }
 
-/// The pure selection rule (module note). `default_source` is the address the default route
-/// would send from, if the routing table has one.
+/// The pure selection rule (module note). `default_source` is the source address of the primary
+/// IPv4 default route, if the routing table has one.
 pub fn select(addresses: &[InterfaceAddress], default_source: Option<IpAddr>) -> Selection {
-    addresses
+    let candidates: Vec<&InterfaceAddress> = addresses
         .iter()
         .filter(|a| a.up && !a.loopback && !a.point_to_point && admitted(a.ip))
-        .filter_map(|a| Some((default_source != Some(a.ip), class(a.ip)?, &a.name, a.ip)))
-        .min()
-        .map_or(Selection::LocalOnly(NO_PRIVATE_ADDRESS), |(.., ip)| {
-            Selection::Lan(ip)
-        })
+        .filter(|a| class(a.ip).is_some())
+        .collect();
+    if let Some(source) = default_source
+        && candidates.iter().any(|a| a.ip == source)
+    {
+        return Selection::Lan(source);
+    }
+    if candidates.is_empty() {
+        return Selection::LocalOnly(NO_PRIVATE_ADDRESS);
+    }
+    let shared: Vec<&InterfaceAddress> = candidates.into_iter().filter(|a| !a.bridge).collect();
+    let Some(first) = shared.first() else {
+        return Selection::LocalOnly(ONLY_BRIDGE_INTERFACES);
+    };
+    if shared.iter().any(|a| a.name != first.name) {
+        return Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES);
+    }
+    // One network: its best address class, if exactly one address has it.
+    let best = shared.iter().filter_map(|a| class(a.ip)).min();
+    let mut best = shared.iter().filter(|a| class(a.ip) == best);
+    match (best.next(), best.next()) {
+        (Some(only), None) => Selection::Lan(only.ip),
+        _ => Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+    }
 }
 
 /// The IP address of a raw `sockaddr_in` / `sockaddr_in6` (`sa_len`, `sa_family`, then the
@@ -103,23 +141,126 @@ pub fn sockaddr_ip(sockaddr: &[u8]) -> Option<IpAddr> {
     }
 }
 
-/// The source address of the primary IPv4 default route in a routing-table dump (RED scaffold:
-/// not read yet).
-pub fn default_route_source_in(_dump: &[u8]) -> Option<IpAddr> {
-    None
+/// The source address of the primary IPv4 default route in a routing-table dump (the bytes of
+/// `sysctl` `CTL_NET.PF_ROUTE.0.AF_INET.NET_RT_DUMP`: `rt_msghdr` records, each followed by the
+/// sockaddrs its `rtm_addrs` names, every one padded to 4 bytes). The default route is the up,
+/// unscoped route to 0.0.0.0 with a zero netmask; its interface address (`RTAX_IFA`) is the source
+/// the kernel uses for it. None, or several that disagree: `None`. A truncated record ends the walk.
+pub fn default_route_source_in(dump: &[u8]) -> Option<IpAddr> {
+    let header = std::mem::size_of::<libc::rt_msghdr>();
+    let int_at = |record: &[u8], offset: usize| -> Option<i32> {
+        Some(i32::from_ne_bytes(
+            record.get(offset..offset + 4)?.try_into().ok()?,
+        ))
+    };
+    let mut found: Option<IpAddr> = None;
+    let mut rest = dump;
+    while rest.len() >= header {
+        let length = usize::from(u16::from_ne_bytes([rest[0], rest[1]]));
+        if length < header || length > rest.len() {
+            break;
+        }
+        let (record, next) = rest.split_at(length);
+        rest = next;
+        if i32::from(record[2]) != libc::RTM_VERSION {
+            continue;
+        }
+        let flags = int_at(record, std::mem::offset_of!(libc::rt_msghdr, rtm_flags))?;
+        let present = int_at(record, std::mem::offset_of!(libc::rt_msghdr, rtm_addrs))?;
+        if flags & libc::RTF_UP == 0 || flags & RTF_IFSCOPE != 0 {
+            continue;
+        }
+        let mut slots: [Option<&[u8]>; 8] = [None; 8];
+        let mut at = header;
+        let mut whole = true;
+        for (index, slot) in slots.iter_mut().enumerate() {
+            if present & (1 << index) == 0 {
+                continue;
+            }
+            let Some(sockaddr) = record
+                .get(at)
+                .and_then(|len| record.get(at..at + usize::from(*len)))
+            else {
+                whole = false;
+                break;
+            };
+            *slot = Some(sockaddr);
+            // route(8)'s `ROUNDUP`: padded to 4 bytes; a zero-length sockaddr still takes 4.
+            at += match sockaddr.len() {
+                0 => 4,
+                len => 1 + ((len - 1) | 3),
+            };
+        }
+        let mask_zero = slots[RTAX_NETMASK].is_some_and(|m| m.iter().skip(2).all(|b| *b == 0));
+        let to_any = slots[RTAX_DST].and_then(sockaddr_ip) == Some(Ipv4Addr::UNSPECIFIED.into());
+        let Some(source) = slots[RTAX_IFA].and_then(sockaddr_ip) else {
+            continue;
+        };
+        if !(whole && mask_zero && to_any) {
+            continue;
+        }
+        if found.is_some_and(|f| f != source) {
+            return None;
+        }
+        found = Some(source);
+    }
+    found
 }
 
-/// The source address the kernel would use for the default route, or none. A UDP `connect` only
-/// consults the routing table: it sends no datagram. The destination is TEST-NET-1 (RFC 5737,
-/// 192.0.2.1), reserved for documentation and never assigned, so no local route can match it
-/// more specifically than the default route.
+/// The source address of this Mac's primary IPv4 default route, read from the kernel's routing
+/// table ([`default_route_source_in`] over `sysctl` `NET_RT_DUMP`). No socket is opened.
+#[allow(unsafe_code)] // sysctl(3): a size query, then a copy into a buffer this function owns
 pub fn default_route_source() -> Option<IpAddr> {
-    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).ok()?;
-    socket
-        .connect(SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 9)))
-        .ok()?;
-    let ip = socket.local_addr().ok()?.ip();
-    (!ip.is_unspecified()).then_some(ip)
+    let mut mib = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        libc::AF_INET,
+        libc::NET_RT_DUMP,
+        0,
+    ];
+    let names = libc::c_uint::try_from(mib.len()).ok()?;
+    // The table can grow between the size query and the copy: retry with headroom.
+    for _ in 0..4 {
+        let mut size: libc::size_t = 0;
+        // SAFETY: `mib` holds `names` ints; a null `oldp` with a valid `oldlenp` asks for the size
+        // only; nothing is set (null `newp`, length 0).
+        let asked = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                names,
+                std::ptr::null_mut(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if asked != 0 {
+            return None;
+        }
+        let mut buffer = vec![0u8; size.saturating_add(size / 2).saturating_add(1024)];
+        let mut filled: libc::size_t = buffer.len();
+        // SAFETY: `buffer` is writable for `filled` bytes; the kernel writes at most that many and
+        // stores the count written in `filled`; nothing is set (null `newp`, length 0).
+        let copied = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                names,
+                buffer.as_mut_ptr().cast(),
+                &mut filled,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if copied == 0 {
+            buffer.truncate(filled);
+            return default_route_source_in(&buffer);
+        }
+        if std::io::Error::last_os_error().raw_os_error() != Some(libc::ENOMEM) {
+            return None;
+        }
+    }
+    None
 }
 
 /// Every address of every interface of this Mac (`getifaddrs(3)`), IPv4 and IPv6 only, each

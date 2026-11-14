@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Explicit local-only Router endpoint ownership. No public relays, address
 //! lookup, wildcard sockets or default N0 preset. This is the sidecar's local
-//! mode, not a production internet-discovery policy.
+//! mode, not a production internet-discovery policy. The packaged app's choice
+//! of the one interface address a direct-LAN endpoint binds
+//! (`api::lan_interface`) opens no socket at all (it reads `getifaddrs` and
+//! the routing table through `sysctl`), so the no-wildcard rule has no
+//! exception on the work path.
 //!
 //! Direct-LAN paths after the handshake (iroh 1.0.2 + noq 1.3.0, verified in the
 //! pinned sources): the endpoint config always enables QUIC multipath and n0 NAT
