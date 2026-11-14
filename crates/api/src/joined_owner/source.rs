@@ -18,9 +18,10 @@
 //! unpinned at once); the job checks the key again, which also covers a
 //! connection carried over from an earlier job. LocalOnly: only that second
 //! check (reason `recipient_key_refused`). Any other or failed handshake is
-//! closed unserved and the job keeps accepting until its own absolute deadline. Serving ends at that deadline or
-//! at `close`, whichever comes first. Bytes, recipes and offers are all
-//! produced elsewhere and verified on both sides here.
+//! closed unserved and the job keeps accepting until its own absolute
+//! deadline. Serving ends at that deadline or at `close`, whichever comes
+//! first. Bytes, recipes and offers are all produced elsewhere and verified on
+//! both sides here.
 //!
 //! `close` is bounded in every state (LAN-R2-A1): it returns within one
 //! `OwnerPoll` (the accept slice in progress, both modes; handshakes in flight
