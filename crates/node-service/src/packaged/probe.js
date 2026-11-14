@@ -42,7 +42,9 @@
       const sent = await post('/chat/api/send', 'X-Mycelium-Chat', {prompt:__PROMPT_JSON__, max_new_tokens:Number(__TOKENS_JSON__)});
       if (sent.status !== 503 || sent.value.error !== 'chat_not_ready') throw new Error('send_' + sent.status + '_' + sent.value.error);
       await receipt('L11_PACKAGED_CHAT_ROUTE_NOT_READY');
-      const events = await post('/chat/api/events', 'X-Mycelium-Chat', {request_id:'none', after:0});
+      // A well-formed id no chat has (16 to 64 of [A-Za-z0-9_-], chat.py:45): a malformed one is
+      // refused 400 chat_request_invalid before the lookup.
+      const events = await post('/chat/api/events', 'X-Mycelium-Chat', {request_id:'l11-probe-unknown-request', after:0});
       if (events.status !== 404 || events.value.error !== 'chat_request_unknown') throw new Error('events_' + events.status);
       await receipt('L11_PACKAGED_CHAT_ROUTE_EVENTS_UNKNOWN');
     } catch (error) {
