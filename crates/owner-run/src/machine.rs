@@ -400,6 +400,14 @@ impl Backoff {
     }
 }
 
+/// One admitted rebuild that waits for the old run's thread to end: the run context it stopped
+/// and its own number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RebuildAttempt {
+    pub generation: u64,
+    pub number: u64,
+}
+
 pub struct OwnerRun {
     identities: Box<dyn FnMut() -> Identity + Send>,
     state: State,
@@ -417,8 +425,11 @@ pub struct OwnerRun {
     rollover: Rollover,
     ctx: Option<Ctx>,
     phase: Phase,
-    /// `rebuild()` waiting for the old run's thread to end before it starts the fresh one.
-    pending_rebuild: bool,
+    /// `rebuild()` waiting for the old run's thread to end before it starts the fresh one: the
+    /// attempt it is (`owner_run.py:288-297` joins the thread THAT rebuild captured).
+    pending_rebuild: Option<RebuildAttempt>,
+    /// How many rebuilds have waited for an old thread (each [`RebuildAttempt`] number, never reused).
+    rebuild_attempts: u64,
     /// Which `RunContext` is current (`owner._ctx is ctx`, demo_chain.py:1086): every context
     /// [`OwnerRun::install`] creates gets the next number, never reused.
     generation: u64,
@@ -454,7 +465,8 @@ impl OwnerRun {
             rollover: Rollover::idle(),
             ctx: None,
             phase: Phase::Idle,
-            pending_rebuild: false,
+            pending_rebuild: None,
+            rebuild_attempts: 0,
             generation: 0,
             backoff: Backoff::registered(),
         }
@@ -476,6 +488,10 @@ impl OwnerRun {
     /// The serving hold loop is running: the driver should poll the ceiling and may monitor.
     /// A `rebuild()` waits for the old run's thread to end before it starts the fresh run.
     pub fn rebuild_pending(&self) -> bool {
+        self.pending_rebuild.is_some()
+    }
+    /// The pending rebuild, read under the lock that admitted it: its watcher acts on it alone.
+    pub fn rebuild_attempt(&self) -> Option<RebuildAttempt> {
         self.pending_rebuild
     }
     pub fn serving(&self) -> bool {
@@ -576,7 +592,11 @@ impl OwnerRun {
             self.rebuilding = false;
             cmds.extend(self.start_rebuild(clock)?);
         } else {
-            self.pending_rebuild = true;
+            self.rebuild_attempts += 1;
+            self.pending_rebuild = Some(RebuildAttempt {
+                generation: self.generation,
+                number: self.rebuild_attempts,
+            });
         }
         Ok(cmds)
     }
@@ -591,10 +611,10 @@ impl OwnerRun {
     /// worker (`owner_run.py:311-316`): the code is recorded on the run, `_error` is set and the
     /// state is forced to `failed`; the old thread runs on (its teardown still ends it later).
     pub fn rebuild_join_expired(&mut self, asynchronous: bool) -> Result<(), OwnerRunError> {
-        if !self.pending_rebuild || self.phase == Phase::Idle {
+        if self.pending_rebuild.is_none() || self.phase == Phase::Idle {
             return Ok(());
         }
-        self.pending_rebuild = false;
+        self.pending_rebuild = None;
         let error = OwnerRunError::new("owner_run_stop_incomplete");
         if asynchronous {
             if let Some(ctx) = self.ctx.as_mut() {
@@ -607,6 +627,21 @@ impl OwnerRun {
         } else {
             Err(error)
         }
+    }
+
+    /// [`OwnerRun::rebuild_join_expired`] for the watcher of `attempt`: nothing happens unless
+    /// that very rebuild is still pending. A rebuild that completed retired its attempt, and a
+    /// newer rebuild has its own attempt and its own watcher and allowance (REVIEW-laneSRV-r2-astra
+    /// R2A-01; v0.1.4's worker only ever joins and fails for its own rebuild, owner_run.py:288-319).
+    pub fn rebuild_join_expired_for(
+        &mut self,
+        asynchronous: bool,
+        attempt: RebuildAttempt,
+    ) -> Result<(), OwnerRunError> {
+        if self.pending_rebuild != Some(attempt) {
+            return Ok(());
+        }
+        self.rebuild_join_expired(asynchronous)
     }
 
     // -- chain callbacks (RunContext) ------------------------------------------------------------
@@ -976,8 +1011,8 @@ impl OwnerRun {
     /// The oracle thread ends; a pending `rebuild()` continues on its worker.
     fn thread_ended(&mut self, clock: Clock) -> Vec<Cmd> {
         self.phase = Phase::Idle;
-        if self.pending_rebuild {
-            self.pending_rebuild = false;
+        // The rebuild completes: its attempt is retired, so its watcher ends without a write.
+        if self.pending_rebuild.take().is_some() {
             self.rebuilding = false;
             return self.start_rebuild(clock).unwrap_or_default();
         }

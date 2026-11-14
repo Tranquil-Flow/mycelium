@@ -28,7 +28,8 @@ mod watcher_tests;
 use crate::action::{self, Applied, Plan, Refusal};
 use crate::chain::{StepEnv, StepError};
 use crate::machine::{
-    CeilingProbe, Clock, Cmd, Identity, MonitorProbe, OwnerRun, OwnerRunError, Reason, StepOutcome,
+    CeilingProbe, Clock, Cmd, Identity, MonitorProbe, OwnerRun, OwnerRunError, Reason,
+    RebuildAttempt, StepOutcome,
 };
 use budgets::{BudgetId, Entries};
 use serde_json::Value;
@@ -457,26 +458,27 @@ impl Runner {
         let (cmds, answer) = f(&mut run, self.shared.clock())?;
         let mut queue = lock(&self.shared.queue);
         self.shared.dispatch(run.generation(), &mut queue, cmds);
-        let waiting = run.rebuild_pending();
+        let waiting = run.rebuild_attempt();
         drop(queue);
         drop(run);
-        if waiting {
-            self.watch_rebuild_join(false);
+        if let Some(attempt) = waiting {
+            self.watch_rebuild_join(false, attempt);
         }
         Ok(answer)
     }
 
     /// `rebuild()`'s `thread.join(join_seconds)` in v0.1.4 runs on the caller (or the `a13-owner-rebuild`
     /// worker), never on the run thread, so a run thread blocked in its teardown cannot delay it.
-    fn watch_rebuild_join(&self, asynchronous: bool) {
+    /// The watcher is bound to `attempt`, read under the run lock that admitted the rebuild.
+    fn watch_rebuild_join(&self, asynchronous: bool, attempt: RebuildAttempt) {
         let shared = self.shared.clone();
         let spawned = std::thread::Builder::new()
             .name("a13-owner-rebuild".into())
-            .spawn(move || join_rebuild(&shared, asynchronous));
+            .spawn(move || join_rebuild(&shared, asynchronous, attempt));
         match spawned {
             Ok(handle) => lock(&self.watchers).push(handle),
             Err(_) => lock(&self.shared.run)
-                .rebuild_join_expired(asynchronous)
+                .rebuild_join_expired_for(asynchronous, attempt)
                 .unwrap_or(()),
         }
     }
@@ -492,11 +494,11 @@ impl Runner {
         let answer = run.snapshot().to_value();
         let mut queue = lock(&self.shared.queue);
         self.shared.dispatch(run.generation(), &mut queue, cmds);
-        let waiting = rebuild_requested && run.rebuild_pending();
+        let waiting = run.rebuild_attempt().filter(|_| rebuild_requested);
         drop(queue);
         drop(run);
-        if waiting {
-            self.watch_rebuild_join(true);
+        if let Some(attempt) = waiting {
+            self.watch_rebuild_join(true, attempt);
         }
         Ok((answer, rebuild_requested))
     }
@@ -526,11 +528,11 @@ impl Runner {
         }
         let mut queue = lock(&self.shared.queue);
         self.shared.dispatch(run.generation(), &mut queue, cmds);
-        let waiting = run.rebuild_pending();
+        let waiting = run.rebuild_attempt();
         drop(queue);
         drop(run);
-        if waiting {
-            self.watch_rebuild_join(true);
+        if let Some(attempt) = waiting {
+            self.watch_rebuild_join(true, attempt);
         }
         Ok(answer)
     }
@@ -633,19 +635,21 @@ fn live_status(shared: &Shared) -> Value {
 
 /// The rebuild worker: wait for the old run's thread to end, up to the join allowance; past it an async
 /// rebuild forces `failed` with `owner_run_stop_incomplete` (the old thread still tears down later).
-fn join_rebuild(shared: &Shared, asynchronous: bool) {
+/// Bound to its own `attempt`: once that rebuild completed (its attempt retired) it ends, and its
+/// expiry is checked and written under one run lock, so it never acts on a newer rebuild.
+fn join_rebuild(shared: &Shared, asynchronous: bool, attempt: RebuildAttempt) {
     let deadline = Instant::now() + Duration::from_secs_f64(shared.timing.rebuild_join);
     loop {
         {
             let run = lock(&shared.run);
-            if !run.rebuild_pending() || !run.thread_alive() {
+            if run.rebuild_attempt() != Some(attempt) || !run.thread_alive() {
                 return;
             }
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             lock(&shared.run)
-                .rebuild_join_expired(asynchronous)
+                .rebuild_join_expired_for(asynchronous, attempt)
                 .unwrap_or(());
             return;
         }
