@@ -504,3 +504,84 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
         "RUNNING"
     );
 }
+/// Proves: B-RUN-10 (the packaged app's ten-step table runs step 10 through its own work ports: the
+/// serving step reads the packaged workflow, which refuses by name without a composed run, instead
+/// of ending at `owner_run_step_not_ported`). Model-free; no route is opened.
+#[test]
+fn the_packaged_chain_runs_the_serving_step_instead_of_refusing_it_as_unported() {
+    let f = Fixture::new();
+    let (last, _) = owner_run::machine::STEPS[owner_run::machine::STEPS.len() - 1];
+    assert_eq!(last, "serving");
+    let mut chain = Composed::new(&f.host, None, None);
+    chain.new_run("run-ten", "dep-ten", owner_run::Reason::Start, None, None);
+    let mut env = Env { at: Instant::now() };
+    let ended = chain.run_step(last, &mut env);
+    match ended {
+        Err(StepError::Refused(e)) => {
+            assert_ne!(e.code, owner_run::steps::NOT_PORTED_CODE, "{e:?}");
+            assert_eq!(e.code, "owner_work_unavailable", "{e:?}");
+        }
+        other => panic!("the serving step must read the packaged workflow: {other:?}"),
+    }
+}
+/// Proves: B-RUN-10 (the packaged chain asks its resident owner workflow the serving run's
+/// `rollover_due`, `ceiling_reached` and `monitor`, demo_chain.py:1132-1186, instead of the trait
+/// defaults that never roll over, never reach a ceiling and never fail a serving run).
+#[test]
+fn the_packaged_chain_forwards_rollover_ceiling_and_monitor_to_its_owner_workflow() {
+    use owner_run::{
+        machine::{CeilingProbe, EXECUTION_CEILING_CODE, MonitorProbe},
+        owner_chain::ChainPorts as _,
+    };
+    let mut f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    seed.exchange
+        .set_owner_control(Some(OwnerControl::new(ports.work.owner.public())));
+    seed.exchange
+        .announce(Announce {
+            phase: "compile".into(),
+            run_id: Some("run-probe".into()),
+            deployment_id: Some("dep-probe".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    f.agent.tick(&f.member);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut state = RunState::new("run-probe", "dep-probe", owner_run::Reason::Start);
+    state.participants = vec![local.clone(), f.remote.clone()];
+    state.local_node = Some(local);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    // Long past the worker wall on the Runner's clock: rollover due and the ceiling reached.
+    let mut serving = state.clone();
+    serving.work_limits = Some(json!({ "max_wall_seconds": wall }));
+    serving.execution_clock_started_at = Some(-(wall as f64) * 10.0);
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    let ceiling = Some(EXECUTION_CEILING_CODE.to_owned());
+    assert_eq!(ports.rollover_due(&serving), Some(true));
+    assert_eq!(
+        ports.ceiling_reached(&serving),
+        CeilingProbe::Code(ceiling.clone())
+    );
+    assert_eq!(ports.monitor(&serving), MonitorProbe::Code(ceiling));
+    assert_eq!(ports.rollover_due(&state), Some(false), "no publish clock yet");
+    assert_eq!(ports.ceiling_reached(&state), CeilingProbe::Code(None));
+    assert_eq!(ports.monitor(&state), MonitorProbe::Code(None));
+    ports.close_work().unwrap();
+}
