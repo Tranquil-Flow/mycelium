@@ -348,6 +348,53 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
 
+/// Lane TEN (ten-row gate, real model, run `gate7-wd2`): the second Start in one process ended row 4
+/// `bootstrap_context_already_exists` after 6 s. The chain's ports live as long as the host
+/// (`work::Composed`), and their teardown never ended the observe port's context, which v0.1.4's
+/// teardown does last, whatever failed before (`app._observation_context = None`,
+/// demo_chain.py:1436 @ f4e366e9), so the next run's `observe/prepare` refused (app.py:1405-1406).
+/// Here the first run ends at compile (no native challenge producer for this model); the second
+/// must pass observe again.
+#[test]
+fn a_second_start_in_one_process_passes_observe_again() {
+    let base = state_root("observe-twice");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+    );
+    let mut ended = Vec::new();
+    for _ in 0..2 {
+        let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+        assert_eq!(code, 200, "{started}");
+        let previous = ended.last().map(|r: &Value| r["deployment_id"].clone());
+        let run = until_within(
+            "the run ended",
+            observe_patience() + millis(B::Compile),
+            || owner.mac.status()["owner_run"].clone(),
+            |r| {
+                Some(r["deployment_id"].clone()) != previous
+                    && matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving"))
+            },
+        );
+        ended.push(run);
+    }
+    for run in &ended {
+        assert_eq!(run["steps"][3]["name"], "observe", "{run}");
+        assert_eq!(run["steps"][3]["state"], "done", "{run}");
+    }
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
 /// S4c-a item 2 (REVIEW-lanePH3B-S2 F4): the joined Mac's capability report stays current as the
 /// shipped app keeps it. v0.1.4 @ f4e366e9: every report after the membership exists carries its
 /// generation (`signed_capability_link_report`, peer.py:1118-1139, called by `_measure_and_sign`
