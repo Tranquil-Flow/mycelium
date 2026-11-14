@@ -513,3 +513,33 @@ fn a_challenge_that_retires_its_epoch_refuses_startup_challenge_failed() {
     work.teardown().unwrap();
     released(&work.state(), "completed");
 }
+
+/// Proves: B-RUN-10 (lane Q, the refusal is published before the slow teardown: `_startup_failure`
+/// "Publish refusal before potentially slow remote teardown, never readiness" (workflow.py:218-230,
+/// called before `route.close()`, supervisor.py:3909-3917). With the final stage's compute close
+/// held, a mismatched challenge already reads `failed` / `startup_challenge_failed` while the
+/// epoch is still closing.)
+#[test]
+fn a_failed_challenge_is_published_before_the_route_has_closed() {
+    let mut s = swarm(2);
+    let (entered, closing) = mpsc::channel();
+    let (open, gate) = mpsc::channel();
+    let mut emitted = SCRIPTED.to_vec();
+    emitted[1] = 7;
+    let mut scripts = scripts_emitting(&emitted);
+    scripts[1].close_hold = Some((entered, gate));
+    let (mut work, members, _) = challenged(&mut s, Some(challenge(&SCRIPTED)), scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let proposal = json!({"max_wall_seconds":60});
+    assert!(work.start_serving(&proposal).is_ok());
+    let staged = work.wait_state(settled, span(B::WorkerStartup));
+    assert_eq!(staged["state"], "awaiting_activation", "{staged}");
+    assert!(ActivationPort::activate(&mut work, &proposal).is_ok());
+    let held = closing.recv_timeout(span(B::WorkerStartup) * 2);
+    let state = work.state();
+    open.send(()).unwrap();
+    assert!(held.is_ok(), "the route closes after the refusal");
+    assert_eq!(state["state"], "failed", "while the route closes: {state}");
+    assert_eq!(state["error_code"], "startup_challenge_failed", "{state}");
+    work.teardown().unwrap();
+}
