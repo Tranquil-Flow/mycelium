@@ -732,3 +732,72 @@ fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketA
         "RUNNING"
     );
 }
+/// Proves: R2-4 (the named network refusals refuse only a run with a joined Mac: an owner-only
+/// run, whose one participant is this Mac's own local worker, composes and starts that worker
+/// under a reading that found no single private network).
+#[test]
+fn an_owner_only_run_without_a_single_private_network_still_starts_its_local_worker() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let owner = WorkNetwork::Read(
+        Arc::new(|| Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)),
+        runtime::iroh_host::LanPolicy::private_only(),
+    );
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut state = run_state(&mut f, &ports);
+    let local = state.local_node.clone().unwrap();
+    state.participants = vec![local.clone()];
+    state.worker_wall_limits.retain(|node, _| *node == local);
+    let mut env = Env { at: Instant::now() };
+    let composed = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env);
+    {
+        let resident = lock(&ports.work.resident);
+        assert!(
+            composed.is_ok(),
+            "an owner-only run was refused: {composed:?}"
+        );
+        assert!(resident.local.is_some(), "its local worker started");
+        assert_eq!(resident.bindings.len(), 1);
+        assert!(resident.work.is_some());
+        assert_eq!(resident.network, Some(NetworkChoice::default()));
+    }
+    ports.close_work().unwrap();
+}
+/// Proves: R2-8 (the compose step maps a refused joined-Mac address to its named refusal in a
+/// test every run executes, not only on the real LAN: the owner on a LAN policy that does not
+/// admit the joined Mac's loopback address refuses `member_work_network_mismatch`, naming both
+/// addresses, before any dial).
+#[test]
+fn an_owner_on_the_lan_refuses_a_joined_mac_on_its_loopback_by_name() {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let other = std::net::IpAddr::from([127, 0, 0, 2]);
+    // The owner binds 127.0.0.1 as its LAN address; its peers may only be at 127.0.0.2.
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback, other])
+        .unwrap()
+        .with_peer_hosts(vec![other])
+        .unwrap();
+    let owner = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy))));
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut state = run_state(&mut f, &ports);
+    // The joined Mac's address is checked first (its own local worker's would be refused too).
+    state.participants.reverse();
+    let mut env = Env { at: Instant::now() };
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "member_work_network_mismatch");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains("joined Mac") && message.contains("loopback address (127.0.0.1)"),
+        "{message}"
+    );
+    assert!(message.contains("works on 127.0.0.1"), "{message}");
+    assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
+}
