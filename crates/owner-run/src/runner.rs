@@ -376,6 +376,23 @@ impl RunnerView {
     }
 }
 
+/// The host maintenance's handle on one installed run: `OwnerRun.status()` (the ceiling, rollover
+/// and monitor checks on the run's own thread, then the snapshot), with no ownership of that
+/// thread. v0.1.4's `PublishedStatus.refresh` calls it from its own maintenance thread
+/// (published_status.py:32-48, 72-76) while readers stay observational ([`RunnerView`]). Call it
+/// outside every host lock; it waits only for the run thread's probe pass.
+#[derive(Clone)]
+pub struct RunnerProbe {
+    shared: Arc<Shared>,
+}
+
+impl RunnerProbe {
+    /// `OwnerRun.status()`.
+    pub fn status(&self) -> Value {
+        live_status(&self.shared)
+    }
+}
+
 /// The run thread and its machine.
 pub struct Runner {
     shared: Arc<Shared>,
@@ -384,6 +401,13 @@ pub struct Runner {
 }
 
 impl Runner {
+    /// The live status for host maintenance, never close/join ownership.
+    pub fn prober(&self) -> RunnerProbe {
+        RunnerProbe {
+            shared: self.shared.clone(),
+        }
+    }
+
     /// Share observation and the atomic inactive operation, never close/join ownership.
     pub fn view(&self) -> RunnerView {
         RunnerView {
@@ -513,37 +537,7 @@ impl Runner {
     /// `OwnerRun.status()`: while serving, the loop thread runs the ceiling / rollover / monitor checks (the
     /// chain lives on that thread) and the answer is the snapshot after them.
     pub fn status(&self) -> Value {
-        let serving = lock(&self.shared.run).serving();
-        if serving {
-            let probe = Arc::new(Probe {
-                done: Mutex::new(false),
-                finished: Condvar::new(),
-            });
-            {
-                let mut queue = lock(&self.shared.queue);
-                if queue.closing {
-                    // snapshot takes `run`; never invert the dispatch lock order (`run` -> `queue`).
-                    drop(queue);
-                    return self.snapshot();
-                }
-                queue.probes.push(probe.clone());
-                self.shared.wake.notify_all();
-            }
-            let mut done = lock(&probe.done);
-            while !*done {
-                let (guard, _) = probe
-                    .finished
-                    .wait_timeout(done, self.shared.timing.poll)
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                done = guard;
-                // End the queue guard's lifetime before testing the run state.
-                let closing = lock(&self.shared.queue).closing;
-                if closing || !lock(&self.shared.run).serving() {
-                    break;
-                }
-            }
-        }
-        self.snapshot()
+        live_status(&self.shared)
     }
 
     pub fn active(&self) -> bool {
@@ -594,6 +588,41 @@ impl Runner {
             watcher.join().unwrap_or(());
         }
     }
+}
+
+/// `OwnerRun.status()` ([`Runner::status`], [`RunnerProbe::status`]).
+fn live_status(shared: &Shared) -> Value {
+    let serving = lock(&shared.run).serving();
+    if serving {
+        let probe = Arc::new(Probe {
+            done: Mutex::new(false),
+            finished: Condvar::new(),
+        });
+        {
+            let mut queue = lock(&shared.queue);
+            if queue.closing {
+                // snapshot takes `run`; never invert the dispatch lock order (`run` -> `queue`).
+                drop(queue);
+                return lock(&shared.run).snapshot().to_value();
+            }
+            queue.probes.push(probe.clone());
+            shared.wake.notify_all();
+        }
+        let mut done = lock(&probe.done);
+        while !*done {
+            let (guard, _) = probe
+                .finished
+                .wait_timeout(done, shared.timing.poll)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            done = guard;
+            // End the queue guard's lifetime before testing the run state.
+            let closing = lock(&shared.queue).closing;
+            if closing || !lock(&shared.run).serving() {
+                break;
+            }
+        }
+    }
+    lock(&shared.run).snapshot().to_value()
 }
 
 /// The rebuild worker: wait for the old run's thread to end, up to the join allowance; past it an async

@@ -5,7 +5,7 @@ use crate::{actions::Action, schema::PublicError, wire::Json};
 use owner_run::{
     action::{self, DemoFacts, DemoPath, Refusal},
     machine::Identity,
-    runner::{Runner, RunnerView, SystemClocks},
+    runner::{Runner, RunnerProbe, RunnerView, SystemClocks},
 };
 pub use owner_run::{
     chain::{StepEnv, StepError},
@@ -85,6 +85,25 @@ impl DemoView {
     }
 }
 
+/// The host maintenance's live status of the lazily installed run (`run.status()` in
+/// `PublishedStatus.refresh`, published_status.py:32-48): the ceiling, rollover and monitor checks
+/// on the run's own thread. Never called by a status reader.
+#[derive(Clone, Default)]
+pub struct DemoProbe(Arc<Mutex<Option<RunnerProbe>>>);
+impl DemoProbe {
+    fn set(&self, probe: RunnerProbe) {
+        *lock(&self.0) = Some(probe);
+    }
+    /// `if run is not None: run.status()` (published_status.py:41-43); the snapshot is not the
+    /// maintenance's to publish. Clones the probe without retaining the installation lock.
+    pub fn refresh(&self) {
+        let installed = lock(&self.0).clone();
+        if let Some(probe) = installed {
+            probe.status();
+        }
+    }
+}
+
 /// Preserve the public source key order (`owner_run.py:188-214`), independent of Value map features.
 /// Nested values keep the existing host conversion, not a new serializer.
 fn status_json(snapshot: Value) -> Json {
@@ -158,6 +177,7 @@ pub struct DemoRuns {
     timing: Timing,
     driver: Option<Runner>,
     view: DemoView,
+    probe: DemoProbe,
 }
 
 impl DemoRuns {
@@ -168,12 +188,17 @@ impl DemoRuns {
             timing,
             driver: None,
             view: DemoView::default(),
+            probe: DemoProbe::default(),
         }
     }
 
     /// The status handle hosts keep beside their own state.
     pub fn view(&self) -> DemoView {
         self.view.clone()
+    }
+    /// The live-status handle a host's maintenance calls (never its status readers).
+    pub fn probe(&self) -> DemoProbe {
+        self.probe.clone()
     }
 
     /// `demo_app.action` (`demo_app.py:109-133`): the ladder, then the run.
@@ -203,6 +228,7 @@ impl DemoRuns {
             )
             .map_err(|_| PublicError::new(409, "action_not_completed"))?;
             self.view.set(driver.view());
+            self.probe.set(driver.prober());
             self.driver = Some(driver);
         }
         let driver = self

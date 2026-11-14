@@ -385,7 +385,7 @@ pub struct HostLoop {
     join_on_drop: bool,
 }
 impl HostLoop {
-    fn start(
+    pub(crate) fn start(
         name: &str,
         period: BudgetId,
         node: &NodeService,
@@ -874,10 +874,7 @@ impl PackagedHost {
                         acquisition.status().state.as_str(),
                         "closed" | "idle" | "failed" | "cancelled"
                     ) {
-                        eprintln!(
-                            "l11_reverify_gate:status={}",
-                            acquisition.status().state
-                        );
+                        eprintln!("l11_reverify_gate:status={}", acquisition.status().state);
                         return Reverify::Failed;
                     }
                     if let Some(reason) = model.resource_violation(&root) {

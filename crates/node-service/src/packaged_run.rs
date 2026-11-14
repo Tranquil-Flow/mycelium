@@ -107,6 +107,9 @@ struct Installed {
     host: PackagedRun,
     runs: Arc<Mutex<DemoRuns>>,
     renewal: Option<Arc<HostLoop>>,
+    /// `DemoApp.status_publisher`'s maintenance (`PublishedStatus._loop` -> `refresh` ->
+    /// `run.status()`, published_status.py:32-48, 72-76): the serving run's live checks.
+    status: Option<Arc<HostLoop>>,
 }
 
 /// What the packaged host's model source answers the run (`app.acquisition`, `_resource_check`,
@@ -621,12 +624,30 @@ impl OwnerRun {
         );
         let view = runs.view();
         host.with(|c| c.run.demo = view.clone());
+        // Every second, outside the host's and the run's locks: the run's own thread runs the
+        // ceiling, rollover and monitor checks of a serving run. The UI's status reads stay
+        // snapshots (`DemoView::status`).
+        let probe = runs.probe();
+        let status = match HostLoop::start(
+            "packaged-owner-run-status",
+            BudgetId::PyMyceliumA13MacosPublishedStatusPublishedstatusLoopSelfStopWaitL73,
+            &host.node,
+            true,
+            move || probe.refresh(),
+        ) {
+            Ok(status) => Some(status),
+            Err(code) => {
+                eprintln!("owner run status: {code}");
+                None
+            }
+        };
         let runs = Arc::new(Mutex::new(runs));
         *lock(&config.installed.0) = Some(Installed {
             view,
             host: host.clone(),
             runs: runs.clone(),
             renewal,
+            status,
         });
         Self { host, runs }
     }
@@ -717,6 +738,10 @@ impl RunClose {
             self.closing = Closing::Done(Ok(()));
             return;
         };
+        // `publisher.stop()` first (app.py:1816-1817).
+        if let Some(status) = &installed.status {
+            status.stop();
+        }
         installed.host.stop_work();
         if let Some(renewal) = &installed.renewal {
             renewal.stop();
