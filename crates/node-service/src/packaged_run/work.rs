@@ -366,6 +366,12 @@ impl Work {
                         forbidden_source: artifact.source().source_root.clone(),
                         worker_walls: state.worker_wall_limits.clone(),
                         owner_root: self.host.with(|c| c.authority.root.clone()),
+                        // The compile's passed native challenge, equal to the recorded reference
+                        // (`route.startup_challenge`, route.py:2371-2378 @ f4e366e9).
+                        challenge: Some(
+                            api::joined_owner::work::compiled_challenge(artifact.root())
+                                .map_err(|e| refused(&e.0))?,
+                        ),
                     },
                     objects.pinned,
                 ),

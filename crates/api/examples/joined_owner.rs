@@ -589,6 +589,8 @@ impl Owner {
                 .map(|m| (m.node_id.clone(), wall))
                 .collect(),
             owner_root: self.root.clone(),
+            // The operator rehearsal never runs the serving step: no startup challenge.
+            challenge: None,
         };
         let members = std::mem::take(&mut self.members);
         let mut parked = Vec::new();

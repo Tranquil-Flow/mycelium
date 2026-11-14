@@ -394,6 +394,72 @@ pub struct Plan {
     pub worker_walls: BTreeMap<String, u64>,
     /// The owner root whose resource policy the slices step reads.
     pub owner_root: PathBuf,
+    /// The route's startup challenge (`route.startup_challenge`, route.py:2371-2378 @ f4e366e9).
+    pub challenge: Option<Challenge>,
+}
+/// The exact prompt and the expected output token ids of the route's startup challenge: the
+/// prompt/output pair the compile proved against the recorded reference (v0.1.4: the pair
+/// authenticated by the controller plan, `route.startup_challenge`, route.py:2371-2378).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Challenge {
+    pub prompt: Vec<u32>,
+    pub expected: Vec<u32>,
+}
+/// The startup challenge of the compiled run under `root`: the prompt and output token ids of its
+/// passed native challenge (`compiled/local-challenge-checkpoint.json`), accepted only when they
+/// equal the recorded reference the native compile proved them against (`validate_evidence`,
+/// native_compiler.rs), so an unpinned file can never supply a different challenge. Anything
+/// else refuses `startup_challenge_unavailable`.
+pub fn compiled_challenge(root: &Path) -> Result<Challenge, Refusal> {
+    use stage_contract::native_proof as contract;
+    let unavailable = || refusal("startup_challenge_unavailable");
+    let ids = |v: &Value| -> Option<Vec<u32>> {
+        v.as_array()?
+            .iter()
+            .map(|t| t.as_u64().and_then(|t| u32::try_from(t).ok()))
+            .collect()
+    };
+    let bytes = std::fs::read(root.join("compiled/local-challenge-checkpoint.json"))
+        .map_err(|_| unavailable())?;
+    let checkpoint: Value = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+    let reference = crate::native_compiler::reference().map_err(|_| unavailable())?;
+    let recorded = &reference["recorded"];
+    let expected = recorded["tokens"]
+        .as_array()
+        .and_then(|t| t.get(..contract::CHALLENGE_OUTPUT_TOKENS))
+        .map(|t| Value::Array(t.to_vec()))
+        .ok_or_else(unavailable)?;
+    if checkpoint["protocol"] != contract::CHECKPOINT_PROTOCOL
+        || checkpoint["state"] != "passed"
+        || checkpoint["prompt_token_ids"] != recorded["workload"]["prompt_ids"]
+        || checkpoint["output_token_ids"] != expected
+    {
+        return Err(unavailable());
+    }
+    match (
+        ids(&checkpoint["prompt_token_ids"]),
+        ids(&checkpoint["output_token_ids"]),
+    ) {
+        (Some(prompt), Some(expected)) if !prompt.is_empty() && !expected.is_empty() => {
+            Ok(Challenge { prompt, expected })
+        }
+        _ => Err(unavailable()),
+    }
+}
+/// `_startup_reason` (supervisor.py:3920-3938): a bounded public code, else
+/// `startup_route_unavailable`.
+fn startup_reason(code: &str) -> String {
+    let b = code.as_bytes();
+    if !b.is_empty()
+        && b.len() <= 64
+        && b[0].is_ascii_lowercase()
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_')
+    {
+        code.to_owned()
+    } else {
+        "startup_route_unavailable".to_owned()
+    }
 }
 
 // Workflow states as v0.1.4 `ManagedServingWorkflow` (workflow.py:277-345).
@@ -432,10 +498,17 @@ struct Flow {
     transferred_all: bool,
     /// The run's epoch was retired while the run serves on (named code; ruling 23).
     retired: Option<&'static str>,
-    /// `workflow.status()['startup']` (`_startup`, demo_chain.py:1030-1042, 1091-1094): only what
-    /// the run really knows about its route's startup. The joined route has no startup route
-    /// challenge, so it never claims `startup_qualification_complete` or a deployment count.
+    /// `workflow.status()['startup']` (`_startup`, demo_chain.py:1030-1042, 1091-1094): the
+    /// started record, written only after the route's startup challenge matched
+    /// ([`Worker::qualify`]); a route opened without a challenge carries only its gateway `url`.
     startup: Option<Value>,
+    /// The running challenge (`_challenge_request`, `_challenge_limit`, `_challenge_count`,
+    /// workflow.py:181-183): its request, its token count and the in-order indices verified.
+    challenge_request: Option<String>,
+    challenge_limit: u64,
+    challenge_count: u64,
+    /// The challenge request's record: its id, its terminal and whether it was released.
+    challenge: Option<Value>,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -461,7 +534,76 @@ impl Shared {
             "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
             "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup,
             "shards_transferred":flow.transferred_all,"epoch_retired":flow.retired,
-            "startup":flow.startup})
+            "startup":flow.startup,
+            // workflow.py:242-244: only while `starting`, and only a positive count.
+            "challenge_progress":(flow.state == STARTING && flow.challenge_count > 0)
+                .then(|| json!({"verified_token_count":flow.challenge_count})),
+            "startup_challenge":flow.challenge})
+    }
+    /// `report("begin", -1)` -> `_challenge_event` (workflow.py:195-212): registration, not
+    /// progress; only while `starting`, not stopped, with a limit in 1..=4096, once.
+    fn challenge_begin(&self, stop: &AtomicBool, request: &str, limit: u64) {
+        self.update(|f| {
+            if stop.load(Ordering::SeqCst)
+                || f.state != STARTING
+                || !(1..=4096).contains(&limit)
+                || f.challenge_request.is_some()
+            {
+                return;
+            }
+            f.challenge_request = Some(request.to_owned());
+            f.challenge_limit = limit;
+            f.challenge = Some(json!({"request_id":request,"terminal":null,"released":false}));
+        });
+    }
+    /// `report("token", index)` -> `_challenge_event` (workflow.py:213-216): a strictly next
+    /// in-order index of the registered request counts once.
+    fn challenge_token(&self, stop: &AtomicBool, request: &str, index: u64, limit: u64) {
+        self.update(|f| {
+            if !stop.load(Ordering::SeqCst)
+                && f.state == STARTING
+                && f.challenge_request.as_deref() == Some(request)
+                && f.challenge_limit == limit
+                && index == f.challenge_count
+                && index < limit
+            {
+                f.challenge_count += 1;
+            }
+        });
+    }
+    /// `finally: route.release_request(request_id)` (supervisor.py:3829-3830) as recorded.
+    fn challenge_released(&self, terminal: Option<String>, released: bool) {
+        self.update(|f| {
+            if let Some(record) = f.challenge.as_mut() {
+                record["terminal"] = json!(terminal);
+                record["released"] = json!(released);
+            }
+        });
+    }
+    /// `_startup_failure` (workflow.py:218-230): publish the refusal before the slow teardown,
+    /// never readiness; only while `starting` and not stopped.
+    fn startup_failure(&self, stop: &AtomicBool, code: &str) {
+        self.update(|f| {
+            if f.state != STARTING || stop.load(Ordering::SeqCst) {
+                return;
+            }
+            f.state = FAILED;
+            f.error = Some(code.to_owned());
+            f.challenge_request = None;
+            f.challenge_count = 0;
+        });
+    }
+    /// `started(document)` (workflow.py:300-305): the started record and `api_running`, unless the
+    /// run was stopped or the workflow left `starting` meanwhile.
+    fn started(&self, stop: &AtomicBool, gateway: Value, startup: Value) {
+        self.update(|f| {
+            if stop.load(Ordering::SeqCst) || f.state != STARTING {
+                return;
+            }
+            f.gateway = Some(gateway);
+            f.startup = Some(startup);
+            f.state = RUNNING;
+        });
     }
     /// The workflow half of the serving fence (`with workflow._lock:`, demo_chain.py:1081-1097):
     /// under this lock the run's Stop and the worker's exit (both written under the same lock, by
@@ -610,6 +752,10 @@ impl OwnerWork {
                     transferred_all: false,
                     retired: None,
                     startup: None,
+                    challenge_request: None,
+                    challenge_limit: 0,
+                    challenge_count: 0,
+                    challenge: None,
                 }),
                 changed: Condvar::new(),
             }),
@@ -1130,11 +1276,14 @@ impl Drop for OwnerWork {
 /// after its publication, never between them (demo_chain.py:1081-1089). Lock order: workflow lock
 /// -> `at`.
 fn signal_stop(shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
-    shared.update(|_| {
+    shared.update(|f| {
         at.lock()
             .unwrap_or_else(|p| p.into_inner())
             .get_or_insert_with(Instant::now);
         stop.store(true, Ordering::SeqCst);
+        // `stop()` (workflow.py:271-275): the challenge's progress is no longer reported.
+        f.challenge_request = None;
+        f.challenge_count = 0;
     });
 }
 /// The worker's exit begins: from here its route and gateway close, so the workflow stops being
@@ -1628,29 +1777,40 @@ impl Worker {
             Ok(epoch) => epoch,
             Err(e) => return Err(self.v2_refused().unwrap_or(e)),
         };
-        let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
-            "qualification":epoch.qualification().ok(),
-            "route_expires_at":epoch.host().message()["expires_at"],
-            "worker_pids":epoch.worker_pids()});
         let handle = epoch.handle().clone();
         let url = format!("http://{}/", epoch.addr());
         *open = Some(epoch);
         self.serving.store(true, Ordering::SeqCst);
+        // The epoch is watched (monitor) while its startup challenge runs; the workflow stays
+        // `starting` until the challenge qualified the route (workflow.py:325-333).
         self.shared.update(|f| {
             f.route = Some(handle);
-            f.gateway = Some(gateway);
             f.epoch = 1;
-            // What the run really knows of its startup: where its gateway listens. The joined
-            // route runs no startup route challenge (v0.1.4 `_qualify_open_route`,
-            // supervisor.py:3787-3830 -> `startup_qualification_complete`, :4416-4423), so the
-            // qualification and the unavailable count stay absent and the serving step refuses
-            // `route_qualification_failed` instead of claiming a route nobody qualified.
-            f.startup = Some(json!({ "url": url }));
-            f.state = RUNNING;
         });
-        eprintln!(
-            "owner_work_startup_unqualified: the joined route runs no startup route challenge"
-        );
+        let epoch = open.as_ref().ok_or_else(|| refusal("route_not_open"))?;
+        let startup = match self.plan.challenge.clone() {
+            // `_qualified_runtime` (supervisor.py:3860-3875): only a route whose challenge
+            // matched is started with `startup_qualification_complete` (:4416-4423; the
+            // workflow runs its launch `api_only=True`, workflow.py:328).
+            Some(challenge) => {
+                if let Err(r) = self.qualify(epoch, &challenge) {
+                    self.shared.startup_failure(&self.stop, &r.0);
+                    return Err(r);
+                }
+                json!({"protocol":"mycelium.live_registry_server_started.v1","url":url,
+                    "startup_qualification_complete":true,"simulated":false,"api_only":true,
+                    "deployment_count":1,"unavailable_deployment_count":0})
+            }
+            // No challenge in the plan: what the run really knows of its startup is where its
+            // gateway listens; the serving step refuses `route_qualification_failed`.
+            None => json!({ "url": url }),
+        };
+        // The gateway's `qualification` is the seed-signed route's (`route::qualification`).
+        let gateway = json!({"addr":epoch.addr(),"bearer":epoch.bearer(),
+            "qualification":epoch.qualification().ok(),
+            "route_expires_at":epoch.host().message()["expires_at"],
+            "worker_pids":epoch.worker_pids()});
+        self.shared.started(&self.stop, gateway, startup);
         // Every chat of the run is a request on this epoch. A retired epoch (death evidence, a
         // revoke or generation change, a carrier failure, a failed session reset) is NEVER
         // re-opened or re-prepared: its gateway refuses later chats and the run serves on until
@@ -1671,6 +1831,121 @@ impl Worker {
                 }
             }
         }
+    }
+    /// `_qualify_open_route` (supervisor.py:3787-3830 @ f4e366e9) on the run's open epoch: the
+    /// exact prompt through the SAME request path a chat takes on this epoch (admission ->
+    /// dispatch -> carrier -> every member stage -> token events), for exactly `len(expected)` new
+    /// tokens with the product stop tokens disabled for this request only
+    /// (`infer_startup_challenge`, route.py:4563-4590); each in-order token index is reported
+    /// while `starting`; the request is ALWAYS released (`finally`), and only then are the
+    /// tokens that came back compared with the expected ids. A route error is the route's code
+    /// (`startup_route_rejected:<code>` -> `_startup_reason`, :3812-3814, 3920-3938); a mismatch
+    /// or a retired epoch (the route's fatal counter) is `startup_challenge_failed`; a Stop ends
+    /// it `managed_workflow_stopped`.
+    fn qualify(&self, epoch: &Epoch, challenge: &Challenge) -> Result<(), Refusal> {
+        use crate::requests::Service as _;
+        let limit = challenge.expected.len() as u64;
+        let service = epoch.service();
+        let accepted = service
+            .submit_startup_challenge(&challenge.prompt, limit)
+            .map_err(|e| refusal(startup_reason(e.code)))?;
+        let id = accepted.request_id.clone();
+        self.shared.challenge_begin(&self.stop, &id, limit);
+        let read = self.read_challenge(epoch, &accepted, limit);
+        // `finally: route.release_request(request_id)`: a request not at its terminal is
+        // cancelled (its teardown then runs on the route or with the epoch's close).
+        let terminal = service.terminal(&id).ok().flatten();
+        let released = terminal.is_some()
+            || service
+                .cancel(&id, Some(&accepted.session_token))
+                .is_ok_and(|cancelling| cancelling)
+            || service.terminal(&id).ok().flatten().is_some();
+        self.shared.challenge_released(terminal, released);
+        let tokens = read?;
+        if tokens != challenge.expected || epoch.retired() {
+            return Err(refusal("startup_challenge_failed"));
+        }
+        Ok(())
+    }
+    /// The challenge's events until its terminal: the token ids that came back, in order; a
+    /// failed or cancelled terminal, or the carrier's own failure of the request (the route
+    /// raises at once in v0.1.4; its cleanup may never be proven when a member died), is the
+    /// route's refusal. Bounded by the run's Stop and the serving step's own budget
+    /// (`route_qualification_timeout`).
+    fn read_challenge(
+        &self,
+        epoch: &Epoch,
+        accepted: &crate::requests::Accepted,
+        limit: u64,
+    ) -> Result<Vec<u32>, Refusal> {
+        use crate::requests::Service as _;
+        let carrier_failure = || {
+            epoch.handle().state.lock().ok().and_then(|o| {
+                o.failure
+                    .map(str::to_owned)
+                    .or_else(|| o.setup_failure.clone())
+                    .or_else(|| o.epoch_failure.map(str::to_owned))
+            })
+        };
+        let mut stream = epoch
+            .service()
+            .subscribe(&accepted.request_id, None, Some(&accepted.session_token))
+            .map_err(|e| refusal(startup_reason(e.code)))?;
+        let end = Instant::now() + super::span(B::Serving)?;
+        let mut tokens = Vec::new();
+        let outcome = loop {
+            if self.stop.load(Ordering::SeqCst) {
+                break Err(refusal("managed_workflow_stopped"));
+            }
+            if Instant::now() >= end {
+                break Err(refusal("route_qualification_timeout"));
+            }
+            let event = match stream.next() {
+                Ok(Some(event)) => event,
+                Ok(None) => break Err(refusal("startup_route_unavailable")),
+                Err(e) if e.code == "m16_stream_poll_timeout" => {
+                    if let Some(code) = carrier_failure() {
+                        break Err(refusal(startup_reason(&code)));
+                    }
+                    continue;
+                }
+                Err(e) => break Err(refusal(startup_reason(e.code))),
+            };
+            if let Some(sequence) = event["sequence"].as_u64()
+                && let Err(e) = stream.ack(sequence)
+            {
+                break Err(refusal(startup_reason(e.code)));
+            }
+            match event["type"].as_str() {
+                Some("token") => {
+                    let (Some(index), Some(token)) = (
+                        event["token_index"].as_u64(),
+                        event["token_id"]
+                            .as_u64()
+                            .and_then(|t| u32::try_from(t).ok()),
+                    ) else {
+                        break Err(refusal("startup_route_unavailable"));
+                    };
+                    tokens.push(token);
+                    self.shared
+                        .challenge_token(&self.stop, &accepted.request_id, index, limit);
+                }
+                Some("completed") => break Ok(tokens),
+                Some("failed") => {
+                    let code = event["code"].as_str().unwrap_or("backend_failed");
+                    break Err(refusal(startup_reason(code)));
+                }
+                Some("cancelled") if self.stop.load(Ordering::SeqCst) => {
+                    break Err(refusal("managed_workflow_stopped"));
+                }
+                Some("cancelled") => break Err(refusal("startup_route_unavailable")),
+                _ => {}
+            }
+        };
+        if let Err(e) = stream.close() {
+            eprintln!("owner_work_challenge_stream_close: {}", e.code);
+        }
+        outcome
     }
     /// EP2 item 3 (REVIEW-laneEP F4): a member whose serve already refused the route this owner
     /// signed with `joined_shard_signature_invalid` runs a build before EP1 (its v1-only route
@@ -1852,6 +2127,99 @@ pub fn ceiling_reached(state: &RunState, now: f64) -> CeilingProbe {
 }
 
 #[cfg(test)]
+mod compiled_challenge_tests {
+    //! Lane Q: where the packaged run's startup challenge comes from: the compiled run's
+    //! `compiled/local-challenge-checkpoint.json`, which the native compile proved against the
+    //! recorded reference (native_compiler.rs `validate_evidence`), the Rust counterpart of the
+    //! controller plan's `request.prompt_token_ids` / `expected_token_ids` (route.py:2371-2378).
+    use super::*;
+    use stage_contract::native_proof as contract;
+
+    fn root(name: &str, checkpoint: Option<&Value>) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "laneq-challenge-{name}-{}-{}",
+            std::process::id(),
+            crate::app_host::hex(&crate::app_host::random(4).expect("entropy"))
+        ));
+        std::fs::create_dir_all(root.join("compiled")).expect("temp root");
+        if let Some(checkpoint) = checkpoint {
+            std::fs::write(
+                root.join("compiled/local-challenge-checkpoint.json"),
+                checkpoint.to_string(),
+            )
+            .expect("checkpoint written");
+        }
+        root
+    }
+    fn reference_pair() -> (Value, Value) {
+        let reference = crate::native_compiler::reference().expect("pinned reference");
+        let recorded = &reference["recorded"];
+        let expected: Vec<Value> = recorded["tokens"].as_array().expect("tokens")
+            [..contract::CHALLENGE_OUTPUT_TOKENS]
+            .to_vec();
+        (recorded["workload"]["prompt_ids"].clone(), json!(expected))
+    }
+    fn checkpoint(prompt: &Value, output: &Value) -> Value {
+        json!({"protocol":contract::CHECKPOINT_PROTOCOL,"state":"passed","prompt_token_ids":prompt,
+            "output_token_ids":output})
+    }
+
+    /// Proves: B-RUN-10 (lane Q: the compiled checkpoint's prompt and output, equal to the recorded
+    /// reference, are the route's startup challenge, token for token).
+    #[test]
+    fn the_compiled_checkpoint_is_the_startup_challenge() {
+        let (prompt, output) = reference_pair();
+        let root = root("ok", Some(&checkpoint(&prompt, &output)));
+        let read = compiled_challenge(&root);
+        std::fs::remove_dir_all(&root).expect("temp root removed");
+        let ids = |v: &Value| -> Vec<u32> {
+            v.as_array()
+                .expect("ids")
+                .iter()
+                .map(|t| u32::try_from(t.as_u64().expect("id")).expect("u32"))
+                .collect()
+        };
+        assert_eq!(
+            read,
+            Ok(Challenge {
+                prompt: ids(&prompt),
+                expected: ids(&output),
+            })
+        );
+    }
+
+    /// Proves: B-RUN-10 (lane Q: no challenge is invented: a missing checkpoint, one that is not a
+    /// passed native challenge, or one whose tokens differ from the recorded reference refuses
+    /// `startup_challenge_unavailable`.)
+    #[test]
+    fn a_checkpoint_that_is_absent_or_differs_from_the_reference_refuses() {
+        let (prompt, output) = reference_pair();
+        let mut wrong = output.clone();
+        wrong[1] = json!(7);
+        let mut short = prompt.clone();
+        short.as_array_mut().expect("ids").pop();
+        let mut failed = checkpoint(&prompt, &output);
+        failed["state"] = json!("failed");
+        let cases = [
+            ("absent", None),
+            ("output", Some(checkpoint(&prompt, &wrong))),
+            ("prompt", Some(checkpoint(&short, &output))),
+            ("state", Some(failed)),
+        ];
+        for (name, document) in cases {
+            let root = root(name, document.as_ref());
+            let read = compiled_challenge(&root);
+            std::fs::remove_dir_all(&root).expect("temp root removed");
+            assert_eq!(
+                read.map_err(|e| e.0),
+                Err("startup_challenge_unavailable".to_owned()),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod serving_fence_tests {
     //! The serving publication's workflow fence (`with workflow._lock:` at demo_chain.py:1081-1097
     //! @ f4e366e9) over the real `Shared`, with the publication parked on a channel (no sleeps).
@@ -1875,6 +2243,10 @@ mod serving_fence_tests {
                 transferred_all: true,
                 retired: None,
                 startup,
+                challenge_request: None,
+                challenge_limit: 0,
+                challenge_count: 0,
+                challenge: None,
             }),
             changed: Condvar::new(),
         })

@@ -4,6 +4,7 @@
 //! Constructor-only source plan and refusing native admission.
 use super::*;
 mod regressions;
+mod serving_q;
 mod serving_r2;
 mod serving_r3;
 mod serving_r3b;
@@ -304,6 +305,7 @@ impl Fixture {
                 forbidden_source: self.root.join("snapshot"),
                 worker_walls: state.worker_wall_limits.clone(),
                 owner_root: self.root.join("owner"),
+                challenge: None,
             },
             objects.pinned,
         )

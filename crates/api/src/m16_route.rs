@@ -302,6 +302,8 @@ enum Command {
         path: Path,
         prompt: Vec<u32>,
         max_new_tokens: u64,
+        /// [`Dispatch::product_stop_tokens`] of this request.
+        product_stop_tokens: bool,
     },
     Teardown(Option<Path>),
     /// Re-dial each unsettled stage and re-send its PathCancellation.
@@ -658,6 +660,7 @@ impl Executor for RouteExecutor {
                 path,
                 prompt,
                 max_new_tokens,
+                product_stop_tokens: dispatch.product_stop_tokens,
             })
             .map_err(|_| error("joined_route_carrier_failed"))
     }
@@ -1218,6 +1221,7 @@ fn carrier(
                     path,
                     prompt,
                     max_new_tokens,
+                    product_stop_tokens,
                 } => {
                     if worker.is_some() {
                         return Err("joined_route_single_request");
@@ -1239,6 +1243,7 @@ fn carrier(
                             &path,
                             prompt,
                             max_new_tokens,
+                            stop_tokens(product_stop_tokens),
                             &mut links,
                             clock,
                             observed,
@@ -1620,6 +1625,7 @@ fn carrier_epoch(
                     path,
                     prompt,
                     max_new_tokens,
+                    product_stop_tokens,
                 } => {
                     let refusal = {
                         let o = observed.state.lock().map_err(|_| "joined_route_poisoned")?;
@@ -1673,6 +1679,7 @@ fn carrier_epoch(
                                 &path,
                                 prompt,
                                 max_new_tokens,
+                                stop_tokens(product_stop_tokens),
                                 &mut links,
                                 clock,
                                 observed,
@@ -1905,12 +1912,20 @@ fn carrier_epoch(
     drop(rt);
     result
 }
+/// The route's product stop tokens (the browser codec's terminal ids).
+const PRODUCT_STOP_TOKENS: [u32; 2] = [151_645, 151_643];
+/// The stop tokens of one request: the product's, or none for the route's startup challenge
+/// (`_stop_token_ids_override=frozenset()`, route.py:4563-4590 @ f4e366e9).
+fn stop_tokens(product: bool) -> &'static [u32] {
+    if product { &PRODUCT_STOP_TOKENS } else { &[] }
+}
 #[allow(clippy::too_many_arguments)]
 fn generate(
     message: &Value,
     path: &Path,
     prompt: Vec<u32>,
     max_new_tokens: u64,
+    stops: &[u32],
     links: &mut [Link<'_>],
     clock: &app_host_clock::Clock,
     observed: &RouteHandle,
@@ -1918,7 +1933,6 @@ fn generate(
     began: Instant,
 ) -> Result<(), &'static str> {
     let last = links.len() - 1;
-    let eos = [151_645u32, 151_643];
     let mut input = prompt;
     for t in 0..max_new_tokens {
         if cancel.load(Ordering::SeqCst) {
@@ -1975,7 +1989,7 @@ fn generate(
             o.token_times_ms.push(elapsed_ms(began));
         }
         observed.changed.notify_all();
-        if eos.contains(&token) {
+        if stops.contains(&token) {
             return Ok(());
         }
         input = vec![token];
@@ -2162,6 +2176,26 @@ impl Host for RouteHost {
         let max_new = submission["max_new_tokens"]
             .as_u64()
             .ok_or(error("invalid_max_new_tokens"))?;
+        let qos = submission["qos_class"]
+            .as_str()
+            .ok_or(error("invalid_workload_binding"))?;
+        self.prepared(&ids, max_new, qos)
+    }
+    /// The startup challenge's exact prompt ids: the same carrier and KV-context checks and the
+    /// same request context as a product prompt, without the tokenizer.
+    fn prepare_tokens(
+        &self,
+        prompt: &[u32],
+        max_new_tokens: u64,
+        qos_class: &str,
+    ) -> Result<Prepared, PublicError> {
+        self.carrier_refusal(true)?;
+        self.prepared(prompt, max_new_tokens, qos_class)
+    }
+}
+impl RouteHost {
+    /// One request's context over `ids` for `max_new` new tokens (every request on the route).
+    fn prepared(&self, ids: &[u32], max_new: u64, qos: &str) -> Result<Prepared, PublicError> {
         // Every stage worker was prepared for a bounded KV context.
         for s in self.message["stages"].as_array().into_iter().flatten() {
             if s["tokens"]
@@ -2188,10 +2222,7 @@ impl Host for RouteHost {
                     .ok_or(error("invalid_max_new_tokens"))?,
                 expected_new_tokens: PyReal::from_json(&json!(max_new))
                     .ok_or(error("invalid_max_new_tokens"))?,
-                qos_class: submission["qos_class"]
-                    .as_str()
-                    .ok_or(error("invalid_workload_binding"))?
-                    .to_owned(),
+                qos_class: qos.to_owned(),
                 admitted_at: PyReal::Float(app_host::now()),
                 target_ttft_ms: latency(
                     B::PyFinalMyceliumRequestGatewayBackendTargetTtftMsL234C12,
