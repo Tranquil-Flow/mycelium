@@ -22,6 +22,12 @@ fn fixture() -> Value {
 fn fixture_r20() -> Value {
     serde_json::from_str(include_str!("fixtures/oracle_serving_r20.json")).unwrap()
 }
+/// Lane SRV round 3: a present workflow whose status is None on its first, observed and post-wait
+/// read, an absent unbound workflow, and `dict(...)` over two malformed pairs in both orders
+/// (probe `serving_probe.py r21`).
+fn fixture_r21() -> Value {
+    serde_json::from_str(include_str!("fixtures/oracle_serving_r21.json")).unwrap()
+}
 #[derive(Default)]
 struct Record {
     time: f64,
@@ -439,6 +445,64 @@ fn serving_matches_executed_oracle_round_two() {
         println!("SERVING-R20-CASE-RAN {name}");
     }
     assert_eq!(replayed, 50);
+    assert!(
+        differ.is_empty(),
+        "{} differences:\n{}",
+        differ.len(),
+        differ.join("\n")
+    );
+}
+/// The fields one replayed case is compared on: everything the oracle recorded for it.
+fn differences(name: &str, case: &Value, ran: &Ran) -> Vec<String> {
+    let rec = ran.rec.lock().unwrap();
+    let mut fields = vec![
+        ("outcome", ran.outcome.clone(), case["outcome"].clone()),
+        ("result", ran.env.result.clone(), case["result"].clone()),
+        ("progress", rle(&ran.env.progress), case["progress"].clone()),
+        (
+            "publishes",
+            rle(&ran.env.publishes),
+            case["publishes"].clone(),
+        ),
+    ];
+    if case["spec"]["fenced"] == true {
+        let committed = rec
+            .committed
+            .clone()
+            .unwrap_or(json!({"phase": "idle", "work_limits": null, "per_node": {}}));
+        fields.push(("announcement", committed, case["announcement"].clone()));
+    } else {
+        fields.push(("calls", rle(&rec.calls), case["calls"].clone()));
+        fields.push(("clocks", rle(&rec.clocks), case["clocks"].clone()));
+        fields.push(("time", json!(rec.time), case["time"].clone()));
+    }
+    fields
+        .into_iter()
+        .filter(|(_, rust, oracle)| rust != oracle)
+        .map(|(field, rust, oracle)| format!("{name}: {field}: rust {rust} oracle {oracle}"))
+        .collect()
+}
+/// Proves: B-RUN-10 (the serving step against the executed v0.1.4 step for the round-3 cases
+/// (REVIEW-laneSRV-r2-astra R2A-03, REVIEW-laneSRV-r2-opus R2-6): a PRESENT workflow whose
+/// `status()` is None raises `AttributeError` on its first, observed or post-wait read
+/// (`state.get`, demo_chain.py:1007, 1017, 1030), while a genuinely absent unbound workflow reads
+/// `{}` and waits (:1016-1018); `dict(work_limits)` raises for the first malformed pair it
+/// reaches (run_exchange.py:169).)
+#[test]
+fn serving_matches_executed_oracle_round_three() {
+    let fixture = fixture_r21();
+    assert_eq!(
+        fixture["oracle"],
+        "f4e366e98a1f705dfaf182897044500d290dbd7f"
+    );
+    let cases = fixture["cases"].as_object().unwrap();
+    assert_eq!(cases.len(), 6);
+    let mut differ = Vec::new();
+    for (name, case) in cases {
+        let ran = run(&case["spec"], None);
+        differ.extend(differences(name, case, &ran));
+        println!("SERVING-R21-CASE-RAN {name}");
+    }
     assert!(
         differ.is_empty(),
         "{} differences:\n{}",
