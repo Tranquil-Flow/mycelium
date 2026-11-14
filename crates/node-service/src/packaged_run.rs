@@ -153,6 +153,10 @@ struct Custody {
     /// The run's route as the packaged chat reads it (lane CHAT): set when the run's work is
     /// composed, taken out by its teardown ([`chat::RouteSource`]).
     route: Option<chat::RouteSource>,
+    /// The page's route chats as the run's ports cancel them (`DesktopServices::run_chats`, put
+    /// here by [`chat_run`]): teardown, ceiling, dead member and rollover (lane CHAT).
+    #[allow(dead_code)] // read by the run's ports from the next commit (lane CHAT TDD)
+    chats: Option<api::chat_service::RunChats>,
 }
 
 /// The packaged host as `api::owner_ports::RunHost` and `api::owner_observation::ChainHost`: its

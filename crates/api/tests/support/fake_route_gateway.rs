@@ -57,11 +57,15 @@ pub struct Seen {
     pub released: bool,
     pub unauthorized: usize,
 }
+/// Runs inside the gateway's `DELETE` handler, before its reply (a test observes what else holds
+/// at the moment the cancel arrives).
+pub type OnDelete = Box<dyn Fn() + Send + Sync>;
 struct Shared {
     script: Mutex<Script>,
     seen: Mutex<Seen>,
     changed: Condvar,
     stop: AtomicBool,
+    on_delete: Mutex<Option<OnDelete>>,
 }
 pub struct FakeGateway {
     addr: SocketAddr,
@@ -87,6 +91,7 @@ impl FakeGateway {
             seen: Mutex::default(),
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
+            on_delete: Mutex::new(None),
         });
         let bearer = "fake-gateway-bearer-0123456789abcdef".to_owned();
         let connections: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
@@ -122,6 +127,11 @@ impl FakeGateway {
     #[allow(dead_code)] // not every including test file swaps scripts
     pub fn script(&self, script: Script) {
         *self.shared.script.lock().unwrap() = script;
+    }
+    /// Run `observe` in every later `DELETE` handler, before the gateway answers it.
+    #[allow(dead_code)] // not every including test file observes its cancels
+    pub fn on_delete(&self, observe: OnDelete) {
+        *self.shared.on_delete.lock().unwrap() = Some(observe);
     }
     pub fn seen<T>(&self, read: impl FnOnce(&Seen) -> T) -> T {
         read(&self.shared.seen.lock().unwrap())
@@ -258,6 +268,9 @@ fn serve(stream: TcpStream, shared: &Shared, bearer: &str) {
             );
         }
         ("DELETE", path) => {
+            if let Some(observe) = shared.on_delete.lock().unwrap().as_ref() {
+                observe();
+            }
             let id = path.trim_start_matches("/v1/inference/").to_owned();
             let mut seen = shared.seen.lock().unwrap();
             seen.deletes += 1;

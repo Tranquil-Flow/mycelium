@@ -83,12 +83,22 @@ impl RunRoute for RunChatRoute {
 
 /// The packaged chat: `services`' `/chat/*` go through the shipped `ChatService` over the run
 /// `config` installs (`DesktopServices::with_chat_run`), with `timing` as the owner's per-chat
-/// timing file (admitted under the services' state root, else `chat_timing_path_refused`). A host
-/// whose state was refused at bind has no run: its chat answers `chat_not_ready`.
+/// timing file (admitted under the services' state root, else `chat_timing_path_refused`); the
+/// run's ports get the service's `RunChats` handle ([`attach_chats`]). A host whose state was
+/// refused at bind has no run: its chat answers `chat_not_ready` and nothing can cancel.
 pub fn chat_run(
     services: DesktopServices,
     config: &RunConfig,
     timing: PathBuf,
 ) -> Result<DesktopServices, PublicError> {
-    services.with_chat_run(Arc::new(RunChatRoute::new(config.clone())), Some(timing))
+    let services =
+        services.with_chat_run(Arc::new(RunChatRoute::new(config.clone())), Some(timing))?;
+    if let (Some(chats), Some(installed)) = (services.run_chats(), config.installed()) {
+        attach_chats(&installed.host, chats);
+    }
+    Ok(services)
+}
+/// `chats` as the handle `host`'s run ports cancel the page's chats through.
+pub(super) fn attach_chats(host: &PackagedRun, chats: api::chat_service::RunChats) {
+    lock(&host.custody).chats = Some(chats);
 }
