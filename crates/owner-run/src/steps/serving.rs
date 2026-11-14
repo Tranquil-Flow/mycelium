@@ -9,7 +9,7 @@
 //! injected legacy double (:1049-1055) has no Rust caller.
 use super::exchange::{Announcement, ReportsPort, publish_participants, truthy};
 use super::progress_wait::{Wait, progress_wait_with_observer};
-use super::publish::{ServingIdentity, WorkPort, failure_code, require_mapping, workflow_snapshot};
+use super::publish::{ServingIdentity, WorkPort, failure_code, require_mapping};
 use crate::chain::{StepEnv, StepError};
 use crate::machine::OwnerRunError;
 use crate::state::RunState;
@@ -78,6 +78,198 @@ fn identity_changed() -> StepError {
     OwnerRunError::new("serving_workflow_identity_changed").into()
 }
 
+fn exception(class: &str) -> StepError {
+    StepError::Exception {
+        class: class.into(),
+    }
+}
+
+/// `{} if workflow is None else workflow.status()` (`demo_chain.py:1007, 1017`) and the post-wait
+/// `workflow.status()` (:1030), then `.get`: no `or {}` on the whole status. Only a genuinely absent
+/// workflow (`null`, the [`WorkPort::workflow_state`] contract) reads as `{}`; a present workflow
+/// whose status is not a mapping, falsy or not, has no `.get` (`AttributeError`).
+fn serving_status(workflow: &mut dyn WorkPort) -> Result<Value, StepError> {
+    match workflow.workflow_state()? {
+        Value::Null => Ok(Value::Object(Map::new())),
+        status @ Value::Object(_) => Ok(status),
+        _ => Err(exception("AttributeError")),
+    }
+}
+
+/// A Python dict key as `dict(...)` sees it (`str`, `int`, `float`, `bool`, `None`): equal keys
+/// collapse as Python's do (`1 == 1.0 == True`, `0 == -0.0 == False`).
+#[derive(Clone)]
+enum PyKey {
+    Str(String),
+    Int(i128),
+    Float(f64),
+    None,
+}
+impl PyKey {
+    fn of(value: &Value) -> Result<Self, StepError> {
+        Ok(match value {
+            Value::String(s) => Self::Str(s.clone()),
+            Value::Bool(b) => Self::Int(i128::from(*b)),
+            Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+                (Some(i), _, _) => Self::Int(i128::from(i)),
+                (None, Some(u), _) => Self::Int(i128::from(u)),
+                (None, None, Some(f)) => Self::Float(f),
+                (None, None, None) => return Err(exception("TypeError")),
+            },
+            Value::Null => Self::None,
+            // `unhashable type: 'list'` / `'dict'`.
+            Value::Array(_) | Value::Object(_) => return Err(exception("TypeError")),
+        })
+    }
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Str(a), Self::Str(b)) => a == b,
+            (Self::None, Self::None) => true,
+            (Self::Int(a), Self::Int(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => a == b,
+            (Self::Int(i), Self::Float(f)) | (Self::Float(f), Self::Int(i)) => {
+                f.fract() == 0.0 && f.is_finite() && (*f as i128) == *i
+            }
+            _ => false,
+        }
+    }
+    /// The key `json.dumps` writes (the announcement is `json.loads(json.dumps(...))`,
+    /// run_exchange.py:175): `True` was collapsed into `1` already, `None` is `null`.
+    fn json_key(&self, value: &Value) -> String {
+        match self {
+            Self::Str(s) => s.clone(),
+            Self::None => "null".into(),
+            Self::Int(_) => match value {
+                Value::Bool(true) => "true".into(),
+                Value::Bool(false) => "false".into(),
+                other => other.to_string(),
+            },
+            Self::Float(f) => py_float_repr(*f),
+        }
+    }
+}
+
+/// Python's `repr(float)`: the shortest round-trip digits, positional for exponents -4..16,
+/// otherwise `d.ddde+XX`.
+fn py_float_repr(f: f64) -> String {
+    let sci = format!("{f:e}");
+    let Some((mantissa, exponent)) = sci.split_once('e') else {
+        return sci;
+    };
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    let (sign, mantissa) = match mantissa.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", mantissa),
+    };
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    if (-4..16).contains(&exponent) {
+        let point = exponent + 1;
+        if point <= 0 {
+            let zeros = "0".repeat(usize::try_from(-point).unwrap_or(0));
+            format!("{sign}0.{zeros}{digits}")
+        } else {
+            let point = usize::try_from(point).unwrap_or(0);
+            if point >= digits.len() {
+                let zeros = "0".repeat(point - digits.len());
+                format!("{sign}{digits}{zeros}.0")
+            } else {
+                format!("{sign}{}.{}", &digits[..point], &digits[point..])
+            }
+        }
+    } else {
+        let (first, rest) = digits.split_at(1);
+        let fraction = if rest.is_empty() {
+            String::new()
+        } else {
+            format!(".{rest}")
+        };
+        let exp_sign = if exponent < 0 { '-' } else { '+' };
+        format!("{sign}{first}{fraction}e{exp_sign}{:02}", exponent.abs())
+    }
+}
+
+/// Python `dict(value)` for a JSON value, then its JSON keys (`run_exchange.py:169, 172`): a mapping
+/// is copied; a list takes each element as a key/value pair (a two-element list, a two-character
+/// string, a two-key mapping's keys); `''` is `{}`. A number, `True`/`False` or `None` is not
+/// iterable (`TypeError`); an element of the wrong length is a `ValueError`, a non-sequence
+/// element or an unhashable key a `TypeError`. A mapping used as a pair yields its keys in the
+/// Value's own key order.
+fn py_dict(value: &Value) -> Result<Map<String, Value>, StepError> {
+    let pairs: Vec<(Value, Value)> = match value {
+        Value::Object(map) => return Ok(map.clone()),
+        Value::String(s) if s.is_empty() => Vec::new(),
+        // Every character is a one-element sequence.
+        Value::String(_) => return Err(exception("ValueError")),
+        Value::Null | Value::Bool(_) | Value::Number(_) => return Err(exception("TypeError")),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Array(pair) if pair.len() == 2 => Ok((pair[0].clone(), pair[1].clone())),
+                Value::String(pair) if pair.chars().count() == 2 => {
+                    let mut chars = pair.chars().map(|c| Value::String(c.to_string()));
+                    match (chars.next(), chars.next()) {
+                        (Some(k), Some(v)) => Ok((k, v)),
+                        _ => Err(exception("ValueError")),
+                    }
+                }
+                Value::Object(pair) if pair.len() == 2 => {
+                    let mut keys = pair.keys().map(|k| Value::String(k.clone()));
+                    match (keys.next(), keys.next()) {
+                        (Some(k), Some(v)) => Ok((k, v)),
+                        _ => Err(exception("ValueError")),
+                    }
+                }
+                Value::Array(_) | Value::String(_) | Value::Object(_) => {
+                    Err(exception("ValueError"))
+                }
+                Value::Null | Value::Bool(_) | Value::Number(_) => Err(exception("TypeError")),
+            })
+            .collect::<Result<_, _>>()?,
+    };
+    // Python keeps the FIRST equal key and the LAST value.
+    let mut keys: Vec<(PyKey, Value, Value)> = Vec::new();
+    for (key, value) in pairs {
+        let py = PyKey::of(&key)?;
+        match keys.iter_mut().find(|(k, _, _)| k.same(&py)) {
+            Some(slot) => slot.2 = value,
+            None => keys.push((py, key, value)),
+        }
+    }
+    let mut out = Map::new();
+    for (py, key, value) in keys {
+        // Distinct Python keys can write the same JSON key (`1` and `'1'`): `json.loads` keeps
+        // the last.
+        out.insert(py.json_key(&key), value);
+    }
+    Ok(out)
+}
+
+/// `None if work_limits is None else dict(work_limits)` (`run_exchange.py:169`).
+pub fn announcement_limits(work_limits: Option<&Value>) -> Result<Option<Value>, StepError> {
+    match work_limits {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => Ok(Some(Value::Object(py_dict(value)?))),
+    }
+}
+
+/// `{node: dict(extra) for node, extra in (per_node or {}).items()}` (`run_exchange.py:172`):
+/// a falsy `per_node` is no rows; a truthy one that is not a mapping has no `.items()`
+/// (`AttributeError`). `None` stays `None` (nothing announced per node).
+pub fn announcement_nodes(
+    work_nodes: Option<&Value>,
+) -> Result<Option<Vec<(String, Value)>>, StepError> {
+    match work_nodes {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) if !truthy(value) => Ok(Some(Vec::new())),
+        Some(Value::Object(nodes)) => nodes
+            .iter()
+            .map(|(node, extra)| Ok((node.clone(), Value::Object(py_dict(extra)?))))
+            .collect::<Result<_, StepError>>()
+            .map(Some),
+        Some(_) => Err(exception("AttributeError")),
+    }
+}
+
 pub fn run_serving_step(
     env: &mut dyn StepEnv,
     reports: &mut dyn ReportsPort,
@@ -107,8 +299,7 @@ pub fn run_serving_step(
         // `up()` (:1011-1018): a failed or stopped workflow first, then its identity, then
         // `api_running`.
         &mut |_, _| {
-            let status = workflow_snapshot(*workflow.borrow_mut())?;
-            require_mapping(&status)?;
+            let status = serving_status(*workflow.borrow_mut())?;
             if failed_or_stopped(&status)? {
                 return Err(OwnerRunError::new(&failure_code(&status)).into());
             }
@@ -121,8 +312,7 @@ pub fn run_serving_step(
         // run's OWN workflow when it is an exact integer in 1..=4096 (bools and floats are not).
         // Only strictly new verified indices renew the wait (:1019-1020).
         &mut || {
-            let status = workflow_snapshot(*workflow.borrow_mut())?;
-            require_mapping(&status)?;
+            let status = serving_status(*workflow.borrow_mut())?;
             let mut view = json!({
                 "state": status.get("state").cloned().unwrap_or(Value::Null),
                 "error_code": status.get("error_code").cloned().unwrap_or(Value::Null),
@@ -148,8 +338,7 @@ pub fn run_serving_step(
     ) {
         return Err(identity_changed());
     }
-    let status = workflow_snapshot(workflow)?;
-    require_mapping(&status)?;
+    let status = serving_status(workflow)?;
     let startup = sub_mapping(&status, "startup")?;
     // :1024-1043: `api_running` only means the API is up; the startup route challenge must have
     // qualified the route (two-Mac run 14 served with no qualified route).
@@ -177,19 +366,11 @@ pub fn run_serving_step(
         Value::String(s) => Value::String(s.trim_end_matches('/').to_owned()),
         other => other,
     };
-    // :1058-1063: `ctx.state['model']` and the announcement are prepared before any lock.
-    let model = state.model.as_ref().ok_or_else(|| StepError::Exception {
-        class: "KeyError".into(),
-    })?;
-    let per_node = match &state.work_nodes {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(nodes)) => Some(nodes.clone().into_iter().collect()),
-        Some(_) => {
-            return Err(StepError::Exception {
-                class: "AttributeError".into(),
-            });
-        }
-    };
+    // :1058-1063: `ctx.state['model']` and the announcement are prepared before any lock, in the
+    // source's order: the model, then `dict(work_limits)`, then the per-node rows.
+    let model = state.model.as_ref().ok_or_else(|| exception("KeyError"))?;
+    let work_limits = announcement_limits(state.work_limits.as_ref())?;
+    let per_node = announcement_nodes(state.work_nodes.as_ref())?;
     let announcement = Announcement {
         phase: "serving".into(),
         run_id: state.run_id.clone(),
@@ -203,12 +384,9 @@ pub fn run_serving_step(
     // :1064-1097: the Stop check, the workflow re-checks, the in-memory commit and
     // `ctx.result['registry_origin']` under the owner's fence and the host's workflow lock;
     // nothing is published when any of them refuses.
-    workflow.commit_serving(
-        state,
-        &announcement,
-        state.work_limits.as_ref(),
-        &mut |commit| env.fenced(commit, "registry_origin", origin.clone()),
-    )?;
+    workflow.commit_serving(state, &announcement, work_limits.as_ref(), &mut |commit| {
+        env.fenced(commit, "registry_origin", origin.clone())
+    })?;
     publish_participants(env, reports, state)?;
     env.progress("route ready: open the chat");
     Ok(())
