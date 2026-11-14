@@ -571,6 +571,8 @@ impl Work {
     }
     fn teardown(&self) -> Result<(), String> {
         let mut resident = lock(&self.resident);
+        // The run's transport ends with it (R2-7): whatever asks next reads this Mac afresh.
+        resident.network = None;
         // Retry a previous close's exact owners first: a new close never proceeds while
         // custody it did not receive is still owed.
         settle_debt(&self.host)?;
