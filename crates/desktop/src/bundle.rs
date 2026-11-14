@@ -24,6 +24,10 @@ pub const EXECUTABLE: &str = "mycelium";
 pub const ICON_FILE: &str = "icon-windowed.icns";
 /// Certified v0.1.4 `Contents/Resources/icon-windowed.icns` (APP-FILES.sha256).
 pub const ICON_SHA256: &str = "676400a536e2dc3e71d97a4b80dc50f1032a5739d8aa3b34fc55de133bfd646e";
+/// `NSLocalNetworkUsageDescription`: what macOS 15+ shows when it asks whether Mycelium may reach
+/// devices on the local network (lane LAN). The work transport binds this Mac's private LAN address
+/// and sends only to the addresses of joined Macs the swarm's seed signed.
+pub const LOCAL_NETWORK_USAGE: &str = "RED scaffold";
 pub const NATIVE_INPUT_SCHEMA: &str = "mycelium.foundation.native-input-evidence.v1";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
