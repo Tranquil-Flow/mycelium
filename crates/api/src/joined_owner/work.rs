@@ -32,6 +32,7 @@ use owner_run::{
         activate::ActivationPort,
         exchange::Announcement,
         publish::{Fence, ServingIdentity, WorkPort},
+        serving::compiled_epoch,
         slices::SlicesPort,
     },
 };
@@ -462,14 +463,36 @@ impl Shared {
             "shards_transferred":flow.transferred_all,"epoch_retired":flow.retired,
             "startup":flow.startup})
     }
-    /// The serving fence (stub).
+    /// The workflow half of the serving fence (`with workflow._lock:`, demo_chain.py:1081-1097):
+    /// under this lock the run's Stop (written under the same lock by [`signal_stop`]), the live
+    /// state and the run binding (`current`) are re-checked, then the LIVE startup, and only then
+    /// does `publish` commit the announcement in memory. `current` and `publish` take no workflow
+    /// lock and call nothing remote. Lock order: this workflow lock -> the exchange's own lock.
     fn commit_serving(
         &self,
-        _stop: &AtomicBool,
-        _current: impl FnOnce() -> bool,
-        _publish: impl FnOnce(),
+        stop: &AtomicBool,
+        current: impl FnOnce() -> bool,
+        publish: impl FnOnce(),
     ) -> Result<(), &'static str> {
-        Err(owner_run::steps::NOT_PORTED_CODE)
+        let flow = self.lock();
+        if stop.load(Ordering::SeqCst) || flow.state != RUNNING || !current() {
+            return Err("serving_workflow_identity_changed");
+        }
+        let live = flow.startup.as_ref();
+        let qualified =
+            live.and_then(|s| s.get("startup_qualification_complete")) == Some(&Value::Bool(true));
+        // Python `count != 0`: 0, 0.0 and False are zero; an absent count is not.
+        let available = match live.and_then(|s| s.get("unavailable_deployment_count")) {
+            Some(Value::Bool(b)) => !b,
+            Some(Value::Number(n)) => n.as_f64() == Some(0.0),
+            _ => false,
+        };
+        if !qualified || !available {
+            return Err("route_qualification_failed");
+        }
+        publish();
+        drop(flow);
+        Ok(())
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -613,20 +636,53 @@ impl OwnerWork {
         self.exchange = Some(exchange);
         self
     }
-    /// `needs_identity` / `current` (stub).
-    pub fn serving_identity_of(&self, _state: &RunState) -> Result<ServingIdentity, StepError> {
-        Err(owner_run::steps::not_ported("serving"))
+    /// `needs_identity(workflow)` / `current(workflow)` (demo_chain.py:988-1001) for this workflow:
+    /// it is always run-bound (`needs_identity`), and current while it was built for the step's run
+    /// and deployment, the run's compile bound an epoch ([`compiled_epoch`]) and its Stop was not
+    /// signalled. One `OwnerWork` is built per run from that run's compile (the slices step), so the
+    /// oracle's `_progress_identity` epoch is carried by the object itself; `workflow is
+    /// app._chain_workflow` is the host's to answer (the packaged host lends only its resident one).
+    pub fn serving_identity_of(&self, state: &RunState) -> ServingIdentity {
+        if self.current(state) {
+            ServingIdentity::Current
+        } else {
+            ServingIdentity::Changed
+        }
     }
-    /// The fenced serving publication (stub).
+    fn current(&self, state: &RunState) -> bool {
+        self.run.0 == state.run_id
+            && self.run.1 == state.deployment_id
+            && compiled_epoch(state).is_some()
+            && !self.stop.load(Ordering::SeqCst)
+    }
+    /// The serving publication (demo_chain.py:1056-1097): the announcement is validated and
+    /// serialised first, outside every lock; then, inside the owner run's Stop `fence` and under
+    /// this workflow's lock ([`Shared::commit_serving`]), the re-checks and the in-memory commit to
+    /// `exchange`. A refusal publishes nothing.
     pub fn commit_serving_on(
         &self,
-        _state: &RunState,
-        _exchange: &RunExchange,
-        _announcement: &Announcement,
-        _work_limits: Option<&Value>,
-        _fence: Fence<'_>,
+        state: &RunState,
+        exchange: &RunExchange,
+        announcement: &Announcement,
+        work_limits: Option<&Value>,
+        fence: Fence<'_>,
     ) -> Result<(), StepError> {
-        Err(owner_run::steps::not_ported("serving"))
+        let prepared = exchange
+            .prepare_announcement(serving_announce(announcement, work_limits))
+            .map_err(|_| StepError::Exception {
+                class: "ValueError".into(),
+            })?;
+        fence(&mut || {
+            self.shared
+                .commit_serving(
+                    &self.stop,
+                    || self.current(state),
+                    || {
+                        exchange.commit_announcement(&prepared, false);
+                    },
+                )
+                .map_err(step_refusal)
+        })
     }
     /// Retain compiler admission-time objects until the source thread has joined.
     pub fn with_objects(mut self, objects: Arc<runtime::artifact_journal::PinnedObjects>) -> Self {
@@ -1055,11 +1111,35 @@ impl Drop for OwnerWork {
     }
 }
 /// The run's Stop: set the flag every wait polls and remember when (the exit's ONE deadline).
-fn signal_stop(_shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
-    at.lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .get_or_insert_with(Instant::now);
-    stop.store(true, Ordering::SeqCst);
+/// Written under the workflow lock, so the serving fence sees a Stop either before its re-checks or
+/// after its publication, never between them (demo_chain.py:1081-1089). Lock order: workflow lock
+/// -> `at`.
+fn signal_stop(shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
+    shared.update(|_| {
+        at.lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_or_insert_with(Instant::now);
+        stop.store(true, Ordering::SeqCst);
+    });
+}
+/// `exchange.prepare_announcement(phase='serving', ..., work_limits=, per_node=)`
+/// (demo_chain.py:1058-1062): the document the work announcement carries (`announce_work`).
+pub fn serving_announce(a: &Announcement, work_limits: Option<&Value>) -> Announce {
+    Announce {
+        phase: a.phase.clone(),
+        run_id: Some(a.run_id.clone()),
+        deployment_id: Some(a.deployment_id.clone()),
+        model: Some(json!({
+            "choice": crate::model_catalog::find(&a.model_id, &a.resolved_commit)
+                .and_then(crate::model_catalog::choice_for_model),
+            "model_id": a.model_id,
+            "resolved_commit": a.resolved_commit,
+        })),
+        slice_mode: a.slice_mode,
+        manifest_digest: Some(a.manifest_digest.clone()),
+        work_limits: work_limits.cloned(),
+        per_node: a.per_node.iter().flatten().cloned().collect(),
+    }
 }
 fn refused(code: &str) -> PortError {
     PortError::Refused(OwnerRunError::new(code))
@@ -1102,6 +1182,22 @@ impl WorkPort for OwnerWork {
     }
     fn workflow_state(&mut self) -> Result<Value, StepError> {
         Ok(self.state())
+    }
+    fn serving_identity(&mut self, state: &RunState) -> Result<ServingIdentity, StepError> {
+        Ok(self.serving_identity_of(state))
+    }
+    fn commit_serving(
+        &mut self,
+        state: &RunState,
+        announcement: &Announcement,
+        work_limits: Option<&Value>,
+        fence: Fence<'_>,
+    ) -> Result<(), StepError> {
+        let exchange = self
+            .exchange
+            .clone()
+            .ok_or_else(|| step_refusal("owner_exchange_unavailable"))?;
+        self.commit_serving_on(state, &exchange, announcement, work_limits, fence)
     }
 }
 impl ActivationPort for OwnerWork {
@@ -1287,6 +1383,8 @@ impl Worker {
         self.shared.update(|f| {
             f.route = None;
             f.gateway = None;
+            // The gateway closed with the epoch: no startup url outlives it.
+            f.startup = None;
             f.cleanup_error = cleanup;
             match failure {
                 Some(r) => {
@@ -1495,14 +1593,24 @@ impl Worker {
             "route_expires_at":epoch.host().message()["expires_at"],
             "worker_pids":epoch.worker_pids()});
         let handle = epoch.handle().clone();
+        let url = format!("http://{}/", epoch.addr());
         *open = Some(epoch);
         self.serving.store(true, Ordering::SeqCst);
         self.shared.update(|f| {
             f.route = Some(handle);
             f.gateway = Some(gateway);
             f.epoch = 1;
+            // What the run really knows of its startup: where its gateway listens. The joined
+            // route runs no startup route challenge (v0.1.4 `_qualify_open_route`,
+            // supervisor.py:3787-3830 -> `startup_qualification_complete`, :4416-4423), so the
+            // qualification and the unavailable count stay absent and the serving step refuses
+            // `route_qualification_failed` instead of claiming a route nobody qualified.
+            f.startup = Some(json!({ "url": url }));
             f.state = RUNNING;
         });
+        eprintln!(
+            "owner_work_startup_unqualified: the joined route runs no startup route challenge"
+        );
         // Every chat of the run is a request on this epoch. A retired epoch (death evidence, a
         // revoke or generation change, a carrier failure, a failed session reset) is NEVER
         // re-opened or re-prepared: its gateway refuses later chats and the run serves on until
@@ -1799,8 +1907,9 @@ mod serving_fence_tests {
     /// only a qualified startup publishes, once).
     #[test]
     fn the_fence_rechecks_the_live_state_and_startup() {
+        type Case = (&'static str, Option<Value>, bool, Result<(), &'static str>);
         let stop = AtomicBool::new(false);
-        let cases: [(&'static str, Option<Value>, bool, Result<(), &str>); 7] = [
+        let cases: [Case; 7] = [
             (
                 STARTING,
                 qualified(json!(0)),
