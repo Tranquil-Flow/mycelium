@@ -24,7 +24,8 @@ use serde_json::{Value, json};
 use std::{
     fs,
     net::IpAddr,
-    path::PathBuf,
+    os::unix::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -32,6 +33,8 @@ use std::{
     time::Duration,
 };
 use transport::{Channel, Clock};
+#[path = "../../runtime/tests/support/udp_hold.rs"]
+mod udp_hold;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 fn span(id: B) -> Duration {
@@ -416,4 +419,277 @@ fn a_peer_sending_invalid_requests_cannot_outlive_stop() {
     closer.join().unwrap();
     let answered = flooder.unwrap().join().unwrap().unwrap();
     assert!(answered >= 1, "the flooder was served before Stop");
+}
+
+/// `ShardSource::close`'s stated bound, the same in every state (`source.rs` module note): one
+/// accept slice (`OwnerPoll`) to see Stop, then one `RouterClose` for the endpoint's close and
+/// for storage work still running; asserted with one more `RouterClose` of scheduling margin.
+fn close_bound() -> Duration {
+    span(B::OwnerPoll) + span(B::RouterClose) + span(B::RouterClose)
+}
+/// Close `source` on its own thread: its result if it returned within [`close_bound`].
+fn close_within_bound(
+    source: ShardSource,
+) -> (
+    Result<Result<(), Refusal>, mpsc::RecvTimeoutError>,
+    std::thread::JoinHandle<bool>,
+) {
+    let (closed_tx, closed) = mpsc::channel();
+    // `true` if the test was still waiting when `close` returned.
+    let closer = std::thread::spawn(move || closed_tx.send(source.close()).is_ok());
+    (closed.recv_timeout(close_bound()), closer)
+}
+/// Replace the content-addressed object at `path` with a FIFO: a read of it blocks in `open(2)`
+/// until a writer appears, as storage work that cannot observe Stop does (a stalled disk).
+fn hold_object(path: &Path) {
+    fs::remove_file(path).unwrap();
+    let made = std::process::Command::new("/usr/bin/mkfifo")
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(made.success(), "mkfifo {}", path.display());
+}
+/// Release a held object: true if a reader was still blocked opening it (a non-blocking writer
+/// open succeeds only then, `ENXIO` otherwise), which it then lets through (to a failed read).
+fn release_object(path: &Path) -> bool {
+    fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .is_ok()
+}
+
+fn a_stalled_handshake_cannot_hold_close(lan: Option<(IpAddr, LanPolicy)>) {
+    let pair = Pair::new();
+    let (source, recipe, file) = pair.source(lan);
+    let mut stalled: Option<(udp_hold::Hold, std::thread::JoinHandle<bool>)> = None;
+    let mut member = Member {
+        root: pair.member_root.clone(),
+        receive: Box::new(|command| {
+            let target = source_address(command);
+            let at = *target.ip_addrs().next().unwrap();
+            // A local process that starts a handshake and never finishes it: every answer
+            // of the source is held, so the handshake stays in flight.
+            let hold = udp_hold::Hold::start(at, span(B::SidecarReceivePollWait));
+            let parked = iroh::EndpointAddr::new(target.id).with_ip_addr(hold.address());
+            let dialer = std::thread::spawn(move || {
+                Client::new()
+                    .with(iroh::SecretKey::generate(), &parked, |_, _| ())
+                    .is_err()
+            });
+            assert!(
+                hold.answered(span(B::RouterClose)),
+                "the source took the stalled handshake"
+            );
+            // From now on the stalled peer sends nothing either: not even its own close.
+            hold.freeze();
+            stalled = Some((hold, dialer));
+            // The member gives up (a cancelled receive): the owner stops the source.
+            Err(Refusal("member_receive_cancelled".into()))
+        }),
+        reply: None,
+    };
+    let refused = transfer(
+        &source,
+        &pair.seed.coordinator,
+        &mut member,
+        &pair.registration,
+        "lan-source-stalled",
+        &file,
+        &recipe,
+        span(B::RouterClose),
+    )
+    .err()
+    .unwrap();
+    drop(member);
+    assert_eq!(refused.0, "member_receive_cancelled");
+    let (closed, closer) = close_within_bound(source);
+    let (hold, dialer) = stalled.expect("the member's receive ran");
+    let result = closed.unwrap_or_else(|_| {
+        panic!(
+            "a handshake in flight held the source's close past {:?}",
+            close_bound()
+        )
+    });
+    assert!(result.is_ok(), "{result:?}");
+    assert!(closer.join().unwrap(), "close answered the waiting test");
+    drop(hold);
+    assert!(dialer.join().unwrap(), "the stalled dial never completed");
+}
+
+/// Proves: R2-2 / LAN-R2-A1 (LocalOnly: a local process that starts a handshake with the shard
+/// source and never finishes it cannot hold `close` past its bound).
+#[test]
+fn on_loopback_a_stalled_handshake_cannot_hold_the_sources_close() {
+    a_stalled_handshake_cannot_hold_close(None);
+}
+
+/// Proves: LAN-R2-A1 (direct LAN: the same; in-flight handshakes end with the host's close).
+#[test]
+fn on_the_lan_a_stalled_handshake_cannot_hold_the_sources_close() {
+    a_stalled_handshake_cannot_hold_close(direct_lan());
+}
+
+/// Proves: LAN-R2-A1 (verifying at admission: object verification whose storage read cannot
+/// observe Stop is left to finish in the background; `close` returns within its bound and does
+/// not wait for it).
+#[test]
+fn held_storage_while_verifying_at_admission_cannot_hold_the_sources_close() {
+    let pair = Pair::new();
+    let (recipe, file, objects) = pair.material();
+    let digest = file["content_digest"].as_str().unwrap();
+    let object = objects.join(digest.strip_prefix("sha256:").unwrap());
+    hold_object(&object);
+    let source = ShardSource::start(
+        pair.seed.coordinator.clone(),
+        objects,
+        pair.owner.join("journal"),
+        direct_lan(),
+    )
+    .unwrap();
+    let mut member = Member {
+        root: pair.member_root.clone(),
+        receive: Box::new(|_| panic!("no offer is issued for an object still being verified")),
+        reply: None,
+    };
+    // The admission job does not finish while its read is held: that is the job's own wait.
+    let refused = transfer(
+        &source,
+        &pair.seed.coordinator,
+        &mut member,
+        &pair.registration,
+        "lan-source-held-admit",
+        &file,
+        &recipe,
+        span(B::RouterClose),
+    )
+    .err()
+    .unwrap();
+    drop(member);
+    assert_eq!(refused.0, "source_job_timeout");
+    let (closed, closer) = close_within_bound(source);
+    let blocked = release_object(&object);
+    let result = match closed {
+        Ok(result) => result,
+        Err(_) => {
+            closer.join().unwrap();
+            panic!(
+                "held storage work held the source's close past {:?}",
+                close_bound()
+            )
+        }
+    };
+    assert!(closer.join().unwrap(), "close answered the waiting test");
+    assert!(result.is_ok(), "{result:?}");
+    assert!(
+        blocked,
+        "the admission read was not held across close (the test did not reach its state)"
+    );
+}
+
+/// Proves: LAN-R2-A1 (serving: a chunk read the artifact service started on the blocking pool,
+/// after its admission was journaled, is left to finish in the background; `close` returns
+/// within its bound instead of the runtime's drop waiting for it).
+#[test]
+fn held_storage_while_serving_a_chunk_cannot_hold_the_sources_close() {
+    let pair = Pair::new();
+    let (source, recipe, file) = pair.source(direct_lan());
+    let digest = file["content_digest"].as_str().unwrap().to_owned();
+    let object = pair
+        .owner
+        .join("objects")
+        .join(digest.strip_prefix("sha256:").unwrap());
+    let journal = pair
+        .owner
+        .join("journal")
+        .join(runtime::artifact_journal::LEDGER_FILE);
+    let (signer, _, _) = app_host::identity(&pair.member_root).unwrap();
+    let carrier =
+        Identity::from_secret(&pair.recipient.public().to_string(), &signer.secret_bytes())
+            .unwrap();
+    let mut answered: Option<Result<Vec<u8>, String>> = None;
+    let mut journaled = 0;
+    let mut member = Member {
+        root: pair.member_root.clone(),
+        receive: Box::new(|command| {
+            // Admitted and verified at admission; now its bytes are held on disk.
+            hold_object(&object);
+            let limits = runtime::sidecar_artifact::grant_limits().unwrap();
+            let now = (app_host::now() * 1000.0).floor() as u64;
+            let offer = &command["offer"];
+            let grant = protocol::artifact_grant::verify_grant(
+                &offer["message"]["grant"],
+                &offer["verification_key"],
+                now,
+                limits,
+            )
+            .unwrap();
+            let request = protocol::artifact_grant::sign_chunk_request(
+                &carrier,
+                &grant,
+                "held-chunk",
+                "held-chunk-nonce",
+                command["source_id"].as_str().unwrap(),
+                &digest,
+                0,
+                1,
+                now,
+                limits,
+            )
+            .unwrap();
+            let body = serde_json::to_vec(&request).unwrap();
+            let target = source_address(command);
+            answered = Some(
+                Client::new()
+                    .with(pair.recipient.clone(), &target, |rt, connection| {
+                        exchange(rt, connection, &body)
+                    })
+                    .and_then(|r| r),
+            );
+            journaled = fs::read_to_string(&journal).unwrap().lines().count();
+            Err(Refusal("member_receive_cancelled".into()))
+        }),
+        reply: None,
+    };
+    let refused = transfer(
+        &source,
+        &pair.seed.coordinator,
+        &mut member,
+        &pair.registration,
+        "lan-source-held-serve",
+        &file,
+        &recipe,
+        span(B::RouterClose),
+    )
+    .err()
+    .unwrap();
+    drop(member);
+    assert_eq!(refused.0, "member_receive_cancelled");
+    let (closed, closer) = close_within_bound(source);
+    let blocked = release_object(&object);
+    let result = match closed {
+        Ok(result) => result,
+        Err(_) => {
+            closer.join().unwrap();
+            panic!(
+                "a held chunk read held the source's close past {:?}",
+                close_bound()
+            )
+        }
+    };
+    assert!(closer.join().unwrap(), "close answered the waiting test");
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(
+        answered,
+        Some(Err("no answer".to_owned())),
+        "the chunk request was answered although its read was held"
+    );
+    assert_eq!(
+        journaled, 2,
+        "the request's admission (genesis + one line) was journaled before its read"
+    );
+    assert!(
+        blocked,
+        "the chunk read was not held across close (the test did not reach its state)"
+    );
 }

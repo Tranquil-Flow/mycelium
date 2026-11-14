@@ -4,7 +4,9 @@
 //! HOLDS every server datagram (the server's handshake answers) while held.
 //! The first server datagram is an event (`answered`): the server pulled the
 //! client's Initial and is mid-handshake. `release` delivers the held
-//! datagrams in order and forwards from then on. Nothing is decided by
+//! datagrams in order and forwards from then on; `freeze` drops every later
+//! client datagram instead (a peer that went silent mid-handshake, which never
+//! even sends its own close). Nothing is decided by
 //! elapsed time: the socket read timeout only lets the relay threads see
 //! `Drop`. Shared by the runtime and api suites (`#[path]`).
 use std::{
@@ -19,6 +21,8 @@ use std::{
 
 struct Shared {
     stop: AtomicBool,
+    /// Set by `freeze`: client datagrams are dropped from then on.
+    frozen: AtomicBool,
     /// `Some` while held: the server's datagrams not yet delivered.
     held: Mutex<Option<Vec<Vec<u8>>>>,
     client: Mutex<Option<SocketAddr>>,
@@ -55,6 +59,7 @@ impl Hold {
         let address = front.local_addr().unwrap();
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
+            frozen: AtomicBool::new(false),
             held: Mutex::new(Some(Vec::new())),
             client: Mutex::new(None),
             front,
@@ -66,6 +71,9 @@ impl Hold {
             let mut buffer = vec![0u8; 65536];
             while !up.stop.load(Ordering::SeqCst) {
                 if let Ok((n, from)) = up.front.recv_from(&mut buffer) {
+                    if up.frozen.load(Ordering::SeqCst) {
+                        continue;
+                    }
                     *up.client.lock().unwrap() = Some(from);
                     if up.back.send(&buffer[..n]).is_err() {
                         eprintln!("udp hold: a client datagram was not forwarded");
@@ -108,6 +116,10 @@ impl Hold {
     /// Whether the server has sent its first datagram, waiting at most `within`.
     pub fn answered(&self, within: Duration) -> bool {
         self.answered.recv_timeout(within).is_ok()
+    }
+    /// Drop every client datagram from now on (the server keeps waiting for them).
+    pub fn freeze(&self) {
+        self.shared.frozen.store(true, Ordering::SeqCst);
     }
     /// Deliver what was held, in order, and forward everything from now on.
     pub fn release(&self) {
