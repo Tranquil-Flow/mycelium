@@ -101,10 +101,7 @@ fn serving_probe_call_order_matches_source_before_side_effects() {
             run: Mutex::new(run),
             queue: Mutex::new(queue),
             wake: Condvar::new(),
-            stop: StopEvent {
-                set: Mutex::new(false),
-                changed: Condvar::new(),
-            },
+            stop: StopEvent::new(),
             clocks: Arc::new(Fixed),
             timing: Timing::registered(),
         };

@@ -29,13 +29,32 @@ fn shared() -> Arc<Shared> {
         }))),
         queue: Mutex::new(Queue::default()),
         wake: Condvar::new(),
-        stop: StopEvent {
-            set: Mutex::new(false),
-            changed: Condvar::new(),
-        },
+        stop: StopEvent::new(),
         clocks: Arc::new(NoClocks),
         timing: Timing::registered(),
     })
+}
+
+/// A machine whose run context 1 is running, as the driver sees it at its first step.
+fn started() -> (Arc<Shared>, u64) {
+    let shared = shared();
+    let context = {
+        let mut run = lock(&shared.run);
+        let cmds = run
+            .start(
+                "start",
+                None,
+                Clock {
+                    mono: 0.0,
+                    wall: 0.0,
+                },
+            )
+            .expect("start");
+        let mut queue = lock(&shared.queue);
+        shared.dispatch(run.generation(), &mut queue, cmds);
+        run.generation()
+    };
+    (shared, context)
 }
 
 fn patience() -> Duration {
@@ -49,12 +68,15 @@ fn patience() -> Duration {
 /// stays free).
 #[test]
 fn a_stop_cannot_land_inside_the_serving_commit() {
-    let shared = shared();
+    let (shared, context) = started();
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let worker = shared.clone();
     let commit = std::thread::spawn(move || {
-        let mut env = Env { shared: &worker };
+        let mut env = Env {
+            shared: &worker,
+            context,
+        };
         env.fenced(
             &mut || {
                 entered_tx.send(()).expect("test receives the entry");
@@ -80,9 +102,12 @@ fn a_stop_cannot_land_inside_the_serving_commit() {
 /// `raise _Stopped()` precedes every workflow re-check, demo_chain.py:1077-1080).
 #[test]
 fn a_stop_before_the_fence_skips_the_commit() {
-    let shared = shared();
+    let (shared, context) = started();
     shared.stop.assign(true);
-    let mut env = Env { shared: &shared };
+    let mut env = Env {
+        shared: &shared,
+        context,
+    };
     let mut ran = false;
     let result = env.fenced(
         &mut || {

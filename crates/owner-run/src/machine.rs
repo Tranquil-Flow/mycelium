@@ -419,6 +419,9 @@ pub struct OwnerRun {
     phase: Phase,
     /// `rebuild()` waiting for the old run's thread to end before it starts the fresh one.
     pending_rebuild: bool,
+    /// Which `RunContext` is current (`owner._ctx is ctx`, demo_chain.py:1086): every context
+    /// [`OwnerRun::install`] creates gets the next number, never reused.
+    generation: u64,
     pub backoff: Backoff,
 }
 
@@ -452,6 +455,7 @@ impl OwnerRun {
             ctx: None,
             phase: Phase::Idle,
             pending_rebuild: false,
+            generation: 0,
             backoff: Backoff::registered(),
         }
     }
@@ -486,6 +490,15 @@ impl OwnerRun {
     }
     pub fn run_id(&self) -> Option<&str> {
         self.ctx.as_ref().map(|c| c.identity.run_id.as_str())
+    }
+    /// The current context's number (`owner._ctx`); `0` before the first run. A chain call made
+    /// for an older number belongs to a replaced context.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    /// `ctx.stop_event.is_set()` of the current context (true when there is none).
+    pub fn context_stopped(&self) -> bool {
+        self.ctx.as_ref().is_none_or(|c| c.stop)
     }
 
     /// `start(reason, execution_ceiling=)`: the refusals, then a fresh run whose first step begins.
@@ -782,6 +795,7 @@ impl OwnerRun {
         self.reason = Some(reason);
         self.started_at = Some(clock.wall);
         self.ctx = Some(ctx);
+        self.generation += 1;
     }
 
     /// `_run_once`'s loop head: the step becomes active, then `ctx.check_stopped()`.

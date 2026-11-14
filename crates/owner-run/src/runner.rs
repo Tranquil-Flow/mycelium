@@ -134,27 +134,58 @@ impl Timing {
     }
 }
 
-/// `ctx.stop_event`.
+/// `ctx.stop_event`, one per run context (`RunContext.__init__`, owner_run.py:96): the event of the
+/// context `context` names. An older context's event is set for good: a context is only replaced
+/// after its Stop (a new Start needs an inactive machine, and the one way to leave a call
+/// outstanding there is an async rebuild whose join expired after `stop()`).
 struct StopEvent {
-    set: Mutex<bool>,
+    set: Mutex<StopFlag>,
     changed: Condvar,
 }
+#[derive(Default)]
+struct StopFlag {
+    /// The machine generation of the context this event belongs to.
+    context: u64,
+    set: bool,
+}
 impl StopEvent {
+    fn new() -> Self {
+        Self {
+            set: Mutex::new(StopFlag::default()),
+            changed: Condvar::new(),
+        }
+    }
+    /// Set or clear the current context's event.
     fn assign(&self, value: bool) {
-        *lock(&self.set) = value;
+        lock(&self.set).set = value;
         self.changed.notify_all();
     }
-    fn is_set(&self) -> bool {
-        *lock(&self.set)
+    /// A fresh context's own event; every older context's event stays set.
+    fn renew(&self, context: u64, value: bool) {
+        *lock(&self.set) = StopFlag {
+            context,
+            set: value,
+        };
+        self.changed.notify_all();
     }
-    /// `stop_event.wait(seconds)`: true when the event is set.
-    fn wait(&self, span: Duration) -> bool {
+    /// The current context's event (tests read it).
+    #[cfg(test)]
+    fn is_set(&self) -> bool {
+        lock(&self.set).set
+    }
+    /// `ctx.stop_event.is_set()` for the context `context`.
+    fn is_set_for(&self, context: u64) -> bool {
+        let flag = lock(&self.set);
+        flag.context != context || flag.set
+    }
+    /// `ctx.stop_event.wait(seconds)` for the context `context`: true when its event is set.
+    fn wait_for(&self, context: u64, span: Duration) -> bool {
         let guard = lock(&self.set);
         let (guard, _) = self
             .changed
-            .wait_timeout_while(guard, span, |set| !*set)
+            .wait_timeout_while(guard, span, |flag| flag.context == context && !flag.set)
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *guard
+        guard.context != context || guard.set
     }
 }
 
@@ -166,7 +197,8 @@ struct Probe {
 
 #[derive(Default)]
 struct Queue {
-    cmds: VecDeque<Cmd>,
+    /// Each command with the machine generation it was dispatched under.
+    cmds: VecDeque<(Cmd, u64)>,
     probes: Vec<Arc<Probe>>,
     in_call: bool,
     closing: bool,
@@ -191,8 +223,10 @@ impl Shared {
         }
     }
     /// Hand commands to the loop. A Stop in the same instant as a start is visible before the first step
-    /// (`check_stopped`); a fresh context otherwise starts with a clear stop event.
-    fn dispatch(&self, queue: &mut Queue, cmds: Vec<Cmd>) {
+    /// (`check_stopped`); a fresh context otherwise starts with its own clear stop event. The caller
+    /// holds the run lock; `generation` is the machine's current context (a `NewRun` is always
+    /// dispatched in the same critical section that installed its context).
+    fn dispatch(&self, generation: u64, queue: &mut Queue, cmds: Vec<Cmd>) {
         let simultaneous = cmds.iter().any(|c| matches!(c, Cmd::SignalStop));
         if simultaneous {
             self.stop.assign(true);
@@ -201,25 +235,38 @@ impl Shared {
             match cmd {
                 Cmd::SignalStop => {}
                 Cmd::NewRun { .. } => {
-                    self.stop.assign(simultaneous);
-                    queue.cmds.push_back(cmd);
+                    self.stop.renew(generation, simultaneous);
+                    queue.cmds.push_back((cmd, generation));
                 }
-                other => queue.cmds.push_back(other),
+                other => queue.cmds.push_back((other, generation)),
             }
         }
         self.wake.notify_all();
     }
 }
 
+/// A chain call's `RunContext`: the run context `context` (a machine generation) it was made for.
+/// Once a newer context replaced it, its event reads set and its progress, results and
+/// diagnostics stay with it (owner_run.py:96-105, 334-337): nothing reaches the newer context.
 struct Env<'a> {
     shared: &'a Shared,
+    context: u64,
+}
+impl Env<'_> {
+    /// The machine, only while this call's context is still the current one.
+    fn current(&self) -> Option<MutexGuard<'_, OwnerRun>> {
+        let run = lock(&self.shared.run);
+        (run.generation() == self.context).then_some(run)
+    }
 }
 impl StepEnv for Env<'_> {
     fn progress(&mut self, detail: &str) {
-        lock(&self.shared.run).progress(Some(detail));
+        if let Some(mut run) = self.current() {
+            run.progress(Some(detail));
+        }
     }
     fn stopped(&self) -> bool {
-        self.shared.stop.is_set()
+        self.shared.stop.is_set_for(self.context)
     }
     fn now(&mut self) -> f64 {
         self.shared.clocks.mono()
@@ -228,16 +275,23 @@ impl StepEnv for Env<'_> {
         self.shared.clocks.wall()
     }
     fn set_result(&mut self, key: &str, value: Value) {
-        lock(&self.shared.run).set_result(key, value);
+        if let Some(mut run) = self.current() {
+            run.set_result(key, value);
+        }
     }
     fn record_exception(&mut self, code: &str, class: &str) {
-        lock(&self.shared.run).record_exception(code, class);
+        if let Some(mut run) = self.current() {
+            run.record_exception(code, class);
+        }
     }
     /// One transaction for the publication and its result (`demo_chain.py:1074-1097`): the Stop
-    /// check, `commit` and `ctx.result[key] = value` all run under the run lock, the lock
-    /// `OwnerRun.stop` and every status snapshot take (owner_run.py:194, 275-282), so a Stop or a
-    /// status read lands before the check or after the result, never between the announcement and
-    /// its origin.
+    /// check, the live run check, `commit` and `ctx.result[key] = value` all run under the run
+    /// lock, the lock `OwnerRun.stop` and every status snapshot take (owner_run.py:194, 275-282),
+    /// so a Stop or a status read lands before the check or after the result, never between the
+    /// announcement and its origin. The check is bound to this call's own context: a replaced
+    /// context's event is set (`_Stopped`, :1077-1080); a current context that is no longer
+    /// `running` refuses `serving_workflow_identity_changed` (`owner._ctx is not ctx or
+    /// owner._state != 'running'`, :1086-1088).
     ///
     /// Lock order (one order everywhere; `->` = acquired while holding):
     ///   host outer lock (the packaged resident workflow, the oracle's `app.guard`) -> run ->
@@ -254,8 +308,14 @@ impl StepEnv for Env<'_> {
         value: Value,
     ) -> Result<(), StepError> {
         let mut run = lock(&self.shared.run);
-        if self.shared.stop.is_set() {
+        if run.generation() != self.context
+            || run.context_stopped()
+            || self.shared.stop.is_set_for(self.context)
+        {
             return Err(StepError::Stopped);
+        }
+        if run.state() != crate::machine::State::Running {
+            return Err(OwnerRunError::new("serving_workflow_identity_changed").into());
         }
         commit()?;
         run.set_result(key, value);
@@ -265,11 +325,12 @@ impl StepEnv for Env<'_> {
     fn pause(&mut self, seconds: f64) -> bool {
         if self.shared.clocks.simulated() {
             self.shared.clocks.advance(seconds);
-            return self.shared.stop.is_set();
+            return self.shared.stop.is_set_for(self.context);
         }
-        self.shared
-            .stop
-            .wait(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO))
+        self.shared.stop.wait_for(
+            self.context,
+            Duration::try_from_secs_f64(seconds).unwrap_or(Duration::ZERO),
+        )
     }
 }
 
@@ -340,10 +401,7 @@ impl Runner {
             run: Mutex::new(OwnerRun::new(identities)),
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
-            stop: StopEvent {
-                set: Mutex::new(false),
-                changed: Condvar::new(),
-            },
+            stop: StopEvent::new(),
             clocks,
             timing,
         });
@@ -368,7 +426,7 @@ impl Runner {
         let mut run = lock(&self.shared.run);
         let (cmds, answer) = f(&mut run, self.shared.clock())?;
         let mut queue = lock(&self.shared.queue);
-        self.shared.dispatch(&mut queue, cmds);
+        self.shared.dispatch(run.generation(), &mut queue, cmds);
         let waiting = run.rebuild_pending();
         drop(queue);
         drop(run);
@@ -403,7 +461,7 @@ impl Runner {
         } = action::apply(plan, &mut run, self.shared.clock())?;
         let answer = run.snapshot().to_value();
         let mut queue = lock(&self.shared.queue);
-        self.shared.dispatch(&mut queue, cmds);
+        self.shared.dispatch(run.generation(), &mut queue, cmds);
         let waiting = rebuild_requested && run.rebuild_pending();
         drop(queue);
         drop(run);
@@ -437,7 +495,7 @@ impl Runner {
             o.insert("rebuild_requested".into(), true.into());
         }
         let mut queue = lock(&self.shared.queue);
-        self.shared.dispatch(&mut queue, cmds);
+        self.shared.dispatch(run.generation(), &mut queue, cmds);
         let waiting = run.rebuild_pending();
         drop(queue);
         drop(run);
@@ -523,7 +581,7 @@ impl Runner {
             let mut run = lock(&self.shared.run);
             let cmds = run.stop();
             let mut queue = lock(&self.shared.queue);
-            self.shared.dispatch(&mut queue, cmds);
+            self.shared.dispatch(run.generation(), &mut queue, cmds);
             queue.closing = true;
         }
         self.shared.wake.notify_all();
@@ -582,10 +640,32 @@ fn finish(shared: &Shared, event: impl FnOnce(&mut OwnerRun, Clock) -> Vec<Cmd>)
     let cmds = event(&mut run, shared.clock());
     let mut queue = lock(&shared.queue);
     queue.in_call = false;
-    shared.dispatch(&mut queue, cmds);
+    shared.dispatch(run.generation(), &mut queue, cmds);
+}
+
+/// [`finish`] for a call made for the run context `context`: the machine hears of it only while
+/// that context is current. A replaced context's call ends without any machine event (its
+/// outcome belongs to the old `RunContext`, `_fail`'s `ctx is not self._ctx`, owner_run.py:340-341)
+/// and leaves the call open (`in_call`) for the caller to close; returns whether it was current.
+fn finish_current(
+    shared: &Shared,
+    context: u64,
+    event: impl FnOnce(&mut OwnerRun, Clock) -> Vec<Cmd>,
+) -> bool {
+    let mut run = lock(&shared.run);
+    if run.generation() != context {
+        return false;
+    }
+    let cmds = event(&mut run, shared.clock());
+    let mut queue = lock(&shared.queue);
+    queue.in_call = false;
+    shared.dispatch(run.generation(), &mut queue, cmds);
+    true
 }
 
 fn drive(shared: &Shared, chain: &mut dyn Chain) {
+    // The run context the chain currently holds (the generation of its last `NewRun`).
+    let mut context = 0;
     loop {
         let next = {
             let mut queue = lock(&shared.queue);
@@ -596,7 +676,7 @@ fn drive(shared: &Shared, chain: &mut dyn Chain) {
             queue.in_call = next.is_some();
             next
         };
-        let Some(cmd) = next else {
+        let Some((cmd, generation)) = next else {
             idle(shared, chain);
             continue;
         };
@@ -615,14 +695,15 @@ fn drive(shared: &Shared, chain: &mut dyn Chain) {
                     ceiling.as_ref(),
                     rollover_binding.as_ref(),
                 );
+                context = generation;
                 finish(shared, |_, _| Vec::new());
             }
             Cmd::RunStep { step } => {
                 // A Stop that arrived with the start is seen before the step begins.
-                let outcome = if shared.stop.is_set() {
+                let outcome = if shared.stop.is_set_for(context) {
                     StepOutcome::Stopped
                 } else {
-                    match chain.run_step(step, &mut Env { shared }) {
+                    match chain.run_step(step, &mut Env { shared, context }) {
                         Ok(()) => StepOutcome::Ok,
                         Err(StepError::Refused(e)) => StepOutcome::Refused(e),
                         Err(StepError::Stopped) => StepOutcome::Stopped,
@@ -630,16 +711,34 @@ fn drive(shared: &Shared, chain: &mut dyn Chain) {
                     }
                 };
                 let binding = chain.rollover_binding();
-                finish(shared, |run, _| {
+                let failed = matches!(
+                    outcome,
+                    StepOutcome::Refused(_) | StepOutcome::Exception { .. }
+                );
+                let current = finish_current(shared, context, |run, _| {
                     if let Some(binding) = binding {
                         run.set_rollover_binding(binding);
                     }
                     run.step_finished(outcome)
                 });
+                if !current {
+                    // A newer context replaced this one while its step ran (an async rebuild's
+                    // join expired, then a Start): the old thread's `finally` still tears its own
+                    // context down (owner_run.py:440-446), with every write kept in that context.
+                    // A failure is recorded in that context only, which no status shows.
+                    if let Err(class) = chain.teardown(failed, &mut Env { shared, context }) {
+                        eprintln!("owner run: replaced context teardown failed ({class})");
+                    }
+                    finish(shared, |_, _| Vec::new());
+                }
             }
             Cmd::Teardown { failed } => {
-                let result = chain.teardown(failed, &mut Env { shared });
-                finish(shared, |run, clock| run.teardown_finished(result, clock));
+                let result = chain.teardown(failed, &mut Env { shared, context });
+                if !finish_current(shared, context, |run, clock| {
+                    run.teardown_finished(result, clock)
+                }) {
+                    finish(shared, |_, _| Vec::new());
+                }
             }
             Cmd::SignalStop => finish(shared, |_, _| Vec::new()),
         }
@@ -659,7 +758,7 @@ fn idle(shared: &Shared, chain: &mut dyn Chain) {
             queue.in_call = true;
         }
         let probes = std::mem::take(&mut queue.probes);
-        shared.dispatch(&mut queue, cmds);
+        shared.dispatch(run.generation(), &mut queue, cmds);
         (serving, probes)
     };
     if serving {
@@ -675,7 +774,7 @@ fn idle(shared: &Shared, chain: &mut dyn Chain) {
             let mut run = lock(&shared.run);
             let cmds = run.serving_poll(due, ceiling);
             let mut queue = lock(&shared.queue);
-            shared.dispatch(&mut queue, cmds);
+            shared.dispatch(run.generation(), &mut queue, cmds);
             // Keep in_call set until the entire probe ends. No other driver can
             // install/serve a new context while this driver owns the chain;
             // Stop/rebuild may leave serving, which must suppress monitoring.

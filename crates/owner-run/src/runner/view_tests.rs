@@ -24,10 +24,7 @@ fn shared() -> Arc<Shared> {
         }))),
         queue: Mutex::new(Queue::default()),
         wake: Condvar::new(),
-        stop: StopEvent {
-            set: Mutex::new(false),
-            changed: Condvar::new(),
-        },
+        stop: StopEvent::new(),
         clocks: Arc::new(NoObservers),
         timing: Timing::registered(),
     })
