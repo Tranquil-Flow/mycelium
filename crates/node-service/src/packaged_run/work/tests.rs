@@ -106,6 +106,11 @@ impl Fixture {
     }
     /// Both hosts' work transports over `work` (the seed stays on its loopback TLS address).
     fn on(work: WorkNetwork) -> Self {
+        Self::on_each(work.clone(), work)
+    }
+    /// The owner's work transport over `owner`, the joined Mac's over `member`.
+    fn on_each(owner_work: WorkNetwork, member_work: WorkNetwork) -> Self {
+        let work = member_work;
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
             crate::service::random_id().unwrap()
@@ -117,7 +122,7 @@ impl Fixture {
         let network = Network::new(
             &owner,
             NetworkConfig {
-                work_network: work.clone(),
+                work_network: owner_work,
                 ..NetworkConfig::default()
             },
         );
@@ -208,10 +213,10 @@ impl Fixture {
                 closed: Box::new(|| false),
                 resource: Box::new(|_| None),
                 acquisition: Box::new(|| None),
-                start_whole_model: Box::new(|_| {
-                    Err("member_model_download_not_ported".to_string())
-                }),
-                },
+                start_whole_model: Box::new(
+                    |_| Err("member_model_download_not_ported".to_string()),
+                ),
+            },
         );
         Self {
             root,
@@ -415,11 +420,14 @@ fn two_packaged_hosts_on_the_real_lan_interface_handoff_and_push_before_publish(
     });
 }
 /// The production default on this Mac: [`NetworkConfig::default`]'s work transport, resolved
-/// through the real host constructor as a run starts, is this Mac's LAN address, not loopback.
+/// through the real host constructor as a run starts, is the address of this Mac's default-route
+/// interface (whatever its name: `route -n get default`, then `ipconfig getifaddr`), not loopback.
+/// Proves: F8 (c, d) (runs in the `lan-real` gate step; FAILS without MYCELIUM_LAN_IP; no en0).
 #[test]
 #[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
 fn the_app_default_work_transport_is_this_macs_lan_address() {
-    let ip = lan_ip();
+    lan_ip();
+    let ip = default_route_address().expect("this Mac has a private default route");
     let root = std::env::temp_dir().join(format!(
         "lan-default-{}",
         crate::service::random_id().unwrap()
@@ -433,6 +441,124 @@ fn the_app_default_work_transport_is_this_macs_lan_address() {
         NetworkChoice(Some((ip, runtime::iroh_host::LanPolicy::private_only())))
     );
     assert!(!choice.allows(std::net::SocketAddr::from(([127, 0, 0, 1], 9))));
+}
+/// The IPv4 address of the interface `route -n get default` names, from `ipconfig`: this Mac's
+/// answer from tools that share no code with `api::lan_interface`.
+fn default_route_address() -> Option<std::net::IpAddr> {
+    let route = std::process::Command::new("/sbin/route")
+        .args(["-n", "get", "default"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(route.stdout).unwrap();
+    let interface = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("interface: "))?
+        .to_owned();
+    let address = std::process::Command::new("/usr/sbin/ipconfig")
+        .args(["getifaddr", &interface])
+        .output()
+        .unwrap();
+    String::from_utf8(address.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .ok()
+}
+/// A run's state with this fixture's local contributor and joined Mac, the owner announced.
+fn run_state(f: &mut Fixture, ports: &PackagedChainPorts) -> RunState {
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    seed.exchange
+        .set_owner_control(Some(OwnerControl::new(ports.work.owner.public())));
+    seed.exchange
+        .announce(Announce {
+            phase: "compile".into(),
+            run_id: Some("run-s4cb2".into()),
+            deployment_id: Some("dep-s4cb2".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    f.agent.tick(&f.member);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut state = RunState::new("run-s4cb2", "dep-s4cb2", owner_run::Reason::Start);
+    state.participants = vec![local.clone(), f.remote.clone()];
+    state.local_node = Some(local);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    state
+}
+/// Proves: F6 and LAN-A2 c (an owner whose own reading of this Mac found no single private network
+/// refuses a run with a joined Mac by name, with the reason and the side, before it starts its
+/// local worker or dials anyone).
+#[test]
+fn an_owner_without_a_single_private_network_refuses_a_joined_mac_by_name() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let owner = WorkNetwork::Read(
+        Arc::new(|| Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)),
+        runtime::iroh_host::LanPolicy::private_only(),
+    );
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "owner_work_network_unavailable");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains(AMBIGUOUS_PRIVATE_INTERFACES) && message.contains("This Mac"),
+        "{message}"
+    );
+    let resident = lock(&ports.work.resident);
+    assert!(resident.local.is_none(), "no local worker was started");
+    assert!(resident.bindings.is_empty() && resident.work.is_none());
+}
+/// Proves: F6 (owner on this Mac's real LAN, joined Mac on its loopback: refused by name, naming
+/// the joined Mac's side and both addresses, before any dial; the real-LAN gate step runs it).
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn on_the_real_lan_an_owner_refuses_a_joined_mac_on_its_loopback_by_name() {
+    let ip = lan_ip();
+    let owner = WorkNetwork::Fixed(NetworkChoice(Some((
+        ip,
+        runtime::iroh_host::LanPolicy::private_only(),
+    ))));
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    let begun = Instant::now();
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "member_work_network_mismatch");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains("joined Mac") && message.contains("127.0.0.1"),
+        "{message}"
+    );
+    assert!(message.contains(&ip.to_string()), "{message}");
+    eprintln!("refused in {:?}: {message}", begun.elapsed());
+    assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
 }
 fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketAddr)) {
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
@@ -488,7 +614,7 @@ fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketA
     state.proposal = Some(proposal.clone());
     use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
     state.model = Some(ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         model_id: "Qwen/Qwen3-0.6B".into(),
         resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
         manifest_digest: "sha256:00".into(),

@@ -10,9 +10,14 @@ impl Network {
     /// or this Mac's private LAN address read at this moment. Logs the transport it names
     /// (`l11_work_network:<transport> role=<role>`, stderr only).
     pub fn resolve_work_network(&self, role: &str) -> crate::packaged_work::NetworkChoice {
-        let (choice, transport) = self.work_network.resolve();
-        eprintln!("l11_work_network:{transport} role={role}");
-        choice
+        self.resolve_run_network(role).choice
+    }
+    /// [`Network::resolve_work_network`] with the reason when this Mac's reading found no single
+    /// private network (an owner run refuses a joined Mac by that name).
+    pub fn resolve_run_network(&self, role: &str) -> crate::packaged_work::Resolved {
+        let resolved = self.work_network.resolution();
+        eprintln!("l11_work_network:{} role={role}", resolved.transport);
+        resolved
     }
     /// The configured work transport (not resolved).
     pub fn work_network(&self) -> &crate::packaged_work::WorkNetwork {

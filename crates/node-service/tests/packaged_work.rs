@@ -49,10 +49,8 @@ fn packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership()
             closed: Box::new(|| false),
             resource: Box::new(|_| None),
             acquisition: Box::new(|| None),
-            start_whole_model: Box::new(|_| {
-                Err("member_model_download_not_ported".to_string())
-            }),
-            },
+            start_whole_model: Box::new(|_| Err("member_model_download_not_ported".to_string())),
+        },
     );
     let mut agent = MemberAgent::default();
     agent.tick(&member);
@@ -241,4 +239,89 @@ fn the_app_default_work_transport_follows_this_macs_private_address() {
         WorkNetwork::Fixed(lan.clone()).resolve_with(read),
         (lan, "lan:10.160.112.32".to_owned())
     );
+}
+/// Lane LAN round 2 (REVIEW-laneLAN F6, LAN-A3): an owner run names, before any dial, why the two
+/// Macs cannot meet. This Mac's own reading that found no single private network carries its
+/// reason (a fixed choice never does); a joined Mac that offers work only on its loopback while
+/// this run is on the LAN, a family this run's one socket cannot reach, and a LAN address against
+/// a loopback-only run are each refused with their own code and a message naming the side and the
+/// cause.
+/// Proves: F6 and LAN-A3 (named refusals: owner_work_network_unavailable,
+/// member_work_network_mismatch, member_work_family_mismatch).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_run_names_why_the_two_macs_cannot_meet() {
+    use api::lan_interface::{
+        AMBIGUOUS_PRIVATE_INTERFACES, NO_PRIVATE_ADDRESS, ONLY_BRIDGE_INTERFACES, Selection,
+    };
+    use node_service::packaged_work::{NetworkChoice, WorkNetwork, owner_network_refusal};
+    use runtime::iroh_host::LanPolicy;
+    use std::net::SocketAddr;
+    let at = |text: &str| text.parse::<SocketAddr>().unwrap();
+    // The reason travels with the resolution; a fixed choice is deliberate and carries none.
+    for reason in [
+        NO_PRIVATE_ADDRESS,
+        AMBIGUOUS_PRIVATE_INTERFACES,
+        ONLY_BRIDGE_INTERFACES,
+    ] {
+        let read = WorkNetwork::Read(
+            Arc::new(move || Selection::LocalOnly(reason)),
+            LanPolicy::private_only(),
+        );
+        let resolved = read.resolution();
+        assert_eq!(resolved.choice, NetworkChoice(None));
+        assert_eq!(resolved.local_only, Some(reason));
+        let (code, message) = owner_network_refusal(reason);
+        assert_eq!(code, "owner_work_network_unavailable");
+        assert!(message.contains(reason), "{message}");
+        assert!(message.contains("This Mac"), "names the side: {message}");
+        assert!(message.len() <= 600, "{message}");
+    }
+    assert_eq!(WorkNetwork::loopback().resolution().local_only, None);
+    let lan = NetworkChoice(Some((
+        "192.168.1.23".parse().unwrap(),
+        LanPolicy::private_only(),
+    )));
+    // Member on its loopback, this run on the LAN.
+    assert!(!lan.allows(at("127.0.0.1:61700")));
+    let (code, message) = lan.address_refusal(at("127.0.0.1:61700"));
+    assert_eq!(code, "member_work_network_mismatch");
+    assert!(
+        message.contains("joined Mac") && message.contains("127.0.0.1"),
+        "{message}"
+    );
+    assert!(message.contains("192.168.1.23"), "{message}");
+    // Address family: an IPv4 run holds one IPv4 socket and cannot reach an IPv6-only member.
+    assert!(
+        !lan.allows(at("[fd00::5]:61700")),
+        "IPv6 against an IPv4 run"
+    );
+    let (code, message) = lan.address_refusal(at("[fd00::5]:61700"));
+    assert_eq!(code, "member_work_family_mismatch");
+    assert!(
+        message.contains("fd00::5") && message.contains("192.168.1.23"),
+        "{message}"
+    );
+    let ula = NetworkChoice(Some((
+        "fd00::1".parse().unwrap(),
+        LanPolicy::private_only(),
+    )));
+    assert!(
+        !ula.allows(at("192.168.1.40:61700")),
+        "IPv4 against an IPv6 run"
+    );
+    assert!(ula.allows(at("[fd00::5]:61700")));
+    assert_eq!(
+        ula.address_refusal(at("192.168.1.40:61700")).0,
+        "member_work_family_mismatch"
+    );
+    // A loopback-only run (a caller's fixed choice) against a member on the LAN.
+    let (code, message) = NetworkChoice(None).address_refusal(at("192.168.1.40:61700"));
+    assert_eq!(code, "member_work_network_mismatch");
+    assert!(message.contains("192.168.1.40"), "{message}");
+    // Anything else keeps the round-1 code, now with the address.
+    let (code, message) = lan.address_refusal(at("17.5.7.8:61700"));
+    assert_eq!(code, "member_work_address_refused");
+    assert!(message.contains("17.5.7.8"), "{message}");
+    assert!(lan.allows(at("192.168.1.40:61700")));
 }

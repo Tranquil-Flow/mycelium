@@ -394,7 +394,8 @@ impl Work {
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
         // One transport per run, read from this Mac's interfaces as the run starts its work.
-        let network = self.host.network.resolve_work_network("owner_run");
+        let resolved = self.host.network.resolve_run_network("owner_run");
+        let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
         let until = env.now() + span(BudgetId::Slices)?.as_secs_f64();
         let verified = loop {

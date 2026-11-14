@@ -31,23 +31,60 @@ pub type SessionCell = Arc<Mutex<Option<Session>>>;
 /// Explicit transport policy; no environment-selected interface or public relay fallback.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkChoice(pub Option<(IpAddr, LanPolicy)>);
+/// One reading of this Mac's interfaces ([`api::lan_interface::this_mac`] in the app).
+pub type InterfaceReader = Arc<dyn Fn() -> api::lan_interface::Selection + Send + Sync>;
 /// Where the packaged work endpoints (member work service, the owner's local worker, the shard
 /// source, the route and the owner's dials) bind, decided each time a work service or an owner run
-/// STARTS, never once per process: Wi-Fi may come up or change network after launch.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// STARTS, never once per process: Wi-Fi may come up or change network after launch. An owner run
+/// reads it ONCE, at its start, and keeps that answer for the whole run.
+#[derive(Clone)]
 pub enum WorkNetwork {
     /// Exactly this choice, whatever this Mac's interfaces are (tests and explicit callers).
     Fixed(NetworkChoice),
     /// The app's own: this Mac's private LAN address ([`api::lan_interface::this_mac`]) under
     /// [`LanPolicy::private_only`] (exact pins, no relay, no address lookup); 127.0.0.1 only
-    /// (`NetworkMode::LocalOnly`) when the Mac has no private address.
+    /// (`NetworkMode::LocalOnly`) with the rule's named reason when it finds no single network.
     ThisMac,
+    /// The app's rule over another reading of the interfaces, bound under `policy`: a test that
+    /// must see when, and how often, a run reads the interfaces.
+    Read(InterfaceReader, LanPolicy),
 }
+impl std::fmt::Debug for WorkNetwork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(choice) => f.debug_tuple("Fixed").field(choice).finish(),
+            Self::ThisMac => f.write_str("ThisMac"),
+            Self::Read(_, policy) => f.debug_tuple("Read").field(policy).finish(),
+        }
+    }
+}
+impl PartialEq for WorkNetwork {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Fixed(a), Self::Fixed(b)) => a == b,
+            (Self::ThisMac, Self::ThisMac) => true,
+            (Self::Read(a, p), Self::Read(b, q)) => Arc::ptr_eq(a, b) && p == q,
+            _ => false,
+        }
+    }
+}
+impl Eq for WorkNetwork {}
 impl Default for WorkNetwork {
     /// The app's own ([`WorkNetwork::ThisMac`]).
     fn default() -> Self {
         Self::ThisMac
     }
+}
+/// One resolution of the work transport.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved {
+    pub choice: NetworkChoice,
+    /// Log-only transport name (`lan:<ip>` / `local_only:<reason>`).
+    pub transport: String,
+    /// Why this Mac's own reading left the transport on 127.0.0.1 (the rule's
+    /// [`api::lan_interface::Selection::LocalOnly`] reason). `None` on the LAN, and for a choice
+    /// a caller fixed (which is deliberate, never a failed reading).
+    pub local_only: Option<&'static str>,
 }
 impl WorkNetwork {
     /// 127.0.0.1 only, whatever the interfaces (`NetworkMode::LocalOnly`).
@@ -64,25 +101,48 @@ impl WorkNetwork {
         &self,
         read: impl FnOnce() -> api::lan_interface::Selection,
     ) -> (NetworkChoice, String) {
-        match self {
+        let resolved = self.resolution_with(read);
+        (resolved.choice, resolved.transport)
+    }
+    /// This start's full resolution, with the reason when the reading found no single network.
+    pub fn resolution(&self) -> Resolved {
+        self.resolution_with(api::lan_interface::this_mac)
+    }
+    fn resolution_with(&self, read: impl FnOnce() -> api::lan_interface::Selection) -> Resolved {
+        let (selection, policy) = match self {
             Self::Fixed(choice) => {
-                let name = match &choice.0 {
+                let transport = match &choice.0 {
                     Some((ip, _)) => format!("lan:{ip}"),
                     None => "local_only:explicit".into(),
                 };
-                (choice.clone(), name)
+                return Resolved {
+                    choice: choice.clone(),
+                    transport,
+                    local_only: None,
+                };
             }
-            Self::ThisMac => match read() {
-                api::lan_interface::Selection::Lan(ip) => (
-                    NetworkChoice(Some((ip, LanPolicy::private_only()))),
-                    format!("lan:{ip}"),
-                ),
-                api::lan_interface::Selection::LocalOnly(reason) => {
-                    (NetworkChoice::default(), format!("local_only:{reason}"))
-                }
+            Self::ThisMac => (read(), LanPolicy::private_only()),
+            Self::Read(reader, policy) => (reader(), policy.clone()),
+        };
+        match selection {
+            api::lan_interface::Selection::Lan(ip) => Resolved {
+                choice: NetworkChoice(Some((ip, policy))),
+                transport: format!("lan:{ip}"),
+                local_only: None,
+            },
+            api::lan_interface::Selection::LocalOnly(reason) => Resolved {
+                choice: NetworkChoice::default(),
+                transport: format!("local_only:{reason}"),
+                local_only: Some(reason),
             },
         }
     }
+}
+/// The refusal (code, plain message) of an owner run whose own reading of this Mac's interfaces
+/// found no single private network (`reason`, an [`api::lan_interface`] refusal) while a joined
+/// Mac is in the run: it is refused before anything is dialed.
+pub fn owner_network_refusal(reason: &str) -> (&'static str, String) {
+    ("owner_work_network_unavailable", reason.to_owned())
 }
 impl NetworkChoice {
     pub fn allows(&self, address: std::net::SocketAddr) -> bool {
@@ -95,6 +155,11 @@ impl NetworkChoice {
                         .is_none_or(|hosts| hosts.contains(&address.ip()))
             }
         }
+    }
+    /// The refusal (code, plain message) for a joined Mac's advertised work address this run's
+    /// transport does not admit ([`NetworkChoice::allows`] false), named before any dial.
+    pub fn address_refusal(&self, refused: std::net::SocketAddr) -> (&'static str, String) {
+        ("member_work_address_refused", refused.to_string())
     }
 }
 #[cfg(test)]
