@@ -198,12 +198,12 @@ impl ShardSource {
                         &[Channel::ArtifactChunk],
                     ),
                 };
-                let mut host = bound.or_else(|e| {
+                let mut host = bound.map_err(|e| {
                     let code = format!("source_bind_failed:{e:?}");
                     if ready_tx.send(Err(refusal(code.clone()))).is_err() {
                         eprintln!("joined owner source: starter gone");
                     }
-                    Err(refusal(code))
+                    refusal(code)
                 })?;
                 let addr = host
                     .address()

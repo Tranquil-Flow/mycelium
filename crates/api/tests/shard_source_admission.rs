@@ -734,7 +734,9 @@ fn a_recipient_that_keeps_the_connection_busy_is_cut_off_at_the_jobs_deadline() 
         wall,
     )
     .unwrap();
-    let mut flooded: Option<Result<(u64, Option<(u64, Vec<u8>)>), String>> = None;
+    // Requests answered, then the source's close (code, reason).
+    type Flooded = (u64, Option<(u64, Vec<u8>)>);
+    let mut flooded: Option<Result<Flooded, String>> = None;
     let mut member = Member {
         root: pair.member_root.clone(),
         receive: Box::new(|command| {

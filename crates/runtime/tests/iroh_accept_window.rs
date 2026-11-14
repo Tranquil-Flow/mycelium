@@ -110,17 +110,16 @@ fn socket_of(host: &LoopbackHost<'_>) -> (iroh::EndpointId, SocketAddr) {
     let address = host.address().unwrap();
     (address.id, *address.ip_addrs().next().unwrap())
 }
-/// Dial `id` at `at` from a fresh LocalOnly client on its own thread; the dial's outcome (the
-/// connection stays open until `done` is dropped) and the client's key.
-fn dial(
-    id: iroh::EndpointId,
-    at: SocketAddr,
-) -> (
+/// A dial in flight: the client's key, its outcome, `done` (the connection stays open until it
+/// is dropped) and the client thread.
+type Dial = (
     iroh::EndpointId,
     mpsc::Receiver<Result<(), Error>>,
     mpsc::Sender<()>,
     std::thread::JoinHandle<()>,
-) {
+);
+/// Dial `id` at `at` from a fresh LocalOnly client on its own thread.
+fn dial(id: iroh::EndpointId, at: SocketAddr) -> Dial {
     let secret = SecretKey::generate();
     let key = secret.public();
     let (outcome_tx, outcome) = mpsc::channel();
