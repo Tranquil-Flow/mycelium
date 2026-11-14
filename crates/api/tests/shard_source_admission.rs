@@ -169,8 +169,8 @@ impl Drop for Pair {
 
 /// What the test runs as the member's `receive`.
 type Receive<'a> = Box<dyn FnMut(&Value) -> Result<Value, Refusal> + 'a>;
-/// One intruder attempt: the source's answer (or why there is none) and its close code.
-type Attempt = (Result<Vec<u8>, String>, Option<u64>);
+/// One intruder attempt: the source's answer (or why there is none) and its close (code, reason).
+type Attempt = (Result<Vec<u8>, String>, Option<(u64, Vec<u8>)>);
 /// The member side of `transfer`: its own consent answer, and `receive` run by the test.
 struct Member<'a> {
     root: PathBuf,
@@ -262,10 +262,12 @@ fn exchange(
         .map_err(|_| "no answer".to_owned())?
     })
 }
-/// The application close code the source ended `connection` with, if it did.
-fn close_code(connection: &Connection) -> Option<u64> {
+/// The application close (code, reason) the source ended `connection` with, if it did.
+fn close_code(connection: &Connection) -> Option<(u64, Vec<u8>)> {
     match connection.close_reason() {
-        Some(ConnectionError::ApplicationClosed(close)) => Some(close.error_code.into_inner()),
+        Some(ConnectionError::ApplicationClosed(close)) => {
+            Some((close.error_code.into_inner(), close.reason.to_vec()))
+        }
         _ => None,
     }
 }
@@ -276,6 +278,11 @@ fn source_address(command: &Value) -> iroh::EndpointAddr {
 }
 
 fn an_unrelated_key_cannot_consume_the_job(lan: Option<(IpAddr, LanPolicy)>) {
+    // Which check refused the intruder (R2-5 / LAN-R2-A4). On the LAN the host, after TLS
+    // authentication and before the job sees the connection: it closes `lan_key_refused` and
+    // unpins the peer at once (no close drain for an unauthenticated peer), so its close frame
+    // may never leave. On loopback the job's own check, `recipient_key_refused`.
+    let on_lan = lan.is_some();
     let pair = Pair::new();
     let (source, recipe, file) = pair.source(lan);
     let mut intruder: Option<Attempt> = None;
@@ -328,12 +335,18 @@ fn an_unrelated_key_cannot_consume_the_job(lan: Option<(IpAddr, LanPolicy)>) {
         "a key the offer does not name was served: {:?}",
         answer.map(|a| String::from_utf8_lossy(&a).into_owned())
     );
-    if let Some(code) = code {
-        assert_eq!(
-            code,
-            u64::from(LAN_KEY_REFUSED),
-            "refused as an unadmitted key"
+    let host = Some((u64::from(LAN_KEY_REFUSED), b"lan_key_refused".to_vec()));
+    let job = Some((
+        u64::from(LAN_KEY_REFUSED),
+        b"recipient_key_refused".to_vec(),
+    ));
+    if on_lan {
+        assert!(
+            code.is_none() || code == host,
+            "the host must refuse the key before the job sees it: {code:?}"
         );
+    } else {
+        assert_eq!(code, job, "refused as an unadmitted key by the job's check");
     }
     assert_eq!(
         served,
@@ -347,14 +360,16 @@ fn an_unrelated_key_cannot_consume_the_job(lan: Option<(IpAddr, LanPolicy)>) {
     );
 }
 
-/// Proves: LAN-A1 = F4 (direct LAN: only the offer's recipient key is admitted; an unrelated key's
-/// handshake is refused, it gets no answer, and the job still serves the recipient).
+/// Proves: LAN-A1 = F4 and R2-5 (direct LAN: only the offer's recipient key is admitted; an
+/// unrelated key is refused by the HOST, after TLS authentication and before the job sees the
+/// connection (`lan_key_refused`), it gets no answer, and the job still serves the recipient).
 #[test]
 fn on_the_lan_an_unrelated_key_cannot_consume_the_shard_job() {
     an_unrelated_key_cannot_consume_the_job(direct_lan());
 }
 
-/// Proves: LAN-A1 (LocalOnly: the same rule by the accepted connection's key).
+/// Proves: LAN-A1 (LocalOnly: the same rule by the job's own check of the accepted connection's
+/// key, `recipient_key_refused`).
 #[test]
 fn on_loopback_an_unrelated_key_cannot_consume_the_shard_job() {
     an_unrelated_key_cannot_consume_the_job(None);
