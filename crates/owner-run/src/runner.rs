@@ -370,6 +370,29 @@ impl RunnerView {
         lock(&self.shared.run).active()
     }
 
+    /// `thread.join(timeout)` on the run's thread (`OwnerRun.join`, owner_run.py:326-331): wait
+    /// until no run thread is alive (its teardown ended) or `until` passed; true when none is.
+    /// Stops nothing itself. No lock is held while it waits (run, then queue for the wake-up, never
+    /// both); a wake-up it misses between its check and its wait costs at most one poll interval.
+    pub fn join(&self, until: Instant) -> bool {
+        loop {
+            if !lock(&self.shared.run).thread_alive() {
+                return true;
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            let queue = lock(&self.shared.queue);
+            let waited = self
+                .shared
+                .wake
+                .wait_timeout(queue, left.min(self.shared.timing.poll))
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            drop(waited);
+        }
+    }
+
     /// Execute `f` iff inactive, atomically with respect to run transitions.
     /// Returns `None` without invoking `f` when active, otherwise `Some(f())`.
     ///

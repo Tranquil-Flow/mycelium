@@ -71,6 +71,11 @@ impl DemoView {
     pub fn active(&self) -> bool {
         self.installed().is_some_and(|view| view.active())
     }
+    /// `run.join(timeout)` (demo_app.py:203): wait, holding no lock, until the run's thread ended
+    /// or `until` passed; true when it ended (or no run was ever installed).
+    pub fn join(&self, until: std::time::Instant) -> bool {
+        self.installed().is_none_or(|view| view.join(until))
+    }
     /// Prepare external work first. Callback is short, nonblocking, non-reentrant and must not
     /// close/drop the owner. Lock ordering is run -> host, never host -> run.
     pub fn while_inactive<R>(&self, f: impl FnOnce() -> R) -> Option<R> {
@@ -252,11 +257,13 @@ impl DemoRuns {
         self.view.active()
     }
     /// `if run is not None and run.active(): run.stop()` (`demo_app.close`, demo_app.py:201-202),
-    /// without the join: the caller joins with [`DemoRuns::close`].
-    pub fn stop(&self) {
-        if let Some(driver) = self.driver.as_ref().filter(|d| d.active()) {
-            driver.stop();
-        }
+    /// without the join: the caller joins with [`DemoView::join`] / [`DemoRuns::close`]. The
+    /// answer is the Stop's own status, taken under the run lock; `None` when no run was active.
+    pub fn stop(&self) -> Option<Value> {
+        self.driver
+            .as_ref()
+            .filter(|d| d.active())
+            .map(Runner::stop)
     }
     pub fn quiescent(&self) -> bool {
         self.driver.as_ref().is_none_or(Runner::quiescent)

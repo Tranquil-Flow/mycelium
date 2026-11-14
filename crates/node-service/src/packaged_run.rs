@@ -705,9 +705,10 @@ pub fn status_overlay(status: &mut Value, config: &RunConfig) {
     };
 }
 
-/// Quit's run step, `demo_app.close` (demo_app.py:199-209 @ f4e366e9) then `_stop_local_contributor`
-/// (app.py:1842): on its own thread as Quit begins, the run is stopped and joined
-/// (`run.stop(); run.join(60)`, `DemoAppCloseRunJoin`), then the contributor's live session ends.
+/// Quit's run step, `demo_app.close` (demo_app.py:199-209 @ f4e366e9), then `workflow.stop()`
+/// (app.py:1835-1838) and `_stop_local_contributor` (app.py:1842): the run is stopped as Quit
+/// begins and, on its own thread, joined (`run.stop(); run.join(60)`, `DemoAppCloseRunJoin`)
+/// before what remains of its workflow is stopped, then the contributor's live session ends.
 /// A join that outlasts its 60 s is left to the process exit as v0.1.4 leaves it (stderr
 /// `owner_run_join_incomplete`); a failed contributor stop is `local_contributor_stop_failed`.
 pub struct RunClose {
@@ -739,15 +740,24 @@ impl RunClose {
             return;
         };
         // `publisher.stop()` first (app.py:1816-1817), then the run is stopped (`run.stop()`,
-        // demo_app.py:202) BEFORE its workflow (`workflow.stop()`, app.py:1832-1834 runs after
-        // `demo_app.close`): a step waiting on the workflow sees the owner's Stop first and ends
-        // `stopped`. The work stop still follows at once (not after the join), so a step blocked
-        // in a work call the run's Stop cannot reach (a slices push) is released too.
+        // demo_app.py:202) and joined for up to 60 s (`run.join(60)`, :203) BEFORE its workflow
+        // (`workflow.stop()`, app.py:1835-1838 runs after `demo_app.close` returned), so a step
+        // that already passed its Stop check never sees a workflow Stop it did not cause.
+        // One exception keeps Quit prompt: outside the serving step a work call can wait on the
+        // workflow's own stop flag, which the run's Stop cannot reach (a slices push waits on
+        // `OwnerWork`'s stop, api joined_owner/work.rs), so there the workflow is stopped at once
+        // and the join follows. In the serving step (its wait and its hold) every wait is on the
+        // run's own stop event and every workflow call is a short read or the in-memory commit,
+        // so the join ends with the run's own teardown, as in v0.1.4. The decision reads the
+        // Stop's own answer, taken under the run lock with the Stop.
         if let Some(status) = &installed.status {
             status.stop();
         }
-        lock(&installed.runs).stop();
-        installed.host.stop_work();
+        let stopped = lock(&installed.runs).stop();
+        let serving = stopped.is_some_and(|answer| answer["step"] == "serving");
+        if !serving {
+            installed.host.stop_work();
+        }
         if let Some(renewal) = &installed.renewal {
             renewal.stop();
         }
@@ -764,6 +774,14 @@ impl RunClose {
         let spawned = std::thread::Builder::new()
             .name("packaged-owner-run-close".into())
             .spawn(move || {
+                if serving {
+                    // `run.join(60)` holding no lifecycle lock, then `workflow.stop()` on the
+                    // run's end or on the timeout alike (app.py:1835-1838).
+                    if !installed.view.join(until) {
+                        eprintln!("owner run: owner_run_join_incomplete");
+                    }
+                    installed.host.stop_work();
+                }
                 lock(&installed.runs).close();
                 owner_ports::stop_local_contributor(&installed.host)
                     .map_err(|_| "local_contributor_stop_failed")
