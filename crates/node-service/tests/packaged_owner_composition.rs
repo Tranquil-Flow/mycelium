@@ -94,6 +94,147 @@ fn shutdown(host: &DesktopServices) {
         }
     }
 }
+/// One page request through the composed window core, as chat.js sends it (`X-Mycelium-Chat`).
+fn chat(core: &Arc<dyn desktop::core::Core>, path: &str, body: Value) -> (u16, Value) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    core.submit(
+        desktop::channel::Request {
+            window: "main".into(),
+            method: "POST".into(),
+            uri: format!("{}{path}", desktop::channel::ORIGIN),
+            headers: vec![
+                ("x-mycelium-chat".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(&body).unwrap(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let patience = budgets::BudgetId::WorkerStartup
+        .span(budgets::Entries::ZERO)
+        .unwrap();
+    let reply = rx
+        .recv_timeout(Duration::from_millis(patience.millis()))
+        .expect("the window answers");
+    (
+        reply.status,
+        serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
+    )
+}
+/// The packaged executable's real composition over `state` (`packaged::core_with_network`, no
+/// model, no relay client, offline hub).
+fn packaged_core(
+    state: &std::path::Path,
+) -> Result<(Arc<dyn desktop::core::Core>, packaged::AppCleanup), String> {
+    let production = node_service::packaged_network::NetworkConfig::default().hooks;
+    packaged::core_with_network(
+        state,
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+        Arc::new(AlwaysPermitted),
+        node_service::packaged_network::NetworkConfig {
+            hooks: Arc::new(move || {
+                let mut hooks = production();
+                hooks.binary = Arc::new(|| None);
+                hooks
+            }),
+            ..node_service::packaged_network::NetworkConfig::default()
+        },
+    )
+}
+struct AlwaysPermitted;
+impl api::resources::Observer for AlwaysPermitted {
+    fn observe(&self) -> api::resources::Observation {
+        api::resources::Observation {
+            power: "external".into(),
+            thermal: "nominal".into(),
+            network: "unmetered".into(),
+        }
+    }
+}
+fn quit(mut cleanup: packaged::AppCleanup) {
+    use desktop::lifecycle::Cleanup;
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    cleanup.bind_clock(Instant::now()).unwrap();
+    cleanup.begin(allowance).unwrap();
+    let deadline = Instant::now() + Duration::from_millis(allowance.millis());
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(Instant::now() < deadline, "the packaged core did not quit");
+                std::thread::yield_now();
+            }
+            other => {
+                assert_eq!(other, Ok(Poll::Verified));
+                return;
+            }
+        }
+    }
+}
+
+/// Proves: ledger row 17 (owner ruling 14 Nov: one chat path, as v0.1.4). The packaged
+/// executable's own composition (`packaged::compose`, what `bin/mycelium.rs` runs) always composes
+/// the chat over the owner run's route: with no run started and no model on this Mac, every
+/// `/chat/*` route is answered by the shipped `ChatService` (chat.js `call` -> `chat.handle`
+/// chat.py:553-584 -> `ChatService.state` :476-504 / `send` :300-318 with no serving run ->
+/// `chat_not_ready` :317-318 / `events` :460-468 -> `chat_request_unknown`), never by the one-Mac
+/// native model (whose gate answered `model_not_installed` here before the wiring). The release
+/// preflight registers this test as the compiled proof that the packaged chat has a run route.
+#[test]
+fn the_packaged_composition_always_has_a_chat_run() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("state");
+    let (core, cleanup) = packaged_core(&state).expect("the packaged app composes");
+    let state_reply = chat(&core, "/chat/api/state", serde_json::json!({}));
+    let send = chat(
+        &core,
+        "/chat/api/send",
+        serde_json::json!({"prompt":"hi","max_new_tokens":2}),
+    );
+    let events = chat(
+        &core,
+        "/chat/api/events",
+        serde_json::json!({"request_id":"A".repeat(24),"after":0}),
+    );
+    quit(cleanup);
+    assert_eq!(state_reply.0, 200, "{}", state_reply.1);
+    let limits = &state_reply.1["limits"];
+    assert_eq!(
+        state_reply.1,
+        serde_json::json!({"available":false,"busy":false,"switching_runs":false,
+            "warming_up":false,"rejoining":false,"model_id":null,"served_by":[],"limits":limits}),
+        "the chat state is the run route's, not the native model's"
+    );
+    assert!(limits["max_new_tokens"].is_u64(), "{limits}");
+    assert_eq!(send, (503, serde_json::json!({"error":"chat_not_ready"})));
+    assert_eq!(
+        events,
+        (404, serde_json::json!({"error":"chat_request_unknown"}))
+    );
+}
+
+/// Proves: ledger row 17 (the timing file is admitted through `TimingFile::under` when the app is
+/// composed): a state root inside v0.1.4's own folder (rulings 20/25: v0.2 never writes there)
+/// fails the packaged composition with `chat_timing_path_refused` instead of composing a chat
+/// whose timing file the service would then refuse on every completed chat.
+#[test]
+fn a_refused_timing_file_fails_the_packaged_composition() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("Mycelium A13 macOS Demo").join("state");
+    let composed = packaged_core(&state);
+    let refusal = match composed {
+        Ok((_core, cleanup)) => {
+            quit(cleanup);
+            None
+        }
+        Err(error) => Some(error),
+    };
+    assert_eq!(
+        refusal.as_deref(),
+        Some("compose:chat_timing_path_refused"),
+        "the packaged app composed a chat whose timing file lies in v0.1.4's folder"
+    );
+}
+
 #[test]
 fn timing_admission_accepts_the_real_default_folder_shape_and_macos_temp_alias() {
     let scratch = Scratch::new();
