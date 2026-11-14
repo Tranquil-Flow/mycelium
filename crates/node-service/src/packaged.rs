@@ -607,10 +607,15 @@ fn compose(
     )
     .gated(native);
     let (core, mut cleanup) = assemble(services, source);
-    if let AppCleanup::Service(quit) = &mut cleanup {
+    close_run_first(&mut cleanup, run);
+    Ok((core, cleanup))
+}
+/// Quit's run step (`crate::packaged_run::RunClose`) over the composed `run`, begun before every
+/// other step of the window's Quit.
+pub(crate) fn close_run_first(cleanup: &mut AppCleanup, run: RunConfig) {
+    if let AppCleanup::Service(quit) = cleanup {
         quit.run = Some(crate::packaged_run::RunClose::new(run));
     }
-    Ok((core, cleanup))
 }
 /// The window's core and its Quit cleanup over composed `services` and the run model's `source`
 /// (the same source the services' packaged host was given): the composition's last step, also

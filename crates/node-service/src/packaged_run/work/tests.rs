@@ -5,6 +5,7 @@ use super::*;
 mod regressions;
 mod serving_r2;
 mod serving_r3;
+mod serving_r3b;
 use crate::packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember};
 use api::{
     handoff,

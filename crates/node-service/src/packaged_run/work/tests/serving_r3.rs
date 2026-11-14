@@ -11,7 +11,7 @@ use owner_run::steps::serving::run_serving_step;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-struct Facts;
+pub(super) struct Facts;
 impl DemoFacts for Facts {
     fn owner(&self) -> bool {
         true
@@ -25,12 +25,12 @@ impl DemoFacts for Facts {
 }
 
 /// `run.join(60)`'s allowance (demo_app.py:203): the longest any wait here may take.
-fn patience() -> Duration {
+pub(super) fn patience() -> Duration {
     span(BudgetId::PyMyceliumA13MacosDemoAppCloseRunJoinL203).unwrap()
 }
 
 /// Waits for a release; a dropped sender (the test unwound) releases as well.
-fn hold(release: &mpsc::Receiver<()>) {
+pub(super) fn hold(release: &mpsc::Receiver<()>) {
     let timed_out = matches!(
         release.recv_timeout(patience()),
         Err(mpsc::RecvTimeoutError::Timeout)
@@ -67,10 +67,10 @@ impl ReportsPort for NoReports {
 /// the host's work stop, exactly as `OwnerWork::current` counts its own stop flag
 /// (api joined_owner/work.rs). The first status read, which the wait makes after its Stop check
 /// (`ctx.check_stopped()` then `up()`, demo_chain.py:1016-1022), parks until the test releases it.
-struct StoppableWorkflow {
-    stopped: Arc<AtomicBool>,
-    entered: Option<mpsc::Sender<()>>,
-    release: mpsc::Receiver<()>,
+pub(super) struct StoppableWorkflow {
+    pub(super) stopped: Arc<AtomicBool>,
+    pub(super) entered: Option<mpsc::Sender<()>>,
+    pub(super) release: mpsc::Receiver<()>,
 }
 impl WorkPort for StoppableWorkflow {
     fn install_cleanup_progress(&mut self) -> Result<(), StepError> {
@@ -97,8 +97,8 @@ impl WorkPort for StoppableWorkflow {
 }
 
 /// Every step but `serving` is answered `Ok`; `serving` is the REAL step over the workflow above.
-struct RealServingStep {
-    workflow: StoppableWorkflow,
+pub(super) struct RealServingStep {
+    pub(super) workflow: StoppableWorkflow,
 }
 impl Chain for RealServingStep {
     fn new_run(
