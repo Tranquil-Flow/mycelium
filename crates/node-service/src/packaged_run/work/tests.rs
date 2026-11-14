@@ -3,6 +3,7 @@
 //! inert shard receipts and cleanup. Constructor-only source plan and refusing native admission.
 use super::*;
 mod regressions;
+mod serving_r2;
 use crate::packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember};
 use api::{
     handoff,
@@ -70,6 +71,31 @@ impl StepEnv for Env {
         false
     }
 }
+/// A run step environment on a simulated clock: a wait advances it instead of sleeping.
+struct SimEnv {
+    now: f64,
+}
+impl StepEnv for SimEnv {
+    fn progress(&mut self, _: &str) {}
+    fn stopped(&self) -> bool {
+        false
+    }
+    fn now(&mut self) -> f64 {
+        self.now
+    }
+    fn wall(&mut self) -> f64 {
+        app_host::now()
+    }
+    fn set_result(&mut self, _: &str, _: Value) {}
+    fn record_exception(&mut self, _: &str, _: &str) {
+        panic!("unexpected exception")
+    }
+    fn pause(&mut self, seconds: f64) -> bool {
+        self.now += seconds;
+        false
+    }
+}
+
 struct Fixture {
     root: PathBuf,
     host: PackagedRun,
@@ -192,10 +218,10 @@ impl Fixture {
                 closed: Box::new(|| false),
                 resource: Box::new(|_| None),
                 acquisition: Box::new(|| None),
-                start_whole_model: Box::new(|_| {
-                    Err("member_model_download_not_ported".to_string())
-                }),
-                },
+                start_whole_model: Box::new(
+                    |_| Err("member_model_download_not_ported".to_string()),
+                ),
+            },
         );
         Self {
             root,
@@ -414,7 +440,7 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
     state.proposal = Some(proposal.clone());
     use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
     state.model = Some(ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         model_id: "Qwen/Qwen3-0.6B".into(),
         resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
         manifest_digest: "sha256:00".into(),
@@ -504,25 +530,49 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
         "RUNNING"
     );
 }
-/// Proves: B-RUN-10 (the packaged app's ten-step table runs step 10 through its own work ports: the
-/// serving step reads the packaged workflow, which refuses by name without a composed run, instead
-/// of ending at `owner_run_step_not_ported`). Model-free; no route is opened.
+/// Proves: B-RUN-10 (the packaged app's ten-step table runs step 10 through its own work ports,
+/// never `owner_run_step_not_ported`; with no workflow it does what v0.1.4 does,
+/// `state = {} if workflow is None else workflow.status()` (demo_chain.py:1016-1020): an unbound
+/// run keeps waiting and ends `route_qualification_timeout`; a run whose compile bound an epoch
+/// refuses `serving_workflow_identity_changed` (`needs_identity(workflow) and not
+/// current(workflow)`, :1019-1020). REVIEW-laneSRV ASRV-04 / SRV-3: round 1 expected
+/// `owner_work_unavailable`, a code the source never produces here.) Model-free; no route opened.
 #[test]
 fn the_packaged_chain_runs_the_serving_step_instead_of_refusing_it_as_unported() {
     let f = Fixture::new();
     let (last, _) = owner_run::machine::STEPS[owner_run::machine::STEPS.len() - 1];
     assert_eq!(last, "serving");
+    // Through the chain the Runner drives: a fresh run binds nothing.
     let mut chain = Composed::new(&f.host, None, None);
     chain.new_run("run-ten", "dep-ten", owner_run::Reason::Start, None, None);
-    let mut env = Env { at: Instant::now() };
-    let ended = chain.run_step(last, &mut env);
-    match ended {
+    let budget = span(BudgetId::Serving).unwrap().as_secs_f64();
+    let mut env = SimEnv { now: 0.0 };
+    match chain.run_step(last, &mut env) {
         Err(StepError::Refused(e)) => {
             assert_ne!(e.code, owner_run::steps::NOT_PORTED_CODE, "{e:?}");
-            assert_eq!(e.code, "owner_work_unavailable", "{e:?}");
+            assert_eq!(e.code, "route_qualification_timeout", "{e:?}");
         }
-        other => panic!("the serving step must read the packaged workflow: {other:?}"),
+        other => panic!("an unbound run with no workflow waits: {other:?}"),
     }
+    assert!(env.now >= budget, "the wait ran its budget: {}", env.now);
+    // A run whose compile bound an epoch.
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut bound = RunState::new("run-bound", "dep-bound", owner_run::Reason::Start);
+    bound.compile_state = Some(json!({"epoch": 7}));
+    let publication = ports.publication();
+    let mut env = SimEnv { now: 0.0 };
+    let refused = owner_run::steps::serving::run_serving_step(
+        &mut env,
+        publication.reports,
+        publication.workflow,
+        &mut bound,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    );
+    assert!(
+        matches!(&refused, Err(StepError::Refused(e)) if e.code == "serving_workflow_identity_changed"),
+        "{refused:?}"
+    );
+    assert_eq!(ports.work.workflow_state(), Ok(Value::Null), "absent: null");
 }
 /// Proves: B-RUN-10 (the packaged chain asks its resident owner workflow the serving run's
 /// `rollover_due`, `ceiling_reached` and `monitor`, demo_chain.py:1132-1186, instead of the trait

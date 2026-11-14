@@ -589,7 +589,10 @@ impl OwnerRun {
         let chain_host = host.clone();
         let double = config.observe_test_double.clone();
         let native_program = config.native_program.clone();
-        let runs = DemoRuns::new(
+        Self::install_with(
+            host,
+            config,
+            renewal,
             Box::new(move || {
                 Box::new(work::Composed::new(
                     &chain_host,
@@ -597,6 +600,18 @@ impl OwnerRun {
                     native_program.clone(),
                 ))
             }),
+        )
+    }
+    /// [`OwnerRun::install`] over the chain `factory` builds for the run (the composition's is
+    /// `work::Composed`; a test wraps a real `Composed`).
+    fn install_with(
+        host: PackagedRun,
+        config: &RunConfig,
+        renewal: Option<Arc<HostLoop>>,
+        factory: Box<dyn FnMut() -> Box<dyn api::owner_driver::Chain> + Send>,
+    ) -> Self {
+        let runs = DemoRuns::new(
+            factory,
             Box::new(|| {
                 fresh_identity(api::app_host::now()).unwrap_or_else(|_| {
                     owner_run::machine::new_run_identity([0; 19], "00000000T000000Z")
