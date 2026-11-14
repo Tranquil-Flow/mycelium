@@ -583,7 +583,9 @@ impl Work {
     /// `chain.rollover_due(ctx)`, `ceiling_reached(ctx)` and `monitor(ctx)` of a serving run
     /// (`demo_chain.py:1132-1186`) over its resident workflow, whose clock is the Runner's. With no
     /// workflow resident, `rollover_due` and `ceiling_reached` still read the run's state and clock
-    /// (:1132-1164) and `monitor` answers `managed_workflow_missing` after the ceiling (:1166-1176).
+    /// (:1132-1164) and `monitor` answers `managed_workflow_missing` after the ceiling and after
+    /// `tick_local` (`self._tick_local()`, :1166-1176). The resident workflow's own monitor
+    /// (`OwnerWork::monitor`) does not tick (a pre-existing difference, outside lane SRV).
     /// Before any work was composed there is no run clock and no `execution_clock_started_at`
     /// (publish starts it after the slices step composed the work): nothing is due.
     pub(super) fn rollover_due(&self, state: &RunState) -> Option<bool> {
@@ -604,7 +606,7 @@ impl Work {
             None => CeilingProbe::Code(None),
         }
     }
-    pub(super) fn monitor(&self, state: &RunState) -> MonitorProbe {
+    pub(super) fn monitor(&self, state: &RunState, tick_local: &mut dyn FnMut()) -> MonitorProbe {
         if let Some(work) = lock(&self.resident).work.as_ref() {
             return work.monitor(state);
         }
@@ -612,6 +614,8 @@ impl Work {
             CeilingProbe::Code(Some(code)) => MonitorProbe::Code(Some(code)),
             CeilingProbe::Raised { class } => MonitorProbe::Raised { class },
             CeilingProbe::Code(None) | CeilingProbe::Unavailable => {
+                // Never under the resident lock: the local tick takes it itself.
+                tick_local();
                 MonitorProbe::Code(Some("managed_workflow_missing".into()))
             }
         }

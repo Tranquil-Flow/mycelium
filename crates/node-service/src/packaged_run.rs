@@ -555,7 +555,10 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
         self.work.ceiling_reached(state)
     }
     fn monitor(&mut self, state: &owner_run::state::RunState) -> owner_run::machine::MonitorProbe {
-        self.work.monitor(state)
+        let reports = &mut self.reports;
+        self.work.monitor(state, &mut || {
+            owner_run::steps::exchange::ReportsPort::tick_local(reports);
+        })
     }
     fn slices_ports(&mut self) -> Option<owner_run::steps::slices::SlicesPorts<'_>> {
         Some(self.slices())
