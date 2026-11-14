@@ -757,14 +757,8 @@ fn the_teardown_cancels_the_page_chat_before_the_work_closes() {
     p.close();
 }
 
-/// Proves: ledger row 17 (the execution ceiling cancels the page's chats with its code ONCE per
-/// run, off the probe's thread (demo_chain.py:1155-1163 `execution_ceiling_cancelled`), whether
-/// the ceiling or the monitor (which checks the ceiling first, :1166-1168) reached it; the
-/// failed run's teardown then finds nothing left to cancel).
-#[test]
-fn the_ceiling_cancels_the_page_chat_once_with_its_code() {
-    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
-    let mut p = ported(&fake, "run-ceiling");
+/// A serving state of `p`'s run whose execution clock is far past its wall ceiling.
+fn past_the_ceiling(p: &Ported) -> RunState {
     let wall = BudgetId::MemberChosenWall
         .span(Entries::ZERO)
         .unwrap()
@@ -773,21 +767,58 @@ fn the_ceiling_cancels_the_page_chat_once_with_its_code() {
     let mut serving = p.state.clone();
     serving.work_limits = Some(json!({ "max_wall_seconds": wall }));
     serving.execution_clock_started_at = Some(-(wall as f64) * 10.0);
+    serving
+}
+
+/// Proves: ledger row 17 (the execution ceiling cancels the page's chats with its code ONCE per
+/// run, off the probe's thread (demo_chain.py:1155-1163 `execution_ceiling_cancelled`): the
+/// chat has ended when `ceiling_reached` has answered, before any monitor ran; neither a second
+/// `ceiling_reached`, the monitor's own ceiling check (:1166-1168) nor the failed run's teardown
+/// cancels again).
+#[test]
+fn the_ceiling_cancels_the_page_chat_once_with_its_code() {
+    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
+    let mut p = ported(&fake, "run-ceiling");
+    let serving = past_the_ceiling(&p);
     let ceiling = Some(EXECUTION_CEILING_CODE.to_owned());
     assert_eq!(
         p.ports.ceiling_reached(&serving),
         CeilingProbe::Code(ceiling.clone())
+    );
+    let last = p.ended();
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!(EXECUTION_CEILING_CODE))
     );
     assert_eq!(
         p.ports.ceiling_reached(&serving),
         CeilingProbe::Code(ceiling.clone())
     );
     assert_eq!(p.ports.monitor(&serving), MonitorProbe::Code(ceiling));
+    let mut env = Env { at: Instant::now() };
+    assert_eq!(p.ports.teardown(true, &mut env), Ok(()));
+    assert_eq!(fake.seen(|s| s.deletes), 1, "one cancel per run");
+    p.close();
+}
+
+/// Proves: ledger row 17 (the monitor's ceiling check, demo_chain.py:1166-1168, cancels the
+/// page's chats with the ceiling's code when no `ceiling_reached` probe ran first, once).
+#[test]
+fn the_monitor_ceiling_cancels_the_page_chat_once_with_its_code() {
+    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
+    let mut p = ported(&fake, "run-monitor-ceiling");
+    let serving = past_the_ceiling(&p);
+    let ceiling = Some(EXECUTION_CEILING_CODE.to_owned());
+    assert_eq!(
+        p.ports.monitor(&serving),
+        MonitorProbe::Code(ceiling.clone())
+    );
     let last = p.ended();
     assert_eq!(
         (&last["terminal"], &last["error"]),
         (&json!("cancelled"), &json!(EXECUTION_CEILING_CODE))
     );
+    assert_eq!(p.ports.monitor(&serving), MonitorProbe::Code(ceiling));
     let mut env = Env { at: Instant::now() };
     assert_eq!(p.ports.teardown(true, &mut env), Ok(()));
     assert_eq!(fake.seen(|s| s.deletes), 1, "one cancel per run");
