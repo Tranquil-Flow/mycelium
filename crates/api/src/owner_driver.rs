@@ -251,6 +251,13 @@ impl DemoRuns {
     pub fn active(&self) -> bool {
         self.view.active()
     }
+    /// `if run is not None and run.active(): run.stop()` (`demo_app.close`, demo_app.py:201-202),
+    /// without the join: the caller joins with [`DemoRuns::close`].
+    pub fn stop(&self) {
+        if let Some(driver) = self.driver.as_ref().filter(|d| d.active()) {
+            driver.stop();
+        }
+    }
     pub fn quiescent(&self) -> bool {
         self.driver.as_ref().is_none_or(Runner::quiescent)
     }

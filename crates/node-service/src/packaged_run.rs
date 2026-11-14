@@ -738,10 +738,15 @@ impl RunClose {
             self.closing = Closing::Done(Ok(()));
             return;
         };
-        // `publisher.stop()` first (app.py:1816-1817).
+        // `publisher.stop()` first (app.py:1816-1817), then the run is stopped (`run.stop()`,
+        // demo_app.py:202) BEFORE its workflow (`workflow.stop()`, app.py:1832-1834 runs after
+        // `demo_app.close`): a step waiting on the workflow sees the owner's Stop first and ends
+        // `stopped`. The work stop still follows at once (not after the join), so a step blocked
+        // in a work call the run's Stop cannot reach (a slices push) is released too.
         if let Some(status) = &installed.status {
             status.stop();
         }
+        lock(&installed.runs).stop();
         installed.host.stop_work();
         if let Some(renewal) = &installed.renewal {
             renewal.stop();

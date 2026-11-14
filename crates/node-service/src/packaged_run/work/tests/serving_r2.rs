@@ -288,7 +288,8 @@ impl Chain for WaitsForStop {
 /// Proves: B-RUN-10 (REVIEW-laneSRV SRV-7: Quit stops the run before its workflow, as v0.1.4's
 /// close runs `demo_app.close` (`run.stop(); run.join(60)`, demo_app.py:199-203) before
 /// `workflow.stop()` (app.py:1815-1837): when the work stop is requested the run is already
-/// `stopping`, so a serving step ends `stopped`, never on a workflow that changed under it.)
+/// `stopping` or `stopped`, so a serving step ends `stopped`, never on a workflow that changed
+/// under it.)
 #[test]
 fn quit_stops_the_run_before_its_workflow() {
     let f = Fixture::new();
@@ -332,10 +333,15 @@ fn quit_stops_the_run_before_its_workflow() {
     };
     let last = config.observed().unwrap().status().unwrap().to_value();
     lock(&f.host.custody).work_stop = None;
-    assert_eq!(
-        at_work_stop,
-        Ok(Some(json!("stopping"))),
-        "the run is stopped before its workflow"
+    // The run thread may already have ended its stopped step (`stopped`) or not yet
+    // (`stopping`); it is never still `running` when the workflow is asked to stop.
+    let at_work_stop = at_work_stop.expect("Quit stops the work");
+    assert!(
+        matches!(
+            at_work_stop.as_ref().and_then(Value::as_str),
+            Some("stopping" | "stopped")
+        ),
+        "the run is stopped before its workflow: {at_work_stop:?}"
     );
     assert!(closed.is_some(), "Quit ended the run");
     assert_eq!(last["state"], "stopped", "{last}");
