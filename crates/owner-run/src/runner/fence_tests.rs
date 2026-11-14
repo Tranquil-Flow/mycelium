@@ -143,10 +143,12 @@ impl Chain for Publishing {
                 announced.store(true, Ordering::SeqCst);
                 // A failed send means the test already unwound: do not park.
                 if entered.send(()).is_ok() {
-                    match release.recv_timeout(patience()) {
-                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-                        Err(mpsc::RecvTimeoutError::Timeout) => panic!("test release timed out"),
-                    }
+                    // Released, or the sender dropped (the test unwound): both end the park.
+                    let timed_out = matches!(
+                        release.recv_timeout(patience()),
+                        Err(mpsc::RecvTimeoutError::Timeout)
+                    );
+                    assert!(!timed_out, "test release timed out");
                 }
                 Ok(())
             },

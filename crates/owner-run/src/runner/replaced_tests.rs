@@ -19,10 +19,11 @@ fn patience() -> Duration {
 
 /// Waits for a release; a dropped sender (the test unwound) releases as well.
 fn hold(release: &mpsc::Receiver<()>) {
-    match release.recv_timeout(patience()) {
-        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-        Err(mpsc::RecvTimeoutError::Timeout) => panic!("test release timed out"),
-    }
+    let timed_out = matches!(
+        release.recv_timeout(patience()),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    );
+    assert!(!timed_out, "test release timed out");
 }
 
 struct Held {
