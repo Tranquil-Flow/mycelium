@@ -476,58 +476,133 @@ fn default_route_by_the_system_tools() -> Option<(String, IpAddr)> {
     Some((interface, address.trim().parse().ok()?))
 }
 
-/// Proves: F3 and F8 (d) (this host's own reading: when the default route is on a private,
-/// non-tunnel interface, the work transport binds exactly that interface's address, whatever its
-/// name; loopback is never accepted then. Expected value from `route`/`ipconfig`, not en0.)
+/// One interface as `ifconfig -a` prints it.
+struct Shown {
+    name: String,
+    /// `UP` and `RUNNING` among its flags.
+    up: bool,
+    loopback: bool,
+    point_to_point: bool,
+    addresses: Vec<IpAddr>,
+}
+/// This Mac's interfaces as `/sbin/ifconfig -a` prints them: an answer that shares no code with
+/// `api::lan_interface` (no `getifaddrs` reader of ours).
+fn interfaces_by_ifconfig() -> Vec<Shown> {
+    let out = std::process::Command::new("/sbin/ifconfig")
+        .arg("-a")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "ifconfig -a");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let mut shown: Vec<Shown> = Vec::new();
+    for line in text.lines() {
+        if !line.starts_with(['\t', ' ']) {
+            // `en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500`
+            let Some((name, rest)) = line.split_once(": flags=") else {
+                continue;
+            };
+            let flags = rest
+                .split_once('<')
+                .and_then(|(_, f)| f.split_once('>'))
+                .map_or("", |(f, _)| f);
+            let has = |flag: &str| flags.split(',').any(|f| f == flag);
+            shown.push(Shown {
+                name: name.to_owned(),
+                up: has("UP") && has("RUNNING"),
+                loopback: has("LOOPBACK"),
+                point_to_point: has("POINTOPOINT"),
+                addresses: Vec::new(),
+            });
+        } else if let Some(current) = shown.last_mut() {
+            let mut words = line.split_whitespace();
+            let address = match words.next() {
+                Some("inet" | "inet6") => words.next(),
+                _ => None,
+            };
+            if let Some(address) = address
+                .and_then(|a| a.split('%').next())
+                .and_then(|a| a.parse().ok())
+            {
+                current.addresses.push(address);
+            }
+        }
+    }
+    shown
+}
+/// An address the rule may choose, by the address alone: RFC 1918, IPv4 link-local or IPv6
+/// unique-local.
+fn choosable(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => (v6.segments()[0] & 0xfe00) == 0xfc00,
+    }
+}
+
+/// Proves: F3, F8 (d) and LAN-R2-A3 (this host's own reading, decided from the OS's own tools,
+/// never from the reader under test: every private address `ifconfig` shows on an up,
+/// non-loopback, non-tunnel interface must be in `interface_addresses()`; when `route`/`ipconfig`
+/// put the default route on one of them, the work transport binds exactly that address, whatever
+/// the interface's name; loopback is accepted only as the rule's named answer, and
+/// `no_private_address` only on a Mac that shows no private address at all).
 #[test]
 fn this_macs_choice_is_its_default_routes_private_address() {
-    let addresses = interface_addresses().unwrap();
+    let shown = interfaces_by_ifconfig();
     assert!(
-        addresses.iter().any(|a| a.loopback),
-        "getifaddrs must report the loopback interface: {addresses:?}"
+        shown.iter().any(|i| i.loopback),
+        "ifconfig must show the loopback interface"
     );
+    let eligible: Vec<(String, IpAddr)> = shown
+        .iter()
+        .filter(|i| i.up && !i.loopback && !i.point_to_point)
+        .flat_map(|i| {
+            i.addresses
+                .iter()
+                .filter(|a| choosable(**a))
+                .map(|a| (i.name.clone(), *a))
+        })
+        .collect();
     let system = default_route_by_the_system_tools();
-    eprintln!(
-        "this Mac: default route {system:?}, choice {:?}",
-        this_mac()
-    );
-    match &system {
-        Some((interface, address))
-            if LanPolicy::private_only().allows(*address)
-                && addresses
-                    .iter()
-                    .any(|a| &a.name == interface && a.ip == *address && !a.point_to_point) =>
-        {
-            assert_eq!(default_route_source(), Some(*address));
-            assert_eq!(this_mac(), Selection::Lan(*address));
-        }
-        // No private default route here: whatever is chosen is still one of this Mac's own
-        // admitted, non-tunnel addresses, or a named refusal.
-        _ => match this_mac() {
-            Selection::Lan(address) => {
-                assert!(LanPolicy::private_only().allows(address), "{address}");
-                assert!(
-                    addresses
-                        .iter()
-                        .any(|a| a.ip == address && a.up && !a.point_to_point && !a.loopback),
-                    "{address} is not an up, non-tunnel interface address of this Mac"
-                );
+    let read = interface_addresses().unwrap();
+    let choice = this_mac();
+    eprintln!("this Mac: default route {system:?}, private {eligible:?}, choice {choice:?}");
+    for (name, address) in &eligible {
+        assert!(
+            read.iter().any(|a| &a.name == name
+                && a.ip == *address
+                && a.up
+                && !a.loopback
+                && !a.point_to_point),
+            "ifconfig shows {name} {address}, the interface reader does not: {read:?}"
+        );
+    }
+    match system.filter(|default| eligible.contains(default)) {
+        // The OS puts the default route on a private, non-tunnel interface: this Mac MUST have
+        // a LAN answer, and it is that address.
+        Some((_, address)) => {
+            assert_eq!(default_route_source(), Some(address));
+            assert_eq!(choice, Selection::Lan(address));
+            if let Ok(lan) = std::env::var("MYCELIUM_LAN_IP")
+                && lan == address.to_string()
+            {
+                assert_eq!(choice, Selection::Lan(ip(&lan)));
             }
+        }
+        // No private address at all: the only Mac that may answer "no private address".
+        None if eligible.is_empty() => {
+            assert_eq!(choice, Selection::LocalOnly(NO_PRIVATE_ADDRESS));
+        }
+        // Private addresses but no private default route: one of them by the fallback rule, or
+        // the rule's named refusal between them; never "no private address".
+        None => match choice {
+            Selection::Lan(address) => assert!(
+                eligible.iter().any(|(_, a)| *a == address),
+                "{address} is not a private address ifconfig shows"
+            ),
             Selection::LocalOnly(reason) => assert!(
-                [
-                    NO_PRIVATE_ADDRESS,
-                    AMBIGUOUS_PRIVATE_INTERFACES,
-                    ONLY_BRIDGE_INTERFACES
-                ]
-                .contains(&reason),
+                [AMBIGUOUS_PRIVATE_INTERFACES, ONLY_BRIDGE_INTERFACES].contains(&reason),
                 "{reason}"
             ),
         },
-    }
-    if let Ok(lan) = std::env::var("MYCELIUM_LAN_IP")
-        && system.as_ref().is_some_and(|(_, a)| a.to_string() == lan)
-    {
-        assert_eq!(this_mac(), Selection::Lan(ip(&lan)));
     }
 }
 
