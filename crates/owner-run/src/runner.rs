@@ -19,7 +19,11 @@ mod probe_tests;
 #[cfg(test)]
 mod replaced_tests;
 #[cfg(test)]
+mod test_hooks;
+#[cfg(test)]
 mod view_tests;
+#[cfg(test)]
+mod watcher_tests;
 
 use crate::action::{self, Applied, Plan, Refusal};
 use crate::chain::{StepEnv, StepError};
@@ -34,6 +38,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    #[cfg(test)]
+    test_hooks::before_lock(mutex);
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
