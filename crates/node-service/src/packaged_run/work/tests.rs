@@ -801,3 +801,54 @@ fn an_owner_on_the_lan_refuses_a_joined_mac_on_its_loopback_by_name() {
     assert!(message.contains("works on 127.0.0.1"), "{message}");
     assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
 }
+/// Proves: R2-7 (a run's network choice ends with its teardown: after one run closed, the same
+/// process reads this Mac's interfaces afresh, whatever asks first, and a second run uses its own
+/// reading, not the first run's).
+#[test]
+fn a_second_owner_run_in_one_process_reads_the_interfaces_again() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let owner = WorkNetwork::Read(
+        Arc::new(move || match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Selection::Lan(loopback),
+            _ => Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+        }),
+        policy.clone(),
+    );
+    let member = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy.clone()))));
+    let mut f = Fixture::on_each(owner, member);
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    assert_eq!(
+        lock(&ports.work.resident).network,
+        Some(NetworkChoice(Some((loopback, policy))))
+    );
+    ports.close_work().unwrap();
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    // Whatever asks for the transport between runs gets a fresh reading.
+    assert_eq!(
+        ports.work.run_network(),
+        NetworkChoice::default(),
+        "the closed run's choice was reused"
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+    // The second run reads once more and goes by that reading (no single network here now).
+    fs::remove_dir_all(f.root.join("stage-shards")).unwrap();
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "owner_work_network_unavailable");
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+}
