@@ -50,6 +50,14 @@ pub trait Cleanup {
     }
     fn begin(&mut self, deadline: Span) -> Result<(), CleanupError>;
     fn poll(&mut self) -> Result<Poll, CleanupError>;
+    /// The Quit's deadline arrived: issue now what must still precede the process exit and say
+    /// whether it was issued (`Verified`) or an owned worker is still issuing it (`Pending`: the
+    /// Quit stays stopping and is asked again on the next tick). Nonblocking, as `poll`. v0.1.4
+    /// calls `workflow.stop()` after `run.join(60)` even when that join timed out
+    /// (`demo_app.py:199-203`, `app.py:1835-1838 @ f4e366e9`). Default: nothing to issue.
+    fn expire(&mut self) -> Result<Poll, CleanupError> {
+        Ok(Poll::Verified)
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -120,7 +128,12 @@ impl<C: Cleanup> Shutdown<C> {
         if now < self.last {
             self.state = State::Failed(CleanupError::Clock);
         } else if now >= self.deadline {
-            self.state = State::Failed(CleanupError::Deadline);
+            // The allowance ran out (exit 0), but never before what must precede the exit.
+            self.state = match self.core.expire() {
+                Ok(Poll::Verified) => State::Failed(CleanupError::Deadline),
+                Ok(Poll::Pending) => State::Stopping,
+                Err(e) => State::Failed(e),
+            };
         } else {
             self.state = match self.core.poll() {
                 Ok(Poll::Verified) => State::Verified,

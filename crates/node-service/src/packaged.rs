@@ -207,12 +207,13 @@ impl Cleanup for AppCleanup {
     fn begin(&mut self, deadline: budgets::Span) -> Result<(), CleanupError> {
         match self {
             Self::Service(quit) => {
-                if let Some(run) = &mut quit.run {
-                    run.begin();
-                }
                 quit.deadline = quit.origin.and_then(|origin| {
                     origin.checked_add(Duration::from_millis(deadline.millis()))
                 });
+                // The run's join ends at this same deadline (one allowance, not two).
+                if let Some(run) = &mut quit.run {
+                    run.begin_until(quit.deadline);
+                }
                 // A refused begin is kept, not returned: the shell stops polling a Quit whose
                 // begin failed, and the acquisition must still be closed. The services' own steps
                 // (admission fence, loops, live request, node fence) still run.
@@ -287,6 +288,17 @@ impl Cleanup for AppCleanup {
                 }
                 quit.failed.map_or(Ok(Poll::Verified), Err)
             }
+            Self::Nothing => Ok(Poll::Verified),
+        }
+    }
+    /// At the deadline the window may exit only once the run's workflow Stop was issued
+    /// (`workflow.stop()` after `run.join(60)`, app.py:1835-1838): issued now unless it was.
+    fn expire(&mut self) -> Result<Poll, CleanupError> {
+        match self {
+            Self::Service(quit) => quit
+                .run
+                .as_mut()
+                .map_or(Ok(Poll::Verified), crate::packaged_run::RunClose::expire),
             Self::Nothing => Ok(Poll::Verified),
         }
     }

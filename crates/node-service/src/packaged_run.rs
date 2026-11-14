@@ -34,7 +34,7 @@ use api::{
     wire::Json,
 };
 use budgets::{BudgetId, Entries};
-use desktop::lifecycle::CleanupError;
+use desktop::lifecycle::{CleanupError, Poll};
 use owner_run::{
     chain::{PortError, StepError},
     steps::{model::Reverify, observe::ObservePort},
@@ -43,7 +43,7 @@ use runtime::observe::ObservationContext;
 use serde_json::{Map, Value, json};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError, Weak},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -714,7 +714,9 @@ pub fn status_overlay(status: &mut Value, config: &RunConfig) {
 /// begins and, on its own thread, joined (`run.stop(); run.join(60)`, `DemoAppCloseRunJoin`)
 /// before what remains of its workflow is stopped, then the contributor's live session ends.
 /// A join that outlasts its 60 s is left to the process exit as v0.1.4 leaves it (stderr
-/// `owner_run_join_incomplete`); a failed contributor stop is `local_contributor_stop_failed`.
+/// `owner_run_join_incomplete`), but not before the workflow Stop: that Stop is issued when the
+/// run ends or when Quit's deadline arrives, whichever comes first, and the close is done only
+/// once it was ([`WorkStop`]). A failed contributor stop is `local_contributor_stop_failed`.
 pub struct RunClose {
     config: RunConfig,
     closing: Closing,
@@ -724,8 +726,43 @@ enum Closing {
     Running {
         worker: JoinHandle<Result<(), &'static str>>,
         until: Instant,
+        stop: Arc<WorkStop>,
     },
     Done(Result<(), CleanupError>),
+}
+/// `workflow.stop()` (app.py:1835-1838), issued once: by the close thread when the run ended, or
+/// at Quit's deadline, whichever comes first. The flag's lock is held across the Stop (taken after
+/// every lifecycle lock is released, it guards nothing else), so `issued` is a receipt; the
+/// shell's thread only tries it ([`WorkStop::try_issue`]) and never waits for the close thread.
+struct WorkStop {
+    host: PackagedRun,
+    issued: Mutex<bool>,
+}
+impl WorkStop {
+    fn issue(&self) {
+        let mut issued = lock(&self.issued);
+        if !*issued {
+            self.host.stop_work();
+            *issued = true;
+        }
+    }
+    /// [`Self::issue`] without waiting: `false` while the close thread is issuing it.
+    fn try_issue(&self) -> Result<bool, CleanupError> {
+        let mut issued = match self.issued.try_lock() {
+            Ok(issued) => issued,
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Poisoned(_)) => {
+                // The Stop panicked on the close thread: a close step that raised.
+                eprintln!("owner run: demo_run_stop_failed");
+                return Err(CleanupError::Poll);
+            }
+        };
+        if !*issued {
+            self.host.stop_work();
+            *issued = true;
+        }
+        Ok(true)
+    }
 }
 impl RunClose {
     pub fn new(config: RunConfig) -> Self {
@@ -734,8 +771,14 @@ impl RunClose {
             closing: Closing::NotStarted,
         }
     }
-    /// Start the close now (the run's lease loop stops at once).
+    /// Start the close now (the run's lease loop stops at once), joined for its own allowance.
     pub fn begin(&mut self) {
+        self.begin_until(None);
+    }
+    /// [`Self::begin`] with Quit's deadline `until` (the shell's, `packaged::WindowQuit`): the
+    /// run's join and the workflow Stop share that one deadline, nothing is added on top. `None`:
+    /// the registered allowance from now.
+    pub fn begin_until(&mut self, until: Option<Instant>) {
         if !matches!(self.closing, Closing::NotStarted) {
             return;
         }
@@ -759,22 +802,28 @@ impl RunClose {
         }
         let stopped = lock(&installed.runs).stop();
         let serving = stopped.is_some_and(|answer| answer["step"] == "serving");
+        let stop = Arc::new(WorkStop {
+            host: installed.host.clone(),
+            issued: Mutex::new(false),
+        });
         if !serving {
-            installed.host.stop_work();
+            stop.issue();
         }
         if let Some(renewal) = &installed.renewal {
             renewal.stop();
         }
-        let patience = match BudgetId::PyMyceliumA13MacosDemoAppCloseRunJoinL203.span(Entries::ZERO)
-        {
-            Ok(span) => Duration::from_millis(span.millis()),
-            Err(_) => {
-                eprintln!("owner run: owner_run_close_budget_invalid");
-                self.closing = Closing::Done(Err(CleanupError::InvalidBudget));
-                return;
-            }
+        let until = match until {
+            Some(until) => until,
+            None => match BudgetId::PyMyceliumA13MacosDemoAppCloseRunJoinL203.span(Entries::ZERO) {
+                Ok(span) => Instant::now() + Duration::from_millis(span.millis()),
+                Err(_) => {
+                    eprintln!("owner run: owner_run_close_budget_invalid");
+                    self.closing = Closing::Done(Err(CleanupError::InvalidBudget));
+                    return;
+                }
+            },
         };
-        let until = Instant::now() + patience;
+        let closer = stop.clone();
         let spawned = std::thread::Builder::new()
             .name("packaged-owner-run-close".into())
             .spawn(move || {
@@ -784,19 +833,38 @@ impl RunClose {
                     if !installed.view.join(until) {
                         eprintln!("owner run: owner_run_join_incomplete");
                     }
-                    installed.host.stop_work();
+                    closer.issue();
                 }
                 lock(&installed.runs).close();
                 owner_ports::stop_local_contributor(&installed.host)
                     .map_err(|_| "local_contributor_stop_failed")
             });
         self.closing = match spawned {
-            Ok(worker) => Closing::Running { worker, until },
+            Ok(worker) => Closing::Running {
+                worker,
+                until,
+                stop,
+            },
             Err(_) => {
                 eprintln!("owner run: demo_run_stop_failed");
                 Closing::Done(Err(CleanupError::Poll))
             }
         };
+    }
+    /// Quit's deadline arrived (`Cleanup::expire`): the workflow Stop is issued now unless it was
+    /// (`Pending` while the close thread is issuing it). The rest is left to the process exit.
+    pub fn expire(&mut self) -> Result<Poll, CleanupError> {
+        if matches!(self.closing, Closing::NotStarted) {
+            self.begin();
+        }
+        match &self.closing {
+            Closing::Running { stop, .. } => Ok(if stop.try_issue()? {
+                Poll::Verified
+            } else {
+                Poll::Pending
+            }),
+            Closing::NotStarted | Closing::Done(_) => Ok(Poll::Verified),
+        }
     }
     /// `None` while the close runs within its patience, else its result (kept).
     pub fn poll(&mut self) -> Option<Result<(), CleanupError>> {
@@ -805,14 +873,36 @@ impl RunClose {
                 self.begin();
                 self.poll()
             }
-            Closing::Running { worker, until } if !worker.is_finished() => {
-                if Instant::now() < until {
-                    self.closing = Closing::Running { worker, until };
-                    return None;
+            Closing::Running {
+                worker,
+                until,
+                stop,
+            } if !worker.is_finished() => {
+                // `run.join(60)` returned with the run still alive: v0.1.4 stops the workflow
+                // (app.py:1835-1838) and goes on with the rest; done only once that Stop was.
+                let issued = if Instant::now() < until {
+                    Ok(false)
+                } else {
+                    stop.try_issue()
+                };
+                match issued {
+                    Ok(false) => {
+                        self.closing = Closing::Running {
+                            worker,
+                            until,
+                            stop,
+                        };
+                        None
+                    }
+                    Ok(true) => {
+                        eprintln!("owner run: owner_run_join_incomplete");
+                        Some(Ok(()))
+                    }
+                    Err(error) => {
+                        self.closing = Closing::Done(Err(error));
+                        Some(Err(error))
+                    }
                 }
-                // `run.join(60)` returned with the run still alive: v0.1.4 goes on with the rest.
-                eprintln!("owner run: owner_run_join_incomplete");
-                Some(Ok(()))
             }
             Closing::Running { worker, .. } => {
                 let result = match worker.join() {
