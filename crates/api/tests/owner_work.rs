@@ -553,16 +553,21 @@ struct Serving {
     /// A member of a build before EP1: its serve runs only the v1 route check
     /// (`route::verify_member`, unchanged) and answers its refusal.
     old_member: bool,
+    /// Lane Q: the step with this global index fails (the member's stage server ends, as a
+    /// member that dies mid-request).
+    fail_at: Option<u64>,
 }
 const VOCAB: usize = 64;
-/// Controlled final-stage logits: argmax at `token` (MYAC header of the native link).
+/// Controlled final-stage logits: argmax at `token` (MYAC header of the native link); the
+/// vocabulary grows to hold a large token id (lane Q: a product stop token).
 fn logits(token: u32) -> Vec<u8> {
+    let vocab = VOCAB.max(token as usize + 1);
     let mut out = b"MYAC\x01\x03\x03\x01".to_vec();
-    out.extend(((VOCAB * 4) as u64).to_be_bytes());
-    for d in [1u32, 1, VOCAB as u32] {
+    out.extend(((vocab * 4) as u64).to_be_bytes());
+    for d in [1u32, 1, vocab as u32] {
         out.extend(d.to_be_bytes());
     }
-    for i in 0..VOCAB {
+    for i in 0..vocab {
         out.extend((if i as u32 == token { 1.0f32 } else { 0.0f32 }).to_le_bytes());
     }
     out
@@ -611,6 +616,10 @@ impl StageCompute for Controlled<'_> {
         self.steps += 1;
         self.position += 1;
         self.log(("step", position));
+        if self.script.fail_at == Some(t) {
+            self.log(("died", position));
+            return Err(Error("test_member_died"));
+        }
         if let Some((_, entered, open)) = self.script.hold.take_if(|h| h.0 == t) {
             entered.send(()).unwrap();
             if let Err(e) = open.recv_timeout(span(B::WorkerStartup)) {
@@ -1630,6 +1639,8 @@ impl Admission for ControlledAdmission {
 mod codec_custody;
 #[path = "support/owner_codec_stop.rs"]
 mod codec_stop;
+#[path = "support/owner_startup.rs"]
+mod startup;
 #[path = "support/tokenizer_helper.rs"]
 mod tokenizer_helper;
 
@@ -1930,12 +1941,15 @@ fn phase(exchange: &RunExchange) -> Value {
     exchange.announcement(None).to_value()["phase"].clone()
 }
 
-/// Proves: B-RUN-10 (the joined route's serving workflow, once `api_running`, reports what it really
-/// knows: its gateway as the startup `url`, no startup qualification and no verified-token count,
-/// because it runs no startup route challenge; the serving step therefore refuses
+/// Proves: B-RUN-10 (lane Q, the "did not run" direction: a joined route whose plan carries no
+/// startup challenge, once `api_running`, reports what it really knows: its gateway as the startup
+/// `url`, no startup qualification and no verified-token count (`challenge_progress` null outside
+/// a running challenge, workflow.py:242-244); the serving step therefore refuses
 /// `route_qualification_failed` at the fence and the `serving` announcement is never committed.
 /// It is the run's own workflow (same run, deployment and compiled epoch) until its Stop, after
-/// which the fence refuses `serving_workflow_identity_changed`). Model-free: controlled admission.
+/// which the fence refuses `serving_workflow_identity_changed`). The "did not match" and "matched"
+/// directions: `startup::one_wrong_token_anywhere_refuses_the_route_startup_challenge_failed`,
+/// `startup::the_startup_challenge_runs_through_the_opened_route_and_qualifies_it`.
 #[test]
 fn a_serving_joined_route_never_claims_a_startup_qualification_it_did_not_run() {
     let mut s = swarm(2);
@@ -1951,7 +1965,12 @@ fn a_serving_joined_route_never_claims_a_startup_qualification_it_did_not_run() 
         json!({"url": format!("http://{}/", gateway["addr"].as_str().unwrap())}),
         "{serving}"
     );
-    assert!(serving.get("challenge_progress").is_none(), "{serving}");
+    assert_eq!(serving["challenge_progress"], Value::Null, "{serving}");
+    assert_eq!(
+        serving["startup_challenge"],
+        Value::Null,
+        "no challenge ran: {serving}"
+    );
 
     let state = serving_state("s4a-run");
     assert_eq!(

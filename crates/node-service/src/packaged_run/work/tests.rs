@@ -3,6 +3,7 @@
 //! inert shard receipts and cleanup. Constructor-only source plan and refusing native admission.
 use super::*;
 mod regressions;
+mod serving_q;
 mod serving_r2;
 mod serving_r3;
 mod serving_r3b;

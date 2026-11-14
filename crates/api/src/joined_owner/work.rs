@@ -1866,6 +1866,99 @@ pub fn ceiling_reached(state: &RunState, now: f64) -> CeilingProbe {
 }
 
 #[cfg(test)]
+mod compiled_challenge_tests {
+    //! Lane Q: where the packaged run's startup challenge comes from: the compiled run's
+    //! `compiled/local-challenge-checkpoint.json`, which the native compile proved against the
+    //! recorded reference (native_compiler.rs `validate_evidence`), the Rust counterpart of the
+    //! controller plan's `request.prompt_token_ids` / `expected_token_ids` (route.py:2371-2378).
+    use super::*;
+    use stage_contract::native_proof as contract;
+
+    fn root(name: &str, checkpoint: Option<&Value>) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "laneq-challenge-{name}-{}-{}",
+            std::process::id(),
+            crate::app_host::hex(&crate::app_host::random(4).expect("entropy"))
+        ));
+        std::fs::create_dir_all(root.join("compiled")).expect("temp root");
+        if let Some(checkpoint) = checkpoint {
+            std::fs::write(
+                root.join("compiled/local-challenge-checkpoint.json"),
+                checkpoint.to_string(),
+            )
+            .expect("checkpoint written");
+        }
+        root
+    }
+    fn reference_pair() -> (Value, Value) {
+        let reference = crate::native_compiler::reference().expect("pinned reference");
+        let recorded = &reference["recorded"];
+        let expected: Vec<Value> = recorded["tokens"].as_array().expect("tokens")
+            [..contract::CHALLENGE_OUTPUT_TOKENS]
+            .to_vec();
+        (recorded["workload"]["prompt_ids"].clone(), json!(expected))
+    }
+    fn checkpoint(prompt: &Value, output: &Value) -> Value {
+        json!({"protocol":contract::CHECKPOINT_PROTOCOL,"state":"passed","prompt_token_ids":prompt,
+            "output_token_ids":output})
+    }
+
+    /// Proves: B-RUN-10 (lane Q: the compiled checkpoint's prompt and output, equal to the recorded
+    /// reference, are the route's startup challenge, token for token).
+    #[test]
+    fn the_compiled_checkpoint_is_the_startup_challenge() {
+        let (prompt, output) = reference_pair();
+        let root = root("ok", Some(&checkpoint(&prompt, &output)));
+        let read = compiled_challenge(&root);
+        std::fs::remove_dir_all(&root).expect("temp root removed");
+        let ids = |v: &Value| -> Vec<u32> {
+            v.as_array()
+                .expect("ids")
+                .iter()
+                .map(|t| u32::try_from(t.as_u64().expect("id")).expect("u32"))
+                .collect()
+        };
+        assert_eq!(
+            read,
+            Ok(Challenge {
+                prompt: ids(&prompt),
+                expected: ids(&output),
+            })
+        );
+    }
+
+    /// Proves: B-RUN-10 (lane Q: no challenge is invented: a missing checkpoint, one that is not a
+    /// passed native challenge, or one whose tokens differ from the recorded reference refuses
+    /// `startup_challenge_unavailable`.)
+    #[test]
+    fn a_checkpoint_that_is_absent_or_differs_from_the_reference_refuses() {
+        let (prompt, output) = reference_pair();
+        let mut wrong = output.clone();
+        wrong[1] = json!(7);
+        let mut short = prompt.clone();
+        short.as_array_mut().expect("ids").pop();
+        let mut failed = checkpoint(&prompt, &output);
+        failed["state"] = json!("failed");
+        let cases = [
+            ("absent", None),
+            ("output", Some(checkpoint(&prompt, &wrong))),
+            ("prompt", Some(checkpoint(&short, &output))),
+            ("state", Some(failed)),
+        ];
+        for (name, document) in cases {
+            let root = root(name, document.as_ref());
+            let read = compiled_challenge(&root);
+            std::fs::remove_dir_all(&root).expect("temp root removed");
+            assert_eq!(
+                read.map_err(|e| e.0),
+                Err("startup_challenge_unavailable".to_owned()),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod serving_fence_tests {
     //! The serving publication's workflow fence (`with workflow._lock:` at demo_chain.py:1081-1097
     //! @ f4e366e9) over the real `Shared`, with the publication parked on a channel (no sleeps).
