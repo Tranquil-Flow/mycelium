@@ -5,7 +5,8 @@
 //! identifier `org.mycelium.app`, so it sits beside an installed v0.1.4 and never touches its
 //! files (ruling 20). Icon, minimum OS and the Info.plist key set are the released v0.1.4 values
 //! (`Contents/Info.plist` sha256 `e1220422…` in the certified package); name, identifier,
-//! executable name and version differ, and a test names those differences. Nothing here signs,
+//! executable name and version differ, and the Local Network usage text is added (v0.2's work
+//! transport is the Mac's own LAN); a test names those differences. Nothing here signs,
 //! notarizes, installs, upgrades or touches an installed application.
 use crate::package::{Entry, Kind, Manifest, PackageError};
 use serde::Deserialize;
@@ -27,7 +28,7 @@ pub const ICON_SHA256: &str = "676400a536e2dc3e71d97a4b80dc50f1032a5739d8aa3b34f
 /// `NSLocalNetworkUsageDescription`: what macOS 15+ shows when it asks whether Mycelium may reach
 /// devices on the local network (lane LAN). The work transport binds this Mac's private LAN address
 /// and sends only to the addresses of joined Macs the swarm's seed signed.
-pub const LOCAL_NETWORK_USAGE: &str = "RED scaffold";
+pub const LOCAL_NETWORK_USAGE: &str = "Mycelium sends model parts and chat work directly between this Mac and the Macs you joined to your swarm on the same network. It does not contact other devices on your network.";
 pub const NATIVE_INPUT_SCHEMA: &str = "mycelium.foundation.native-input-evidence.v1";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -181,7 +182,8 @@ fn verify_source(file: &SourceFile) -> Result<(), BundleError> {
     }
     Ok(())
 }
-/// Deterministic, v0.1.4-key-set Info.plist (tab indented, sorted keys).
+/// Deterministic Info.plist (tab indented, sorted keys): the v0.1.4 key set plus
+/// `NSLocalNetworkUsageDescription` ([`LOCAL_NETWORK_USAGE`], lane LAN).
 pub fn info_plist() -> String {
     let string =
         |key: &str, value: &str| format!("\t<key>{key}</key>\n\t<string>{value}</string>\n");
@@ -197,7 +199,9 @@ pub fn info_plist() -> String {
     out += &string("CFBundlePackageType", "APPL");
     out += &string("CFBundleShortVersionString", VERSION);
     out += &string("LSMinimumSystemVersion", MINIMUM_OS);
-    out += "\t<key>NSHighResolutionCapable</key>\n\t<true/>\n</dict>\n</plist>\n";
+    out += "\t<key>NSHighResolutionCapable</key>\n\t<true/>\n";
+    out += &string("NSLocalNetworkUsageDescription", LOCAL_NETWORK_USAGE);
+    out += "</dict>\n</plist>\n";
     out
 }
 
@@ -582,7 +586,7 @@ pub fn content_manifest(built: &Built) -> Result<serde_json::Value, BundleError>
         "identity": {
             "display_name": DISPLAY_NAME, "bundle_identifier": BUNDLE_ID, "version": VERSION,
             "minimum_system_version": MINIMUM_OS, "executable": EXECUTABLE, "icon": ICON_FILE,
-            "policy": "owner ruling 25: v0.2's own name and identifier, so it sits beside an installed v0.1.4 and never touches its files; v0.1.4 icon and Info.plist key set; executable name and version differ",
+            "policy": "owner ruling 25: v0.2's own name and identifier, so it sits beside an installed v0.1.4 and never touches its files; v0.1.4 icon and Info.plist key set plus the Local Network usage text; executable name and version differ",
         },
         "trust_level": match &built.signature {
             None => serde_json::json!({

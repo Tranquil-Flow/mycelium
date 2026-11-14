@@ -204,6 +204,10 @@ fn built_bundle_matches_its_content_manifest_and_info_plist_identity() {
     assert_eq!(json["CFBundleIconFile"], bundle::ICON_FILE);
     assert_eq!(json["LSMinimumSystemVersion"], bundle::MINIMUM_OS);
     assert_eq!(json["NSHighResolutionCapable"], true);
+    assert_eq!(
+        json["NSLocalNetworkUsageDescription"],
+        bundle::LOCAL_NETWORK_USAGE
+    );
     // Unsigned local build: there must be no signature or CodeResources to mistake for a seal.
     assert!(!app.join("Contents/_CodeSignature").exists());
 }
