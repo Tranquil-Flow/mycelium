@@ -69,6 +69,14 @@ pub enum NetworkMode {
 /// provisional table (B9f, `iroh_lan_filter` module note). The host of a
 /// handshake verified under an admitted peer key is learned and gets its own
 /// lane of that table (B14, [`LoopbackHost::lan_learned_hosts`]).
+///
+/// Where "signed peer addresses" come from, as the packaged callers verify
+/// them (not every address carries the seed's own signature): a member's
+/// control and carrier addresses are signed by that member's key, accepted
+/// only while the seed's current row enrolls that key; a shard source's
+/// addresses are inside the seed-signed grant; the owner's address on a
+/// member is never in signed data and is learned from a handshake under an
+/// admitted key (B14).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LanPolicy {
     extra: Vec<IpAddr>,

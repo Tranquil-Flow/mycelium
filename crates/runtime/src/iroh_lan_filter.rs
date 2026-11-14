@@ -39,7 +39,8 @@
 //!
 //! Admission. Range form ([`LanPolicy::range_form`]): any allow-listed address.
 //! Exact pins (the default): only socket addresses this host dialed (the
-//! caller's signed peer addresses) or accepted an inbound handshake from, each
+//! caller's signed peer addresses: see [`LanPolicy`] for who signs which) or
+//! accepted an inbound handshake from, each
 //! held by a [`Pin`] for the connection's lifetime plus a close drain. Pins are
 //! in two classes (B9f, F2): AUTHENTICATED (dialed signed addresses, and
 //! accepts whose key the host verified against [`Admission::set_keys`]) and

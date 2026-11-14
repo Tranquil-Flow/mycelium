@@ -28,7 +28,9 @@ use std::{
 use transport::Channel;
 type Result<T> = std::result::Result<T, String>;
 pub type SessionCell = Arc<Mutex<Option<Session>>>;
-/// Explicit transport policy; no environment-selected interface or public relay fallback.
+/// Explicit transport policy; no environment-selected interface or public relay fallback. The
+/// addresses it admits are verified before they get here: a member's are signed by that member's
+/// key while the seed currently enrolls it, a shard source's are in the seed-signed grant.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkChoice(pub Option<(IpAddr, LanPolicy)>);
 /// One reading of this Mac's interfaces ([`api::lan_interface::this_mac`] in the app).

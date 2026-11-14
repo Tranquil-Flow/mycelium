@@ -406,7 +406,8 @@ fn lan_ip() -> std::net::IpAddr {
 }
 /// The loopback pair above, with both hosts' work transports on this Mac's real LAN interface
 /// under the packaged policy (`LanPolicy::private_only`: exact pins, no relay, no lookup). Every
-/// work address the owner admits from the seed-signed registrations is on that interface.
+/// work address the owner admits (from member-signed registrations whose key the seed currently
+/// enrolls) is on that interface.
 #[test]
 #[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
 fn two_packaged_hosts_on_the_real_lan_interface_handoff_and_push_before_publish() {
