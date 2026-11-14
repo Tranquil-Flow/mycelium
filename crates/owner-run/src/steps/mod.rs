@@ -23,8 +23,9 @@ pub const NOT_PORTED_CODE: &str = "owner_run_step_not_ported";
 
 /// Steps still missing: `(step, difference tag, seam that must close first)`. Remove a row when its
 /// step is ported; `OWNER-RUN.md` section 2 holds the v0.1.4 lines and the round that ports it.
-pub const NOT_PORTED: [(&str, &str, &str); 1] =
-    [("serving", "NP-SLICE1-serving", "SE-L9-RUN-SESSION")];
+/// Empty: all ten steps are ported (a host that does not lend a step's collaborators still ends
+/// with that step's legacy refusal below).
+pub const NOT_PORTED: [(&str, &str, &str); 0] = [];
 
 /// How a not-yet-ported step ends: a closed refusal naming the step and its seam. Never a success.
 pub fn not_ported(step: &str) -> StepError {
@@ -34,6 +35,7 @@ pub fn not_ported(step: &str) -> StepError {
         "publish" => ("NP-SLICE1-publish", "SE-L10-EXCHANGE"),
         "activate" => ("NP-SLICE1-activate", "SE-L9-RUN-SESSION"),
         "targets" => ("NP-SLICE1-targets", "SE-L9-RUN-SESSION"),
+        "serving" => ("NP-SLICE1-serving", "SE-L9-RUN-SESSION"),
         _ => ("NP-SLICE1-unknown", "SE-SLICE1-UNKNOWN"),
     };
     let (tag, seam) = NOT_PORTED

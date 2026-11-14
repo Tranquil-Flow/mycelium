@@ -229,6 +229,22 @@ impl StepEnv for Env<'_> {
     fn record_exception(&mut self, code: &str, class: &str) {
         lock(&self.shared.run).record_exception(code, class);
     }
+    /// The stop event is held across `commit` (`OwnerRun.stop` writes under the lock the oracle's
+    /// commit holds, demo_chain.py:1073-1080). Lock order: dispatch takes run -> queue -> stop
+    /// event; this takes the stop event -> the host's own locks, and no host lock holder ever
+    /// takes the run, queue or stop event lock, so neither waits on the other.
+    fn fenced(
+        &mut self,
+        commit: &mut dyn FnMut() -> Result<(), StepError>,
+    ) -> Result<(), StepError> {
+        let set = lock(&self.shared.stop.set);
+        if *set {
+            return Err(StepError::Stopped);
+        }
+        let result = commit();
+        drop(set);
+        result
+    }
     fn pause(&mut self, seconds: f64) -> bool {
         if self.shared.clocks.simulated() {
             self.shared.clocks.advance(seconds);

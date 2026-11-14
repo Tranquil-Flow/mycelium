@@ -124,28 +124,17 @@ impl<P: ChainPorts> OwnerChain<P> {
                 interval(),
             );
         }
-        if matches!(step, "publish" | "targets") {
+        if matches!(step, "publish" | "targets" | "serving") {
             let ports = self
                 .ports
                 .work_ports()
                 .ok_or_else(|| steps::not_ported(step))?;
-            return if step == "publish" {
-                steps::publish::run_publish_step(
-                    env,
-                    ports.reports,
-                    ports.workflow,
-                    state,
-                    interval(),
-                )
-            } else {
-                steps::targets::run_targets_step(
-                    env,
-                    ports.reports,
-                    ports.workflow,
-                    state,
-                    interval(),
-                )
+            let run = match step {
+                "publish" => steps::publish::run_publish_step,
+                "targets" => steps::targets::run_targets_step,
+                _ => steps::serving::run_serving_step,
             };
+            return run(env, ports.reports, ports.workflow, state, interval());
         }
         if step == "activate" {
             let port = self
