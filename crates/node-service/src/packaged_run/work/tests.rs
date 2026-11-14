@@ -447,6 +447,30 @@ fn the_owners_own_contributor_receives_its_shard_in_the_state_the_contributor_st
         assert!(address.ip().is_loopback(), "{address}")
     });
 }
+/// Lane TEN (ten-row gate, real model, runs `gate3-noenv` and `gate4-noenv`): row 6 ended
+/// `member_wall_cap_below_share`. The compile gives the owner's own worker the proposal's wall
+/// (`planner::chain_compile::admit`: no caps for the local node -> `proposed`, 1800 s,
+/// `PROPOSED_WALL_SECONDS`; v0.1.4's owner worker holds no grant at all), and the contributor's own
+/// standing check refuses any wall above its grant (`local_agent.rs:420-424`,
+/// `standing_acceptor::standing_limits`). The contributor step granted 600 s
+/// (`MemberChosenWall`, a v0.1.4 TEST fixture's member choice). The shares below are the real
+/// run's (gate3: layers 19-28 of Qwen3-0.6B).
+#[test]
+fn the_owners_own_contributor_grant_admits_the_wall_the_compile_gives_the_local_node() {
+    let f = Fixture::product_contributor();
+    let dir = owner_ports::contributor_dir(&f.root.join("owner"));
+    let grant = standing_consent::load(&dir)
+        .unwrap()
+        .expect("the contributor step's grant");
+    let share = json!({"max_wall_seconds": 1800, "max_rss_bytes": 2_625_486_324u64,
+        "max_disk_bytes": 1_074_471_271u64});
+    assert_eq!(
+        standing_consent::standing_limits(&grant, Some(&share))
+            .map(|l| l["max_wall_seconds"].clone()),
+        Ok(json!(1800)),
+        "{grant:?}"
+    );
+}
 /// This Mac's private LAN address, as the `lan-real` gate step exports it (`ipconfig getifaddr
 /// en0`). Absent or not private: the test FAILS, it never skips.
 fn lan_ip() -> std::net::IpAddr {
