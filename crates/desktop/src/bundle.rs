@@ -26,9 +26,12 @@ pub const ICON_FILE: &str = "icon-windowed.icns";
 /// Certified v0.1.4 `Contents/Resources/icon-windowed.icns` (APP-FILES.sha256).
 pub const ICON_SHA256: &str = "676400a536e2dc3e71d97a4b80dc50f1032a5739d8aa3b34fc55de133bfd646e";
 /// `NSLocalNetworkUsageDescription`: what macOS 15+ shows when it asks whether Mycelium may reach
-/// devices on the local network (lane LAN). The work transport binds this Mac's private LAN address
-/// and sends only to the addresses of joined Macs the swarm's seed signed.
-pub const LOCAL_NETWORK_USAGE: &str = "Mycelium sends model parts and chat work directly between this Mac and the Macs you joined to your swarm on the same network. It does not contact other devices on your network.";
+/// devices on the local network (lane LAN). True on the owner's Mac and on a joined Mac alike. The
+/// work transport binds one private address of this Mac and dials only addresses it verified:
+/// a member's, signed by that member's currently seed-enrolled key; a shard source's, in the
+/// seed-signed grant. It promises no more than that: an unjoined device on the network can still
+/// get a handshake answer before its key is refused (REVIEW-laneLAN LAN-A4).
+pub const LOCAL_NETWORK_USAGE: &str = "Mycelium transfers model parts and chat work directly between the Macs joined to your swarm on this network. It does not scan your network or use public relays for this work.";
 pub const NATIVE_INPUT_SCHEMA: &str = "mycelium.foundation.native-input-evidence.v1";
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 
