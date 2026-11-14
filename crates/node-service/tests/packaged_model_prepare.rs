@@ -3,8 +3,10 @@
 //! (app.py:1551-1577 @ f4e366e9) run `api::acquisition` through the packaged host into v0.1.4's
 //! model-source layout (`_open_acquisition`, app.py:649-672: `<state>/model-source-<rev12>/`
 //! `models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/<rev>/`; acquisition.py:1096-1184 `_execute`:
-//! download, verify, `prepare_local_source`), and the packaged core leaves `model_not_installed`
-//! once that snapshot is prepared, without a relaunch.
+//! download, verify, `prepare_local_source`). Preparing the model never makes a one-Mac chat
+//! (lane CHAT, owner ruling 14 Nov: one chat path, as v0.1.4): before and after the snapshot is
+//! prepared, and after a relaunch over it, the page's chat is the owner run's route, which serves
+//! nothing until a run does (`chat_not_ready`, chat.py:317-318).
 //!
 //! No network and no real model. A loopback repository serves a tiny snapshot: the config and
 //! safetensors of the accepted `qwen2_monolithic` layout of the executed manifest oracle
@@ -64,7 +66,6 @@ const SOURCE: &str = "model-source-7ae557604adf";
 const MODEL_DIR: &str = "models--Qwen--Qwen2.5-0.5B-Instruct";
 /// The executed acquisition scenarios' grant (`max_download_bytes` = `storage_limit_bytes`).
 const GRANT_BYTES: u64 = 10_000_000;
-const NOT_INSTALLED: (u16, &str) = (503, "model_not_installed");
 const TOKENIZER: &[u8] = br#"{"version":"1.0","model":{"type":"BPE","vocab":{},"merges":[]}}"#;
 
 fn millis(id: B) -> Duration {
@@ -509,6 +510,29 @@ fn cancel(window: &impl Window) -> (u16, Value) {
 fn chat_state(window: &impl Window) -> (u16, Value) {
     window.call("/chat/api/state", json!({}))
 }
+/// The page's chat is the run route's and no run serves: the state answers unavailable with no
+/// model and a send is refused `chat_not_ready` (chat.py:317-318, 477-503), whatever is on disk.
+#[track_caller]
+fn assert_no_run_chat(window: &impl Window) {
+    let state = chat_state(window);
+    assert_eq!(state.0, 200, "chat state: {}", state.1);
+    assert_eq!(
+        (&state.1["available"], &state.1["model_id"]),
+        (&json!(false), &Value::Null),
+        "{}",
+        state.1
+    );
+    let sent = window.call(
+        "/chat/api/send",
+        json!({"prompt": "hi", "max_new_tokens": 8}),
+    );
+    assert_eq!(refusal(&sent), (503, "chat_not_ready"));
+}
+/// The pinned snapshot's two files are where v0.1.4's lookup (and the run model's) finds them.
+fn located(state: &Path) -> bool {
+    let snapshot = snapshot_dir(state, REVISION);
+    snapshot.join("model.safetensors").is_file() && snapshot.join("tokenizer.json").is_file()
+}
 /// The download answered with the attempt it started (racy by nature: the status at the instant
 /// the worker started, `api::model_routes_e2e`).
 fn assert_started(started: &(u16, Value)) {
@@ -823,10 +847,8 @@ fn packaged_model_prepare_download_reaches_prepared() {
             "{name}"
         );
     }
-    // The packaged core's lookup finds exactly that snapshot.
-    let located = packaged::locate_model(&state).expect("the prepared snapshot is located");
-    assert_eq!(located.checkpoint, snapshot.join("model.safetensors"));
-    assert_eq!(located.tokenizer, snapshot.join("tokenizer.json"));
+    // v0.1.4's lookup finds exactly that snapshot.
+    assert!(located(&state));
     // Download twice: the attempt has ended, the source is already prepared and stays so
     // (oracle `run_twice_after_prepared`).
     assert_eq!(refusal(&download(&host)), (409, "source_already_prepared"));
@@ -839,7 +861,7 @@ fn packaged_model_prepare_download_reaches_prepared() {
 }
 
 #[test]
-fn packaged_model_prepare_core_leaves_model_not_installed() {
+fn packaged_model_prepare_never_makes_a_one_mac_chat() {
     let state = state_root();
     let files = tiny_snapshot(None);
     // A snapshot of another revision is not the pinned model (near miss).
@@ -847,27 +869,21 @@ fn packaged_model_prepare_core_leaves_model_not_installed() {
     let repository = Repository::start(files.clone());
     let observed = Observed::new(permissive());
     let (core, cleanup) = packaged_core(&state, &repository, &observed);
-    // No model: the window opens and the native service answers `model_not_installed`.
-    assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
+    // No model: the window opens and the chat is the run route's.
+    assert_no_run_chat(&core);
     // The action root is the packaged one: the owner creates the swarm and asks for the model.
     assert_created(&core);
-    assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
+    assert_no_run_chat(&core);
     assert_started(&download(&core));
     assert_eq!(
         settled(&state),
         status_doc("prepared", total(&files), total(&files), None)
     );
-    // Prepared: without a relaunch, the native service is composed over the located snapshot
-    // and answers.
-    let composed = chat_state(&core);
-    assert_eq!(composed.0, 200, "chat state: {}", composed.1);
-    assert_eq!(composed.1["available"], true);
-    assert_eq!(composed.1["busy"], false);
-    assert_eq!(composed.1["model_id"], "Qwen2.5-0.5B-Instruct");
-    // The native driver was composed on the private root (its member identity and the local
-    // membership `configured_driver` keeps there).
+    // Prepared: the chat is still the run route's (no run serves), and no one-Mac native driver
+    // was composed over the snapshot (it would keep its member identity in the private root).
+    assert_no_run_chat(&core);
     let private = state.join("v02-node/private");
-    assert!(private.join("member").is_dir(), "{:?}", entries(&private));
+    assert!(!private.join("member").exists(), "{:?}", entries(&private));
     quit(core, cleanup);
     // Relaunch after prepared: the window composes the located model at open. Quit closed the
     // acquisition (`DemoApp.close` -> `self.acquisition.close()`, app.py:1845-1847 @ f4e366e9:
@@ -878,7 +894,7 @@ fn packaged_model_prepare_core_leaves_model_not_installed() {
     // without closing recovers `failed prepared_source_revalidation_required` instead
     // (`happy_then_reverify`, the `new` step): the crash path, not Quit.
     let (core, cleanup) = packaged_core(&state, &repository, &observed);
-    assert_eq!(chat_state(&core).0, 200);
+    assert_no_run_chat(&core);
     let oracle = scenario("close_when_idle");
     let reopened = &oracle["ops"][2];
     assert_eq!(reopened["op"], "new");
@@ -921,22 +937,22 @@ fn packaged_model_prepare_bad_snapshot_refused() {
         tree(&state.join(SOURCE)),
         oracle_tree("digest_mismatch_lfs", &files)
     );
-    assert!(packaged::locate_model(&state).is_none());
-    assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
+    assert!(!located(&state));
+    assert_no_run_chat(&core);
     // Download after the failure, the source repaired: the attempt resumes from what verified
-    // and prepares (oracle `run_after_failure_retries`); then the core answers.
+    // and prepares (oracle `run_after_failure_retries`); the chat stays the run route's.
     repository.tamper(None);
     assert_started(&download(&core));
     assert_eq!(
         settled(&state),
         status_doc("prepared", total(&files), total(&files), None)
     );
-    assert_eq!(chat_state(&core).0, 200);
+    assert_no_run_chat(&core);
     quit(core, cleanup);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 
     // A snapshot every byte check accepts but the native manifest compile refuses: it is on disk
-    // where the packaged lookup lands, yet it was never prepared, so the core keeps refusing.
+    // where v0.1.4's lookup lands, yet it was never prepared; the chat stays the run route's.
     let state = state_root();
     let files = tiny_snapshot(Some(25));
     let repository = Repository::start(files.clone());
@@ -958,8 +974,8 @@ fn packaged_model_prepare_bad_snapshot_refused() {
         tree(&state.join(SOURCE)),
         oracle_tree("compile_serving_error", &files)
     );
-    assert!(packaged::locate_model(&state).is_some());
-    assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
+    assert!(located(&state));
+    assert_no_run_chat(&core);
     quit(core, cleanup);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
@@ -1061,14 +1077,14 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
     );
     assert_eq!(outcome(&cancelled), oracle_outcome("cancel_before_file"));
     // No partial model source: the resumable stage stays where v0.1.4 keeps it, nothing reaches
-    // the snapshot the packaged lookup reads, and the core keeps refusing.
+    // the snapshot v0.1.4's lookup reads, and the chat stays the run route's.
     assert_eq!(
         tree(&state.join(SOURCE)),
         oracle_tree("cancel_before_file", &files)
     );
     assert!(!snapshot_dir(&state, REVISION).exists());
-    assert!(packaged::locate_model(&state).is_none());
-    assert_eq!(refusal(&chat_state(&core)), NOT_INSTALLED);
+    assert!(!located(&state));
+    assert_no_run_chat(&core);
     // Cancel with nothing running answers the cancelled status and changes nothing.
     assert_eq!(cancel(&core), (200, cancelled.clone()));
     // Quit while an attempt runs: Quit asks the attempt to stop at once and closes the
@@ -1094,14 +1110,14 @@ fn packaged_model_prepare_cancel_leaves_no_partial() {
     assert!(!snapshot_dir(&state, REVISION).exists());
     let (core, cleanup) = packaged_core(&state, &repository, &observed);
     assert_eq!(cancel(&core), (200, closed));
-    // Download after the quit resumes the stage to prepared; then the core answers.
+    // Download after the quit resumes the stage to prepared; the chat stays the run route's.
     assert_started(&download(&core));
     assert_eq!(
         settled(&state),
         status_doc("prepared", total(&files), total(&files), None)
     );
     assert_eq!(tree(&state.join(SOURCE)), oracle_tree("happy_path", &files));
-    assert_eq!(chat_state(&core).0, 200);
+    assert_no_run_chat(&core);
     quit(core, cleanup);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }

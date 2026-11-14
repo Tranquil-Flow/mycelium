@@ -246,11 +246,12 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
   (`cargo build --release -p node-service --features packaged --bin mycelium`), not this crate's
   `src/bin/mycelium.rs` (a core-less shell kept as the test double for entry/launch-wiring tests).
   It routes like v0.1.4, admits the OS and the pinned payload, then serves the unchanged UI over
-  SLICE-1's node service (`node_service::packaged`): the pinned Qwen2.5-0.5B is looked up in the
-  state root's v0.1.4 `model-source-*` layout, where the window's `/api/model/download` puts it
-  (until it is prepared the chat answers 503 `model_not_installed`; then the native service is
-  composed over it without a relaunch), private state and per-launch evidence live under
-  `<state>/v02-node/`. The same executable is the
+  SLICE-1's node service (`node_service::packaged`): the window's `/api/model/download` puts the
+  pinned run model in the state root's v0.1.4 `model-source-*` layout; every `/chat/*` request goes
+  through the shipped chat service over the owner run's route (lane CHAT, owner ruling 14 Nov:
+  one chat path, as v0.1.4; no one-Mac native chat is composed, whatever is on disk, and with no
+  serving run the chat answers `chat_not_ready`); private state and v0.2's evidence (the per-chat
+  timing file `chat-timing.jsonl`) live under `<state>/v02-node/`. The same executable is the
   node's member/owner-leaf worker (re-executed with `member|owner-leaf`), admitted first. It links
   `libmlxc` through `@executable_path/../Frameworks` only. Probe hooks do not exist in it: the
   test-only `qualification-probe` feature (scratch bundles for `bundle_chat`) is the only way to
