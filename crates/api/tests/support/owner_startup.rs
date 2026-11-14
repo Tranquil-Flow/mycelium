@@ -493,3 +493,23 @@ fn a_second_run_in_the_same_process_qualifies_again() {
     released(&second, "completed");
     again.teardown().unwrap();
 }
+
+/// Proves: B-RUN-10 (lane Q, the route's fatal counter: `route.counters().fatal is not None` ->
+/// `startup_challenge_failed` even when the tokens matched (supervisor.py:3818-3819). Here the
+/// final stage cannot reset its session after the challenge, so the challenge completes with the
+/// expected tokens and its own teardown retires the epoch (EP1's failed reset): the route is
+/// refused, never started.)
+#[test]
+fn a_challenge_that_retires_its_epoch_refuses_startup_challenge_failed() {
+    let mut s = swarm(2);
+    let mut scripts = scripts_emitting(&SCRIPTED);
+    scripts[1].reset_fails = true;
+    let (mut work, members, _) = challenged(&mut s, Some(challenge(&SCRIPTED)), scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let ended = activate_until_settled(&mut work);
+    assert_eq!(ended["state"], "failed", "{ended}");
+    assert_eq!(ended["error_code"], "startup_challenge_failed", "{ended}");
+    assert_eq!(ended["startup"], Value::Null, "{ended}");
+    work.teardown().unwrap();
+    released(&work.state(), "completed");
+}
