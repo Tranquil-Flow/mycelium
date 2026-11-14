@@ -140,6 +140,14 @@ impl Fixture {
     }
     /// The owner's work transport over `owner`, the joined Mac's over `member`.
     fn on_each(owner_work: WorkNetwork, member_work: WorkNetwork) -> Self {
+        Self::built(owner_work, member_work, true)
+    }
+    /// Both hosts on loopback, the owner's own contributor left exactly as the product's
+    /// contributor step leaves it (no state written into its root by this fixture).
+    fn product_contributor() -> Self {
+        Self::built(WorkNetwork::loopback(), WorkNetwork::loopback(), false)
+    }
+    fn built(owner_work: WorkNetwork, member_work: WorkNetwork, contributor_by_hand: bool) -> Self {
         let work = member_work;
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
@@ -178,6 +186,9 @@ impl Fixture {
         owner_ports::start_local_contributor(&host).unwrap();
         owner_ports::renew_contributor(&host);
         host.with(|c| {
+            if !contributor_by_hand {
+                return;
+            }
             consent(
                 &owner_ports::contributor_dir(&owner),
                 c.run
@@ -421,6 +432,18 @@ fn stop_reaches_real_push_while_member_receive_is_held() {
 #[test]
 fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
     handoff_and_push_before_publish(Fixture::new(), &|address| {
+        assert!(address.ip().is_loopback(), "{address}")
+    });
+}
+/// Lane TEN (the hermetic ten-row gate, real model): row 6 ended `compiler_storage_consent_required`.
+/// The owner's own contributor receives its stage shard into its own root
+/// (`JoinedShard::begin` -> `MemberShard::begin` -> `reserve_output`, compiler_inputs.rs:532-560), which
+/// bounds the reservation by that root's resource policy. The fixture above writes one there by hand;
+/// the product's contributor step (`owner_ports::start_local_contributor`) writes only the standing
+/// grant, so a real run refused the owner's own stage before any byte arrived.
+#[test]
+fn the_owners_own_contributor_receives_its_shard_in_the_state_the_contributor_step_leaves() {
+    handoff_and_push_before_publish(Fixture::product_contributor(), &|address| {
         assert!(address.ip().is_loopback(), "{address}")
     });
 }
