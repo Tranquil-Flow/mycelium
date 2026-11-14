@@ -211,6 +211,10 @@ impl Work {
             clock: Arc::default(),
         }
     }
+    /// The packaged host this run's work belongs to (the run ports' chat hooks read its custody).
+    pub(super) fn host(&self) -> &PackagedRun {
+        &self.host
+    }
     fn local(&self) -> Result<(), StepError> {
         let (root, seed, session, signer, node) = self.host.with(|c| {
             let member = c
@@ -847,6 +851,8 @@ impl Chain for Composed {
             seed.exchange
                 .set_owner_control(Some(OwnerControl::new(self.work.owner.public())));
         }
+        // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
+        super::chat::new_run(&self.work.host);
         self.inner
             .new_run(run, deployment, reason, ceiling, binding);
     }

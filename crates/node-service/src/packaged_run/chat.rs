@@ -102,3 +102,74 @@ pub fn chat_run(
 pub(super) fn attach_chats(host: &PackagedRun, chats: api::chat_service::RunChats) {
     lock(&host.custody).chats = Some(chats);
 }
+/// The page's route chats `host`'s run ports reach (none before `chat_run`); the custody lock is
+/// held only to clone the handle.
+fn chats(host: &PackagedRun) -> Option<api::chat_service::RunChats> {
+    lock(&host.custody).chats.clone()
+}
+/// v0.2's dead-member code: a participant whose seed lease ran out (the open epoch's death
+/// evidence or the seed row, `OwnerWork::monitor`). v0.1.4's `_dead_member` (demo_chain.py:1188-
+/// 1203) names a member that reports `error`; both are what `monitor` stores as
+/// `ctx.state['monitor_error_code']` (:1179-1181). No other monitor code is (the workflow's own
+/// failure, `managed_workflow_missing`, the ceiling), as in v0.1.4.
+const DEAD_MEMBER: &str = "joined_route_member_stale";
+/// `ctx.state['rollover_requested']` (owner_run.py:252-257), read from the run's own machine: the
+/// serving poll sets it together with `rollover.state = 'switching'` while the serving step is
+/// done (:254-258). A fresh run of a rollover is also `switching` until it serves (:382, 402), but
+/// its steps start pending, so its serving step is never done before it serves (:429-433), and a
+/// Stop that raced the rollover's due check leaves the state `idle` (:251-252, machine.rs
+/// `serving_poll`). The run's view is read with no lock of the host or the run held.
+fn rollover_requested(host: &PackagedRun) -> bool {
+    let Some(status) = host.with(|c| c.run.demo.clone()).status() else {
+        return false;
+    };
+    let status = status.to_value();
+    status["rollover"]["state"] == "switching"
+        && status["steps"].as_array().is_some_and(|steps| {
+            steps
+                .iter()
+                .any(|step| step["name"] == "serving" && step["state"] == "done")
+        })
+}
+/// A fresh `RunContext` (owner_run.py:392-399): no chat fact survives into the next run.
+pub(super) fn new_run(host: &PackagedRun) {
+    if let Some(chats) = chats(host) {
+        chats.new_run();
+    }
+}
+/// `chain.teardown` FIRST (demo_chain.py:1326-1338): every chat not done is cancelled while the
+/// route still takes `DELETE`, with `'chat_switching_runs' if rollover_requested else
+/// (monitor_error_code or 'owner_run_failed') if failed else 'chat_cancelled'`.
+pub(super) fn teardown(host: &PackagedRun, failed: bool) {
+    if let Some(chats) = chats(host) {
+        if rollover_requested(host) {
+            chats.rollover_requested();
+        }
+        chats.teardown(failed);
+    }
+}
+/// `ceiling_reached` returned its code: the run's chats are cancelled with it, once per run, off
+/// the caller's thread (demo_chain.py:1155-1163; `RunChats::ceiling_reached` keeps the once).
+pub(super) fn ceiling(host: &PackagedRun, probe: &owner_run::machine::CeilingProbe) {
+    if let owner_run::machine::CeilingProbe::Code(Some(code)) = probe
+        && code == owner_run::machine::EXECUTION_CEILING_CODE
+        && let Some(chats) = chats(host)
+    {
+        chats.ceiling_reached();
+    }
+}
+/// `monitor` (demo_chain.py:1166-1186): its ceiling check cancels as `ceiling_reached` does
+/// (:1167, the same once), its dead-member code becomes the teardown's code (:1179-1181).
+pub(super) fn monitored(host: &PackagedRun, probe: &owner_run::machine::MonitorProbe) {
+    let owner_run::machine::MonitorProbe::Code(Some(code)) = probe else {
+        return;
+    };
+    let Some(chats) = chats(host) else {
+        return;
+    };
+    if code == owner_run::machine::EXECUTION_CEILING_CODE {
+        chats.ceiling_reached();
+    } else if code == DEAD_MEMBER {
+        chats.dead_member(code);
+    }
+}
