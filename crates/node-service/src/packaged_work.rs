@@ -29,8 +29,56 @@ use transport::Channel;
 type Result<T> = std::result::Result<T, String>;
 pub type SessionCell = Arc<Mutex<Option<Session>>>;
 /// Explicit transport policy; no environment-selected interface or public relay fallback.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkChoice(pub Option<(IpAddr, LanPolicy)>);
+/// Where the packaged work endpoints (member work service, the owner's local worker, the shard
+/// source, the route and the owner's dials) bind, decided each time a work service or an owner run
+/// STARTS, never once per process: Wi-Fi may come up or change network after launch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkNetwork {
+    /// Exactly this choice, whatever this Mac's interfaces are (tests and explicit callers).
+    Fixed(NetworkChoice),
+    /// The app's own: this Mac's private LAN address ([`api::lan_interface::this_mac`]) under
+    /// [`LanPolicy::private_only`] (exact pins, no relay, no address lookup); 127.0.0.1 only
+    /// (`NetworkMode::LocalOnly`) when the Mac has no private address.
+    ThisMac,
+}
+impl Default for WorkNetwork {
+    /// RED scaffold: still loopback-only.
+    fn default() -> Self {
+        Self::loopback()
+    }
+}
+impl WorkNetwork {
+    /// 127.0.0.1 only, whatever the interfaces (`NetworkMode::LocalOnly`).
+    pub fn loopback() -> Self {
+        Self::Fixed(NetworkChoice::default())
+    }
+    /// This start's choice, reading this Mac's interfaces now when it is [`WorkNetwork::ThisMac`].
+    pub fn resolve(&self) -> (NetworkChoice, String) {
+        self.resolve_with(api::lan_interface::this_mac)
+    }
+    /// [`WorkNetwork::resolve`] over a given reading of the interfaces (the pure rule's answer).
+    /// Answers the choice and the log-only transport name (`lan:<ip>` / `local_only:<reason>`).
+    pub fn resolve_with(
+        &self,
+        read: impl FnOnce() -> api::lan_interface::Selection,
+    ) -> (NetworkChoice, String) {
+        match self {
+            Self::Fixed(choice) => {
+                let name = match &choice.0 {
+                    Some((ip, _)) => format!("lan:{ip}"),
+                    None => "local_only:explicit".into(),
+                };
+                (choice.clone(), name)
+            }
+            Self::ThisMac => {
+                let _ = read;
+                (NetworkChoice::default(), "local_only:not_resolved".into())
+            }
+        }
+    }
+}
 impl NetworkChoice {
     pub fn allows(&self, address: std::net::SocketAddr) -> bool {
         match &self.0 {

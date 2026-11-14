@@ -6,8 +6,17 @@ use api::{
     run_exchange::owner_pin::{OwnerPin, VerifiedAnnouncement},
 };
 impl Network {
-    pub fn work_network(&self) -> crate::packaged_work::NetworkChoice {
-        self.work_network.clone()
+    /// The work transport for a work service or an owner run starting NOW: the configured choice,
+    /// or this Mac's private LAN address read at this moment. Logs the transport it names
+    /// (`l11_work_network:<transport> role=<role>`, stderr only).
+    pub fn resolve_work_network(&self, role: &str) -> crate::packaged_work::NetworkChoice {
+        let (choice, transport) = self.work_network.resolve();
+        eprintln!("l11_work_network:{transport} role={role}");
+        choice
+    }
+    /// The configured work transport (not resolved).
+    pub fn work_network(&self) -> &crate::packaged_work::WorkNetwork {
+        &self.work_network
     }
     pub fn close_work(&self) {
         let mut slot = lock(&self.work);
@@ -71,7 +80,7 @@ impl PackagedMember {
                 self.network.work_session.clone(),
                 Arc::new(identity),
                 announcement,
-                self.network.work_network.clone(),
+                self.network.resolve_work_network("member_work"),
             )?);
         }
         if self.network.work_closed.load(Ordering::SeqCst) || self.network.fenced() {

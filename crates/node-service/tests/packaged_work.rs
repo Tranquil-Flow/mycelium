@@ -162,3 +162,80 @@ fn enrolled_packaged_control_dispatches_without_pair_request_and_closes_all_owne
     assert_eq!(service.registration().unwrap_err(), "member_work_closed");
     service.close().unwrap();
 }
+/// Lane LAN: the app's own composition (`NetworkConfig::default()`, what every production
+/// constructor passes) puts the work transport on this Mac's private LAN address when it has one,
+/// through the pure rule (`api::lan_interface::select`), and stays 127.0.0.1-only when it has none.
+/// An explicit choice is kept as given and never reads the interfaces.
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn the_app_default_work_transport_follows_this_macs_private_address() {
+    use api::lan_interface::{InterfaceAddress, NO_PRIVATE_ADDRESS, Selection, select};
+    use node_service::{
+        packaged_network::{Network, NetworkConfig},
+        packaged_work::{NetworkChoice, WorkNetwork},
+    };
+    use runtime::iroh_host::LanPolicy;
+    use std::net::{IpAddr, SocketAddr};
+    let ip = |text: &str| text.parse::<IpAddr>().unwrap();
+    let at = |text: &str| SocketAddr::new(ip(text), 61700);
+    let interface =
+        |name: &str, address: &str, loopback: bool, point_to_point: bool| InterfaceAddress {
+            name: name.into(),
+            ip: ip(address),
+            up: true,
+            loopback,
+            point_to_point,
+        };
+    let root = std::env::temp_dir().join(format!(
+        "lan-default-config-{}",
+        app_host::hex(&app_host::random(8).unwrap())
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let network = Network::new(&root, NetworkConfig::default());
+    let default = network.work_network().clone();
+    network.quit();
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(default, WorkNetwork::ThisMac);
+    // A Mac on Wi-Fi with Tailscale up: the Wi-Fi address, never the tailnet or loopback one.
+    let wifi = [
+        interface("lo0", "127.0.0.1", true, false),
+        interface("utun5", "100.84.252.4", false, true),
+        interface("en0", "192.168.1.23", false, false),
+    ];
+    let (choice, transport) = default.resolve_with(|| select(&wifi, Some(ip("192.168.1.23"))));
+    assert_eq!(
+        choice,
+        NetworkChoice(Some((ip("192.168.1.23"), LanPolicy::private_only())))
+    );
+    assert_eq!(transport, "lan:192.168.1.23");
+    assert!(choice.allows(at("192.168.1.40")));
+    assert!(!choice.allows(at("127.0.0.1")));
+    assert!(!choice.allows(at("100.84.252.4")));
+    assert!(!choice.allows(at("17.5.7.8")));
+    // No private address: LocalOnly, and the reason is named.
+    let none = [
+        interface("lo0", "127.0.0.1", true, false),
+        interface("utun5", "100.84.252.4", false, true),
+        interface("en0", "17.5.7.8", false, false),
+    ];
+    let (choice, transport) = default.resolve_with(|| select(&none, Some(ip("17.5.7.8"))));
+    assert_eq!(choice, NetworkChoice(None));
+    assert_eq!(transport, format!("local_only:{NO_PRIVATE_ADDRESS}"));
+    assert!(choice.allows(at("127.0.0.1")));
+    assert!(!choice.allows(at("192.168.1.40")));
+    let (choice, transport) =
+        default.resolve_with(|| Selection::LocalOnly(api::lan_interface::INTERFACES_UNREADABLE));
+    assert_eq!(choice, NetworkChoice(None));
+    assert_eq!(transport, "local_only:interfaces_unreadable");
+    // An explicit choice is exactly what the caller passed.
+    let read = || -> Selection { panic!("an explicit choice never reads the interfaces") };
+    assert_eq!(
+        WorkNetwork::loopback().resolve_with(read),
+        (NetworkChoice(None), "local_only:explicit".to_owned())
+    );
+    let lan = NetworkChoice(Some((ip("10.160.112.32"), LanPolicy::private_only())));
+    assert_eq!(
+        WorkNetwork::Fixed(lan.clone()).resolve_with(read),
+        (lan, "lan:10.160.112.32".to_owned())
+    );
+}

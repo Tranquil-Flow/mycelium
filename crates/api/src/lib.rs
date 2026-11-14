@@ -28,6 +28,7 @@ pub mod join_link;
 pub mod joined_member;
 pub mod joined_owner;
 pub mod joined_shard;
+pub mod lan_interface;
 pub mod leave;
 pub mod local_agent;
 pub mod local_manifest;

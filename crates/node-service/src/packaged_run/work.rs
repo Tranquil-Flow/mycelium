@@ -179,6 +179,9 @@ struct Resident {
     local_session: crate::packaged_work::SessionCell,
     bindings: Vec<joined::Verified>,
     run: Option<(String, String)>,
+    /// The work transport this run resolved when it started (`compose`): its local worker, its
+    /// member dials, its shard source and route all use this one choice for the whole run.
+    network: Option<crate::packaged_work::NetworkChoice>,
 }
 #[derive(Clone)]
 pub(super) struct Work {
@@ -200,11 +203,18 @@ impl Work {
                 local_session,
                 bindings: Vec::new(),
                 run: None,
+                network: None,
             })),
             stopped: Arc::new(AtomicBool::new(false)),
         }
     }
-    fn local(&self) -> Result<(), StepError> {
+    /// The run's transport, resolved at `compose`; a work announcement before any compose (none
+    /// in the chain's order) resolves its own.
+    fn run_network(&self) -> crate::packaged_work::NetworkChoice {
+        let held = lock(&self.resident).network.clone();
+        held.unwrap_or_else(|| self.host.network.resolve_work_network("owner_local_work"))
+    }
+    fn local(&self, network: &crate::packaged_work::NetworkChoice) -> Result<(), StepError> {
         let (root, seed, session, signer, node) = self.host.with(|c| {
             let member = c
                 .run
@@ -274,7 +284,7 @@ impl Work {
                     resident.local_session.clone(),
                     signer,
                     announcement,
-                    self.host.network.work_network(),
+                    network.clone(),
                 )
                 .map_err(|e| refused(&e))?,
             );
@@ -383,13 +393,15 @@ impl Work {
             .host
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
-        let network = self.host.network.work_network();
+        // One transport per run, read from this Mac's interfaces as the run starts its work.
+        let network = self.host.network.resolve_work_network("owner_run");
+        lock(&self.resident).network = Some(network.clone());
         let until = env.now() + span(BudgetId::Slices)?.as_secs_f64();
         let verified = loop {
             if env.stopped() || self.stopped.load(Ordering::SeqCst) {
                 return Err(StepError::Stopped);
             }
-            match self.local() {
+            match self.local(&network) {
                 Ok(()) => {}
                 Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {
                     env.progress("member_work_renewing");
@@ -476,6 +488,7 @@ impl Work {
             .ok_or("owner_exchange_unavailable")?;
         let resident = lock(&self.resident);
         let (run, deployment) = resident.run.as_ref().ok_or("owner_work_unavailable")?;
+        let network = resident.network.clone().ok_or("owner_work_unavailable")?;
         for binding in &resident.bindings {
             let announcement = seed
                 .exchange
@@ -492,7 +505,7 @@ impl Work {
                     self.owner.public(),
                     run,
                     deployment,
-                    &|a| self.host.network.work_network().allows(a),
+                    &|a| network.allows(a),
                 )
                 .map_err(|e| e.code.to_owned())?;
             if current.registration() != binding.registration()
@@ -655,7 +668,8 @@ impl ReportsPort for Reports {
             model:Some(json!({"choice":api::model_catalog::find(&a.model_id,&a.resolved_commit).and_then(api::model_catalog::choice_for_model),"model_id":a.model_id,"resolved_commit":a.resolved_commit})),
             slice_mode:a.slice_mode,manifest_digest:Some(a.manifest_digest.clone()),work_limits:Some(limits.clone()),
             per_node:a.per_node.iter().flatten().cloned().collect() }).map_err(|_| refused("demo_announcement_invalid"))?;
-        self.work.local()
+        let network = self.work.run_network();
+        self.work.local(&network)
     }
     fn reports(&mut self) -> Result<BTreeMap<String, Value>, StepError> {
         self.inner.reports()

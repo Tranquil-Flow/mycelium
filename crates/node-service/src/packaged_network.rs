@@ -72,8 +72,10 @@ pub struct NetworkConfig {
     /// v0.1.4's `_device_memory_bytes()` test seam (app.py:1123-1126 @ f4e366e9): the RAM that
     /// bounds this Mac's per-run memory consent. `None` (the app's own): this Mac's `hw.memsize`.
     pub device_memory_bytes: Option<u64>,
-    /// Explicit permitted work transport: LocalOnly by default, or a caller-admitted LAN.
-    pub work_network: crate::packaged_work::NetworkChoice,
+    /// Where the work endpoints bind: the app's own is this Mac's private LAN address, read each
+    /// time a work service or an owner run starts ([`crate::packaged_work::WorkNetwork::ThisMac`]);
+    /// a test or caller that passes a [`crate::packaged_work::WorkNetwork::Fixed`] choice keeps it.
+    pub work_network: crate::packaged_work::WorkNetwork,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -84,7 +86,7 @@ impl Default for NetworkConfig {
             seams: JoinSeams::default(),
             sidecar: None,
             device_memory_bytes: None,
-            work_network: crate::packaged_work::NetworkChoice::default(),
+            work_network: crate::packaged_work::WorkNetwork::default(),
         }
     }
 }
@@ -113,7 +115,7 @@ pub struct Network {
     renewed: std::sync::Condvar,
     work: Mutex<Option<crate::packaged_work::Service>>,
     work_session: crate::packaged_work::SessionCell,
-    work_network: crate::packaged_work::NetworkChoice,
+    work_network: crate::packaged_work::WorkNetwork,
     work_closed: AtomicBool,
     /// `_relay_is_serving` (app.py:770-777): raised by the run chain while an owner run is active, so
     /// a relay may extend its window only then. The packaged host has no swarm publisher yet, so the

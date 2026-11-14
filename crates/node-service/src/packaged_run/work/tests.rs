@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Two packaged host roles on loopback. Real enrollment, seed TLS, member control, carrier,
-//! inert shard receipts and cleanup. Constructor-only source plan and refusing native admission.
+//! Two packaged host roles on loopback, and the same pair on this Mac's real LAN interface (lane
+//! LAN). Real enrollment, seed TLS, member control, carrier, inert shard receipts and cleanup.
+//! Constructor-only source plan and refusing native admission.
 use super::*;
 mod regressions;
-use crate::packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember};
+use crate::{
+    packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember},
+    packaged_work::{NetworkChoice, WorkNetwork},
+};
 use api::{
     handoff,
     joined_owner::{
@@ -96,7 +100,12 @@ fn consent(root: &Path, session: &api::member::Session, policy: &Value) {
     .unwrap();
 }
 impl Fixture {
+    /// Both hosts on loopback (`NetworkMode::LocalOnly`), whatever this Mac's interfaces are.
     fn new() -> Self {
+        Self::on(WorkNetwork::loopback())
+    }
+    /// Both hosts' work transports over `work` (the seed stays on its loopback TLS address).
+    fn on(work: WorkNetwork) -> Self {
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
             crate::service::random_id().unwrap()
@@ -105,7 +114,13 @@ impl Fixture {
         let root = root.canonicalize().unwrap();
         let owner = root.join("owner");
         let authority = Arc::new(Mutex::new(Authority::load(owner.clone()).unwrap()));
-        let network = Network::new(&owner, NetworkConfig::default());
+        let network = Network::new(
+            &owner,
+            NetworkConfig {
+                work_network: work.clone(),
+                ..NetworkConfig::default()
+            },
+        );
         let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
         resource_policy::write(&owner, &policy).unwrap();
         app_host::create_owner_json(&network.cell(&authority), policy.as_object().unwrap())
@@ -182,6 +197,7 @@ impl Fixture {
                     member_seed: options,
                     ..Default::default()
                 },
+                work_network: work,
                 ..Default::default()
             },
         );
@@ -368,7 +384,57 @@ fn stop_reaches_real_push_while_member_receive_is_held() {
 }
 #[test]
 fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
-    let mut f = Fixture::new();
+    handoff_and_push_before_publish(Fixture::new(), &|address| {
+        assert!(address.ip().is_loopback(), "{address}")
+    });
+}
+/// This Mac's private LAN address, as the `lan-real` gate step exports it (`ipconfig getifaddr
+/// en0`). Absent or not private: the test FAILS, it never skips.
+fn lan_ip() -> std::net::IpAddr {
+    let value = std::env::var("MYCELIUM_LAN_IP").expect("MYCELIUM_LAN_IP = this host's LAN IP");
+    let address: std::net::IpAddr = value.parse().expect("MYCELIUM_LAN_IP is an IP address");
+    assert!(
+        runtime::iroh_host::private_lan(address),
+        "{address} is not a private LAN address"
+    );
+    address
+}
+/// The loopback pair above, with both hosts' work transports on this Mac's real LAN interface
+/// under the packaged policy (`LanPolicy::private_only`: exact pins, no relay, no lookup). Every
+/// work address the owner admits from the seed-signed registrations is on that interface.
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn two_packaged_hosts_on_the_real_lan_interface_handoff_and_push_before_publish() {
+    let ip = lan_ip();
+    let work = WorkNetwork::Fixed(NetworkChoice(Some((
+        ip,
+        runtime::iroh_host::LanPolicy::private_only(),
+    ))));
+    handoff_and_push_before_publish(Fixture::on(work), &|address| {
+        assert_eq!(address.ip(), ip, "{address}")
+    });
+}
+/// The production default on this Mac: [`NetworkConfig::default`]'s work transport, resolved
+/// through the real host constructor as a run starts, is this Mac's LAN address, not loopback.
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn the_app_default_work_transport_is_this_macs_lan_address() {
+    let ip = lan_ip();
+    let root = std::env::temp_dir().join(format!(
+        "lan-default-{}",
+        crate::service::random_id().unwrap()
+    ));
+    fs::create_dir(&root).unwrap();
+    let network = Network::new(&root, NetworkConfig::default());
+    let choice = network.resolve_work_network("test");
+    fs::remove_dir_all(&root).unwrap();
+    assert_eq!(
+        choice,
+        NetworkChoice(Some((ip, runtime::iroh_host::LanPolicy::private_only())))
+    );
+    assert!(!choice.allows(std::net::SocketAddr::from(([127, 0, 0, 1], 9))));
+}
+fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketAddr)) {
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
     seed.exchange
@@ -404,6 +470,14 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
         .work
         .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
         .unwrap();
+    {
+        let resident = lock(&ports.work.resident);
+        assert_eq!(resident.bindings.len(), 2);
+        for binding in &resident.bindings {
+            assert!(binding.address().ip_addrs().count() > 0);
+            binding.address().ip_addrs().copied().for_each(on);
+        }
+    }
     let called = Arc::new(AtomicUsize::new(0));
     {
         let mut resident = lock(&ports.work.resident);
