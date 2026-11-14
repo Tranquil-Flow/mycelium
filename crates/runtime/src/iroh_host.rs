@@ -252,7 +252,8 @@ pub struct LoopbackHost<'a> {
     lan: Option<Arc<Admission>>,
     /// Direct LAN: the one bound socket (owned by the LAN transport).
     lan_socket: Option<SocketAddr>,
-    /// Direct LAN: inbound handshakes in flight, bounded and concurrent.
+    /// Inbound handshakes in flight (both modes), bounded and concurrent, and
+    /// completed connections a window ended on, for the next `accept`.
     handshakes: Mutex<tokio::task::JoinSet<Handshake>>,
     /// Bridges `Endpoint::watch_addr` into the watch channel the address gate reads.
     address_task: Option<tokio::task::JoinHandle<()>>,
@@ -269,7 +270,7 @@ struct LanReuse {
     secret: iroh::SecretKey,
     alpns: Vec<Vec<u8>>,
 }
-type Handshake = Result<(Connection, Pin), Error>;
+type Handshake = Result<(Connection, Option<Pin>), Error>;
 /// The builder of a direct-LAN endpoint: no relay, no address lookup and NO
 /// IP transport; the pre-send LAN transport owns the one bound socket (see
 /// `iroh_lan_filter`).
@@ -766,40 +767,42 @@ impl<'a> LoopbackHost<'a> {
     /// TLS authenticates an endpoint, not membership. Pass the connection to
     /// RouterReceiver::new with the independent current allow-list binding.
     ///
+    /// Both modes run inbound handshakes CONCURRENTLY in a pool the host owns
+    /// (at most `RelayConnectionSlots` in flight, each capped at
+    /// `SidecarLocalHandshake`), so N stalled handshakes cost one cap, not N,
+    /// and `deadline` bounds only this call's wait, never a handshake already
+    /// started: handshakes still in flight when it passes carry over to the
+    /// next call (REVIEW-laneLAN-r2 R2-1: callers accept in `OwnerPoll`
+    /// windows and call again). The call returns the first completed
+    /// connection, or `Authentication` for one refused/failed handshake
+    /// (callers keep accepting). A connection that completed as `deadline`
+    /// passed is not closed as late: this call returns the deadline error and
+    /// hands the connection to the next call, because every caller either
+    /// accepts again or closes the host, and the host's close ends it with the
+    /// handshakes still in flight.
+    ///
     /// Direct LAN: an inbound source outside the admission is ignored before
-    /// any answer; an admitted source is pinned exactly, then its handshake
-    /// runs CONCURRENTLY with others (at most `RelayConnectionSlots` in flight,
-    /// each capped at `SidecarLocalHandshake`), so N stalled handshakes cost one
-    /// cap, not N. The call returns the first completed connection, or
-    /// `Authentication` for one refused/failed handshake (callers keep
-    /// accepting; handshakes still in flight carry over to the next call). The
-    /// admitted connection is confined to admitted paths.
+    /// any answer; an admitted source is pinned exactly before its handshake
+    /// answers; the admitted connection is confined to admitted paths.
+    /// LocalOnly admits whom it always did: any dialer on 127.0.0.1 (callers
+    /// check the key).
     pub fn accept(&self, clock: &impl Clock, deadline: MonoInstant) -> Result<Connection, Error> {
         outside_runtime()?;
         let endpoint = self.endpoint()?;
         let wait = allowance(clock, deadline)?;
-        let (connection, pin) = match &self.lan {
-            None => (
-                self.runtime.block_on(async {
-                    tokio::time::timeout(wait, async {
-                        let incoming = endpoint.accept().await.ok_or(Error::Unavailable)?;
-                        incoming.await.map_err(|_| Error::Authentication)
-                    })
-                    .await
-                    .map_err(|_| Error::Expired)?
-                })?,
-                None,
-            ),
-            Some(admission) => {
-                let (connection, pin) = self.accept_lan(endpoint, admission, wait)?;
-                (connection, Some(pin))
-            }
-        };
+        let (connection, pin) = self.accept_pooled(endpoint, self.lan.as_ref(), wait)?;
         if let Err(error) = allowance(clock, deadline) {
-            return Err(late_outcome(error, self.close_late(connection)));
+            self.hand_on(connection, pin)?;
+            return Err(error);
         }
         self.confine(&connection, pin)?;
         Ok(connection)
+    }
+    /// Keep a completed, admitted connection for the next [`Self::accept`].
+    fn hand_on(&self, connection: Connection, pin: Option<Pin>) -> Result<(), Error> {
+        let mut pool = self.handshakes.lock().map_err(|_| Error::Unavailable)?;
+        pool.spawn_on(async move { Ok((connection, pin)) }, self.runtime.handle());
+        Ok(())
     }
     /// A connection that completed after the caller's deadline: close it with
     /// `deadline` and put that close on the wire before returning (see
@@ -811,12 +814,12 @@ impl<'a> LoopbackHost<'a> {
         self.runtime
             .block_on(flush_close(self.endpoint()?, &closed, remote))
     }
-    fn accept_lan(
+    fn accept_pooled(
         &self,
         endpoint: &Endpoint,
-        admission: &Arc<Admission>,
+        admission: Option<&Arc<Admission>>,
         wait: Duration,
-    ) -> Result<(Connection, Pin), Error> {
+    ) -> Result<(Connection, Option<Pin>), Error> {
         enum Next {
             Done(Option<Result<Handshake, tokio::task::JoinError>>),
             Arrived(Option<Box<iroh::endpoint::Incoming>>),
@@ -840,28 +843,34 @@ impl<'a> LoopbackHost<'a> {
                         Next::Arrived(None) => return Err(Error::Unavailable),
                         Next::Arrived(Some(incoming)) => *incoming,
                     };
-                    // An inbound source outside the admission is ignored before
-                    // any handshake work or answer, whatever key it presents.
-                    let source = match incoming.remote_addr() {
-                        iroh::endpoint::IncomingAddr::Custom(custom) => from_custom(&custom),
-                        _ => None,
-                    };
-                    let Some(source) = source.filter(|s| admission.may_accept(*s)) else {
-                        incoming.ignore();
-                        return Err(Error::Authentication);
-                    };
-                    // Pinned BEFORE the handshake answers, released if it fails.
-                    // Provisional: an unauthenticated source never takes (or
-                    // blocks) an authenticated pin. A full provisional table is
-                    // one refused inbound, never a reason to stop accepting.
-                    let mut pin = match admission.pin_provisional([source]) {
-                        Ok(pin) => pin,
-                        Err(_) => {
-                            incoming.ignore();
-                            return Err(Error::Authentication);
+                    let lan = match admission {
+                        None => None,
+                        Some(admission) => {
+                            // An inbound source outside the admission is ignored before
+                            // any handshake work or answer, whatever key it presents.
+                            let source = match incoming.remote_addr() {
+                                iroh::endpoint::IncomingAddr::Custom(custom) => {
+                                    from_custom(&custom)
+                                }
+                                _ => None,
+                            };
+                            let Some(source) = source.filter(|s| admission.may_accept(*s)) else {
+                                incoming.ignore();
+                                return Err(Error::Authentication);
+                            };
+                            // Pinned BEFORE the handshake answers, released if it fails.
+                            // Provisional: an unauthenticated source never takes (or
+                            // blocks) an authenticated pin. A full provisional table is
+                            // one refused inbound, never a reason to stop accepting.
+                            match admission.pin_provisional([source]) {
+                                Ok(pin) => Some((admission.clone(), source, pin)),
+                                Err(_) => {
+                                    incoming.ignore();
+                                    return Err(Error::Authentication);
+                                }
+                            }
                         }
                     };
-                    let admission = admission.clone();
                     pool.spawn(async move {
                         // A stalled handshake must not hold the caller's window.
                         // A failed one frees its receive-filter slot at once
@@ -869,9 +878,15 @@ impl<'a> LoopbackHost<'a> {
                         let connection = match tokio::time::timeout(handshake, incoming).await {
                             Ok(Ok(connection)) => connection,
                             Ok(Err(_)) | Err(_) => {
-                                pin.refuse();
+                                if let Some((_, _, pin)) = lan {
+                                    pin.refuse();
+                                }
                                 return Err(Error::Authentication);
                             }
+                        };
+                        // LocalOnly: the caller verifies the key.
+                        let Some((admission, source, mut pin)) = lan else {
+                            return Ok((connection, None));
                         };
                         match admission.admits_key(&connection.remote_id()) {
                             // Not an admitted peer key: refused here, unpinned
@@ -896,7 +911,7 @@ impl<'a> LoopbackHost<'a> {
                             // stays provisional (its own capacity).
                             None => pin.remember(),
                         }
-                        Ok((connection, pin))
+                        Ok((connection, Some(pin)))
                     });
                 }
             })

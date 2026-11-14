@@ -118,6 +118,7 @@ impl Hold {
         self.answered.recv_timeout(within).is_ok()
     }
     /// Drop every client datagram from now on (the server keeps waiting for them).
+    #[allow(dead_code)] // the api suite's stalled peer; the runtime suite releases instead
     pub fn freeze(&self) {
         self.shared.frozen.store(true, Ordering::SeqCst);
     }
