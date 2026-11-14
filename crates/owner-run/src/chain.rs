@@ -36,21 +36,25 @@ pub trait StepEnv {
     fn record_exception(&mut self, code: &str, class: &str);
     /// `ctx.stop_event.wait(interval)`: sleeps up to `seconds`; true when Stop ended the wait.
     fn pause(&mut self, seconds: f64) -> bool;
-    /// Run a short publication `commit` so that the owner's Stop cannot land between its checks
-    /// and its effect (`with OwnerRun._lock: if ctx.stop_event.is_set(): raise _Stopped()`,
-    /// `demo_chain.py:1074-1080 @ f4e366e9`): a Stop that came first ends the step stopped and
+    /// Run a short publication `commit` and, when it succeeds, `ctx.result[key] = value`, so that
+    /// the owner's Stop cannot land between the checks and the effect (`with OwnerRun._lock: if
+    /// ctx.stop_event.is_set(): raise _Stopped()` ... `ctx.result['registry_origin'] = origin`,
+    /// `demo_chain.py:1074-1097 @ f4e366e9`): a Stop that came first ends the step stopped and
     /// `commit` never runs; a Stop that comes later waits until `commit` returned. `commit` must
     /// not call back into this environment (no progress, result or clock) and must not block on
-    /// anything remote. This default only checks first; the threaded Runner holds its stop event
-    /// across `commit`.
+    /// anything remote. This default only checks first.
     fn fenced(
         &mut self,
         commit: &mut dyn FnMut() -> Result<(), StepError>,
+        key: &str,
+        value: Value,
     ) -> Result<(), StepError> {
         if self.stopped() {
             return Err(StepError::Stopped);
         }
-        commit()
+        commit()?;
+        self.set_result(key, value);
+        Ok(())
     }
 }
 

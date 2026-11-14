@@ -200,17 +200,15 @@ pub fn run_serving_step(
         manifest_digest: model.manifest_digest.clone(),
         per_node,
     };
-    // :1064-1097: the Stop check, the workflow re-checks and the in-memory commit under the owner's
-    // Stop fence and the host's workflow lock; nothing is published when any of them refuses.
+    // :1064-1097: the Stop check, the workflow re-checks, the in-memory commit and
+    // `ctx.result['registry_origin']` under the owner's fence and the host's workflow lock;
+    // nothing is published when any of them refuses.
     workflow.commit_serving(
         state,
         &announcement,
         state.work_limits.as_ref(),
-        &mut |commit| env.fenced(commit),
+        &mut |commit| env.fenced(commit, "registry_origin", origin.clone()),
     )?;
-    // Written after the fence: a result write takes the Runner's run lock, which it orders before
-    // its stop event (the oracle writes `ctx.result['registry_origin']` inside the lock, :1097).
-    env.set_result("registry_origin", origin);
     publish_participants(env, reports, state)?;
     env.progress("route ready: open the chat");
     Ok(())

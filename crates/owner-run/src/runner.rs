@@ -236,6 +236,8 @@ impl StepEnv for Env<'_> {
     fn fenced(
         &mut self,
         commit: &mut dyn FnMut() -> Result<(), StepError>,
+        key: &str,
+        value: Value,
     ) -> Result<(), StepError> {
         let set = lock(&self.shared.stop.set);
         if *set {
@@ -243,7 +245,9 @@ impl StepEnv for Env<'_> {
         }
         let result = commit();
         drop(set);
-        result
+        result?;
+        self.set_result(key, value);
+        Ok(())
     }
     fn pause(&mut self, seconds: f64) -> bool {
         if self.shared.clocks.simulated() {
