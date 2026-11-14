@@ -409,3 +409,247 @@ fn with_no_workflow_the_monitor_ticks_the_local_contributor_before_answering_mis
         "the monitor ticks this Mac's own contributor: {after:?}"
     );
 }
+
+/// The executed v0.1.4 publish/targets fixture (owner-run's `oracle_work_r15_v2.json`).
+fn work_fixture() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../../owner-run/tests/fixtures/oracle_work_r15_v2.json"
+    ))
+    .unwrap()
+}
+
+/// The fixture's own time, clock reads and step outputs (as owner-run's `oracle_work.rs` replay).
+#[derive(Default)]
+struct Record {
+    time: f64,
+    calls: Vec<Value>,
+    clocks: Vec<Value>,
+    result: Value,
+    progress: Vec<Value>,
+    publishes: Vec<Value>,
+    stop: Option<f64>,
+}
+struct Replayed<'a>(&'a Mutex<Record>);
+impl StepEnv for Replayed<'_> {
+    fn progress(&mut self, detail: &str) {
+        lock(self.0).progress.push(json!(detail));
+    }
+    fn stopped(&self) -> bool {
+        let rec = lock(self.0);
+        rec.stop.is_some_and(|at| rec.time >= at)
+    }
+    fn now(&mut self) -> f64 {
+        let mut rec = lock(self.0);
+        let t = rec.time;
+        rec.clocks.push(json!(["mono", t]));
+        t
+    }
+    fn wall(&mut self) -> f64 {
+        let mut rec = lock(self.0);
+        let t = 1_800_000_000.0 + rec.time;
+        rec.clocks.push(json!(["wall", t]));
+        t
+    }
+    fn set_result(&mut self, key: &str, value: Value) {
+        let mut rec = lock(self.0);
+        if key == "participants" {
+            rec.publishes.push(value.clone());
+        }
+        rec.result[key] = value;
+    }
+    fn record_exception(&mut self, _: &str, _: &str) {
+        panic!("unexpected cleanup exception");
+    }
+    fn pause(&mut self, seconds: f64) -> bool {
+        lock(self.0).time += seconds;
+        self.stopped()
+    }
+}
+/// The fixture's exchange double: its report frames, members and the local tick.
+struct FixtureReports<'a>(&'a Mutex<Record>, Value);
+impl ReportsPort for FixtureReports<'_> {
+    fn forget_reports(&mut self) {
+        panic!("cannot forget");
+    }
+    fn announce(&mut self, _: &Announcement) -> Result<(), StepError> {
+        panic!("cannot announce");
+    }
+    fn reports(&mut self) -> Result<BTreeMap<String, Value>, StepError> {
+        let mut rec = lock(self.0);
+        rec.calls.push(json!("reports"));
+        let frame = self.1["reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rfind(|f| f[0].as_f64().unwrap() <= rec.time)
+            .map_or(Value::Null, |f| f[1].clone());
+        Ok(serde_json::from_value(frame).unwrap())
+    }
+    fn members(&mut self) -> Vec<MemberRow> {
+        lock(self.0).calls.push(json!("members"));
+        self.1["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| MemberRow {
+                node_id: m["node_id"].as_str().unwrap().into(),
+                lifecycle_state: m["lifecycle_state"].as_str().map(str::to_owned),
+                lease_expires_at: m["lease_expires_at"].as_f64(),
+            })
+            .collect()
+    }
+    fn own_node_id(&mut self) -> Option<String> {
+        Some("owner-authority".into())
+    }
+    fn member_identity(&mut self, _: &str) -> Value {
+        panic!("no identity reread");
+    }
+    fn clock_skew(&mut self, _: &[String]) -> Result<Option<ClockSkew>, StepError> {
+        panic!("no skew read");
+    }
+    fn tick_local(&mut self) {
+        lock(self.0).calls.push(json!("tick"));
+    }
+}
+/// The fixture case's run state (owner-run `oracle_work.rs` `state_of`).
+fn work_state(spec: &Value) -> RunState {
+    use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
+    let s = &spec["state"];
+    let m = &spec["model"];
+    let mut state = RunState::new("run-1", "dep-1", owner_run::Reason::Start);
+    state.local_node = s["local_node"].as_str().map(str::to_owned);
+    state.descriptors = serde_json::from_value(s["descriptors"].clone()).unwrap();
+    state.rollover_binding = s.get("rollover_binding").cloned();
+    state.participants = serde_json::from_value(s["participants"].clone()).unwrap();
+    state.proposal = s.get("proposal").cloned();
+    state.compile_state = (!s["compile_state"].is_null()).then(|| s["compile_state"].clone());
+    state.worker_wall_limits = serde_json::from_value(s["worker_wall_limits"].clone()).unwrap();
+    state.layers = serde_json::from_value(s["layers"].clone()).unwrap();
+    let digest: String = s["manifest_digest"].as_str().unwrap().into();
+    state.model = Some(ModelStepOutput {
+        forced_slice: false,
+        prepared: PreparedSource {
+            model: PreparedModel {
+                model_id: m["model_id"].as_str().unwrap().into(),
+                resolved_commit: m["resolved_commit"].as_str().unwrap().into(),
+                architecture: m["architecture"].as_str().unwrap().into(),
+                label: m["label"].as_str().unwrap().into(),
+                choice: m["choice"].as_str().map(str::to_owned),
+                shape_registered: true,
+                owner_storage_need: m["owner_storage_need"].as_u64().unwrap(),
+            },
+            manifest_digest: digest.clone(),
+            source_bytes: json!(123),
+        },
+        choice: m["choice"].as_str().map(str::to_owned),
+        slice_mode: s["slice_mode"].as_bool().unwrap(),
+        manifest_digest: digest,
+        model_id: m["model_id"].as_str().unwrap().into(),
+        resolved_commit: m["resolved_commit"].as_str().unwrap().into(),
+    });
+    state.execution_clock_started_at = s["execution_clock_started_at"].as_f64();
+    state.registry_origin = s.get("registry_origin").cloned();
+    state
+}
+fn rle(xs: &[Value]) -> Value {
+    let mut out: Vec<Value> = vec![];
+    for x in xs {
+        if let Some(last) = out.last_mut().filter(|v| v[0] == *x) {
+            last[1] = json!(last[1].as_u64().unwrap() + 1);
+        } else {
+            out.push(json!([x, 1]));
+        }
+    }
+    json!(out)
+}
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r2-opus R2-9: the packaged host's absent-workflow `null`
+/// (round 2) reaches the targets step's `_workflow_state() or {}` (demo_chain.py:434-436, 952):
+/// the REAL targets step over the REAL packaged adapter with no workflow resident ends exactly as
+/// the executed v0.1.4 case `targets-no-workflow` does: outcome, results, published
+/// participants, collaborator calls, clock reads and elapsed time.)
+#[test]
+fn the_targets_step_over_an_absent_packaged_workflow_matches_its_oracle_case() {
+    let f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    assert!(
+        lock(&ports.work.resident).work.is_none(),
+        "no workflow is resident"
+    );
+    let fixture = work_fixture();
+    let case = &fixture["cases"]["targets-no-workflow"];
+    let spec = &case["spec"];
+    assert_eq!(spec["no_workflow"], true);
+    let rec = Mutex::new(Record {
+        result: json!({}),
+        stop: spec["stop_at"].as_f64(),
+        ..Record::default()
+    });
+    let mut state = work_state(spec);
+    let poll = span(BudgetId::OwnerPoll).unwrap().as_secs_f64();
+    let result = owner_run::steps::targets::run_targets_step(
+        &mut Replayed(&rec),
+        &mut FixtureReports(&rec, spec.clone()),
+        &mut ports.work,
+        &mut state,
+        poll,
+    );
+    let rec = lock(&rec);
+    let outcome = match result {
+        Ok(()) => json!({"kind": "ok"}),
+        Err(StepError::Stopped) => json!({"kind": "stopped"}),
+        Err(StepError::Exception { class }) => json!({"kind": "exception", "class": class}),
+        Err(StepError::Refused(e)) => {
+            json!({"kind": "refused", "code": e.code, "message": e.message})
+        }
+    };
+    assert_eq!(outcome, case["outcome"]);
+    assert_eq!(rec.result, case["result"]);
+    assert_eq!(rle(&rec.progress), case["progress"]);
+    assert_eq!(rle(&rec.publishes), case["publishes"]);
+    assert_eq!(rle(&rec.calls), case["calls"]);
+    assert_eq!(rle(&rec.clocks), case["clocks"]);
+    assert_eq!(json!(rec.time), case["time"]);
+}
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r2-opus R2-9: the absent-workflow `null` cannot reach the
+/// publish step's workflow read on the packaged host: with no workflow resident, publish ends
+/// where it ended before round 2, refusing `owner_work_unavailable` at its first call
+/// (`install_cleanup_progress`), before any clock read, workflow read or announcement. v0.1.4's
+/// `publish-no-workflow` case instead skips the install and starts serving through
+/// `ChainOps.start_serving`, which composes no workflow on this host: a pre-existing difference
+/// of the packaged composition (its workflow is composed in the slices step), not of the
+/// absent-workflow read, and outside lane SRV.)
+#[test]
+fn the_publish_step_over_an_absent_packaged_workflow_refuses_before_reading_it() {
+    let f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let fixture = work_fixture();
+    let spec = &fixture["cases"]["publish-no-workflow"]["spec"];
+    let rec = Mutex::new(Record {
+        result: json!({}),
+        ..Record::default()
+    });
+    let mut state = work_state(spec);
+    let poll = span(BudgetId::OwnerPoll).unwrap().as_secs_f64();
+    let result = owner_run::steps::publish::run_publish_step(
+        &mut Replayed(&rec),
+        &mut FixtureReports(&rec, spec.clone()),
+        &mut ports.work,
+        &mut state,
+        poll,
+    );
+    let rec = lock(&rec);
+    assert!(
+        matches!(&result, Err(StepError::Refused(e)) if e.code == "owner_work_unavailable"),
+        "{result:?}"
+    );
+    assert_eq!(rec.result, json!({}), "nothing published");
+    assert!(
+        rec.calls.is_empty() && rec.clocks.is_empty(),
+        "{:?} {:?}",
+        rec.calls,
+        rec.clocks
+    );
+    assert_eq!(state.execution_clock_started_at, None);
+}
