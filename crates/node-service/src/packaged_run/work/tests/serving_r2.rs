@@ -38,7 +38,7 @@ fn status_period() -> Duration {
 }
 
 /// The run's own state over the fixture's two Macs, with the compile phase announced.
-fn run_state(f: &mut Fixture, work: &Work, run: &str, deployment: &str) -> RunState {
+pub(super) fn run_state(f: &mut Fixture, work: &Work, run: &str, deployment: &str) -> RunState {
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
     seed.exchange
         .set_owner_control(Some(OwnerControl::new(work.owner.public())));

@@ -371,3 +371,41 @@ fn dropping_the_status_loop_waits_for_it_at_most_the_source_join() {
         "dropping the status loop must not wait past its join allowance"
     );
 }
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r2-opus R2-10: with no workflow resident, the packaged
+/// monitor keeps this Mac's own contributor reporting before it answers
+/// `managed_workflow_missing`, as v0.1.4's `monitor` runs `self._tick_local()` between the ceiling
+/// and the workflow read (demo_chain.py:1166-1176).)
+#[test]
+fn with_no_workflow_the_monitor_ticks_the_local_contributor_before_answering_missing() {
+    use owner_run::{
+        machine::MonitorProbe, owner_chain::ChainPorts as _,
+        steps::contributor::ContributorPort as _,
+    };
+    let mut f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = super::serving_r2::run_state(&mut f, &ports.work, "run-tick", "dep-tick");
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    ports.close_work().unwrap();
+    let local = state.local_node.clone().unwrap();
+    ports.contributor.attach_agent(&local).unwrap();
+    let before = ports.reports.reports().unwrap();
+    let probe = ports.monitor(&state);
+    let after = ports.reports.reports().unwrap();
+    assert_eq!(
+        probe,
+        MonitorProbe::Code(Some("managed_workflow_missing".into()))
+    );
+    assert!(
+        !before.contains_key(&local),
+        "this Mac had not reported yet: {before:?}"
+    );
+    assert!(
+        after.contains_key(&local),
+        "the monitor ticks this Mac's own contributor: {after:?}"
+    );
+}
