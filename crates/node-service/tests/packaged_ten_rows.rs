@@ -705,18 +705,29 @@ fn chat_row(
         json!({"got": got, "expected": expected}),
     );
     ev.row(with(row, "result", json!("failed")));
-    // Diagnostic only (not the row): a chat that fits the route's KV context (prompt + 4).
-    let (small, small_pieces) = chat(mac, ev, &format!("{label}_diagnostic_4"), 4);
-    ev.note(
-        &format!("{label}_diagnostic_4"),
-        json!({"last": small, "got": small_pieces.iter().map(|p| &p.0).collect::<Vec<_>>(),
-            "expected": reference_pieces(codec, 4)}),
+    // A second row, not a substitute: the longest chat the route's stages admit (their KV context
+    // is the challenge's prompt + 4, REPORT-laneTEN D6), compared token for token as above.
+    let (small, small_pieces) = chat(mac, ev, &format!("{label}_within_capacity"), 4);
+    let small_got: Vec<String> = small_pieces.iter().map(|p| p.0.clone()).collect();
+    let small_expected = reference_pieces(codec, 4);
+    let passed = small["terminal"] == "completed" && small_got == small_expected;
+    ev.row(
+        json!({"row": format!("{label} chat within the stages' 39-token context (4 tokens)"),
+        "result": if passed { "passed" } else { "failed" },
+        "wall_ms": small_pieces.last().map(|p| p.1), "ttft_ms": small_pieces.first().map(|p| p.1),
+        "pieces": small_got, "expected": small_expected,
+        "status_line": {"terminal": small["terminal"], "error": small["error"]}}),
     );
     Err(format!(
-        "chat {label}: terminal={} error={} pieces={}",
+        "chat {label}: terminal={} error={} pieces={}; within the 39-token context: {}",
         last["terminal"],
         last["error"],
-        got.len()
+        got.len(),
+        if passed {
+            "equal to the reference"
+        } else {
+            "FAILED"
+        }
     ))
 }
 
