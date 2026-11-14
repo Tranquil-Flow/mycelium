@@ -118,11 +118,19 @@ fn info_plist_has_the_released_v014_key_set_and_values_except_the_named_differen
         )),
         "the Local Network usage text is missing"
     );
+    // REVIEW-laneLAN LAN-A4 / F7: true from both sides (the owner's Mac and a joined Mac), and no
+    // absolute promise the transport does not keep (an unjoined private-network device can get a
+    // handshake answer before its key is refused).
+    let text = bundle::LOCAL_NETWORK_USAGE;
     assert!(
-        bundle::LOCAL_NETWORK_USAGE.contains("Macs you joined")
-            && bundle::LOCAL_NETWORK_USAGE.contains("same network")
-            && !bundle::LOCAL_NETWORK_USAGE.contains(['<', '>', '&']),
-        "plain text naming what is sent and to whom"
+        text.contains("Macs joined to your swarm")
+            && text.contains("on this network")
+            && text.contains("does not scan your network")
+            && text.contains("public relays")
+            && !text.contains("Macs you joined")
+            && !text.contains("does not contact")
+            && !text.contains(['<', '>', '&']),
+        "plain text naming what is sent and to whom, true on both Macs: {text}"
     );
     let mut keys = vec![
         "NSHighResolutionCapable".to_string(),
