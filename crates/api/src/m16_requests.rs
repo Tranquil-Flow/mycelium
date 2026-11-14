@@ -44,12 +44,26 @@ pub trait Host: Send + Sync {
     fn qualification(&self) -> Result<Value, PublicError>;
     /// Tokenize/validate against the selected model, generate id and secret owner token.
     fn prepare(&self, submission: &Value) -> Result<Prepared, PublicError>;
+    /// The route's startup challenge: validate exact prompt token ids (no tokenizer) for
+    /// `max_new_tokens`, generate id and secret owner token. A host that cannot run one refuses.
+    fn prepare_tokens(
+        &self,
+        _prompt: &[u32],
+        _max_new_tokens: u64,
+        _qos_class: &str,
+    ) -> Result<Prepared, PublicError> {
+        Err(error("startup_challenge_unsupported"))
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Dispatch {
     pub context: RequestContext,
     pub identity: RouteIdentity,
     pub manifest: Value,
+    /// The route's product stop tokens end this request. False ONLY for the route's startup
+    /// challenge (`_stop_token_ids_override=frozenset()`, route.py:4563-4590 @ f4e366e9): a
+    /// request-local override, never a change of the route-wide stop set.
+    pub product_stop_tokens: bool,
 }
 pub enum Execution {
     Pending,
@@ -81,6 +95,8 @@ struct Entry {
     progress_refusal: Option<&'static str>,
     next_token: u64,
     max_tokens: u64,
+    /// [`Dispatch::product_stop_tokens`].
+    product_stop_tokens: bool,
 }
 struct State {
     runtime: LiveM16Runtime,
@@ -284,6 +300,58 @@ impl Shared {
         e.phase = Phase::PublicationPending;
         self.publish(s, id)
     }
+    /// Admit a prepared request (coordinator, registry, owner entry): the one admission tail of
+    /// every request on this route, product or startup challenge.
+    fn admit(
+        &self,
+        s: &mut State,
+        qualification: Value,
+        p: Prepared,
+        profile: &str,
+        max_tokens: u64,
+        product_stop_tokens: bool,
+    ) -> Result<Accepted, PublicError> {
+        let now = Self::now(s)?;
+        let id = p.context.request_id.clone();
+        // Consume before calling: even a rejected path can retain ledger/history records.
+        s.admission_attempts += 1;
+        s.runtime
+            .coordinator
+            .admit(&p.context, profile, &p.excluded_placements)
+            .map_err(coordinator)?;
+        let mut evicted = Vec::new();
+        if let Err(e) = s
+            .registry
+            .submit(&id, Some(&p.owner_token), now, &mut evicted)
+        {
+            if !s.runtime.coordinator.cancel(&id) {
+                return Err(error("m16_admission_rollback_failed"));
+            }
+            return Err(registry(e));
+        }
+        // Room was checked before admission; this owner never permits registry eviction.
+        if !evicted.is_empty() {
+            return Err(error("m16_unexpected_registry_eviction"));
+        }
+        s.entries.insert(
+            id.clone(),
+            Entry {
+                qualification,
+                phase: Phase::Queued,
+                outcome: "completed",
+                failure: None,
+                progress_refusal: None,
+                next_token: 0,
+                max_tokens,
+                product_stop_tokens,
+            },
+        );
+        self.changed.notify_all();
+        Ok(Accepted {
+            request_id: id,
+            session_token: p.owner_token,
+        })
+    }
 }
 impl M16Requests {
     pub fn new(
@@ -357,6 +425,11 @@ impl M16Requests {
                     .coordinator
                     .path_manifest(&id)
                     .map_err(|e| error(e.code))?,
+                product_stop_tokens: s
+                    .entries
+                    .get(&id)
+                    .ok_or(error("m16_dispatch_unknown_request"))?
+                    .product_stop_tokens,
             };
             s.entries
                 .get_mut(&id)
@@ -388,6 +461,63 @@ impl M16Requests {
             1 => Err(refusals.remove(0)),
             _ => Err(error("m16_multiple_progress_refusals")),
         }
+    }
+    /// The route's startup challenge (`infer_startup_challenge`, route.py:4563-4590 @ f4e366e9):
+    /// the exact `prompt` token ids for exactly `max_new_tokens` new tokens, under the host's
+    /// CURRENT qualification, admitted, dispatched, executed and settled as every request on this
+    /// route is, with the product stop tokens disabled for this request only. The caller reads
+    /// the tokens that came back through [`Service::subscribe`] with the returned owner token,
+    /// and must cancel it if it stops reading before its terminal.
+    pub fn submit_startup_challenge(
+        &self,
+        prompt: &[u32],
+        max_new_tokens: u64,
+    ) -> Result<Accepted, PublicError> {
+        const PROFILE: &str = "interactive";
+        // `infer`: `max_new_tokens < 1` is invalid (route.py:4621-4628); the workflow counts at
+        // most 4096 challenge tokens (workflow.py:206).
+        if prompt.is_empty() || !(1..=4096).contains(&max_new_tokens) {
+            return Err(error("invalid_inference_request"));
+        }
+        let sh = &self.shared;
+        let mut s = sh.lock()?;
+        let qualification = sh.host.qualification()?;
+        for field in [
+            "deployment_id",
+            "deployment_epoch",
+            "topology_version",
+            "model_id",
+            "resolved_commit",
+            "manifest_digest",
+        ] {
+            if qualification[field] != s.runtime.graph.as_value()[field] {
+                return Err(error("qualification_mismatch"));
+            }
+        }
+        if s.entries.len() >= sh.config.max_sessions {
+            return Err(error("gateway_capacity_exhausted"));
+        }
+        if s.admission_attempts >= sh.config.max_sessions {
+            return Err(error("m16_admission_attempt_budget_exhausted"));
+        }
+        let p = sh.host.prepare_tokens(prompt, max_new_tokens, PROFILE)?;
+        if !registry::valid_request_id(&p.context.request_id) {
+            return Err(error("invalid_request_id"));
+        }
+        if !crate::requests::valid_owner_token(&p.owner_token) {
+            return Err(error("invalid_session_token"));
+        }
+        if s.entries.contains_key(&p.context.request_id) {
+            return Err(error("duplicate_request_id"));
+        }
+        if p.context.qos_class != PROFILE
+            || Some(p.context.max_new_tokens.clone()) != PyReal::from_json(&json!(max_new_tokens))
+            || p.context.prompt_token_ids.len() != prompt.len()
+        {
+            return Err(error("m16_prepared_request_mismatch"));
+        }
+        sh.current(&qualification)?;
+        sh.admit(&mut s, qualification, p, PROFILE, max_new_tokens, false)
     }
     /// All retained per-owner refusal codes, including settlement/publication failures.
     /// A tick still advances other owners before returning a refusal (aggregate if multiple).
@@ -518,50 +648,20 @@ impl Service for M16Requests {
             return Err(error("m16_prepared_request_mismatch"));
         }
         sh.current(&document["qualification"])?;
-        let now = Shared::now(&s)?;
-        let id = p.context.request_id.clone();
         let profile = document["workload_profile_id"]
             .as_str()
             .ok_or(error("invalid_workload_profile_id"))?;
-        // Consume before calling: even a rejected path can retain ledger/history records.
-        s.admission_attempts += 1;
-        s.runtime
-            .coordinator
-            .admit(&p.context, profile, &p.excluded_placements)
-            .map_err(coordinator)?;
-        let mut evicted = Vec::new();
-        if let Err(e) = s
-            .registry
-            .submit(&id, Some(&p.owner_token), now, &mut evicted)
-        {
-            if !s.runtime.coordinator.cancel(&id) {
-                return Err(error("m16_admission_rollback_failed"));
-            }
-            return Err(registry(e));
-        }
-        // Room was checked before admission; this owner never permits registry eviction.
-        if !evicted.is_empty() {
-            return Err(error("m16_unexpected_registry_eviction"));
-        }
-        s.entries.insert(
-            id.clone(),
-            Entry {
-                qualification: document["qualification"].clone(),
-                phase: Phase::Queued,
-                outcome: "completed",
-                failure: None,
-                progress_refusal: None,
-                next_token: 0,
-                max_tokens: document["max_new_tokens"]
-                    .as_u64()
-                    .ok_or(error("invalid_max_new_tokens"))?,
-            },
-        );
-        sh.changed.notify_all();
-        Ok(Accepted {
-            request_id: id,
-            session_token: p.owner_token,
-        })
+        let max_tokens = document["max_new_tokens"]
+            .as_u64()
+            .ok_or(error("invalid_max_new_tokens"))?;
+        sh.admit(
+            &mut s,
+            document["qualification"].clone(),
+            p,
+            profile,
+            max_tokens,
+            true,
+        )
     }
     fn cancel(&self, id: &str, token: Option<&str>) -> Result<bool, PublicError> {
         let sh = &self.shared;
