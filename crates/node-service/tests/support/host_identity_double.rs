@@ -192,4 +192,7 @@ impl ObserveDouble for HostIdentityTestDouble {
     fn teardown(&mut self) -> Result<(), String> {
         self.0.host_mut().backend.0.teardown()
     }
+    fn end_run(&mut self) {
+        self.0.end_run()
+    }
 }

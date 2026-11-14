@@ -87,6 +87,8 @@ pub trait ObserveDouble: ObservePort + Send {
     fn context(&self) -> Option<&ObservationContext>;
     /// `chain.teardown`'s observation half (the offers' cleanup and retirement).
     fn teardown(&mut self) -> Result<(), String>;
+    /// The teardown's last act: end the run's context (`ObserveAdapter::end_run`).
+    fn end_run(&mut self);
 }
 /// Builds a test's [`ObserveDouble`] over the run's real observation backend.
 pub type ObserveTestDouble =
@@ -541,19 +543,27 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
             .lock()
             .map_err(|_| "compiler_state_unavailable".to_owned())?
             .teardown();
+        // The context ends with the run whatever its cleanup answered (demo_chain.py:1436): the
+        // ports live as long as the host (`work::Composed`), and the next Start prepares anew.
         let observation = match &self.observation {
-            Observe::Real(observation) => observation
-                .0
-                .lock()
-                .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
-                .host_mut()
-                .backend
-                .teardown(),
-            Observe::TestDouble(double) => double
-                .0
-                .lock()
-                .map_err(|_| "managed_owner_lock_unavailable".to_owned())?
-                .teardown(),
+            Observe::Real(observation) => {
+                let mut adapter = observation
+                    .0
+                    .lock()
+                    .map_err(|_| "managed_owner_lock_unavailable".to_owned())?;
+                let result = adapter.host_mut().backend.teardown();
+                adapter.end_run();
+                result
+            }
+            Observe::TestDouble(double) => {
+                let mut double = double
+                    .0
+                    .lock()
+                    .map_err(|_| "managed_owner_lock_unavailable".to_owned())?;
+                let result = double.teardown();
+                double.end_run();
+                result
+            }
         };
         work.and(compilation).and(observation)
     }

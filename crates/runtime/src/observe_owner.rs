@@ -44,6 +44,12 @@ impl<H, C, T> ObserveAdapter<H, C, T> {
     pub fn host_mut(&mut self) -> &mut H {
         &mut self.host
     }
+    /// The run's teardown ends its context last, whatever failed before
+    /// (`app._observation_context = None`, demo_chain.py:1436 @ f4e366e9): the next run's
+    /// `prepare` opens its own (app.py:1405-1406 refuses while one is installed).
+    pub fn end_run(&mut self) {
+        self.context = None;
+    }
 }
 fn failed(error: ObservationError) -> PortError {
     PortError::Failed {
