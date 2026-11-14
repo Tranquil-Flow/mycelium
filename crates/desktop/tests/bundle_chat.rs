@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Explicit REAL-chat gate over a scratch `qualification-probe` bundle (never in the default run):
-//! the installed bundle's own executable serves the frozen chat page over SLICE-1's node service
-//! (real Iroh control, real Metal on the bundled macOS-14 MLX libraries); the test-only script
-//! types the oracle prompt, waits for a native token in the page DOM, presses Stop, waits for the
-//! terminal state; then the harness sends an Apple Event quit to the exact child pid and checks
-//! the cleanup receipts and that every owned process is gone.
+//! Explicit chat gate over a scratch `qualification-probe` bundle (never in the default run),
+//! retargeted by lane CHAT (owner ruling 14 Nov: one chat path, as v0.1.4): the installed bundle's
+//! own executable serves the frozen chat page, and every `/chat/*` request goes through the shipped
+//! chat service over the owner run's route. With no run serving (one Mac, no joined member), the
+//! test-only script sees the page's shipped not-ready state, its channel refusing an action, a send
+//! through the page's own channel refused `chat_not_ready` and an unknown request's events refused
+//! `chat_request_unknown`; then the harness sends an Apple Event quit to the exact child pid and
+//! checks the cleanup receipt and that every owned process is gone. A SLICE-1 model folder is
+//! planted where the retired one-Mac chat looked for it: the bundle must not compose it (no native
+//! member or owner-leaf identity, no native launch evidence, no worker process). No GPU, no model.
 //!
 //! ```text
 //! MYCELIUM_PROBE_BUNDLE_APP="/path/probe/Mycelium.app" \
-//! MYCELIUM_MODEL_SNAPSHOT="<dir with model.safetensors and tokenizer.json>" \
 //!   cargo test --release --offline --locked -j 2 -p desktop --features tauri-shell \
 //!   --test bundle_chat -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! The model files are APFS-cloned (`cp -c`, read-only on the source) into the SCRATCH state
-//! root; the real state root, `/Applications` and `~/Applications` are unreachable. The memory
-//! pressure level is checked before launch and at every poll; any level but 1 kills the owned
-//! process group (our own unreaped child, exact pid).
+//! The real state root, `/Applications` and `~/Applications` are unreachable. The memory pressure
+//! level is checked before launch and at every poll; any level but 1 kills the owned process group
+//! (our own unreaped child, exact pid). A route chat that streams tokens into the bundle's page
+//! needs a serving run across two Macs: that is lane TEN's two-Mac gate, not this one.
 #![cfg(all(feature = "tauri-shell", target_os = "macos"))]
-#[path = "support/chat_answer.rs"]
-mod chat_answer;
 mod support;
 use budgets::BudgetId;
 use std::{
@@ -62,8 +63,8 @@ fn children_of(parent: u32) -> Vec<u32> {
 }
 
 #[test]
-#[ignore = "explicit GUI+GPU gate: runs the named scratch probe bundle with real Metal"]
-fn installed_bundle_streams_a_native_token_into_the_page_then_stop_and_apple_event_quit_clean_up() {
+#[ignore = "explicit GUI gate: runs the named scratch probe bundle"]
+fn installed_bundle_chat_page_answers_through_the_run_route_then_apple_event_quit_cleans_up() {
     let app = PathBuf::from(std::env::var("MYCELIUM_PROBE_BUNDLE_APP").expect("probe bundle"));
     assert!(
         app.starts_with(std::env::var("HOME").unwrap())
@@ -71,27 +72,18 @@ fn installed_bundle_streams_a_native_token_into_the_page_then_stop_and_apple_eve
         "only a lane scratch bundle may be launched: {}",
         app.display()
     );
-    let snapshot = PathBuf::from(std::env::var("MYCELIUM_MODEL_SNAPSHOT").expect("snapshot dir"));
     assert_eq!(pressure_level(), "1", "memory safety gate before launch");
 
     let (fake, fake_home, executable) = install_scratch(&app, "v02-l11-chat");
     let state = fake_home.join("Library/Application Support/org.mycelium.app/state");
+    // Where the retired one-Mac chat looked for its model: bytes that are no model at all.
     let target = state
         .join(format!("model-source-{}", &REVISION[..12]))
         .join("models--Qwen--Qwen2.5-0.5B-Instruct/snapshots")
         .join(REVISION);
     std::fs::create_dir_all(&target).unwrap();
     for file in ["model.safetensors", "tokenizer.json"] {
-        assert!(
-            Command::new("/bin/cp")
-                .args(["-c"])
-                .arg(snapshot.join(file))
-                .arg(target.join(file))
-                .status()
-                .unwrap()
-                .success(),
-            "clone {file}"
-        );
+        std::fs::write(target.join(file), b"not a model").unwrap();
     }
     {
         use std::os::unix::fs::PermissionsExt;
@@ -213,13 +205,12 @@ fn installed_bundle_streams_a_native_token_into_the_page_then_stop_and_apple_eve
             "L11_NATIVE_READY",
             "L11_WINDOW_VISIBLE:true",
             "L11_PACKAGED_CHAT_PAGE_READY",
-            "L11_SLICE_CHAT_DOM_TOKEN",
-            "L11_SLICE_STOP_VERIFIED",
-            "L11_SLICE_CHAT_DOM_TERMINAL",
+            "L11_PACKAGED_CHAT_ROUTE_NOT_READY",
+            "L11_PACKAGED_CHAT_ROUTE_EVENTS_UNKNOWN",
         ] {
             wait_for(receipt, &mut child, &mut lines, &mut poll);
         }
-        let tokens_at = begun.elapsed();
+        let answered_at = begun.elapsed();
         send_quit(pid);
         let quit_sent = Instant::now();
         let exit_deadline = quit_sent + budget(BudgetId::StageCleanup);
@@ -251,54 +242,31 @@ fn installed_bundle_streams_a_native_token_into_the_page_then_stop_and_apple_eve
             !lines.iter().any(|(_, l)| l.contains("Failed")),
             "{lines:?}"
         );
-        // The owner's own evidence of this launch.
-        let evidence_root = state.join("v02-node/evidence");
-        let launch = std::fs::read_dir(&evidence_root)
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .collect::<Vec<_>>();
-        assert_eq!(launch.len(), 1, "one launch directory: {launch:?}");
-        let generation = launch[0].join("generation-1");
-        let result: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(generation.join("result.json")).unwrap())
-                .unwrap();
-        let proof: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(generation.join("stop-proof.json")).unwrap())
-                .unwrap();
-        assert_eq!(result["cancelled"], true, "{result}");
-        assert_eq!(result["member_reaped"], true);
-        assert_eq!(result["planner_active"], 0);
-        assert_eq!(result["iroh_activation_transport"], true);
-        assert_eq!(result["iroh_control_transport"], "signed-node-control");
-        assert_eq!(result["loopback_tcp_control"], false);
-        assert_eq!(
-            result["artifact"]["member"]["staged_via"],
-            "signed-artifact-chunk"
-        );
-        // The answer is v0.1.4's: a prefix of its greedy answer to the same question (round 9
-        // passed with "\n\n" because only "some token streamed" was asserted).
-        let oracle_tokens_checked = chat_answer::check(&result)
-            .unwrap_or_else(|reason| panic!("answer is not the oracle's: {reason}; {result}"));
-        assert_eq!(proof["cleanup_proven"], true);
-        let workers: Vec<u64> = ["member_pid", "owner_leaf_pid"]
-            .iter()
-            .map(|k| result[k].as_u64().unwrap())
+        // No one-Mac native chat was composed: no native identity in the private state, no native
+        // launch evidence, no chat timed (none completed), no worker left.
+        let node = state.join("v02-node");
+        let identities: Vec<_> = ["member", "owner-leaf"]
+            .into_iter()
+            .filter(|name| node.join("private").join(name).exists())
             .collect();
-        for worker in &workers {
-            assert!(!alive(*worker), "worker {worker} survived");
-        }
+        assert!(identities.is_empty(), "native identities: {identities:?}");
+        let evidence: Vec<_> = std::fs::read_dir(node.join("evidence"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            evidence.is_empty(),
+            "native launch evidence or timing: {evidence:?}"
+        );
         assert!(!alive(u64::from(pid)), "app {pid} survived");
         assert!(children_of(pid).is_empty(), "children of {pid} survived");
-        // The workers were this very bundle's executable, re-executed.
         println!(
             "BUNDLE_CHAT {}",
             serde_json::json!({
-                "pid": pid, "executable": executable, "workers": workers,
-                "tokens_at_ms": tokens_at.as_millis(), "quit_to_exit_ms": quit_to_exit.as_millis(),
+                "pid": pid, "executable": executable,
+                "answered_at_ms": answered_at.as_millis(), "quit_to_exit_ms": quit_to_exit.as_millis(),
                 "pressure_max": pressure_max.load(std::sync::atomic::Ordering::Acquire),
-                "stderr": *stderr_lines.lock().unwrap(), "answer_text": result["text"],
-                "answer_token_ids": result["token_ids"], "oracle_tokens_checked": oracle_tokens_checked,
-                "stop_proof": proof, "receipts": lines,
+                "stderr": *stderr_lines.lock().unwrap(), "receipts": lines,
             })
         );
     }));

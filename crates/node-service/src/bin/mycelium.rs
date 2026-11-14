@@ -97,9 +97,9 @@ fn run() -> Result<(), String> {
     #[cfg(feature = "qualification-probe")]
     return shell::run_packaged_with_probe(&manifest, compose, budget, probe_script(&state)?);
 }
-/// Test builds only: the frozen chat driven with the oracle question (as many tokens as the
-/// recorded oracle run, Stop after the first). The page posts the plain question; the chat edge
-/// wraps it in the v0.1.4 envelope.
+/// Test builds only: the frozen chat page over the run's route with no run serving (lane CHAT):
+/// the page's not-ready state, then a send of the oracle question (as many tokens as the recorded
+/// oracle run) refused `chat_not_ready` and an unknown request's events refused.
 #[cfg(feature = "qualification-probe")]
 fn probe_script(_state: &Path) -> Result<String, String> {
     let fixture: serde_json::Value =
