@@ -48,9 +48,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod chat;
 #[cfg(test)]
 mod program_tests;
 mod work;
+pub use chat::{RunChatRoute, chat_run};
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -148,6 +150,9 @@ struct Custody {
     /// Member Work / local Service retained by a failed work close (never replaced while owed).
     work_debt: Option<WorkDebt>,
     exchange_resource: Option<(Instant, Option<&'static str>)>,
+    /// The run's route as the packaged chat reads it (lane CHAT): set when the run's work is
+    /// composed, taken out by its teardown ([`chat::RouteSource`]).
+    route: Option<chat::RouteSource>,
 }
 
 /// The packaged host as `api::owner_ports::RunHost` and `api::owner_observation::ChainHost`: its

@@ -468,10 +468,18 @@ impl Work {
         .with_objects(objects);
         let stopper = Arc::new(work.stopper());
         let stopped = self.stopped.clone();
-        lock(&self.host.custody).work_stop = Some(Arc::new(move || {
+        let read = Arc::new(work.gateway_reader());
+        let mut custody = lock(&self.host.custody);
+        custody.work_stop = Some(Arc::new(move || {
             stopped.store(true, Ordering::SeqCst);
             stopper();
         }));
+        // The packaged chat's run route reads this run's open epoch here (`chat::RunChatRoute`).
+        custody.route = Some(super::chat::RouteSource {
+            run_id: state.run_id.clone(),
+            read,
+        });
+        drop(custody);
         let mut resident = lock(&self.resident);
         resident.bindings = verified;
         resident.run = Some((state.run_id.clone(), state.deployment_id.clone()));
@@ -537,6 +545,8 @@ impl Work {
         }
     }
     fn teardown(&self) -> Result<(), String> {
+        // The chat's route ends with the run's work (the epoch closes below).
+        lock(&self.host.custody).route = None;
         let mut resident = lock(&self.resident);
         // Retry a previous close's exact owners first: a new close never proceeds while
         // custody it did not receive is still owed.

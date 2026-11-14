@@ -72,6 +72,11 @@ pub fn locate_model(state_root: &Path) -> Option<ModelFiles> {
 pub struct Dirs {
     pub private: PathBuf,
     pub evidence: PathBuf,
+    /// The owner's per-chat timing file (lane CHAT): JSONL `{ttft_ms, decode_millitokens_s,
+    /// request_ms, run_id}` per completed chat (the fields of chat.py:392-395, which v0.1.4 keeps
+    /// in memory only), appended across launches beside the per-launch evidence folders in v0.2's
+    /// own evidence root `<state>/v02-node/evidence/`, never in v0.1.4's folder.
+    pub chat_timing: PathBuf,
 }
 pub fn prepare_dirs(state_root: &Path) -> Result<Dirs, String> {
     let base = state_root.join("v02-node");
@@ -88,6 +93,7 @@ pub fn prepare_dirs(state_root: &Path) -> Result<Dirs, String> {
     Ok(Dirs {
         private,
         evidence: evidence_root.join(launch),
+        chat_timing: evidence_root.join("chat-timing.jsonl"),
     })
 }
 
@@ -583,6 +589,13 @@ fn compose(
 ) -> Result<(Arc<dyn Core>, AppCleanup), String> {
     let dirs = prepare_dirs(state_root)?;
     let private = dirs.private.clone();
+    // The chat's timing file is admitted before anything is composed (lane CHAT): a refused path
+    // fails the composition by name, and `with_chat_run` below admits the same path again.
+    let timing = dirs.chat_timing.clone();
+    if let Some(node_root) = private.parent() {
+        api::chat_service::TimingFile::under(node_root, &timing)
+            .map_err(|e| format!("compose:{}", e.code))?;
+    }
     let native = Arc::new(NativeOnDemand {
         state_root: state_root.to_owned(),
         dirs,
@@ -618,6 +631,10 @@ fn compose(
         run.clone(),
     )
     .gated(native);
+    // `app.chat` over `app.owner_run` (chat.py:513-518, app.py:1926): every `/chat/*` request goes
+    // through the shipped chat service and the run's route, always (lane CHAT, ledger row 17).
+    let services = crate::packaged_run::chat_run(services, &run, timing)
+        .map_err(|e| format!("compose:{}", e.code))?;
     let (core, mut cleanup) = assemble(services, source);
     close_run_first(&mut cleanup, run);
     Ok((core, cleanup))
