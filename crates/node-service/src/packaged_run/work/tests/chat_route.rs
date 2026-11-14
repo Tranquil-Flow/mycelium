@@ -542,6 +542,46 @@ fn a_rollover_ends_the_route_chat_chat_switching_runs_and_the_next_run_chats() {
     page.close();
 }
 
+/// Proves: REVIEW-laneCHAT F2 (each run starts with fresh chat facts: a new `RunContext`,
+/// owner_run.py:392-399, whose `ctx.state` has no `rollover_requested`): the run after a rollover
+/// is begun by the packaged chain's own `new_run` (`Composed`, `chat::new_run`), so a plain Stop
+/// during its chat ends that chat `chat_cancelled` (demo_chain.py:1335), not with the previous
+/// run's `chat_switching_runs` (:1333).
+#[test]
+fn a_stop_on_the_run_after_a_rollover_ends_its_chat_chat_cancelled() {
+    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
+    let page = Page::new(&fake);
+    page.start();
+    let first = page.serving()["run_id"].as_str().unwrap().to_owned();
+    let (code, sent) = page.send("hi");
+    assert_eq!(code, 200, "{sent}");
+    fake.wait("the token sent", |s| s.tokens_sent == 1);
+    page.flags.rollover.store(true, Ordering::SeqCst);
+    let (_, last) = page.until_done(&sent["request_id"]);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!("chat_switching_runs"))
+    );
+    page.until("the fresh run serves", |s| {
+        s["state"] == "serving" && s["run_id"].as_str() != Some(first.as_str())
+    });
+    fake.script(Fake::ending(&["b"], End::Hold));
+    let (code, held) = page.send("again");
+    assert_eq!(code, 200, "{held}");
+    fake.wait("the fresh run's token sent", |s| s.tokens_sent == 2);
+    page.stop();
+    let (tokens, last) = page.until_done(&held["request_id"]);
+    assert_eq!(tokens, ["b"]);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!("chat_cancelled")),
+        "the fresh run kept the previous run's rollover request"
+    );
+    assert_eq!(fake.seen(|s| s.deletes), 2);
+    page.until("the run stopped", |s| s["state"] == "stopped");
+    page.close();
+}
+
 /// Proves: ledger row 17 (two pages chatting over the one route: one chat in flight for the whole
 /// swarm, chat.py:319-321 `chat_busy`; each page reads exactly its own chat's tokens, chat.py:460-475).
 #[test]
@@ -798,6 +838,62 @@ fn the_ceiling_cancels_the_page_chat_once_with_its_code() {
     let mut env = Env { at: Instant::now() };
     assert_eq!(p.ports.teardown(true, &mut env), Ok(()));
     assert_eq!(fake.seen(|s| s.deletes), 1, "one cancel per run");
+    p.close();
+}
+
+/// Proves: REVIEW-laneCHAT F2 (`execution_ceiling_cancelled` is a fact of the run's `ctx`,
+/// demo_chain.py:1159-1160, and every run gets a fresh one, owner_run.py:392-399): after the
+/// ceiling cancelled the first run's chat, the next run begun by the packaged chain's own
+/// `new_run` (`Composed`, `chat::new_run`) still has its chat cancelled by its own ceiling, with
+/// the ceiling's code, through the real `ceiling_reached` port.
+#[test]
+fn the_next_runs_ceiling_still_cancels_its_page_chat() {
+    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
+    let mut p = ported(&fake, "run-ceiling-first");
+    let ceiling = Some(EXECUTION_CEILING_CODE.to_owned());
+    let serving = past_the_ceiling(&p);
+    assert_eq!(
+        p.ports.ceiling_reached(&serving),
+        CeilingProbe::Code(ceiling.clone())
+    );
+    let last = p.ended();
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!(EXECUTION_CEILING_CODE))
+    );
+    let mut env = Env { at: Instant::now() };
+    assert_eq!(p.ports.teardown(true, &mut env), Ok(()));
+    assert_eq!(fake.seen(|s| s.deletes), 1);
+    // The next run, begun as the runner begins every run: the packaged chain's `new_run`.
+    Composed::new(&p.f.host, None, None).new_run(
+        "run-ceiling-next",
+        "dep-run-ceiling-next",
+        owner_run::Reason::Start,
+        None,
+        None,
+    );
+    fake.script(Fake::ending(&["b"], End::Hold));
+    let (code, next) = post(
+        &p.services,
+        &p.replies,
+        "/chat/api/send",
+        json!({"prompt":"hi","max_new_tokens":8}),
+    );
+    assert_eq!(code, 200, "{next}");
+    fake.wait("the next run's token sent", |s| s.tokens_sent == 2);
+    let mut serving = past_the_ceiling(&p);
+    serving.run_id = "run-ceiling-next".into();
+    assert_eq!(
+        p.ports.ceiling_reached(&serving),
+        CeilingProbe::Code(ceiling)
+    );
+    fake.wait("the next run's ceiling cancel", |s| s.deletes == 2);
+    let (tokens, last) = until_done(&p.services, &p.replies, &next["request_id"]);
+    assert_eq!(tokens, ["b"]);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!(EXECUTION_CEILING_CODE))
+    );
     p.close();
 }
 
