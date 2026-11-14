@@ -9,9 +9,39 @@
 //! (2) verifies the object and establishes journal genesis BEFORE the grant is
 //! issued (issuing first trips the source's ledger-reset fence), (3) issues the
 //! seed-signed offer naming this source's key (and, on LAN, its signed
-//! addresses), (4) serves exactly that offer to one connection while the member
-//! receives and verifies, and returns the member's receipt. Bytes, recipes and
-//! offers are all produced elsewhere and verified on both sides here.
+//! addresses), (4) serves exactly that offer to one connection from the
+//! offer's recipient carrier key while the member receives and verifies, and
+//! returns the member's receipt. Only that key is admitted. Direct LAN: the key
+//! is installed in the host before the job's first accept and ENFORCED by the
+//! host after TLS authentication and before it hands the connection to the job
+//! (other keys are closed `LAN_KEY_REFUSED`, reason `lan_key_refused`, and
+//! unpinned at once); the job checks the key again, which also covers a
+//! connection carried over from an earlier job. LocalOnly: only that second
+//! check (reason `recipient_key_refused`). Any other or failed handshake is
+//! closed unserved and the job keeps accepting until its own absolute
+//! deadline. Serving ends at that deadline or at `close`, whichever comes
+//! first. Bytes, recipes and offers are all produced elsewhere and verified on
+//! both sides here.
+//!
+//! `close` is bounded in every state (LAN-R2-A1): it returns within one
+//! `OwnerPoll` (the accept slice in progress, both modes; handshakes in flight
+//! carry over between slices and end with the endpoint) plus one `RouterClose`
+//! (the endpoint's close, then storage work still running), whether the
+//! thread waits in accept, is mid-handshake, verifies an object at admission
+//! or serves a stream. Storage work runs on this source's runtime's blocking
+//! pool, never on the source thread: object verification at admission (which
+//! also checks Stop between reads) and the artifact service's chunk reads and
+//! journal appends. What cannot be interrupted (a read or fsync inside the
+//! kernel) is not joined without limit: it gets what is left of that
+//! `RouterClose` (`Runtime::shutdown_timeout`), then it is ABANDONED to finish
+//! on its own pool thread, which drops its files when the call returns, and
+//! `close` says so (`source_storage_abandoned`). That is safe for the files it
+//! touches: the content-addressed objects are only read; a late journal
+//! append or rewrite on a directory a later source reuses can at worst lose
+//! fence lines of THIS source or make the later source refuse its ledger
+//! (`artifact_source_ledger_corrupt` / `_reset`), never let it serve a replay,
+//! because every source signs with a fresh key and a grant (with its requests)
+//! names that key.
 use super::link::{MemberLink, Refusal};
 use crate::{app_host, joined_shard};
 use budgets::{BudgetId as B, Entries};
@@ -19,7 +49,7 @@ use protocol::identity::Identity;
 use runtime::{
     artifact_journal::{DurableConfig, DurableObjects},
     iroh_artifact_source::ArtifactService,
-    iroh_host::{LanPolicy, LoopbackHost},
+    iroh_host::{LAN_KEY_REFUSED, LanPolicy, LoopbackHost},
     sidecar_artifact::{grant_limits, serve_limits},
 };
 use serde_json::{Value, json};
@@ -59,8 +89,21 @@ pub struct ShardSource {
     lan: bool,
     /// Set by `close`; the source thread serves nothing once it is set.
     closing: Arc<AtomicBool>,
-    /// The source thread is (about to be) blocked accepting a member.
-    accepting: Arc<AtomicBool>,
+    /// Woken by `close`: every wait of the source thread ([`closed`]) ends.
+    stopping: Arc<tokio::sync::Notify>,
+}
+/// Resolves once `close` has begun (`stop` set, then `wake` notified): any
+/// number of waiters, registered before or after it.
+async fn closed(stop: &AtomicBool, wake: &tokio::sync::Notify) {
+    loop {
+        let notified = wake.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if stop.load(Ordering::SeqCst) {
+            return;
+        }
+        notified.await;
+    }
 }
 fn budget(id: B) -> Result<budgets::Span, Refusal> {
     id.span(Entries::ZERO)
@@ -85,7 +128,26 @@ impl ShardSource {
         lan: Option<(IpAddr, LanPolicy)>,
         pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
     ) -> Result<Self, Refusal> {
-        let wall = budget(B::MemberChosenWall)?;
+        Self::start_with_wall(
+            authority,
+            objects,
+            journal,
+            lan,
+            pinned,
+            budget(B::MemberChosenWall)?,
+        )
+    }
+    /// [`Self::start_with_objects`] with each job's absolute wall (the app: `MemberChosenWall`)
+    /// given: the deadline its admission, accept and serving end at. A test shortens it to reach
+    /// that deadline; no product path passes anything else.
+    pub fn start_with_wall(
+        authority: Arc<seed::Coordinator>,
+        objects: PathBuf,
+        journal: PathBuf,
+        lan: Option<(IpAddr, LanPolicy)>,
+        pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
+        wall: budgets::Span,
+    ) -> Result<Self, Refusal> {
         let close = budget(B::RouterClose)?;
         let fence = B::ArtifactMaxFence
             .count()
@@ -97,8 +159,8 @@ impl ShardSource {
         let on_lan = lan.is_some();
         let poll = budget(B::OwnerPoll)?;
         let closing = Arc::new(AtomicBool::new(false));
-        let accepting = Arc::new(AtomicBool::new(false));
-        let (stop, waiting) = (closing.clone(), accepting.clone());
+        let stopping = Arc::new(tokio::sync::Notify::new());
+        let (stop, stopped) = (closing.clone(), stopping.clone());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (jobs, inbox) = mpsc::channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -136,16 +198,13 @@ impl ShardSource {
                         &[Channel::ArtifactChunk],
                     ),
                 };
-                let mut host = match bound {
-                    Ok(host) => host,
-                    Err(e) => {
-                        let code = format!("source_bind_failed:{e:?}");
-                        if ready_tx.send(Err(refusal(code.clone()))).is_err() {
-                            eprintln!("joined owner source: starter gone");
-                        }
-                        return Err(refusal(code));
+                let mut host = bound.map_err(|e| {
+                    let code = format!("source_bind_failed:{e:?}");
+                    if ready_tx.send(Err(refusal(code.clone()))).is_err() {
+                        eprintln!("joined owner source: starter gone");
                     }
-                };
+                    refusal(code)
+                })?;
                 let addr = host
                     .address()
                     .map_err(|e| refusal(format!("source_address_failed:{e:?}")))?;
@@ -160,35 +219,76 @@ impl ShardSource {
                     signer.public_key_record(),
                 )));
                 let mut admitted: BTreeMap<String, DurableObjects> = BTreeMap::new();
+                // Storage work this thread put on the blocking pool: every admission holds a
+                // clone of `custody`, every chunk read of the artifact service a strong
+                // reference to its job's objects (`served`). What still holds one after the
+                // runtime's shutdown below was abandoned (module note).
+                let custody = Arc::new(());
+                let mut served = Vec::new();
                 // A starter that went away just closes the endpoint below.
                 while sent.is_ok() {
                     let Ok(job) = inbox.recv() else { break };
+                    if stop.load(Ordering::SeqCst) {
+                        let (Job::Admit { done, .. } | Job::Serve { done, .. }) = job;
+                        if done.send(Err(refusal("source_closed"))).is_err() {
+                            eprintln!("joined owner source: closed job waiter gone");
+                        }
+                        continue;
+                    }
                     match job {
                         Job::Admit { hash, done } => {
                             let result = (|| {
-                                let store = DurableObjects::open(DurableConfig {
+                                let config = DurableConfig {
                                     objects: objects.clone(),
                                     state_dir: journal.clone(),
                                     fence_capacity: fence,
                                     clock_skew_ms: skew,
                                     now: Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
-                                })
-                                .map_err(|e| refusal(format!("source_store_failed:{}", e.0)))?
-                                .with_pinned(pinned.clone());
-                                let end = Instant::now() + Duration::from_millis(wall.millis());
-                                store
-                                    .verify_bounded(&hash, &|| {
-                                        if Instant::now() < end {
-                                            Ok(())
-                                        } else {
-                                            Err(runtime::iroh_artifact::ArtifactError(
-                                                "source_verify_deadline".into(),
-                                            ))
+                                };
+                                let (pinned, halt, held) =
+                                    (pinned.clone(), stop.clone(), custody.clone());
+                                let wall = Duration::from_millis(wall.millis());
+                                let end = Instant::now() + wall;
+                                // On the blocking pool: the source thread keeps observing
+                                // Stop while a read is held (LAN-R2-A1).
+                                let verifying = rt.spawn_blocking(move || {
+                                    let custody = held;
+                                    let store = DurableObjects::open(config)
+                                        .map_err(|e| {
+                                            refusal(format!("source_store_failed:{}", e.0))
+                                        })?
+                                        .with_pinned(pinned);
+                                    store
+                                        .verify_bounded(&hash, &|| {
+                                            if halt.load(Ordering::SeqCst) {
+                                                Err(runtime::iroh_artifact::ArtifactError(
+                                                    "source_closed".into(),
+                                                ))
+                                            } else if Instant::now() < end {
+                                                Ok(())
+                                            } else {
+                                                Err(runtime::iroh_artifact::ArtifactError(
+                                                    "source_verify_deadline".into(),
+                                                ))
+                                            }
+                                        })
+                                        .map_err(|e| {
+                                            refusal(format!("source_verify_failed:{}", e.0))
+                                        })?;
+                                    drop(custody);
+                                    Ok::<_, Refusal>((hash, store))
+                                });
+                                let (hash, store) = rt.block_on(async {
+                                    tokio::select! {
+                                        joined = verifying => joined.map_err(|_| {
+                                            refusal("source_verify_failed:source_verify_panicked")
+                                        })?,
+                                        () = closed(&stop, &stopped) => Err(refusal("source_closed")),
+                                        () = tokio::time::sleep(wall) => {
+                                            Err(refusal("source_verify_failed:source_verify_deadline"))
                                         }
-                                    })
-                                    .map_err(|e| {
-                                        refusal(format!("source_verify_failed:{}", e.0))
-                                    })?;
+                                    }
+                                })?;
                                 admitted.insert(hash, store);
                                 Ok(())
                             })();
@@ -201,11 +301,19 @@ impl ShardSource {
                                 let store = admitted
                                     .remove(&hash)
                                     .ok_or_else(|| refusal("source_object_not_admitted"))?;
-                                let wrapped = joined_shard::JoinedSource::new(
+                                // The one key this job serves: the recipient carrier the
+                                // seed-signed offer names (JoinedSource::new checks the offer).
+                                let recipient: iroh::EndpointId = offer["message"]["grant"]
+                                    ["message"]["recipient_endpoint_id"]
+                                    .as_str()
+                                    .and_then(|key| key.parse().ok())
+                                    .ok_or_else(|| refusal("joined_shard_invalid"))?;
+                                let wrapped = Arc::new(joined_shard::JoinedSource::new(
                                     authority.clone(),
                                     offer,
                                     store,
-                                )?;
+                                )?);
+                                served.push(Arc::downgrade(&wrapped));
                                 let service = ArtifactService::new(
                                     Identity::from_secret(
                                         signer.endpoint_id(),
@@ -214,47 +322,80 @@ impl ShardSource {
                                     .map_err(|_| refusal("source_identity_failed"))?,
                                     authority.signer().public_key_record(),
                                     grant_limits().map_err(|_| refusal("budget_unavailable"))?,
-                                    Arc::new(wrapped),
+                                    wrapped,
                                     serve_limits().map_err(|_| refusal("budget_unavailable"))?,
                                     Arc::new(|| (app_host::now() * 1000.0).floor() as u64),
                                 )
                                 .map_err(|e| refusal(format!("source_service_failed:{e:?}")))?;
                                 let end = until(wall)?;
-                                // F4: `close` wakes this wait (LocalOnly: it dials the
-                                // source once; direct LAN: slices of OwnerPoll, whose
-                                // in-flight handshakes carry over to the next accept).
-                                waiting.store(true, Ordering::SeqCst);
+                                // LAN-A1: installed before accept; the host enforces it after
+                                // TLS authentication, before handing a connection to this job.
+                                if on_lan {
+                                    host.admit_peer_ids(&[recipient]).map_err(|e| {
+                                        refusal(format!("source_admission_failed:{e:?}"))
+                                    })?;
+                                }
+                                // `close` is seen within one slice of OwnerPoll, in both
+                                // modes: in-flight handshakes carry over to the next accept
+                                // and end with the endpoint (LAN-R2-A1).
                                 let accepted = loop {
                                     if stop.load(Ordering::SeqCst) {
                                         break Err(refusal("source_closed"));
                                     }
-                                    let slice = match on_lan {
-                                        true => until(poll)?
-                                            .earliest(end)
-                                            .map_err(|_| refusal("deadline_invalid"))?,
-                                        false => end,
-                                    };
+                                    let slice = until(poll)?
+                                        .earliest(end)
+                                        .map_err(|_| refusal("deadline_invalid"))?;
                                     match host.accept(&clock, slice) {
-                                        Err(transport::Error::Expired)
-                                            if on_lan
-                                                && end.remaining(clock.monotonic()).is_ok() =>
-                                        {
-                                            continue;
+                                        Ok(connection) if connection.remote_id() == recipient => {
+                                            break Ok(connection);
                                         }
-                                        other => {
-                                            break other.map_err(|e| {
-                                                refusal(format!("source_accept_failed:{e:?}"))
-                                            });
+                                        // LocalOnly admits any key; on the LAN, a connection
+                                        // carried over from an earlier job's key: closed
+                                        // unserved (this check's own reason), the job goes on.
+                                        Ok(connection) => {
+                                            connection.close(
+                                                LAN_KEY_REFUSED.into(),
+                                                b"recipient_key_refused",
+                                            );
+                                        }
+                                        // A slice ended, or a refused or failed handshake:
+                                        // retried until the job's own absolute deadline.
+                                        Err(
+                                            transport::Error::Expired
+                                            | transport::Error::Authentication,
+                                        ) if end.remaining(clock.monotonic()).is_ok() => continue,
+                                        Err(e) => {
+                                            break Err(refusal(format!(
+                                                "source_accept_failed:{e:?}"
+                                            )));
                                         }
                                     }
                                 };
-                                waiting.store(false, Ordering::SeqCst);
                                 if stop.load(Ordering::SeqCst) {
                                     return Err(refusal("source_closed"));
                                 }
                                 let connection = accepted?;
-                                rt.block_on(service.serve_connection(connection))
-                                    .map_err(|e| refusal(format!("source_serve_failed:{e:?}")))
+                                // Serving ends at the job's deadline or at `close`: a peer
+                                // that keeps the connection busy cannot hold either.
+                                let left = end
+                                    .remaining(clock.monotonic())
+                                    .map(|span| Duration::from_millis(span.millis()))
+                                    .unwrap_or(Duration::ZERO);
+                                let served = connection.clone();
+                                rt.block_on(async {
+                                    tokio::select! {
+                                        outcome = service.serve_connection(connection) => outcome
+                                            .map_err(|e| refusal(format!("source_serve_failed:{e:?}"))),
+                                        () = closed(&stop, &stopped) => {
+                                            served.close(0u32.into(), b"source_closed");
+                                            Err(refusal("source_closed"))
+                                        }
+                                        () = tokio::time::sleep(left) => {
+                                            served.close(0u32.into(), b"source_deadline");
+                                            Err(refusal("source_serve_deadline"))
+                                        }
+                                    }
+                                })
                             })();
                             if done.send(result).is_err() {
                                 eprintln!("joined owner source: serve waiter gone");
@@ -262,9 +403,26 @@ impl ShardSource {
                         }
                     }
                 }
-                host.close(&clock, until(close)?)
-                    .map_err(|e| refusal(format!("source_close_failed:{e:?}")))?;
-                // `host` drops before `rt` (reverse declaration order).
+                // One RouterClose for the endpoint's close and the storage work still
+                // running; whatever outlives it is abandoned, never joined (module note).
+                let ends = until(close)?;
+                let shut = host.close(&clock, ends);
+                drop(host);
+                let left = ends
+                    .remaining(clock.monotonic())
+                    .map(|span| Duration::from_millis(span.millis()))
+                    .unwrap_or(Duration::ZERO);
+                rt.shutdown_timeout(left);
+                let abandoned = Arc::strong_count(&custody) > 1
+                    || served.iter().any(|objects| objects.strong_count() > 0);
+                shut.map_err(|e| refusal(format!("source_close_failed:{e:?}")))?;
+                if abandoned {
+                    eprintln!(
+                        "joined owner source: storage work still running was left to finish \
+                         in the background (source_storage_abandoned)"
+                    );
+                    return Err(refusal("source_storage_abandoned"));
+                }
                 Ok(())
             })
             .map_err(|_| refusal("source_thread_failed"))?;
@@ -279,7 +437,7 @@ impl ShardSource {
             key: Value::Null,
             lan: on_lan,
             closing,
-            accepting,
+            stopping,
         };
         let (endpoint, addrs, key) = match ready.and_then(|r| r) {
             Ok(ready) => ready,
@@ -318,67 +476,20 @@ impl ShardSource {
     }
     fn shutdown(&mut self) -> Result<(), Refusal> {
         self.closing.store(true, Ordering::SeqCst);
+        // Every wait of the source thread ends now (an admission, a connection being
+        // served); an accept slice within OwnerPoll.
+        self.stopping.notify_waiters();
         self.jobs.take();
-        if !self.lan && self.accepting.load(Ordering::SeqCst) {
-            self.wake();
-        }
         match self.thread.take() {
             Some(t) => t.join().map_err(|_| refusal("source_thread_panicked"))?,
             None => Ok(()),
         }
     }
-    /// Close the endpoint and join the thread.
+    /// Close the endpoint and join the thread, within the bound of the module
+    /// note in every state; `source_storage_abandoned` when storage work that
+    /// could not be interrupted was left to finish in the background.
     pub fn close(mut self) -> Result<(), Refusal> {
         self.shutdown()
-    }
-    /// F4 (LocalOnly): dial this source once so an accept waiting for a member
-    /// that will not come (its receive was cancelled or refused) returns now;
-    /// the source thread then serves nothing and closes. A failed wake leaves
-    /// the accept to its own deadline.
-    fn wake(&self) {
-        let woken = (|| -> Result<(), String> {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .map_err(|e| e.to_string())?;
-            let clock = crate::managed_carrier::HostClock::default();
-            let until = |id: B| -> Result<budgets::MonoInstant, String> {
-                clock
-                    .monotonic()
-                    .checked_add(budget(id).map_err(|e| e.0)?)
-                    .map_err(|_| "deadline_invalid".to_owned())
-            };
-            let mut host = LoopbackHost::bind_with_secret(
-                &rt,
-                &clock,
-                until(B::SidecarLocalHandshake)?,
-                iroh::SecretKey::generate(),
-            )
-            .map_err(|e| format!("{e:?}"))?;
-            let target = self
-                .addrs
-                .iter()
-                .fold(iroh::EndpointAddr::new(self.endpoint), |a, s| {
-                    a.with_ip_addr(*s)
-                });
-            let dialed = host
-                .connect_channel(
-                    &target,
-                    Channel::ArtifactChunk,
-                    &clock,
-                    until(B::SidecarLocalHandshake)?,
-                )
-                .map(drop)
-                .map_err(|e| format!("{e:?}"));
-            let closed = host
-                .close(&clock, until(B::RouterClose)?)
-                .map_err(|e| format!("{e:?}"));
-            dialed.and(closed)
-        })();
-        if let Err(e) = woken {
-            eprintln!("joined owner source wake: {e}");
-        }
     }
 }
 impl Drop for ShardSource {

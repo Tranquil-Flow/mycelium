@@ -28,19 +28,196 @@ use std::{
 use transport::Channel;
 type Result<T> = std::result::Result<T, String>;
 pub type SessionCell = Arc<Mutex<Option<Session>>>;
-/// Explicit transport policy; no environment-selected interface or public relay fallback.
-#[derive(Clone, Default)]
+/// Explicit transport policy; no environment-selected interface or public relay fallback. The
+/// addresses it admits are verified before they get here: a member's are signed by that member's
+/// key while the seed currently enrolls it, a shard source's are in the seed-signed grant.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NetworkChoice(pub Option<(IpAddr, LanPolicy)>);
+/// One reading of this Mac's interfaces ([`api::lan_interface::this_mac`] in the app).
+pub type InterfaceReader = Arc<dyn Fn() -> api::lan_interface::Selection + Send + Sync>;
+/// Where the packaged work endpoints (member work service, the owner's local worker, the shard
+/// source, the route and the owner's dials) bind, decided each time a work service or an owner run
+/// STARTS, never once per process: Wi-Fi may come up or change network after launch. An owner run
+/// reads it ONCE, at its start, and keeps that answer for the whole run.
+#[derive(Clone)]
+pub enum WorkNetwork {
+    /// Exactly this choice, whatever this Mac's interfaces are (tests and explicit callers).
+    Fixed(NetworkChoice),
+    /// The app's own: this Mac's private LAN address ([`api::lan_interface::this_mac`]) under
+    /// [`LanPolicy::private_only`] (exact pins, no relay, no address lookup); 127.0.0.1 only
+    /// (`NetworkMode::LocalOnly`) with the rule's named reason when it finds no single network.
+    ThisMac,
+    /// The app's rule over another reading of the interfaces, bound under `policy`: a test that
+    /// must see when, and how often, a run reads the interfaces.
+    Read(InterfaceReader, LanPolicy),
+}
+impl std::fmt::Debug for WorkNetwork {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(choice) => f.debug_tuple("Fixed").field(choice).finish(),
+            Self::ThisMac => f.write_str("ThisMac"),
+            Self::Read(_, policy) => f.debug_tuple("Read").field(policy).finish(),
+        }
+    }
+}
+impl PartialEq for WorkNetwork {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Fixed(a), Self::Fixed(b)) => a == b,
+            (Self::ThisMac, Self::ThisMac) => true,
+            (Self::Read(a, p), Self::Read(b, q)) => Arc::ptr_eq(a, b) && p == q,
+            _ => false,
+        }
+    }
+}
+impl Eq for WorkNetwork {}
+impl Default for WorkNetwork {
+    /// The app's own ([`WorkNetwork::ThisMac`]).
+    fn default() -> Self {
+        Self::ThisMac
+    }
+}
+/// One resolution of the work transport.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved {
+    pub choice: NetworkChoice,
+    /// Log-only transport name (`lan:<ip>` / `local_only:<reason>`).
+    pub transport: String,
+    /// Why this Mac's own reading left the transport on 127.0.0.1 (the rule's
+    /// [`api::lan_interface::Selection::LocalOnly`] reason). `None` on the LAN, and for a choice
+    /// a caller fixed (which is deliberate, never a failed reading).
+    pub local_only: Option<&'static str>,
+}
+impl WorkNetwork {
+    /// 127.0.0.1 only, whatever the interfaces (`NetworkMode::LocalOnly`).
+    pub fn loopback() -> Self {
+        Self::Fixed(NetworkChoice::default())
+    }
+    /// This start's choice, reading this Mac's interfaces now when it is [`WorkNetwork::ThisMac`].
+    pub fn resolve(&self) -> (NetworkChoice, String) {
+        self.resolve_with(api::lan_interface::this_mac)
+    }
+    /// [`WorkNetwork::resolve`] over a given reading of the interfaces (the pure rule's answer).
+    /// Answers the choice and the log-only transport name (`lan:<ip>` / `local_only:<reason>`).
+    pub fn resolve_with(
+        &self,
+        read: impl FnOnce() -> api::lan_interface::Selection,
+    ) -> (NetworkChoice, String) {
+        let resolved = self.resolution_with(read);
+        (resolved.choice, resolved.transport)
+    }
+    /// This start's full resolution, with the reason when the reading found no single network.
+    pub fn resolution(&self) -> Resolved {
+        self.resolution_with(api::lan_interface::this_mac)
+    }
+    fn resolution_with(&self, read: impl FnOnce() -> api::lan_interface::Selection) -> Resolved {
+        let (selection, policy) = match self {
+            Self::Fixed(choice) => {
+                let transport = match &choice.0 {
+                    Some((ip, _)) => format!("lan:{ip}"),
+                    None => "local_only:explicit".into(),
+                };
+                return Resolved {
+                    choice: choice.clone(),
+                    transport,
+                    local_only: None,
+                };
+            }
+            Self::ThisMac => (read(), LanPolicy::private_only()),
+            Self::Read(reader, policy) => (reader(), policy.clone()),
+        };
+        match selection {
+            api::lan_interface::Selection::Lan(ip) => Resolved {
+                choice: NetworkChoice(Some((ip, policy))),
+                transport: format!("lan:{ip}"),
+                local_only: None,
+            },
+            api::lan_interface::Selection::LocalOnly(reason) => Resolved {
+                choice: NetworkChoice::default(),
+                transport: format!("local_only:{reason}"),
+                local_only: Some(reason),
+            },
+        }
+    }
+}
+/// The refusal (code, plain message) of an owner run whose own reading of this Mac's interfaces
+/// found no single private network (`reason`, an [`api::lan_interface`] refusal) while a joined
+/// Mac is in the run: it is refused before anything is dialed.
+pub fn owner_network_refusal(reason: &str) -> (&'static str, String) {
+    use api::lan_interface::{
+        AMBIGUOUS_PRIVATE_INTERFACES, NO_PRIVATE_ADDRESS, ONLY_BRIDGE_INTERFACES,
+    };
+    let why = match reason {
+        NO_PRIVATE_ADDRESS => "it has no private network address",
+        AMBIGUOUS_PRIVATE_INTERFACES => {
+            "it is on more than one private network and cannot tell which one the joined Mac \
+             shares (its default route is a VPN, or there is none)"
+        }
+        ONLY_BRIDGE_INTERFACES => {
+            "its only private network is one it hosts for virtual machines or Internet Sharing, \
+             which the joined Mac is not on"
+        }
+        _ => "it could not read its network interfaces",
+    };
+    (
+        "owner_work_network_unavailable",
+        format!(
+            "This Mac cannot work with the joined Mac: {why} ({reason}). Connect both Macs to \
+             the same Wi-Fi or Ethernet network, turn off any VPN on this Mac, and start again."
+        ),
+    )
+}
 impl NetworkChoice {
+    /// A joined Mac's advertised work address this run's transport may dial: loopback for a
+    /// loopback-only run; otherwise an address the policy admits, of the bound address's family
+    /// (the run holds ONE socket of that family, which cannot reach the other one).
     pub fn allows(&self, address: std::net::SocketAddr) -> bool {
         match &self.0 {
             None => address.ip().is_loopback(),
-            Some((_, policy)) => {
-                policy.allows(address.ip())
+            Some((bound, policy)) => {
+                bound.is_ipv4() == address.is_ipv4()
+                    && policy.allows(address.ip())
                     && policy
                         .peer_hosts()
                         .is_none_or(|hosts| hosts.contains(&address.ip()))
             }
+        }
+    }
+    /// The refusal (code, plain message) for a joined Mac's advertised work address this run's
+    /// transport does not admit ([`NetworkChoice::allows`] false), named before any dial.
+    pub fn address_refusal(&self, refused: std::net::SocketAddr) -> (&'static str, String) {
+        let ip = refused.ip();
+        let again = "Connect both Macs to the same Wi-Fi or Ethernet network, turn off any VPN \
+                     on the joined Mac, and start again.";
+        match &self.0 {
+            Some((bound, _)) if ip.is_loopback() => (
+                "member_work_network_mismatch",
+                format!(
+                    "The joined Mac offers its work only on its own loopback address ({ip}): it \
+                     found no single private network to use. This Mac works on {bound}. {again}"
+                ),
+            ),
+            Some((bound, _)) if bound.is_ipv4() != ip.is_ipv4() => (
+                "member_work_family_mismatch",
+                format!(
+                    "The joined Mac offers its work only at {ip} and this Mac works on {bound}: \
+                     one uses IPv4 and the other IPv6, so they cannot reach each other. {again}"
+                ),
+            ),
+            None if !ip.is_loopback() => (
+                "member_work_network_mismatch",
+                format!(
+                    "The joined Mac offers its work on the network at {ip}, but this Mac's work \
+                     transport is on its own loopback address only. {again}"
+                ),
+            ),
+            _ => (
+                "member_work_address_refused",
+                format!(
+                    "The joined Mac offers its work at {ip}, which is not a private network \
+                     address this Mac may use. {again}"
+                ),
+            ),
         }
     }
 }

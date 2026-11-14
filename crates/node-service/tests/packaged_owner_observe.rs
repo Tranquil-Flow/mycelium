@@ -33,6 +33,7 @@ use macs::{
 use node_service::{
     packaged::{self, RunConfig},
     packaged_network::{JoinSeams, NetworkConfig},
+    packaged_work::WorkNetwork,
 };
 use repository::{Repository, SOURCE, sidecar_file};
 use serde_json::{Value, json};
@@ -109,7 +110,17 @@ fn pair(base: &Path, repository: &Repository, run: RunConfig) -> (Owner, Mac) {
     let sidecar = sidecar_file(base);
     let state = private_dir(base, "owner");
     let before = listening();
-    let mac = launch(&state, repository, NetworkConfig::default(), run);
+    // Both Macs of every pair here keep the work transport on loopback, whatever this host's
+    // interfaces are (lane LAN: the app's own default reads the Mac's private LAN address).
+    let mac = launch(
+        &state,
+        repository,
+        NetworkConfig {
+            work_network: WorkNetwork::loopback(),
+            ..NetworkConfig::default()
+        },
+        run,
+    );
     let proxy = free_port();
     let started = mac.post(
         "/api/network/start",
@@ -153,6 +164,7 @@ fn pair(base: &Path, repository: &Repository, run: RunConfig) -> (Owner, Mac) {
         NetworkConfig {
             seams: owner.seams.clone(),
             sidecar: Some(sidecar),
+            work_network: WorkNetwork::loopback(),
             ..NetworkConfig::default()
         },
         RunConfig::default(),
@@ -565,6 +577,7 @@ fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_
         NetworkConfig {
             seams: owner.seams.clone(),
             sidecar: Some(sidecar),
+            work_network: WorkNetwork::loopback(),
             ..NetworkConfig::default()
         },
         RunConfig::default(),

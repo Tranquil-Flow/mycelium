@@ -180,6 +180,9 @@ struct Resident {
     local_session: crate::packaged_work::SessionCell,
     bindings: Vec<joined::Verified>,
     run: Option<(String, String)>,
+    /// The work transport this run resolved when it started (`compose`): its local worker, its
+    /// member dials, its shard source and route all use this one choice for the whole run.
+    network: Option<crate::packaged_work::NetworkChoice>,
 }
 /// The Runner's monotonic clock as the run's work sees it (aligned when the work is composed).
 type RunClock = Arc<dyn Fn() -> f64 + Send + Sync>;
@@ -206,12 +209,19 @@ impl Work {
                 local_session,
                 bindings: Vec::new(),
                 run: None,
+                network: None,
             })),
             stopped: Arc::new(AtomicBool::new(false)),
             clock: Arc::default(),
         }
     }
-    fn local(&self) -> Result<(), StepError> {
+    /// The run's transport, resolved at `compose`; a work announcement before any compose (none
+    /// in the chain's order) resolves its own.
+    fn run_network(&self) -> crate::packaged_work::NetworkChoice {
+        let held = lock(&self.resident).network.clone();
+        held.unwrap_or_else(|| self.host.network.resolve_work_network("owner_local_work"))
+    }
+    fn local(&self, network: &crate::packaged_work::NetworkChoice) -> Result<(), StepError> {
         let (root, seed, session, signer, node) = self.host.with(|c| {
             let member = c
                 .run
@@ -281,7 +291,7 @@ impl Work {
                     resident.local_session.clone(),
                     signer,
                     announcement,
-                    self.host.network.work_network(),
+                    network.clone(),
                 )
                 .map_err(|e| refused(&e))?,
             );
@@ -390,13 +400,36 @@ impl Work {
             .host
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
-        let network = self.host.network.work_network();
+        // One transport per run, read from this Mac's interfaces as the run starts its work.
+        let resolved = self.host.network.resolve_run_network("owner_run");
+        // No single private network here while a joined Mac is in the run: refused by name now,
+        // before the local worker starts or anything is dialed (lane LAN round 2, F6).
+        if let Some(reason) = resolved.local_only
+            && state
+                .participants
+                .iter()
+                .any(|node| Some(node) != state.local_node.as_ref())
+        {
+            let (code, message) = crate::packaged_work::owner_network_refusal(reason);
+            return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
+        let network = resolved.choice;
+        lock(&self.resident).network = Some(network.clone());
+        // The first advertised address the run's transport refuses: its refusal is named below.
+        let refused_at = std::cell::Cell::new(None);
+        let admits = |address: std::net::SocketAddr| {
+            let admitted = network.allows(address);
+            if !admitted {
+                refused_at.set(Some(address));
+            }
+            admitted
+        };
         let until = env.now() + span(BudgetId::Slices)?.as_secs_f64();
         let verified = loop {
             if env.stopped() || self.stopped.load(Ordering::SeqCst) {
                 return Err(StepError::Stopped);
             }
-            match self.local() {
+            match self.local(&network) {
                 Ok(()) => {}
                 Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {
                     env.progress("member_work_renewing");
@@ -413,7 +446,7 @@ impl Work {
                         self.owner.public(),
                         &state.run_id,
                         &state.deployment_id,
-                        &|a| network.allows(a),
+                        &admits,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>();
@@ -422,7 +455,15 @@ impl Work {
                 Err(e) if e.code == "member_work_unavailable" => {
                     env.progress("member_work_unavailable");
                 }
-                Err(e) => return Err(refused(e.code)),
+                Err(e) => match refused_at.get() {
+                    Some(address) if e.code == "member_work_address_refused" => {
+                        let (code, message) = network.address_refusal(address);
+                        return Err(
+                            owner_run::OwnerRunError::with(code, Some(&message), None).into()
+                        );
+                    }
+                    _ => return Err(refused(e.code)),
+                },
             }
             if env.now() >= until {
                 return Err(refused("member_work_unavailable"));
@@ -485,6 +526,7 @@ impl Work {
             .ok_or("owner_exchange_unavailable")?;
         let resident = lock(&self.resident);
         let (run, deployment) = resident.run.as_ref().ok_or("owner_work_unavailable")?;
+        let network = resident.network.clone().ok_or("owner_work_unavailable")?;
         for binding in &resident.bindings {
             let announcement = seed
                 .exchange
@@ -501,7 +543,7 @@ impl Work {
                     self.owner.public(),
                     run,
                     deployment,
-                    &|a| self.host.network.work_network().allows(a),
+                    &|a| network.allows(a),
                 )
                 .map_err(|e| e.code.to_owned())?;
             if current.registration() != binding.registration()
@@ -538,6 +580,8 @@ impl Work {
     }
     fn teardown(&self) -> Result<(), String> {
         let mut resident = lock(&self.resident);
+        // The run's transport ends with it (R2-7): whatever asks next reads this Mac afresh.
+        resident.network = None;
         // Retry a previous close's exact owners first: a new close never proceeds while
         // custody it did not receive is still owed.
         settle_debt(&self.host)?;
@@ -748,7 +792,8 @@ impl ReportsPort for Reports {
             model:Some(json!({"choice":api::model_catalog::find(&a.model_id,&a.resolved_commit).and_then(api::model_catalog::choice_for_model),"model_id":a.model_id,"resolved_commit":a.resolved_commit})),
             slice_mode:a.slice_mode,manifest_digest:Some(a.manifest_digest.clone()),work_limits:Some(limits.clone()),
             per_node:a.per_node.iter().flatten().cloned().collect() }).map_err(|_| refused("demo_announcement_invalid"))?;
-        self.work.local()
+        let network = self.work.run_network();
+        self.work.local(&network)
     }
     fn reports(&mut self) -> Result<BTreeMap<String, Value>, StepError> {
         self.inner.reports()

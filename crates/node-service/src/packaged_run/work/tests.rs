@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Two packaged host roles on loopback. Real enrollment, seed TLS, member control, carrier,
-//! inert shard receipts and cleanup. Constructor-only source plan and refusing native admission.
+//! Two packaged host roles on loopback, and the same pair on this Mac's real LAN interface (lane
+//! LAN). Real enrollment, seed TLS, member control, carrier, inert shard receipts and cleanup.
+//! Constructor-only source plan and refusing native admission.
 use super::*;
 mod regressions;
 mod serving_r2;
 mod serving_r3;
 mod serving_r3b;
-use crate::packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember};
+use crate::{
+    packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember},
+    packaged_work::{NetworkChoice, WorkNetwork},
+};
 use api::{
     handoff,
     joined_owner::{
@@ -124,7 +128,17 @@ fn consent(root: &Path, session: &api::member::Session, policy: &Value) {
     .unwrap();
 }
 impl Fixture {
+    /// Both hosts on loopback (`NetworkMode::LocalOnly`), whatever this Mac's interfaces are.
     fn new() -> Self {
+        Self::on(WorkNetwork::loopback())
+    }
+    /// Both hosts' work transports over `work` (the seed stays on its loopback TLS address).
+    fn on(work: WorkNetwork) -> Self {
+        Self::on_each(work.clone(), work)
+    }
+    /// The owner's work transport over `owner`, the joined Mac's over `member`.
+    fn on_each(owner_work: WorkNetwork, member_work: WorkNetwork) -> Self {
+        let work = member_work;
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
             crate::service::random_id().unwrap()
@@ -133,7 +147,13 @@ impl Fixture {
         let root = root.canonicalize().unwrap();
         let owner = root.join("owner");
         let authority = Arc::new(Mutex::new(Authority::load(owner.clone()).unwrap()));
-        let network = Network::new(&owner, NetworkConfig::default());
+        let network = Network::new(
+            &owner,
+            NetworkConfig {
+                work_network: owner_work,
+                ..NetworkConfig::default()
+            },
+        );
         let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,"network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
         resource_policy::write(&owner, &policy).unwrap();
         app_host::create_owner_json(&network.cell(&authority), policy.as_object().unwrap())
@@ -210,6 +230,7 @@ impl Fixture {
                     member_seed: options,
                     ..Default::default()
                 },
+                work_network: work,
                 ..Default::default()
             },
         );
@@ -396,7 +417,206 @@ fn stop_reaches_real_push_while_member_receive_is_held() {
 }
 #[test]
 fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
-    let mut f = Fixture::new();
+    handoff_and_push_before_publish(Fixture::new(), &|address| {
+        assert!(address.ip().is_loopback(), "{address}")
+    });
+}
+/// This Mac's private LAN address, as the `lan-real` gate step exports it (`ipconfig getifaddr
+/// en0`). Absent or not private: the test FAILS, it never skips.
+fn lan_ip() -> std::net::IpAddr {
+    let value = std::env::var("MYCELIUM_LAN_IP").expect("MYCELIUM_LAN_IP = this host's LAN IP");
+    let address: std::net::IpAddr = value.parse().expect("MYCELIUM_LAN_IP is an IP address");
+    assert!(
+        runtime::iroh_host::private_lan(address),
+        "{address} is not a private LAN address"
+    );
+    address
+}
+/// The loopback pair above, with both hosts' work transports on this Mac's real LAN interface
+/// under the packaged policy (`LanPolicy::private_only`: exact pins, no relay, no lookup). Every
+/// work address the owner admits (from member-signed registrations whose key the seed currently
+/// enrolls) is on that interface.
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn two_packaged_hosts_on_the_real_lan_interface_handoff_and_push_before_publish() {
+    let ip = lan_ip();
+    let work = WorkNetwork::Fixed(NetworkChoice(Some((
+        ip,
+        runtime::iroh_host::LanPolicy::private_only(),
+    ))));
+    handoff_and_push_before_publish(Fixture::on(work), &|address| {
+        assert_eq!(address.ip(), ip, "{address}")
+    });
+}
+/// The production default on this Mac: [`NetworkConfig::default`]'s work transport, resolved
+/// through the real host constructor as a run starts, is the address of this Mac's default-route
+/// interface (whatever its name: `route -n get default`, then `ipconfig getifaddr`), not loopback.
+/// Proves: F8 (c, d) (runs in the `lan-real` gate step; FAILS without MYCELIUM_LAN_IP; no en0).
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn the_app_default_work_transport_is_this_macs_lan_address() {
+    lan_ip();
+    let ip = default_route_address().expect("this Mac has a private default route");
+    let root = std::env::temp_dir().join(format!(
+        "lan-default-{}",
+        crate::service::random_id().unwrap()
+    ));
+    fs::create_dir(&root).unwrap();
+    let network = Network::new(&root, NetworkConfig::default());
+    let choice = network.resolve_work_network("test");
+    fs::remove_dir_all(&root).unwrap();
+    assert_eq!(
+        choice,
+        NetworkChoice(Some((ip, runtime::iroh_host::LanPolicy::private_only())))
+    );
+    assert!(!choice.allows(std::net::SocketAddr::from(([127, 0, 0, 1], 9))));
+}
+/// The IPv4 address of the interface `route -n get default` names, from `ipconfig`: this Mac's
+/// answer from tools that share no code with `api::lan_interface`.
+fn default_route_address() -> Option<std::net::IpAddr> {
+    let route = std::process::Command::new("/sbin/route")
+        .args(["-n", "get", "default"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(route.stdout).unwrap();
+    let interface = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("interface: "))?
+        .to_owned();
+    let address = std::process::Command::new("/usr/sbin/ipconfig")
+        .args(["getifaddr", &interface])
+        .output()
+        .unwrap();
+    String::from_utf8(address.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .ok()
+}
+/// A run's state with this fixture's local contributor and joined Mac, the owner announced.
+fn run_state(f: &mut Fixture, ports: &PackagedChainPorts) -> RunState {
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    seed.exchange
+        .set_owner_control(Some(OwnerControl::new(ports.work.owner.public())));
+    seed.exchange
+        .announce(Announce {
+            phase: "compile".into(),
+            run_id: Some("run-s4cb2".into()),
+            deployment_id: Some("dep-s4cb2".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    f.agent.tick(&f.member);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut state = RunState::new("run-s4cb2", "dep-s4cb2", owner_run::Reason::Start);
+    state.participants = vec![local.clone(), f.remote.clone()];
+    state.local_node = Some(local);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    state
+}
+/// Proves: F6 and LAN-A2 c (an owner whose own reading of this Mac found no single private network
+/// refuses a run with a joined Mac by name, with the reason and the side, before it starts its
+/// local worker or dials anyone).
+#[test]
+fn an_owner_without_a_single_private_network_refuses_a_joined_mac_by_name() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let owner = WorkNetwork::Read(
+        Arc::new(|| Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)),
+        runtime::iroh_host::LanPolicy::private_only(),
+    );
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "owner_work_network_unavailable");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains(AMBIGUOUS_PRIVATE_INTERFACES) && message.contains("This Mac"),
+        "{message}"
+    );
+    let resident = lock(&ports.work.resident);
+    assert!(resident.local.is_none(), "no local worker was started");
+    assert!(resident.bindings.is_empty() && resident.work.is_none());
+}
+/// Proves: F6 (owner on this Mac's real LAN, joined Mac on its loopback: refused by name, naming
+/// the joined Mac's side and both addresses, before any dial; the real-LAN gate step runs it).
+#[test]
+#[ignore = "needs this host's private LAN interface address in MYCELIUM_LAN_IP"]
+fn on_the_real_lan_an_owner_refuses_a_joined_mac_on_its_loopback_by_name() {
+    let ip = lan_ip();
+    let owner = WorkNetwork::Fixed(NetworkChoice(Some((
+        ip,
+        runtime::iroh_host::LanPolicy::private_only(),
+    ))));
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    let begun = Instant::now();
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "member_work_network_mismatch");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains("joined Mac") && message.contains("127.0.0.1"),
+        "{message}"
+    );
+    assert!(message.contains(&ip.to_string()), "{message}");
+    eprintln!("refused in {:?}: {message}", begun.elapsed());
+    assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
+}
+/// Proves: F2 (one transport per owner run: the owner reads this Mac's interfaces once, when the run
+/// composes, and its local worker, member dials, shard source, route and shares check all keep that
+/// answer, even though every later reading would answer differently. Mutation M3 re-reads it.)
+#[test]
+fn one_owner_run_reads_this_macs_interfaces_once() {
+    use api::lan_interface::Selection;
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let owner = WorkNetwork::Read(
+        Arc::new(move || match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Selection::Lan(loopback),
+            _ => Selection::LocalOnly("interfaces_changed_mid_run"),
+        }),
+        policy.clone(),
+    );
+    let member = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy))));
+    handoff_and_push_before_publish(Fixture::on_each(owner, member), &|address| {
+        assert_eq!(address.ip(), loopback, "{address}")
+    });
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the owner run read the interfaces again after it composed"
+    );
+}
+fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketAddr)) {
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
     seed.exchange
@@ -432,6 +652,14 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
         .work
         .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
         .unwrap();
+    {
+        let resident = lock(&ports.work.resident);
+        assert_eq!(resident.bindings.len(), 2);
+        for binding in &resident.bindings {
+            assert!(binding.address().ip_addrs().count() > 0);
+            binding.address().ip_addrs().copied().for_each(on);
+        }
+    }
     let called = Arc::new(AtomicUsize::new(0));
     {
         let mut resident = lock(&ports.work.resident);
@@ -640,4 +868,124 @@ fn the_packaged_chain_forwards_rollover_ceiling_and_monitor_to_its_owner_workflo
     assert_eq!(ports.ceiling_reached(&state), CeilingProbe::Code(None));
     assert_eq!(ports.monitor(&state), MonitorProbe::Code(None));
     ports.close_work().unwrap();
+}
+/// Proves: R2-4 (the named network refusals refuse only a run with a joined Mac: an owner-only
+/// run, whose one participant is this Mac's own local worker, composes and starts that worker
+/// under a reading that found no single private network).
+#[test]
+fn an_owner_only_run_without_a_single_private_network_still_starts_its_local_worker() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let owner = WorkNetwork::Read(
+        Arc::new(|| Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)),
+        runtime::iroh_host::LanPolicy::private_only(),
+    );
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut state = run_state(&mut f, &ports);
+    let local = state.local_node.clone().unwrap();
+    state.participants = vec![local.clone()];
+    state.worker_wall_limits.retain(|node, _| *node == local);
+    let mut env = Env { at: Instant::now() };
+    let composed = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env);
+    {
+        let resident = lock(&ports.work.resident);
+        assert!(
+            composed.is_ok(),
+            "an owner-only run was refused: {composed:?}"
+        );
+        assert!(resident.local.is_some(), "its local worker started");
+        assert_eq!(resident.bindings.len(), 1);
+        assert!(resident.work.is_some());
+        assert_eq!(resident.network, Some(NetworkChoice::default()));
+    }
+    ports.close_work().unwrap();
+}
+/// Proves: R2-8 (the compose step maps a refused joined-Mac address to its named refusal in a
+/// test every run executes, not only on the real LAN: the owner on a LAN policy that does not
+/// admit the joined Mac's loopback address refuses `member_work_network_mismatch`, naming both
+/// addresses, before any dial).
+#[test]
+fn an_owner_on_the_lan_refuses_a_joined_mac_on_its_loopback_by_name() {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let other = std::net::IpAddr::from([127, 0, 0, 2]);
+    // The owner binds 127.0.0.1 as its LAN address; its peers may only be at 127.0.0.2.
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback, other])
+        .unwrap()
+        .with_peer_hosts(vec![other])
+        .unwrap();
+    let owner = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy))));
+    let mut f = Fixture::on_each(owner, WorkNetwork::loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut state = run_state(&mut f, &ports);
+    // The joined Mac's address is checked first (its own local worker's would be refused too).
+    state.participants.reverse();
+    let mut env = Env { at: Instant::now() };
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "member_work_network_mismatch");
+    let message = error.message.unwrap_or_default();
+    assert!(
+        message.contains("joined Mac") && message.contains("loopback address (127.0.0.1)"),
+        "{message}"
+    );
+    assert!(message.contains("works on 127.0.0.1"), "{message}");
+    assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
+}
+/// Proves: R2-7 (a run's network choice ends with its teardown: after one run closed, the same
+/// process reads this Mac's interfaces afresh, whatever asks first, and a second run uses its own
+/// reading, not the first run's).
+#[test]
+fn a_second_owner_run_in_one_process_reads_the_interfaces_again() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let owner = WorkNetwork::Read(
+        Arc::new(move || match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Selection::Lan(loopback),
+            _ => Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+        }),
+        policy.clone(),
+    );
+    let member = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy.clone()))));
+    let mut f = Fixture::on_each(owner, member);
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    assert_eq!(
+        lock(&ports.work.resident).network,
+        Some(NetworkChoice(Some((loopback, policy))))
+    );
+    ports.close_work().unwrap();
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    // Whatever asks for the transport between runs gets a fresh reading.
+    assert_eq!(
+        ports.work.run_network(),
+        NetworkChoice::default(),
+        "the closed run's choice was reused"
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+    // The second run reads once more and goes by that reading (no single network here now).
+    fs::remove_dir_all(f.root.join("stage-shards")).unwrap();
+    let refused = ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "owner_work_network_unavailable");
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
 }
