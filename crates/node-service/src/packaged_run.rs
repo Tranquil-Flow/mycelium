@@ -730,6 +730,29 @@ enum Closing {
     },
     Done(Result<(), CleanupError>),
 }
+/// The close thread, `packaged-owner-run-close`.
+fn spawn_close(
+    body: impl FnOnce() -> Result<(), &'static str> + Send + 'static,
+) -> std::io::Result<JoinHandle<Result<(), &'static str>>> {
+    #[cfg(test)]
+    if CLOSE_SPAWN_REFUSED.with(|refused| refused.replace(false)) {
+        return Err(std::io::Error::other("test: close thread refused"));
+    }
+    std::thread::Builder::new()
+        .name("packaged-owner-run-close".into())
+        .spawn(body)
+}
+#[cfg(test)]
+thread_local! {
+    /// TEST ONLY (REVIEW-laneSRV-r3-astra R3A-02): the next close thread this thread spawns fails
+    /// to start, as a refused thread allocation would.
+    static CLOSE_SPAWN_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// TEST ONLY: see [`CLOSE_SPAWN_REFUSED`].
+#[cfg(test)]
+fn refuse_next_close_spawn() {
+    CLOSE_SPAWN_REFUSED.with(|refused| refused.set(true));
+}
 /// `workflow.stop()` (app.py:1835-1838), issued once: by the close thread when the run ended, or
 /// at Quit's deadline, whichever comes first. The flag's lock is held across the Stop (taken after
 /// every lifecycle lock is released, it guards nothing else), so `issued` is a receipt; the
@@ -824,21 +847,19 @@ impl RunClose {
             },
         };
         let closer = stop.clone();
-        let spawned = std::thread::Builder::new()
-            .name("packaged-owner-run-close".into())
-            .spawn(move || {
-                if serving {
-                    // `run.join(60)` holding no lifecycle lock, then `workflow.stop()` on the
-                    // run's end or on the timeout alike (app.py:1835-1838).
-                    if !installed.view.join(until) {
-                        eprintln!("owner run: owner_run_join_incomplete");
-                    }
-                    closer.issue();
+        let spawned = spawn_close(move || {
+            if serving {
+                // `run.join(60)` holding no lifecycle lock, then `workflow.stop()` on the
+                // run's end or on the timeout alike (app.py:1835-1838).
+                if !installed.view.join(until) {
+                    eprintln!("owner run: owner_run_join_incomplete");
                 }
-                lock(&installed.runs).close();
-                owner_ports::stop_local_contributor(&installed.host)
-                    .map_err(|_| "local_contributor_stop_failed")
-            });
+                closer.issue();
+            }
+            lock(&installed.runs).close();
+            owner_ports::stop_local_contributor(&installed.host)
+                .map_err(|_| "local_contributor_stop_failed")
+        });
         self.closing = match spawned {
             Ok(worker) => Closing::Running {
                 worker,

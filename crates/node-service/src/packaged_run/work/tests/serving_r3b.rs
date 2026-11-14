@@ -170,3 +170,32 @@ fn a_quit_deadline_waits_for_the_workflow_stop_the_close_thread_is_issuing() {
     );
     assert_eq!(stops_total, 1, "the workflow is stopped once");
 }
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r3-astra R3A-02: a serving run's workflow Stop is deferred to
+/// the close thread; when that thread cannot be spawned, Quit still issues the Stop, at once and
+/// without any join, and reports the failed close step (v0.1.4 runs `workflow.stop()` even when the
+/// preceding close step failed, app.py:1820-1825, 1835-1838 @ f4e366e9).)
+#[test]
+fn a_close_thread_that_cannot_start_still_stops_a_serving_workflow_and_reports_it() {
+    let served = served();
+    let stops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = stops.clone();
+    lock(&served.f.host.custody).work_stop = Some(Arc::new(move || {
+        count.fetch_add(1, Ordering::SeqCst);
+    }));
+    let mut close = RunClose::new(served.config.clone());
+    crate::packaged_run::refuse_next_close_spawn();
+    close.begin();
+    let stops_at_begin = stops.load(Ordering::SeqCst);
+    let result = close.poll();
+    lock(&served.f.host.custody).work_stop = None;
+    assert_eq!(
+        stops_at_begin, 1,
+        "the workflow Stop is issued although the close thread never started"
+    );
+    assert_eq!(
+        result,
+        Some(Err(CleanupError::Poll)),
+        "the failure is reported"
+    );
+}
