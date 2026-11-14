@@ -20,7 +20,7 @@ use crate::{
     app_host,
     joined_shard::{native, route},
     m16_route::{Codec, RouteHandle, SeedMembers},
-    run_exchange::{Announce, RunExchange},
+    run_exchange::{Announce, Prepared, RunExchange},
 };
 use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
@@ -656,9 +656,9 @@ impl OwnerWork {
             && !self.stop.load(Ordering::SeqCst)
     }
     /// The serving publication (demo_chain.py:1056-1097): the announcement is validated and
-    /// serialised first, outside every lock; then, inside the owner run's Stop `fence` and under
-    /// this workflow's lock ([`Shared::commit_serving`]), the re-checks and the in-memory commit to
-    /// `exchange`. A refusal publishes nothing.
+    /// serialised first, outside every lock ([`prepare_serving`]); then, inside the owner run's
+    /// Stop `fence` and under this workflow's lock ([`Shared::commit_serving`]), the re-checks and
+    /// the in-memory commit to `exchange`. A refusal publishes nothing.
     pub fn commit_serving_on(
         &self,
         state: &RunState,
@@ -667,18 +667,26 @@ impl OwnerWork {
         work_limits: Option<&Value>,
         fence: Fence<'_>,
     ) -> Result<(), StepError> {
-        let prepared = exchange
-            .prepare_announcement(serving_announce(announcement, work_limits))
-            .map_err(|_| StepError::Exception {
-                class: "ValueError".into(),
-            })?;
+        let prepared = prepare_serving(exchange, announcement, work_limits)?;
+        self.commit_prepared_on(state, exchange, &prepared, fence)
+    }
+    /// The locked half of [`OwnerWork::commit_serving_on`] for an announcement the caller
+    /// prepared before taking any lock of its own (the packaged host's resident lock, the
+    /// oracle's `app.guard`, demo_chain.py:1058-1074).
+    pub fn commit_prepared_on(
+        &self,
+        state: &RunState,
+        exchange: &RunExchange,
+        prepared: &Prepared,
+        fence: Fence<'_>,
+    ) -> Result<(), StepError> {
         fence(&mut || {
             self.shared
                 .commit_serving(
                     &self.stop,
                     || self.current(state),
                     || {
-                        exchange.commit_announcement(&prepared, false);
+                        exchange.commit_announcement(prepared, false);
                     },
                 )
                 .map_err(step_refusal)
@@ -1121,6 +1129,19 @@ fn signal_stop(shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) 
             .get_or_insert_with(Instant::now);
         stop.store(true, Ordering::SeqCst);
     });
+}
+/// `prepared = exchange.prepare_announcement(...)` (demo_chain.py:1059-1066): validate and
+/// serialise the `serving` announcement, read the exchange's clock, before any lifecycle lock.
+pub fn prepare_serving(
+    exchange: &RunExchange,
+    announcement: &Announcement,
+    work_limits: Option<&Value>,
+) -> Result<Prepared, StepError> {
+    exchange
+        .prepare_announcement(serving_announce(announcement, work_limits))
+        .map_err(|_| StepError::Exception {
+            class: "ValueError".into(),
+        })
 }
 /// `exchange.prepare_announcement(phase='serving', ..., work_limits=, per_node=)`
 /// (demo_chain.py:1058-1062): the document the work announcement carries (`announce_work`).

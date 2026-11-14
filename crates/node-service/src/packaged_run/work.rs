@@ -685,9 +685,11 @@ impl WorkPort for Work {
             None => ServingIdentity::Absent,
         })
     }
-    /// `self._exchange()` before any lock (`demo_chain.py:1057`), then the resident lock (the
-    /// app's guard over installing and retiring the run's workflow, :1073), then the owner run's
-    /// Stop fence and the workflow lock inside `OwnerWork::commit_serving_on`.
+    /// `self._exchange()` and `exchange.prepare_announcement(...)` before any lock
+    /// (`demo_chain.py:1059-1066`: the exchange's clock and the validation run under no lock),
+    /// then the resident lock (the app's guard over installing and retiring the run's workflow,
+    /// :1074), then the owner run's fence and the workflow lock inside
+    /// `OwnerWork::commit_prepared_on`.
     fn commit_serving(
         &mut self,
         state: &RunState,
@@ -697,11 +699,11 @@ impl WorkPort for Work {
     ) -> Result<(), StepError> {
         let exchange = owner_ports::ensure_exchange(&self.host)
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
+        let prepared =
+            api::joined_owner::work::prepare_serving(&exchange, announcement, work_limits)?;
         let resident = lock(&self.resident);
         match resident.work.as_ref() {
-            Some(work) => {
-                work.commit_serving_on(state, &exchange, announcement, work_limits, fence)
-            }
+            Some(work) => work.commit_prepared_on(state, &exchange, &prepared, fence),
             None => fence(&mut || Err(refused("serving_workflow_identity_changed"))),
         }
     }
