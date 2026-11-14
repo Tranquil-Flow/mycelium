@@ -464,19 +464,24 @@ impl Shared {
             "startup":flow.startup})
     }
     /// The workflow half of the serving fence (`with workflow._lock:`, demo_chain.py:1081-1097):
-    /// under this lock the run's Stop (written under the same lock by [`signal_stop`]), the live
-    /// state and the run binding (`current`) are re-checked, then the LIVE startup, and only then
+    /// under this lock the run's Stop and the worker's exit (both written under the same lock, by
+    /// [`signal_stop`] and [`begin_exit`]), the live state and the run binding (`current`) are
+    /// re-checked, then the LIVE startup, and only then
     /// does `publish` commit the announcement in memory. `current` and `publish` take no workflow
     /// lock and call nothing remote. Lock order: this workflow lock -> the exchange's own lock.
     fn commit_serving(
         &self,
         stop: &AtomicBool,
-        _exiting: &AtomicBool,
+        exiting: &AtomicBool,
         current: impl FnOnce() -> bool,
         publish: impl FnOnce(),
     ) -> Result<(), &'static str> {
         let flow = self.lock();
-        if stop.load(Ordering::SeqCst) || flow.state != RUNNING || !current() {
+        if stop.load(Ordering::SeqCst)
+            || exiting.load(Ordering::SeqCst)
+            || flow.state != RUNNING
+            || !current()
+        {
             return Err("serving_workflow_identity_changed");
         }
         let live = flow.startup.as_ref();
@@ -1132,9 +1137,13 @@ fn signal_stop(shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) 
         stop.store(true, Ordering::SeqCst);
     });
 }
-/// The worker's exit begins: from here its route and gateway close.
-fn begin_exit(_shared: &Shared, exiting: &AtomicBool) {
-    exiting.store(true, Ordering::SeqCst);
+/// The worker's exit begins: from here its route and gateway close, so the workflow stops being
+/// publishable FIRST, under the workflow lock the serving fence holds (v0.1.4 writes its terminal
+/// state under `self._lock` before its `finally` cleanup, workflow.py:337-351): a parked serving
+/// commit either published before the exit began or refuses after. The terminal `Flow` state is
+/// still written after the exit (its cleanup result is part of it).
+fn begin_exit(shared: &Shared, exiting: &AtomicBool) {
+    shared.update(|_| exiting.store(true, Ordering::SeqCst));
 }
 /// `prepared = exchange.prepare_announcement(...)` (demo_chain.py:1059-1066): validate and
 /// serialise the `serving` announcement, read the exchange's clock, before any lifecycle lock.
