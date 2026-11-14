@@ -663,7 +663,18 @@ impl OwnerRun {
     ) -> Result<Json, PublicError> {
         let mut facts = owner_ports::demo_facts(&self.host);
         let result = lock(&self.runs).demo_action(action, body, &mut facts);
-        if result.is_ok() && action == Action::DemoStop {
+        // `/api/demo/stop` only stops the run (`OwnerRun.stop`, owner_run.py:275-283 @
+        // f4e366e9); the run's own teardown stops its workflow. Quit's rule
+        // ([`RunClose::begin_until`]) keeps the Stop prompt: outside the serving step a work call
+        // can wait on the workflow's own stop flag, which the run's Stop cannot reach, so there
+        // the workflow is stopped at once; in the serving step every wait is on the run's own
+        // stop event and the workflow is left to the run's teardown, so a step past its Stop
+        // check never sees a workflow Stop it did not cause. The decision reads the Stop's own
+        // answer, taken under the run lock with the Stop.
+        if action == Action::DemoStop
+            && let Ok(answer) = &result
+            && answer.to_value()["step"] != "serving"
+        {
             self.host.stop_work();
         }
         // `_relay_is_serving` (app.py:770-777): the relay's renewal probe reads the run's state. Set it
