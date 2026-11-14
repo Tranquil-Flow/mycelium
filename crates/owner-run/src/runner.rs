@@ -17,6 +17,8 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod probe_tests;
 #[cfg(test)]
+mod replaced_tests;
+#[cfg(test)]
 mod view_tests;
 
 use crate::action::{self, Applied, Plan, Refusal};
