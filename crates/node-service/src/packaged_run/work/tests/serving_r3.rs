@@ -284,3 +284,90 @@ fn quit_outside_the_serving_step_releases_a_blocked_work_call_at_once() {
     assert!(matches!(closed, Some(Ok(()))), "Quit ended the run");
     assert_eq!(last["state"], "stopped", "{last}");
 }
+
+/// A run that serves at once and whose monitor parks on its first call: the host's status loop
+/// is then inside a live status pass that waits for it.
+struct ParkedMonitor {
+    entered: Option<mpsc::Sender<()>>,
+    release: mpsc::Receiver<()>,
+}
+impl Chain for ParkedMonitor {
+    fn new_run(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: owner_run::Reason,
+        _: Option<&Value>,
+        _: Option<&Value>,
+    ) {
+    }
+    fn run_step(&mut self, _: &str, _: &mut dyn StepEnv) -> Result<(), StepError> {
+        Ok(())
+    }
+    fn teardown(&mut self, _: bool, _: &mut dyn StepEnv) -> Result<(), String> {
+        Ok(())
+    }
+    fn rollover_due(&mut self) -> Option<bool> {
+        Some(false)
+    }
+    fn ceiling_reached(&mut self) -> owner_run::machine::CeilingProbe {
+        owner_run::machine::CeilingProbe::Code(None)
+    }
+    fn monitor(&mut self) -> owner_run::machine::MonitorProbe {
+        if let Some(entered) = self.entered.take()
+            && entered.send(()).is_ok()
+        {
+            hold(&self.release);
+        }
+        owner_run::machine::MonitorProbe::Code(None)
+    }
+}
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r2-opus R2-11: dropping the packaged host's status loop waits
+/// for its thread at most `PublishedStatus.stop`'s `self.thread.join(2)` (published_status.py:78-81,
+/// `PublishedstatusStopSelfThreadJoinL81`), then goes on, even while a live status pass waits on a
+/// monitor call that has not returned.)
+#[test]
+fn dropping_the_status_loop_waits_for_it_at_most_the_source_join() {
+    let f = Fixture::new();
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel::<()>();
+    let mut chain: Option<Box<dyn Chain>> = Some(Box::new(ParkedMonitor {
+        entered: Some(entered_tx),
+        release: release_rx,
+    }));
+    let config = RunConfig::default();
+    let run = OwnerRun::install_with(
+        f.host.clone(),
+        &config,
+        None,
+        Box::new(move || chain.take().expect("one run")),
+    );
+    let release = release;
+    lock(&run.runs)
+        .demo_action(Action::DemoStart, &Map::new(), &mut Facts)
+        .expect("start");
+    let period =
+        span(BudgetId::PyMyceliumA13MacosPublishedStatusPublishedstatusLoopSelfStopWaitL73)
+            .unwrap();
+    entered
+        .recv_timeout(period * 10)
+        .expect("the status loop's live pass runs the monitor");
+    let installed = lock(&config.installed.0).take();
+    let (dropped_tx, dropped) = mpsc::channel();
+    let dropping = std::thread::spawn(move || {
+        drop(installed);
+        assert!(dropped_tx.send(()).is_ok(), "test listens");
+    });
+    let join =
+        span(BudgetId::PyMyceliumA13MacosPublishedStatusPublishedstatusStopSelfThreadJoinL81)
+            .unwrap();
+    let bounded = dropped.recv_timeout(join + span(BudgetId::RouterClose).unwrap());
+    drop(release);
+    dropping.join().expect("dropping thread");
+    lock(&run.runs).close();
+    assert!(
+        bounded.is_ok(),
+        "dropping the status loop must not wait past its join allowance"
+    );
+}
