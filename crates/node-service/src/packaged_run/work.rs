@@ -356,6 +356,7 @@ impl Work {
                         forbidden_source: artifact.source().source_root.clone(),
                         worker_walls: state.worker_wall_limits.clone(),
                         owner_root: self.host.with(|c| c.authority.root.clone()),
+                        challenge: None,
                     },
                     objects.pinned,
                 ),

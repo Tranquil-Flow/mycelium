@@ -394,6 +394,20 @@ pub struct Plan {
     pub worker_walls: BTreeMap<String, u64>,
     /// The owner root whose resource policy the slices step reads.
     pub owner_root: PathBuf,
+    /// The route's startup challenge (`route.startup_challenge`, route.py:2371-2378 @ f4e366e9).
+    pub challenge: Option<Challenge>,
+}
+/// The exact prompt and the expected output token ids of the route's startup challenge: the
+/// prompt/output pair the compile proved against the recorded reference (v0.1.4: the pair
+/// authenticated by the controller plan, `route.startup_challenge`, route.py:2371-2378).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Challenge {
+    pub prompt: Vec<u32>,
+    pub expected: Vec<u32>,
+}
+/// The startup challenge of the compiled run under `root` (its `local-challenge-checkpoint.json`).
+pub fn compiled_challenge(_root: &Path) -> Result<Challenge, Refusal> {
+    Err(refusal("startup_challenge_unavailable"))
 }
 
 // Workflow states as v0.1.4 `ManagedServingWorkflow` (workflow.py:277-345).

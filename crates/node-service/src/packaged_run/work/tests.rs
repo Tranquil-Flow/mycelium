@@ -283,6 +283,7 @@ impl Fixture {
                 forbidden_source: self.root.join("snapshot"),
                 worker_walls: state.worker_wall_limits.clone(),
                 owner_root: self.root.join("owner"),
+                challenge: None,
             },
             objects.pinned,
         )

@@ -893,6 +893,7 @@ impl Swarm {
             forbidden_source: self.root.join("snapshot"),
             worker_walls: ids.iter().map(|id| ((*id).clone(), wall)).collect(),
             owner_root: self.owner.clone(),
+            challenge: None,
         }
     }
     /// Hand the members to an owner work port (in stage order).
