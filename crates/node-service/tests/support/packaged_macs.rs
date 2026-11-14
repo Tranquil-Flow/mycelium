@@ -68,7 +68,8 @@ impl Observer for Permissive {
 /// The network every test Mac here gets: the app's own composition, but its relay client lookup
 /// finds nothing, so a Start that forgets `provider: external` fails closed
 /// (`relay_client_installation_required`) instead of running a `cloudflared` this Mac has on
-/// `PATH` (review PH3a Q4).
+/// `PATH` (review PH3a Q4), and its work transport stays on loopback whatever this host's
+/// interfaces are (lane LAN: the app's own reads the Mac's private LAN address).
 pub fn test_network() -> NetworkConfig {
     let production = NetworkConfig::default().hooks;
     NetworkConfig {
@@ -77,6 +78,7 @@ pub fn test_network() -> NetworkConfig {
             hooks.binary = Arc::new(|| None);
             hooks
         }),
+        work_network: node_service::packaged_work::WorkNetwork::loopback(),
         ..NetworkConfig::default()
     }
 }

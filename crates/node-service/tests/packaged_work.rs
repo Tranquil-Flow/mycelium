@@ -37,6 +37,8 @@ fn packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership()
                 member_seed: p.seed.options(),
                 ..Default::default()
             },
+            // The endpoint this test dials is on loopback, whatever this host's interfaces are.
+            work_network: node_service::packaged_work::WorkNetwork::loopback(),
             ..Default::default()
         },
     );
