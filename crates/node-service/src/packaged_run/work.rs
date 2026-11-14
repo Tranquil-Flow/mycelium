@@ -181,12 +181,17 @@ struct Resident {
     bindings: Vec<joined::Verified>,
     run: Option<(String, String)>,
 }
+/// The Runner's monotonic clock as the run's work sees it (aligned when the work is composed).
+type RunClock = Arc<dyn Fn() -> f64 + Send + Sync>;
 #[derive(Clone)]
 pub(super) struct Work {
     host: PackagedRun,
     owner: iroh::SecretKey,
     resident: Arc<Mutex<Resident>>,
     stopped: Arc<AtomicBool>,
+    /// The run's clock, kept after the workflow is gone: `rollover_due` and `ceiling_reached`
+    /// read `ctx.state` and the clock alone (demo_chain.py:1132-1164).
+    clock: Arc<Mutex<Option<RunClock>>>,
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
@@ -203,6 +208,7 @@ impl Work {
                 run: None,
             })),
             stopped: Arc::new(AtomicBool::new(false)),
+            clock: Arc::default(),
         }
     }
     fn local(&self) -> Result<(), StepError> {
@@ -445,6 +451,8 @@ impl Work {
         let at = Instant::now();
         let mono = env.now();
         let wall = env.wall();
+        let run_clock: RunClock = Arc::new(move || mono + at.elapsed().as_secs_f64());
+        *lock(&self.clock) = Some(run_clock.clone());
         let work = OwnerWork::new(
             seed.coordinator.clone(),
             members,
@@ -452,7 +460,7 @@ impl Work {
             network.0,
             codec,
             Clocks {
-                mono: Arc::new(move || mono + at.elapsed().as_secs_f64()),
+                mono: run_clock,
                 wall: Arc::new(move || wall + at.elapsed().as_secs_f64()),
             },
         )
@@ -568,28 +576,45 @@ impl Work {
         }
         Ok(())
     }
+    /// The Runner's clock as the run's work aligned it; none before any work was composed.
+    fn run_clock(&self) -> Option<f64> {
+        lock(&self.clock).as_ref().map(|mono| mono())
+    }
     /// `chain.rollover_due(ctx)`, `ceiling_reached(ctx)` and `monitor(ctx)` of a serving run
-    /// (`demo_chain.py:1132-1186`) over its resident workflow, whose clock is the Runner's. With
-    /// no workflow resident the run cannot be serving: the probes answer as a chain without them.
+    /// (`demo_chain.py:1132-1186`) over its resident workflow, whose clock is the Runner's. With no
+    /// workflow resident, `rollover_due` and `ceiling_reached` still read the run's state and clock
+    /// (:1132-1164) and `monitor` answers `managed_workflow_missing` after the ceiling (:1166-1176).
+    /// Before any work was composed there is no run clock and no `execution_clock_started_at`
+    /// (publish starts it after the slices step composed the work): nothing is due.
     pub(super) fn rollover_due(&self, state: &RunState) -> Option<bool> {
-        lock(&self.resident)
-            .work
-            .as_ref()
-            .and_then(|work| work.rollover_due(state))
+        if let Some(work) = lock(&self.resident).work.as_ref() {
+            return work.rollover_due(state);
+        }
+        match self.run_clock() {
+            Some(now) => api::joined_owner::work::rollover_due(state, now),
+            None => Some(false),
+        }
     }
     pub(super) fn ceiling_reached(&self, state: &RunState) -> CeilingProbe {
-        lock(&self.resident)
-            .work
-            .as_ref()
-            .map_or(CeilingProbe::Unavailable, |work| {
-                work.ceiling_reached(state)
-            })
+        if let Some(work) = lock(&self.resident).work.as_ref() {
+            return work.ceiling_reached(state);
+        }
+        match self.run_clock() {
+            Some(now) => api::joined_owner::work::ceiling_reached(state, now),
+            None => CeilingProbe::Code(None),
+        }
     }
     pub(super) fn monitor(&self, state: &RunState) -> MonitorProbe {
-        lock(&self.resident)
-            .work
-            .as_ref()
-            .map_or(MonitorProbe::Code(None), |work| work.monitor(state))
+        if let Some(work) = lock(&self.resident).work.as_ref() {
+            return work.monitor(state);
+        }
+        match self.ceiling_reached(state) {
+            CeilingProbe::Code(Some(code)) => MonitorProbe::Code(Some(code)),
+            CeilingProbe::Raised { class } => MonitorProbe::Raised { class },
+            CeilingProbe::Code(None) | CeilingProbe::Unavailable => {
+                MonitorProbe::Code(Some("managed_workflow_missing".into()))
+            }
+        }
     }
     /// True while this run, or the host after its own close failed, still owns cleanup debt.
     #[cfg(test)]
@@ -643,12 +668,13 @@ impl WorkPort for Work {
             .ok_or_else(|| api::owner_compiler::failed("owner_work_unavailable"))?
             .start_serving(proposal)
     }
+    /// `workflow.status()`, or null when no workflow is resident (`_workflow_state()` is None,
+    /// demo_chain.py:434-436; the serving wait reads `{}`, :1016-1017).
     fn workflow_state(&mut self) -> Result<Value, StepError> {
-        lock(&self.resident)
-            .work
-            .as_mut()
-            .ok_or_else(|| refused("owner_work_unavailable"))?
-            .workflow_state()
+        match lock(&self.resident).work.as_mut() {
+            Some(work) => work.workflow_state(),
+            None => Ok(Value::Null),
+        }
     }
     /// `needs_identity` / `current` over the run's resident workflow; with none resident, the
     /// run's own compile decides whether one was required (`demo_chain.py:988-992`).

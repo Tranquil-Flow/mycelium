@@ -532,10 +532,10 @@ fn two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish() {
 }
 /// Proves: B-RUN-10 (the packaged app's ten-step table runs step 10 through its own work ports,
 /// never `owner_run_step_not_ported`; with no workflow it does what v0.1.4 does,
-/// `state = {} if workflow is None else workflow.status()` (demo_chain.py:1016-1020): an unbound
+/// `state = {} if workflow is None else workflow.status()` (demo_chain.py:1016-1022): an unbound
 /// run keeps waiting and ends `route_qualification_timeout`; a run whose compile bound an epoch
 /// refuses `serving_workflow_identity_changed` (`needs_identity(workflow) and not
-/// current(workflow)`, :1019-1020). REVIEW-laneSRV ASRV-04 / SRV-3: round 1 expected
+/// current(workflow)`, :1020-1021). REVIEW-laneSRV ASRV-04 / SRV-3: round 1 expected
 /// `owner_work_unavailable`, a code the source never produces here.) Model-free; no route opened.
 #[test]
 fn the_packaged_chain_runs_the_serving_step_instead_of_refusing_it_as_unported() {
