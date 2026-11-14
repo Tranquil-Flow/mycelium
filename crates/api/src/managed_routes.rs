@@ -124,7 +124,10 @@ impl RouteExtension for MailboxRoutes {
             let dispatch = self
                 .0
                 .current()
-                .ok_or_else(|| SeedError::new("managed_owner_unavailable"))?;
+                .ok_or_else(|| {
+                    eprintln!("diag: managed seat missing for {path}");
+                    SeedError::new("managed_owner_unavailable")
+                })?;
             let raw = protocol::canonical::to_bytes(body)
                 .map_err(|_| SeedError::new("managed_control_json_invalid"))?;
             let answer = dispatch(&raw).map_err(SeedError::new)?;

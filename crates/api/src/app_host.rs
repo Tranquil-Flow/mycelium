@@ -275,6 +275,7 @@ impl<M: ManagedSlot> SeedRuntime<M> {
             *closed = true;
         }
         self.mailbox_routes.unbind();
+        eprintln!("diag: managed seat unbound (seed runtime closed)");
         let managed = self.managed.lock().ok().and_then(|m| m.clone());
         if let Some(managed) = managed
             && let Err(error) = managed.close()
