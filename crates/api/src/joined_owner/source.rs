@@ -273,7 +273,7 @@ impl ShardSource {
                                         Err(
                                             transport::Error::Expired
                                             | transport::Error::Authentication,
-                                        ) if end.remaining(clock.monotonic()).is_ok() => {}
+                                        ) if end.remaining(clock.monotonic()).is_ok() => continue,
                                         Err(e) => {
                                             break Err(refusal(format!(
                                                 "source_accept_failed:{e:?}"
