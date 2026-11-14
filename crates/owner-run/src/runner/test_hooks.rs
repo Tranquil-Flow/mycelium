@@ -62,13 +62,10 @@ pub(super) fn before_lock<T>(lock: &Mutex<T>) {
     if let Some(gate) = gate_of(&mut hooks, at, &me) {
         gate.arrivals.push(me.id());
         changed.notify_all();
-        loop {
-            // Gone (dropped) or freed: go on. A pass is used up by this one acquisition.
-            let Some(gate) = gate_of(&mut hooks, at, &me) else {
-                break;
-            };
-            if let Some(at) = gate.passes.iter().position(|t| *t == me.id()) {
-                gate.passes.remove(at);
+        // Gone (dropped) or freed: go on. A pass is used up by this one acquisition.
+        while let Some(gate) = gate_of(&mut hooks, at, &me) {
+            if let Some(pass) = gate.passes.iter().position(|t| *t == me.id()) {
+                gate.passes.remove(pass);
                 break;
             }
             hooks = changed.wait(hooks).unwrap_or_else(PoisonError::into_inner);
