@@ -58,7 +58,8 @@ pub type Composed = (
 );
 /// Build the native driver (fresh `evidence` directory, persisted `private` state) and the
 /// node service over it. Starts nothing until the first request. No window, no refusal of
-/// release builds: the packaged executable calls this; the development hosts add their own.
+/// release builds: the development shell (`run`, `run_probe`) calls this and adds its own. The
+/// packaged executable does not: its chat is the owner run's route (`crate::packaged`, lane CHAT).
 pub fn compose(
     checkpoint: &std::path::Path,
     tokenizer: &std::path::Path,
