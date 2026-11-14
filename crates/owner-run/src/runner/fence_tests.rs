@@ -3,6 +3,7 @@
 //! f4e366e9`: the Stop check and the publication run under `OwnerRun._lock`, which `OwnerRun.stop`
 //! writes under). Deterministic: the commit is parked on a channel, never timed.
 //! Proves: B-RUN-10 (fenced serving publication), B-RUN-17 (lock boundary).
+use super::test_hooks::Blocked;
 use super::*;
 use serde_json::json;
 use std::sync::{
@@ -171,7 +172,8 @@ impl Chain for Publishing {
 /// status: v0.1.4 commits the announcement and writes `ctx.result['registry_origin']` inside
 /// `with owner._lock` (demo_chain.py:1075-1097), the lock `status_snapshot()` reads under
 /// (owner_run.py:194), so no status shows the announcement without its origin. A status read that
-/// starts after the announcement waits for the origin.)
+/// starts after the announcement is proven to wait (it found the run lock held) before the
+/// commit is released, and then carries the origin.)
 #[test]
 fn a_status_snapshot_never_shows_the_serving_announcement_without_its_origin() {
     let announced = Arc::new(AtomicBool::new(false));
@@ -194,28 +196,35 @@ fn a_status_snapshot_never_shows_the_serving_announcement_without_its_origin() {
         Timing::registered(),
     )
     .expect("runner");
+    // Dropped before the Runner when an assertion unwinds: the parked commit is released first.
+    let release = release;
+    let blocked = Blocked::watch(&runner.shared.run);
     runner.start("start", None).expect("start");
     entered.recv_timeout(patience()).expect("commit entered");
     // The commit is parked right after its announcement.
     let run_held = matches!(runner.shared.run.try_lock(), Err(TryLockError::WouldBlock));
     let view = runner.view();
     let watcher_announced = announced.clone();
+    let (watcher_id, watcher_ids) = mpsc::channel();
     let watcher = std::thread::spawn(move || {
+        assert!(watcher_id.send(std::thread::current().id()).is_ok());
         let after_announcement = watcher_announced.load(Ordering::SeqCst);
         (after_announcement, view.snapshot())
     });
-    let (seen_after_announcement, snapshot) = if run_held {
-        // The snapshot waits for the transaction: release it first.
-        release.send(()).expect("commit waits for release");
-        watcher.join().expect("watcher")
-    } else {
-        let seen = watcher.join().expect("watcher");
-        release.send(()).expect("commit waits for release");
-        seen
-    };
+    let watcher_id = watcher_ids
+        .recv_timeout(patience())
+        .expect("watcher started");
+    // Released only once the read is proven to wait for the transaction.
+    let waited = blocked.wait_for(watcher_id, patience());
+    release.send(()).expect("commit waits for release");
+    let (seen_after_announcement, snapshot) = watcher.join().expect("watcher");
     let published = outcome.recv_timeout(patience()).expect("the step ended");
     runner.close();
     assert_eq!(published, Ok(()));
+    assert!(
+        waited,
+        "the status read must wait behind the parked publication"
+    );
     assert!(
         seen_after_announcement,
         "the watcher read after the announcement"
@@ -230,7 +239,8 @@ fn a_status_snapshot_never_shows_the_serving_announcement_without_its_origin() {
 
 /// Proves: B-RUN-10 (REVIEW-laneSRV SRV-8, behaviour, not mechanism: a real `Runner::stop()` issued
 /// while the serving commit is parked lands AFTER the publication, as `OwnerRun.stop` waits for
-/// `owner._lock` that the commit holds (demo_chain.py:1075-1097, owner_run.py:275-282): the step's
+/// `owner._lock` that the commit holds (demo_chain.py:1075-1097, owner_run.py:275-282): the Stop is
+/// proven to wait (it found the run lock held) before the commit is released; the step's
 /// publication is `Ok`, and the Stop's own answer already carries the origin.)
 #[test]
 fn a_concurrent_stop_lands_after_the_parked_publication() {
@@ -254,17 +264,30 @@ fn a_concurrent_stop_lands_after_the_parked_publication() {
         Timing::registered(),
     )
     .expect("runner");
+    let release = release;
+    let blocked = Blocked::watch(&runner.shared.run);
     runner.start("start", None).expect("start");
     entered.recv_timeout(patience()).expect("commit entered");
     let run_held = matches!(runner.shared.run.try_lock(), Err(TryLockError::WouldBlock));
-    let answer = std::thread::scope(|scope| {
-        let stopper = scope.spawn(|| runner.stop());
+    let (stopper_id, stopper_ids) = mpsc::channel();
+    let stopping = &runner;
+    let (waited, answer) = std::thread::scope(|scope| {
+        let stopper = scope.spawn(move || {
+            assert!(stopper_id.send(std::thread::current().id()).is_ok());
+            stopping.stop()
+        });
+        let stopper_id = stopper_ids
+            .recv_timeout(patience())
+            .expect("stopper started");
+        // Released only once the Stop is proven to wait for the transaction.
+        let waited = blocked.wait_for(stopper_id, patience());
         release.send(()).expect("commit waits for release");
-        stopper.join().expect("stopper")
+        (waited, stopper.join().expect("stopper"))
     });
     let published = outcome.recv_timeout(patience()).expect("the step ended");
     runner.close();
     assert!(run_held, "the commit was parked under the run lock");
+    assert!(waited, "the Stop must wait behind the parked publication");
     assert_eq!(published, Ok(()), "the parked publication completes");
     assert_eq!(answer["state"], "stopping", "{answer}");
     assert_eq!(

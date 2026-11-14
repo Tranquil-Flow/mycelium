@@ -19,6 +19,8 @@ mod probe_tests;
 #[cfg(test)]
 mod replaced_tests;
 #[cfg(test)]
+mod serving_tests;
+#[cfg(test)]
 mod test_hooks;
 #[cfg(test)]
 mod view_tests;
