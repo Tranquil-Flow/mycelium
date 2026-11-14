@@ -413,11 +413,15 @@ admission until `package-pins.json` is regenerated from the switched genuine man
   Qwen2 system/user/assistant envelope; the node takes finished ChatML. The packaged chat did not
   wrap, and the page trims the probe's ChatML, so the model began with a whitespace token
   (round 9's `answer_text` was `"\n\n"`). `node_service::chat_template` now wraps at the chat edge
-  (seam note `L11-evidence/round10/seam-node-service.md`). `bundle_chat` asserts the oracle-equal
-  answer (`tests/support/chat_answer.rs`, fixture `tests/fixtures/chat-answer-oracle.json`,
-  FX-L11-chat-answer): the recorded tokens and text must equal v0.1.4's greedy answer for the first
-  16 tokens (text-exact prefix when fewer are recorded); a whitespace-only answer is refused. Fast
-  tests: `tests/chat_answer_oracle.rs`.
+  (seam note `L11-evidence/round10/seam-node-service.md`). The oracle-equal answer is checked
+  offline only, by `tests/chat_answer_oracle.rs` (`tests/support/chat_answer.rs`, fixture
+  `tests/fixtures/chat-answer-oracle.json`, FX-L11-chat-answer): the recorded tokens and text must
+  equal v0.1.4's greedy answer for the first 16 tokens (text-exact prefix when fewer are recorded);
+  a whitespace-only answer is refused. Since lane CHAT, `bundle_chat` checks the shipped bundle's
+  route chat with no run serving: the page's not-ready state, an action refused on the chat
+  channel, a send refused `chat_not_ready`, an unknown request's events refused
+  `chat_request_unknown`, then the exact-pid Apple Event Quit, `L11_CLEANUP:Verified` and no
+  native identity, evidence or child left; it no longer generates or checks an answer.
 
 ### Quit allowance, menu / Command-Q, LaunchServices launch and reopen (round 12)
 
