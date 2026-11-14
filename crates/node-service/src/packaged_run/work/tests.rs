@@ -560,6 +560,33 @@ fn on_the_real_lan_an_owner_refuses_a_joined_mac_on_its_loopback_by_name() {
     eprintln!("refused in {:?}: {message}", begun.elapsed());
     assert!(lock(&ports.work.resident).work.is_none(), "nothing dialed");
 }
+/// Proves: F2 (one transport per owner run: the owner reads this Mac's interfaces once, when the run
+/// composes, and its local worker, member dials, shard source, route and shares check all keep that
+/// answer, even though every later reading would answer differently. Mutation M3 re-reads it.)
+#[test]
+fn one_owner_run_reads_this_macs_interfaces_once() {
+    use api::lan_interface::Selection;
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let policy = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let owner = WorkNetwork::Read(
+        Arc::new(move || match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => Selection::Lan(loopback),
+            _ => Selection::LocalOnly("interfaces_changed_mid_run"),
+        }),
+        policy.clone(),
+    );
+    let member = WorkNetwork::Fixed(NetworkChoice(Some((loopback, policy))));
+    handoff_and_push_before_publish(Fixture::on_each(owner, member), &|address| {
+        assert_eq!(address.ip(), loopback, "{address}")
+    });
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the owner run read the interfaces again after it composed"
+    );
+}
 fn handoff_and_push_before_publish(mut f: Fixture, on: &dyn Fn(std::net::SocketAddr)) {
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
