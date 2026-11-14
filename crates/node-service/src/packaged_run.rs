@@ -868,6 +868,9 @@ impl RunClose {
             },
             Err(_) => {
                 eprintln!("owner run: demo_run_stop_failed");
+                // The closure that held the deferred Stop never ran: issue it here, at once and
+                // without a join (app.py:1835-1838 runs after a failed close step too).
+                stop.issue();
                 Closing::Done(Err(CleanupError::Poll))
             }
         };
