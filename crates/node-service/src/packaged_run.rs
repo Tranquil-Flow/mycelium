@@ -626,13 +626,14 @@ impl OwnerRun {
         host.with(|c| c.run.demo = view.clone());
         // Every second, outside the host's and the run's locks: the run's own thread runs the
         // ceiling, rollover and monitor checks of a serving run. The UI's status reads stay
-        // snapshots (`DemoView::status`).
+        // snapshots (`DemoView::status`). Dropped, it is joined for at most 2 s, as
+        // `PublishedStatus.stop` joins (`self.thread.join(2)`, published_status.py:78-81).
         let probe = runs.probe();
-        let status = match HostLoop::start(
+        let status = match HostLoop::start_joined_within(
             "packaged-owner-run-status",
             BudgetId::PyMyceliumA13MacosPublishedStatusPublishedstatusLoopSelfStopWaitL73,
             &host.node,
-            true,
+            BudgetId::PyMyceliumA13MacosPublishedStatusPublishedstatusStopSelfThreadJoinL81,
             move || probe.refresh(),
         ) {
             Ok(status) => Some(status),

@@ -375,14 +375,25 @@ impl ModelSource {
 /// One of the packaged host's own loops on its named thread (`DemoApp.policy_thread`): `tick`
 /// every `period` until it is stopped or the node service's shutdown fence (`self.closed`) is
 /// set. The window's Quit stops it at once and reaps it without blocking; dropping the last
-/// handle stops and joins it.
+/// handle stops it and joins it as [`DropJoin`] says.
 pub struct HostLoop {
     /// Dropped to wake the loop (`self.closed.wait(1)` returning).
     stop: Mutex<Option<mpsc::Sender<()>>>,
     thread: Mutex<Option<JoinHandle<()>>>,
-    /// Dropping the last handle joins the loop. Off for a loop whose pass may wait on another
-    /// process (a directory exchange): it is stopped and left to end on its own.
-    join_on_drop: bool,
+    /// Disconnected once the loop's thread has returned (its sender is dropped with it).
+    ended: Mutex<mpsc::Receiver<()>>,
+    on_drop: DropJoin,
+}
+/// What dropping the last handle waits for.
+#[derive(Clone, Copy)]
+enum DropJoin {
+    /// Join the loop.
+    Always,
+    /// Off for a loop whose pass may wait on another process (a directory exchange): it is
+    /// stopped and left to end on its own.
+    IfEnded,
+    /// Join it for at most this long, then leave it (`thread.join(timeout)`).
+    Within(Duration),
 }
 impl HostLoop {
     pub(crate) fn start(
@@ -390,6 +401,35 @@ impl HostLoop {
         period: BudgetId,
         node: &NodeService,
         join_on_drop: bool,
+        tick: impl FnMut() + Send + 'static,
+    ) -> Result<Arc<Self>, &'static str> {
+        let on_drop = if join_on_drop {
+            DropJoin::Always
+        } else {
+            DropJoin::IfEnded
+        };
+        Self::spawn(name, period, node, on_drop, tick)
+    }
+    /// [`HostLoop::start`] for a loop whose last handle joins it for at most `join` (the
+    /// owner run's status loop: `PublishedStatus.stop` joins for 2 s, published_status.py:78-81).
+    pub(crate) fn start_joined_within(
+        name: &str,
+        period: BudgetId,
+        node: &NodeService,
+        join: BudgetId,
+        tick: impl FnMut() + Send + 'static,
+    ) -> Result<Arc<Self>, &'static str> {
+        let join = join
+            .span(Entries::ZERO)
+            .map_err(|_| "host_loop_budget_invalid")?;
+        let on_drop = DropJoin::Within(Duration::from_millis(join.millis()));
+        Self::spawn(name, period, node, on_drop, tick)
+    }
+    fn spawn(
+        name: &str,
+        period: BudgetId,
+        node: &NodeService,
+        on_drop: DropJoin,
         mut tick: impl FnMut() + Send + 'static,
     ) -> Result<Arc<Self>, &'static str> {
         let period = period
@@ -397,10 +437,13 @@ impl HostLoop {
             .map_err(|_| "host_loop_budget_invalid")?;
         let period = Duration::from_millis(period.millis());
         let (stop, stopped) = mpsc::channel::<()>();
+        let (alive, ended) = mpsc::channel::<()>();
         let node = node.clone();
         let thread = std::thread::Builder::new()
             .name(name.into())
             .spawn(move || {
+                // Dropped when this thread returns: the drop's bounded join hears it.
+                let _alive = alive;
                 while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(period) {
                     // Quit's fence; a poisoned node counts as closed.
                     if node.closed().unwrap_or(true) {
@@ -413,7 +456,8 @@ impl HostLoop {
         Ok(Arc::new(Self {
             stop: Mutex::new(Some(stop)),
             thread: Mutex::new(Some(thread)),
-            join_on_drop,
+            ended: Mutex::new(ended),
+            on_drop,
         }))
     }
     /// Wake the loop and end it; a pass in progress finishes first.
@@ -450,7 +494,22 @@ impl Drop for HostLoop {
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(thread) = thread.filter(|t| self.join_on_drop || t.is_finished())
+        let join = match self.on_drop {
+            DropJoin::Always => true,
+            DropJoin::IfEnded => false,
+            DropJoin::Within(span) => {
+                let ended = self.ended.get_mut().unwrap_or_else(PoisonError::into_inner);
+                let within = matches!(
+                    ended.recv_timeout(span),
+                    Err(mpsc::RecvTimeoutError::Disconnected)
+                );
+                if !within {
+                    eprintln!("packaged host loop: host_loop_join_incomplete");
+                }
+                within
+            }
+        };
+        if let Some(thread) = thread.filter(|t| join || t.is_finished())
             && thread.join().is_err()
         {
             eprintln!("packaged host loop: host_loop_panicked");
