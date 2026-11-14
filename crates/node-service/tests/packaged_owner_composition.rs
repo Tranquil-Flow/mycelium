@@ -235,6 +235,44 @@ fn a_refused_timing_file_fails_the_packaged_composition() {
     );
 }
 
+/// Proves: ledger row 17 (owner ruling 14 Nov: the packaged app no longer offers one-Mac native
+/// chat; v0.1.4 offers no chat without a second Mac). A SLICE-1 model folder left on disk where
+/// the retired one-Mac chat looked for it (`model-source-<rev12>/models--Qwen--Qwen2.5-0.5B-
+/// Instruct/snapshots/<rev>/`) is not composed into a native driver at window open: the
+/// composition succeeds, writes no native member / owner-leaf identity, and the chat is the
+/// run route's.
+#[test]
+fn the_packaged_app_never_composes_the_one_mac_native_model() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("state");
+    let revision = backend_mlx::admission::REVISION;
+    let snapshot = state
+        .join(format!("model-source-{}", &revision[..12]))
+        .join("models--Qwen--Qwen2.5-0.5B-Instruct/snapshots")
+        .join(revision);
+    std::fs::create_dir_all(&snapshot).unwrap();
+    for file in ["model.safetensors", "tokenizer.json"] {
+        std::fs::write(snapshot.join(file), b"not a model").unwrap();
+    }
+    let composed = packaged_core(&state);
+    let private = state.join("v02-node/private");
+    let native_identities: Vec<_> = ["member", "owner-leaf"]
+        .into_iter()
+        .filter(|name| private.join(name).exists())
+        .collect();
+    let (core, cleanup) = composed.expect("the packaged app composes");
+    let state_reply = chat(&core, "/chat/api/state", serde_json::json!({}));
+    quit(cleanup);
+    assert_eq!(
+        native_identities,
+        Vec::<&str>::new(),
+        "the packaged app composed the one-Mac native driver"
+    );
+    assert_eq!(state_reply.0, 200, "{}", state_reply.1);
+    assert_eq!(state_reply.1["available"], false, "{}", state_reply.1);
+    assert_eq!(state_reply.1["model_id"], Value::Null, "{}", state_reply.1);
+}
+
 #[test]
 fn timing_admission_accepts_the_real_default_folder_shape_and_macos_temp_alias() {
     let scratch = Scratch::new();
