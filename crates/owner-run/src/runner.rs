@@ -300,7 +300,12 @@ impl StepEnv for Env<'_> {
     /// announcement and its origin. The check is bound to this call's own context: a replaced
     /// context's event is set (`_Stopped`, :1077-1080); a current context that is no longer
     /// `running` refuses `serving_workflow_identity_changed` (`owner._ctx is not ctx or
-    /// owner._state != 'running'`, :1086-1088).
+    /// owner._state != 'running'`, :1086-1088). In production the second refusal is defensive:
+    /// every way the machine leaves `running` while a step of the current context runs sets that
+    /// context's stop first (Stop, rebuild, a rebuild-join expiry, machine.rs `stop`,
+    /// `rebuild_join_expired`), and `serving` / `failing` are entered only after the step's call
+    /// returned; only the serving step calls `fenced`. A teardown that called it would reach it
+    /// (`runner::fence_tests` pins it that way).
     ///
     /// Lock order (one order everywhere; `->` = acquired while holding):
     ///   host outer lock (the packaged resident workflow, the oracle's `app.guard`) -> run ->

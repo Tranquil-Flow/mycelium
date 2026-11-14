@@ -296,3 +296,80 @@ fn a_concurrent_stop_lands_after_the_parked_publication() {
         "the Stop landed after the publication: {answer}"
     );
 }
+
+/// A run whose first step refuses (the run is `failing`, its stop event clear) and whose teardown
+/// then calls the fence: the one way a call of the CURRENT context reaches `fenced` while the run
+/// is no longer `running` without a Stop. No production chain does this (only the serving step
+/// calls `fenced`, and only while its step runs); the check is defensive and pinned here.
+struct FencedTeardown {
+    committed: Arc<AtomicBool>,
+    outcome: mpsc::Sender<(Value, Result<(), StepError>)>,
+    view: Arc<Mutex<Option<RunnerView>>>,
+}
+impl Chain for FencedTeardown {
+    fn new_run(&mut self, _: &str, _: &str, _: Reason, _: Option<&Value>, _: Option<&Value>) {}
+    fn run_step(&mut self, _: &str, _: &mut dyn StepEnv) -> Result<(), StepError> {
+        Err(OwnerRunError::new("test_step_refused").into())
+    }
+    fn teardown(&mut self, _: bool, env: &mut dyn StepEnv) -> Result<(), String> {
+        let stopped = env.stopped();
+        let committed = self.committed.clone();
+        let result = env.fenced(
+            &mut || {
+                committed.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+            "registry_origin",
+            json!("http://127.0.0.1:1/"),
+        );
+        let snapshot = lock(&self.view)
+            .as_ref()
+            .map_or(Value::Null, RunnerView::snapshot);
+        let seen = json!({"stopped": stopped, "state": snapshot["state"],
+            "registry_origin": snapshot["registry_origin"]});
+        assert!(self.outcome.send((seen, result)).is_ok(), "test listens");
+        Ok(())
+    }
+}
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV-r2-opus R2-2: the fence's `owner._state != 'running'` half
+/// (demo_chain.py:1086-1088) on the real Runner: a call of the current context whose stop event
+/// is clear, made while the run is `failing`, refuses `serving_workflow_identity_changed` and its
+/// commit never runs; nothing is published.)
+#[test]
+fn a_fence_of_a_run_that_is_no_longer_running_refuses_without_committing() {
+    let committed = Arc::new(AtomicBool::new(false));
+    let (outcome_tx, outcome) = mpsc::channel();
+    let view = Arc::new(Mutex::new(None));
+    let runner = Runner::spawn(
+        Box::new(FencedTeardown {
+            committed: committed.clone(),
+            outcome: outcome_tx,
+            view: view.clone(),
+        }),
+        Box::new(|| Identity {
+            run_id: "failing-run".into(),
+            deployment_id: "failing-deployment".into(),
+        }),
+        Arc::new(SystemClocks::new()),
+        Timing::registered(),
+    )
+    .expect("runner");
+    *lock(&view) = Some(runner.view());
+    runner.start("start", None).expect("start");
+    let (seen, result) = outcome.recv_timeout(patience()).expect("the teardown ran");
+    runner.close();
+    assert_eq!(
+        seen,
+        json!({"stopped": false, "state": "failing", "registry_origin": null}),
+        "a failing run, its stop event clear, nothing published"
+    );
+    assert_eq!(
+        result,
+        Err(OwnerRunError::new("serving_workflow_identity_changed").into())
+    );
+    assert!(
+        !committed.load(Ordering::SeqCst),
+        "nothing is committed for a run that is not running"
+    );
+}

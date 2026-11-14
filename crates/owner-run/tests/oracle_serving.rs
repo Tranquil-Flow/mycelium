@@ -387,9 +387,13 @@ fn serving_matches_executed_oracle() {
 }
 /// The fenced cases whose `at_guard` writer lands between the post-wait read and the fence: the
 /// oracle's outcomes are pinned on the production fences, not on this double:
-/// owner Stop / replaced context -> `stopped`, owner not running -> identity changed:
-/// `owner-run` `runner::fence_tests` and `runner::replaced_tests`; workflow Stop, state, replacement
-/// and live startup: `api` `joined_owner::work::serving_fence_tests`.
+/// owner Stop / replaced context -> `stopped`: `owner-run` `runner::fence_tests` and
+/// `runner::replaced_tests`; owner not running -> identity changed:
+/// `runner::fence_tests::a_fence_of_a_run_that_is_no_longer_running_refuses_without_committing`,
+/// which reaches it from a teardown (a step of the current context cannot see the run leave
+/// `running` without its own stop being set first, so that case has no production schedule);
+/// workflow Stop, state, replacement and live startup: `api`
+/// `joined_owner::work::serving_fence_tests`.
 const FENCE_WRITERS: [&str; 7] = [
     "fenced-owner-stop-at-guard",
     "fenced-owner-replaced-at-guard",
