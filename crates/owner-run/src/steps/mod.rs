@@ -10,6 +10,7 @@ pub mod model;
 pub mod observe;
 pub mod progress_wait;
 pub mod publish;
+pub mod serving;
 pub mod slices;
 pub mod targets;
 

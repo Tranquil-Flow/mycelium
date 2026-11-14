@@ -15,6 +15,37 @@ pub trait WorkPort {
     fn start_serving(&mut self, proposal: &Value) -> Result<Value, PortError>;
     /// Existing workflow.status(); null only when the workflow is genuinely absent.
     fn workflow_state(&mut self) -> Result<Value, StepError>;
+    /// `needs_identity(workflow)` / `current(workflow)` of `_step_serving`
+    /// (`demo_chain.py:988-1004 @ f4e366e9`), read from the host's own run state.
+    /// A host that has not wired the serving step refuses by name, never answers.
+    fn serving_identity(&mut self, _state: &RunState) -> Result<ServingIdentity, StepError> {
+        Err(super::not_ported("serving"))
+    }
+    /// The lifecycle-fenced publication of `_step_serving` (`demo_chain.py:1058-1098`):
+    /// under the host's own workflow fence, re-check that this workflow is still the
+    /// run's, `api_running`, not stopped and that its LIVE startup qualified the route
+    /// (`serving_workflow_identity_changed`, `route_qualification_failed`), then commit
+    /// the `serving` announcement. Nothing is announced when a re-check refuses.
+    fn commit_serving(
+        &mut self,
+        _state: &RunState,
+        _announcement: &super::exchange::Announcement,
+        _work_limits: Option<&Value>,
+    ) -> Result<(), StepError> {
+        Err(super::not_ported("serving"))
+    }
+}
+/// What the host knows about the workflow the serving step looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServingIdentity {
+    /// No workflow, and nothing in the run binds one (`needs_identity` false).
+    Absent,
+    /// A workflow with no run binding to check (injected or legacy workflow).
+    NotNeeded,
+    /// The run's own workflow: same run, deployment and compile epoch, not stopped.
+    Current,
+    /// A binding exists and this workflow does not match it, or is gone.
+    Changed,
 }
 /// Additive borrow bundle; existing Ports literals remain valid.
 pub struct WorkPorts<'a> {
