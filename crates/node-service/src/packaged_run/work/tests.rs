@@ -130,6 +130,13 @@ fn consent(root: &Path, session: &api::member::Session, policy: &Value) {
     .unwrap();
 }
 impl Fixture {
+    /// Both hosts on loopback, the owner's own contributor exactly as the product's contributor
+    /// step leaves it. Every fixture does so now: a resource policy and a standing grant written
+    /// by hand into its root hid two defects of that step (lane TEN rows 6), and a hand-written
+    /// grant with other caps than the product's is refused `standing_consent_changed`.
+    fn product_contributor() -> Self {
+        Self::new()
+    }
     /// Both hosts on loopback (`NetworkMode::LocalOnly`), whatever this Mac's interfaces are.
     fn new() -> Self {
         Self::on(WorkNetwork::loopback())
@@ -140,14 +147,6 @@ impl Fixture {
     }
     /// The owner's work transport over `owner`, the joined Mac's over `member`.
     fn on_each(owner_work: WorkNetwork, member_work: WorkNetwork) -> Self {
-        Self::built(owner_work, member_work, true)
-    }
-    /// Both hosts on loopback, the owner's own contributor left exactly as the product's
-    /// contributor step leaves it (no state written into its root by this fixture).
-    fn product_contributor() -> Self {
-        Self::built(WorkNetwork::loopback(), WorkNetwork::loopback(), false)
-    }
-    fn built(owner_work: WorkNetwork, member_work: WorkNetwork, contributor_by_hand: bool) -> Self {
         let work = member_work;
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
@@ -185,22 +184,6 @@ impl Fixture {
         );
         owner_ports::start_local_contributor(&host).unwrap();
         owner_ports::renew_contributor(&host);
-        host.with(|c| {
-            if !contributor_by_hand {
-                return;
-            }
-            consent(
-                &owner_ports::contributor_dir(&owner),
-                c.run
-                    .contributor
-                    .as_ref()
-                    .unwrap()
-                    .session
-                    .as_ref()
-                    .unwrap(),
-                &policy,
-            )
-        });
         let seed = host.with(|c| c.authority.seed.clone().unwrap());
         let member_root = root.join("member");
         let mut authority = Authority::load(member_root.clone()).unwrap();
