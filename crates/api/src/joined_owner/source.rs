@@ -11,10 +11,14 @@
 //! seed-signed offer naming this source's key (and, on LAN, its signed
 //! addresses), (4) serves exactly that offer to one connection from the
 //! offer's recipient carrier key while the member receives and verifies, and
-//! returns the member's receipt. Only that key is admitted (direct LAN: by the
-//! host before its handshake completes; LocalOnly: by the accepted connection's
-//! key); any other or failed handshake is closed unserved and the job keeps
-//! accepting until its own absolute deadline. Serving ends at that deadline or
+//! returns the member's receipt. Only that key is admitted. Direct LAN: the key
+//! is installed in the host before the job's first accept and ENFORCED by the
+//! host after TLS authentication and before it hands the connection to the job
+//! (other keys are closed `LAN_KEY_REFUSED`, reason `lan_key_refused`, and
+//! unpinned at once); the job checks the key again, which also covers a
+//! connection carried over from an earlier job. LocalOnly: only that second
+//! check (reason `recipient_key_refused`). Any other or failed handshake is
+//! closed unserved and the job keeps accepting until its own absolute deadline. Serving ends at that deadline or
 //! at `close`, whichever comes first. Bytes, recipes and offers are all
 //! produced elsewhere and verified on both sides here.
 //!
@@ -323,7 +327,8 @@ impl ShardSource {
                                 )
                                 .map_err(|e| refusal(format!("source_service_failed:{e:?}")))?;
                                 let end = until(wall)?;
-                                // LAN-A1: direct LAN refuses every other key at the handshake.
+                                // LAN-A1: installed before accept; the host enforces it after
+                                // TLS authentication, before handing a connection to this job.
                                 if on_lan {
                                     host.admit_peer_ids(&[recipient]).map_err(|e| {
                                         refusal(format!("source_admission_failed:{e:?}"))
@@ -343,12 +348,13 @@ impl ShardSource {
                                         Ok(connection) if connection.remote_id() == recipient => {
                                             break Ok(connection);
                                         }
-                                        // LocalOnly admits any key (and the close wake):
-                                        // closed unserved, the job goes on.
+                                        // LocalOnly admits any key; on the LAN, a connection
+                                        // carried over from an earlier job's key: closed
+                                        // unserved (this check's own reason), the job goes on.
                                         Ok(connection) => {
                                             connection.close(
                                                 LAN_KEY_REFUSED.into(),
-                                                b"lan_key_refused",
+                                                b"recipient_key_refused",
                                             );
                                         }
                                         // A slice ended, or a refused or failed handshake:
