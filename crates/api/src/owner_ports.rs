@@ -212,6 +212,12 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
     // `standing-consent.json` from the worker's root (`NativeShard::try_new`). Record the grant the
     // user acknowledged (`peer_visibility` in the resource policy) and bind it to the membership this
     // worker just accepted, so its own stage is served like a peer's.
+    // Its shard receive reserves disk under ITS root's resource policy (`compiler_inputs`
+    // `reserve_output`), as a joined Mac's does under the policy its join wrote
+    // (`joined_member::work`): the owner's own worker is this Mac, so that policy is the owner's
+    // current one. Without it every real run refused the owner's own stage at the slices step
+    // (`compiler_storage_consent_required`).
+    resource_policy::write(&dir, &policy)?;
     grant_self_consent(&dir, &node, &policy)?;
     let lease = session_lease(&session);
     host.with(|c| {
