@@ -8,7 +8,8 @@
 //! client datagram instead (a peer that went silent mid-handshake, which never
 //! even sends its own close). Nothing is decided by
 //! elapsed time: the socket read timeout only lets the relay threads see
-//! `Drop`. Shared by the runtime and api suites (`#[path]`).
+//! `Drop`. Shared by the runtime and api suites (`#[path]`); each uses part of it.
+#![allow(dead_code)]
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::{
@@ -118,7 +119,6 @@ impl Hold {
         self.answered.recv_timeout(within).is_ok()
     }
     /// Drop every client datagram from now on (the server keeps waiting for them).
-    #[allow(dead_code)] // the api suite's stalled peer; the runtime suite releases instead
     pub fn freeze(&self) {
         self.shared.frozen.store(true, Ordering::SeqCst);
     }

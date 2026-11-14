@@ -580,7 +580,11 @@ fn held_storage_while_verifying_at_admission_cannot_hold_the_sources_close() {
         }
     };
     assert!(closer.join().unwrap(), "close answered the waiting test");
-    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(
+        result.map_err(|e| e.0),
+        Err("source_storage_abandoned".to_owned()),
+        "close names the storage work it left running"
+    );
     assert!(
         blocked,
         "the admission read was not held across close (the test did not reach its state)"
@@ -678,7 +682,11 @@ fn held_storage_while_serving_a_chunk_cannot_hold_the_sources_close() {
         }
     };
     assert!(closer.join().unwrap(), "close answered the waiting test");
-    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(
+        result.map_err(|e| e.0),
+        Err("source_storage_abandoned".to_owned()),
+        "close names the storage work it left running"
+    );
     assert_eq!(
         answered,
         Some(Err("no answer".to_owned())),
