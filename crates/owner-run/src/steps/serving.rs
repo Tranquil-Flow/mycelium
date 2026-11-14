@@ -188,47 +188,51 @@ fn py_float_repr(f: f64) -> String {
     }
 }
 
+/// One element of `dict(sequence)` as a key/value pair: a two-element list, a two-character
+/// string, a two-key mapping's keys; any other length is a `ValueError`, a non-sequence a
+/// `TypeError`.
+fn py_pair(item: &Value) -> Result<(Value, Value), StepError> {
+    match item {
+        Value::Array(pair) if pair.len() == 2 => Ok((pair[0].clone(), pair[1].clone())),
+        Value::String(pair) if pair.chars().count() == 2 => {
+            let mut chars = pair.chars().map(|c| Value::String(c.to_string()));
+            match (chars.next(), chars.next()) {
+                (Some(k), Some(v)) => Ok((k, v)),
+                _ => Err(exception("ValueError")),
+            }
+        }
+        Value::Object(pair) if pair.len() == 2 => {
+            let mut keys = pair.keys().map(|k| Value::String(k.clone()));
+            match (keys.next(), keys.next()) {
+                (Some(k), Some(v)) => Ok((k, v)),
+                _ => Err(exception("ValueError")),
+            }
+        }
+        Value::Array(_) | Value::String(_) | Value::Object(_) => Err(exception("ValueError")),
+        Value::Null | Value::Bool(_) | Value::Number(_) => Err(exception("TypeError")),
+    }
+}
+
 /// Python `dict(value)` for a JSON value, then its JSON keys (`run_exchange.py:169, 172`): a mapping
-/// is copied; a list takes each element as a key/value pair (a two-element list, a two-character
-/// string, a two-key mapping's keys); `''` is `{}`. A number, `True`/`False` or `None` is not
-/// iterable (`TypeError`); an element of the wrong length is a `ValueError`, a non-sequence
-/// element or an unhashable key a `TypeError`. A mapping used as a pair yields its keys in the
-/// Value's own key order.
+/// is copied; a list takes each element as a key/value pair ([`py_pair`]); `''` is `{}`. A number,
+/// `True`/`False` or `None` is not iterable (`TypeError`). Elements are taken in order, each one
+/// checked and its key hashed before the next (CPython's `dict_merge_from_seq2`), so the first
+/// malformed element decides the class: a wrong length is a `ValueError`, a non-sequence element
+/// or an unhashable key a `TypeError`. A mapping used as a pair yields its keys in the Value's own
+/// key order.
 fn py_dict(value: &Value) -> Result<Map<String, Value>, StepError> {
-    let pairs: Vec<(Value, Value)> = match value {
+    let items: &[Value] = match value {
         Value::Object(map) => return Ok(map.clone()),
-        Value::String(s) if s.is_empty() => Vec::new(),
+        Value::String(s) if s.is_empty() => &[],
         // Every character is a one-element sequence.
         Value::String(_) => return Err(exception("ValueError")),
         Value::Null | Value::Bool(_) | Value::Number(_) => return Err(exception("TypeError")),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| match item {
-                Value::Array(pair) if pair.len() == 2 => Ok((pair[0].clone(), pair[1].clone())),
-                Value::String(pair) if pair.chars().count() == 2 => {
-                    let mut chars = pair.chars().map(|c| Value::String(c.to_string()));
-                    match (chars.next(), chars.next()) {
-                        (Some(k), Some(v)) => Ok((k, v)),
-                        _ => Err(exception("ValueError")),
-                    }
-                }
-                Value::Object(pair) if pair.len() == 2 => {
-                    let mut keys = pair.keys().map(|k| Value::String(k.clone()));
-                    match (keys.next(), keys.next()) {
-                        (Some(k), Some(v)) => Ok((k, v)),
-                        _ => Err(exception("ValueError")),
-                    }
-                }
-                Value::Array(_) | Value::String(_) | Value::Object(_) => {
-                    Err(exception("ValueError"))
-                }
-                Value::Null | Value::Bool(_) | Value::Number(_) => Err(exception("TypeError")),
-            })
-            .collect::<Result<_, _>>()?,
+        Value::Array(items) => items,
     };
     // Python keeps the FIRST equal key and the LAST value.
     let mut keys: Vec<(PyKey, Value, Value)> = Vec::new();
-    for (key, value) in pairs {
+    for item in items {
+        let (key, value) = py_pair(item)?;
         let py = PyKey::of(&key)?;
         match keys.iter_mut().find(|(k, _, _)| k.same(&py)) {
             Some(slot) => slot.2 = value,
