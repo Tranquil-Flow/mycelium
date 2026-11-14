@@ -17,7 +17,7 @@ use desktop::bundle;
 use std::path::{Path, PathBuf};
 
 /// Strings that only the probe hooks and the slice driver script contain.
-const PROBE_MARKERS: [&str; 10] = [
+const PROBE_MARKERS: [&str; 11] = [
     "L11_ATTACK_TARGET_REACHED_FAILED",
     "L11_NAVIGATION_DENIED",
     "L11_SYSTEM_BROWSER_CAPTURE",
@@ -28,6 +28,7 @@ const PROBE_MARKERS: [&str; 10] = [
     "L11_WEBVIEW_INACTIVE_POLICY",
     "L11_WINDOW_OCCLUSION",
     "L11_SLICE_CHAT_DOM_TOKEN",
+    "L11_PACKAGED_CHAT_ROUTE_NOT_READY",
 ];
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

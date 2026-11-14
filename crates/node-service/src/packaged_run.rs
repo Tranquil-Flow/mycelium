@@ -48,9 +48,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod chat;
 #[cfg(test)]
 mod program_tests;
 mod work;
+pub use chat::{RunChatRoute, chat_run};
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -148,6 +150,12 @@ struct Custody {
     /// Member Work / local Service retained by a failed work close (never replaced while owed).
     work_debt: Option<WorkDebt>,
     exchange_resource: Option<(Instant, Option<&'static str>)>,
+    /// The run's route as the packaged chat reads it (lane CHAT): set when the run's work is
+    /// composed, taken out by its teardown ([`chat::RouteSource`]).
+    route: Option<chat::RouteSource>,
+    /// The page's route chats as the run's ports cancel them (`DesktopServices::run_chats`, put
+    /// here by [`chat_run`]): teardown, ceiling, dead member and rollover (lane CHAT).
+    chats: Option<api::chat_service::RunChats>,
 }
 
 /// The packaged host as `api::owner_ports::RunHost` and `api::owner_observation::ChainHost`: its
@@ -519,7 +527,13 @@ impl PackagedChainPorts {
 impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
     /// `chain.teardown`: the compiler's worker first, then the bootstrap offers' cleanup and
     /// retirement (`api::owner_observation::Backend::teardown`).
-    fn teardown(&mut self, _: bool, _: &mut dyn owner_run::chain::StepEnv) -> Result<(), String> {
+    fn teardown(
+        &mut self,
+        failed: bool,
+        _: &mut dyn owner_run::chain::StepEnv,
+    ) -> Result<(), String> {
+        // Every chat FIRST, while the route still takes `DELETE` (demo_chain.py:1326-1338).
+        chat::teardown(self.work.host(), failed);
         let work = self.close_work();
         let compilation = self
             .compiler
@@ -552,13 +566,17 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
         &mut self,
         state: &owner_run::state::RunState,
     ) -> owner_run::machine::CeilingProbe {
-        self.work.ceiling_reached(state)
+        let probe = self.work.ceiling_reached(state);
+        chat::ceiling(self.work.host(), &probe);
+        probe
     }
     fn monitor(&mut self, state: &owner_run::state::RunState) -> owner_run::machine::MonitorProbe {
         let reports = &mut self.reports;
-        self.work.monitor(state, &mut || {
+        let probe = self.work.monitor(state, &mut || {
             owner_run::steps::exchange::ReportsPort::tick_local(reports);
-        })
+        });
+        chat::monitored(self.work.host(), &probe);
+        probe
     }
     fn slices_ports(&mut self) -> Option<owner_run::steps::slices::SlicesPorts<'_>> {
         Some(self.slices())

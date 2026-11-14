@@ -3,6 +3,7 @@
 //! LAN). Real enrollment, seed TLS, member control, carrier, inert shard receipts and cleanup.
 //! Constructor-only source plan and refusing native admission.
 use super::*;
+mod chat_route;
 mod regressions;
 mod serving_q;
 mod serving_r2;

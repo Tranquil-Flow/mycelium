@@ -221,6 +221,10 @@ impl Work {
         let held = lock(&self.resident).network.clone();
         held.unwrap_or_else(|| self.host.network.resolve_work_network("owner_local_work"))
     }
+    /// The packaged host this run's work belongs to (the run ports' chat hooks read its custody).
+    pub(super) fn host(&self) -> &PackagedRun {
+        &self.host
+    }
     fn local(&self, network: &crate::packaged_work::NetworkChoice) -> Result<(), StepError> {
         let (root, seed, session, signer, node) = self.host.with(|c| {
             let member = c
@@ -515,10 +519,18 @@ impl Work {
         .with_objects(objects);
         let stopper = Arc::new(work.stopper());
         let stopped = self.stopped.clone();
-        lock(&self.host.custody).work_stop = Some(Arc::new(move || {
+        let read = Arc::new(work.gateway_reader());
+        let mut custody = lock(&self.host.custody);
+        custody.work_stop = Some(Arc::new(move || {
             stopped.store(true, Ordering::SeqCst);
             stopper();
         }));
+        // The packaged chat's run route reads this run's open epoch here (`chat::RunChatRoute`).
+        custody.route = Some(super::chat::RouteSource {
+            run_id: state.run_id.clone(),
+            read,
+        });
+        drop(custody);
         let mut resident = lock(&self.resident);
         resident.bindings = verified;
         resident.run = Some((state.run_id.clone(), state.deployment_id.clone()));
@@ -585,6 +597,8 @@ impl Work {
         }
     }
     fn teardown(&self) -> Result<(), String> {
+        // The chat's route ends with the run's work (the epoch closes below).
+        lock(&self.host.custody).route = None;
         let mut resident = lock(&self.resident);
         // The run's transport ends with it (R2-7): whatever asks next reads this Mac afresh.
         resident.network = None;
@@ -888,6 +902,8 @@ impl Chain for Composed {
             seed.exchange
                 .set_owner_control(Some(OwnerControl::new(self.work.owner.public())));
         }
+        // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
+        super::chat::new_run(&self.work.host);
         self.inner
             .new_run(run, deployment, reason, ceiling, binding);
     }

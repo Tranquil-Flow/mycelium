@@ -890,6 +890,12 @@ impl OwnerWork {
     pub fn gateway(&self) -> Option<Value> {
         self.shared.lock().gateway.clone()
     }
+    /// [`Self::gateway`] for a reader that must not take its owner's lock (the packaged chat's
+    /// run route, lane CHAT): only this workflow's own state lock is taken, for the clone.
+    pub fn gateway_reader(&self) -> impl Fn() -> Option<Value> + Send + Sync + 'static {
+        let shared = self.shared.clone();
+        move || shared.lock().gateway.clone()
+    }
     fn send(&self, command: Command) -> Result<(), Refusal> {
         self.commands
             .as_ref()

@@ -94,6 +94,390 @@ fn shutdown(host: &DesktopServices) {
         }
     }
 }
+/// One page request through the composed window core, as chat.js sends it (`X-Mycelium-Chat`).
+fn chat(core: &Arc<dyn desktop::core::Core>, path: &str, body: Value) -> (u16, Value) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    core.submit(
+        desktop::channel::Request {
+            window: "main".into(),
+            method: "POST".into(),
+            uri: format!("{}{path}", desktop::channel::ORIGIN),
+            headers: vec![
+                ("x-mycelium-chat".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(&body).unwrap(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let patience = budgets::BudgetId::WorkerStartup
+        .span(budgets::Entries::ZERO)
+        .unwrap();
+    let reply = rx
+        .recv_timeout(Duration::from_millis(patience.millis()))
+        .expect("the window answers");
+    (
+        reply.status,
+        serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
+    )
+}
+/// The packaged executable's real composition over `state` (`packaged::core_with_network`, no
+/// model, no relay client, offline hub).
+fn packaged_core(
+    state: &std::path::Path,
+) -> Result<(Arc<dyn desktop::core::Core>, packaged::AppCleanup), String> {
+    let production = node_service::packaged_network::NetworkConfig::default().hooks;
+    packaged::core_with_network(
+        state,
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+        Arc::new(AlwaysPermitted),
+        node_service::packaged_network::NetworkConfig {
+            hooks: Arc::new(move || {
+                let mut hooks = production();
+                hooks.binary = Arc::new(|| None);
+                hooks
+            }),
+            ..node_service::packaged_network::NetworkConfig::default()
+        },
+    )
+}
+struct AlwaysPermitted;
+impl api::resources::Observer for AlwaysPermitted {
+    fn observe(&self) -> api::resources::Observation {
+        api::resources::Observation {
+            power: "external".into(),
+            thermal: "nominal".into(),
+            network: "unmetered".into(),
+        }
+    }
+}
+fn quit(mut cleanup: packaged::AppCleanup) {
+    use desktop::lifecycle::Cleanup;
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    cleanup.bind_clock(Instant::now()).unwrap();
+    cleanup.begin(allowance).unwrap();
+    let deadline = Instant::now() + Duration::from_millis(allowance.millis());
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(Instant::now() < deadline, "the packaged core did not quit");
+                std::thread::yield_now();
+            }
+            other => {
+                assert_eq!(other, Ok(Poll::Verified));
+                return;
+            }
+        }
+    }
+}
+
+/// Proves: ledger row 17 (owner ruling 14 Nov: one chat path, as v0.1.4). The packaged
+/// executable's own composition (`packaged::compose`, what `bin/mycelium.rs` runs) always composes
+/// the chat over the owner run's route: with no run started and no model on this Mac, every
+/// `/chat/*` route is answered by the shipped `ChatService` (chat.js `call` -> `chat.handle`
+/// chat.py:553-584 -> `ChatService.state` :476-504 / `send` :300-318 with no serving run ->
+/// `chat_not_ready` :317-318 / `events` :460-468 -> `chat_request_unknown`), never by the one-Mac
+/// native model (whose gate answered `model_not_installed` here before the wiring). The release
+/// preflight registers this test as the compiled proof that the packaged chat has a run route.
+#[test]
+fn the_packaged_composition_always_has_a_chat_run() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("state");
+    let (core, cleanup) = packaged_core(&state).expect("the packaged app composes");
+    let state_reply = chat(&core, "/chat/api/state", serde_json::json!({}));
+    let send = chat(
+        &core,
+        "/chat/api/send",
+        serde_json::json!({"prompt":"hi","max_new_tokens":2}),
+    );
+    let events = chat(
+        &core,
+        "/chat/api/events",
+        serde_json::json!({"request_id":"A".repeat(24),"after":0}),
+    );
+    quit(cleanup);
+    assert_eq!(state_reply.0, 200, "{}", state_reply.1);
+    let limits = &state_reply.1["limits"];
+    assert_eq!(
+        state_reply.1,
+        serde_json::json!({"available":false,"busy":false,"switching_runs":false,
+            "warming_up":false,"rejoining":false,"model_id":null,"served_by":[],"limits":limits}),
+        "the chat state is the run route's, not the native model's"
+    );
+    assert!(limits["max_new_tokens"].is_u64(), "{limits}");
+    assert_eq!(send, (503, serde_json::json!({"error":"chat_not_ready"})));
+    assert_eq!(
+        events,
+        (404, serde_json::json!({"error":"chat_request_unknown"}))
+    );
+}
+
+/// The `qualification-probe` bundle's own script (what `bin/mycelium.rs` `probe_script` injects).
+const PROBE: &str = include_str!("../src/packaged/probe.js");
+/// One request the probe's success path sends and the reply it requires, read out of `probe.js`
+/// itself so the script and this test cannot drift.
+struct ProbeCall {
+    name: String,
+    path: String,
+    header: String,
+    body: Value,
+    status: u16,
+    error: Option<String>,
+}
+/// The probe's JS object literal (bare keys, single-quoted strings, JSON strings, numbers) as
+/// JSON; anything else is a parse failure, not a guess.
+fn js_literal(text: &str) -> Value {
+    let mut json = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                let mut s = String::new();
+                for c in chars.by_ref() {
+                    if c == '\'' {
+                        break;
+                    }
+                    assert!(c != '\\', "escape in a probe literal: {text}");
+                    s.push(c);
+                }
+                json.push_str(&serde_json::to_string(&s).unwrap());
+            }
+            '"' => {
+                json.push('"');
+                while let Some(c) = chars.next() {
+                    json.push(c);
+                    if c == '\\' {
+                        json.push(chars.next().unwrap());
+                    } else if c == '"' {
+                        break;
+                    }
+                }
+            }
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                let mut key = String::from(c);
+                while let Some(&c) = chars.peek()
+                    && (c.is_ascii_alphanumeric() || c == '_')
+                {
+                    key.push(c);
+                    chars.next();
+                }
+                assert_eq!(chars.peek(), Some(&':'), "not a key in {text}: {key}");
+                json.push_str(&serde_json::to_string(&key).unwrap());
+            }
+            c => json.push(c),
+        }
+    }
+    serde_json::from_str(&json).unwrap_or_else(|e| panic!("probe body {text}: {e}"))
+}
+/// Every `const <name> = await post(<path>, <header>[, <body>])` of `probe.js` with the check the
+/// next line makes (`<name>.status !== N`, optionally `<name>.value.error !== '<code>'`). The
+/// placeholders are filled as `probe_script` fills them: the oracle prompt and the recorded
+/// oracle run's token count.
+fn probe_calls() -> Vec<ProbeCall> {
+    let fixture: Value = serde_json::from_str(include_str!("../data/qwen2-oracle.json")).unwrap();
+    let tokens = fixture["tokens"].as_array().unwrap().len();
+    let script = PROBE
+        .replace(
+            "__PROMPT_JSON__",
+            &serde_json::to_string(node_service::chat_template::ORACLE_USER_PROMPT).unwrap(),
+        )
+        .replace("Number(__TOKENS_JSON__)", &tokens.to_string());
+    let lines: Vec<&str> = script.lines().map(str::trim).collect();
+    let mut calls = Vec::new();
+    for (at, line) in lines.iter().enumerate() {
+        let Some((head, args)) = line.split_once(" = await post(") else {
+            continue;
+        };
+        let name = head.strip_prefix("const ").unwrap().to_owned();
+        let args = args.strip_suffix(");").unwrap();
+        let quoted: Vec<&str> = args.splitn(5, '\'').collect();
+        let (path, header) = (quoted[1].to_owned(), quoted[3].to_owned());
+        let rest = quoted[4].trim_start_matches(',').trim();
+        let body = if rest.is_empty() {
+            serde_json::json!({})
+        } else {
+            js_literal(rest)
+        };
+        let check = lines[at + 1];
+        let status = check
+            .split_once(&format!("{name}.status !== "))
+            .unwrap_or_else(|| panic!("no status check after {line}"))
+            .1
+            .split(|c: char| !c.is_ascii_digit())
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let error = check
+            .split_once(&format!("{name}.value.error !== '"))
+            .map(|(_, rest)| rest.split('\'').next().unwrap().to_owned());
+        calls.push(ProbeCall {
+            name,
+            path,
+            header,
+            body,
+            status,
+            error,
+        });
+    }
+    calls
+}
+/// One page request as the shell's protocol handler serves it (`desktop/src/shell.rs`): the
+/// window channel first (`Channel::authorize`, refused 403 `window_channel_rejected`), then the
+/// composed core.
+fn through_window(
+    core: &Arc<dyn desktop::core::Core>,
+    path: &str,
+    header: &str,
+    body: &Value,
+) -> (u16, Value) {
+    let request = desktop::channel::Request {
+        window: "main".into(),
+        method: "POST".into(),
+        uri: format!("{}{path}", desktop::channel::ORIGIN),
+        headers: vec![
+            ("origin".into(), desktop::channel::ORIGIN.into()),
+            (header.to_ascii_lowercase(), "1".into()),
+            ("content-type".into(), "application/json".into()),
+        ],
+        body: serde_json::to_vec(body).unwrap(),
+    };
+    if desktop::channel::Channel::default()
+        .authorize(&request)
+        .is_err()
+    {
+        return (403, serde_json::json!({"error":"window_channel_rejected"}));
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    core.submit(
+        request,
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let patience = budgets::BudgetId::WorkerStartup
+        .span(budgets::Entries::ZERO)
+        .unwrap();
+    let reply = rx
+        .recv_timeout(Duration::from_millis(patience.millis()))
+        .expect("the window answers");
+    (
+        reply.status,
+        serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
+    )
+}
+
+/// Proves: REVIEW-laneCHAT F1 (the `qualification-probe` bundle's script, which
+/// `tests/bundle_chat.rs` waits on, can pass against the packaged app). Every request the probe's
+/// success path sends, read out of `packaged/probe.js` (the denied Stop, the oracle send, the
+/// unknown request's events), goes through the window channel and the packaged composition and
+/// gets exactly the status and code the probe requires; an unknown request is asked with a
+/// well-formed id (16 to 64 of `[A-Za-z0-9_-]`, chat.py:45, 460-468 @ f4e366e9), so the answer is
+/// 404 `chat_request_unknown`, not 400 `chat_request_invalid`. After Quit the state holds what
+/// `bundle_chat` checks: no native identity, an empty `v02-node/evidence` (nothing timed).
+#[test]
+fn the_packaged_composition_answers_every_request_of_the_bundle_probe() {
+    let calls = probe_calls();
+    let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["denied", "sent", "events"], "the probe's requests");
+    let scratch = Scratch::new();
+    let state = scratch.0.join("state");
+    let (core, cleanup) = packaged_core(&state).expect("the packaged app composes");
+    let state_reply = chat(&core, "/chat/api/state", serde_json::json!({}));
+    let answers: Vec<_> = calls
+        .iter()
+        .map(|c| through_window(&core, &c.path, &c.header, &c.body))
+        .collect();
+    quit(cleanup);
+    assert_eq!(state_reply.1["available"], false, "{}", state_reply.1);
+    // Every mismatch at once (the brief asks for all of them, not the first).
+    let mismatches: Vec<String> = calls
+        .iter()
+        .zip(&answers)
+        .filter(|(call, (status, value))| {
+            (*status, call.error.as_ref().map(|_| value["error"].clone()))
+                != (call.status, call.error.clone().map(Value::from))
+        })
+        .map(|(call, (status, value))| {
+            format!(
+                "probe.js `{}` = post('{}', '{}', {}) requires {} {:?}, answered {status} {value}",
+                call.name, call.path, call.header, call.body, call.status, call.error
+            )
+        })
+        .collect();
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+    let node = state.join("v02-node");
+    let identities: Vec<_> = ["member", "owner-leaf"]
+        .into_iter()
+        .filter(|name| node.join("private").join(name).exists())
+        .collect();
+    assert!(identities.is_empty(), "native identities: {identities:?}");
+    let evidence: Vec<_> = std::fs::read_dir(node.join("evidence"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert!(evidence.is_empty(), "evidence: {evidence:?}");
+}
+
+/// Proves: ledger row 17 (the timing file is admitted through `TimingFile::under` when the app is
+/// composed): a state root inside v0.1.4's own folder (rulings 20/25: v0.2 never writes there)
+/// fails the packaged composition with `chat_timing_path_refused` instead of composing a chat
+/// whose timing file the service would then refuse on every completed chat.
+#[test]
+fn a_refused_timing_file_fails_the_packaged_composition() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("Mycelium A13 macOS Demo").join("state");
+    let composed = packaged_core(&state);
+    let refusal = match composed {
+        Ok((_core, cleanup)) => {
+            quit(cleanup);
+            None
+        }
+        Err(error) => Some(error),
+    };
+    assert_eq!(
+        refusal.as_deref(),
+        Some("compose:chat_timing_path_refused"),
+        "the packaged app composed a chat whose timing file lies in v0.1.4's folder"
+    );
+}
+
+/// Proves: ledger row 17 (owner ruling 14 Nov: the packaged app no longer offers one-Mac native
+/// chat; v0.1.4 offers no chat without a second Mac). A SLICE-1 model folder left on disk where
+/// the retired one-Mac chat looked for it (`model-source-<rev12>/models--Qwen--Qwen2.5-0.5B-
+/// Instruct/snapshots/<rev>/`) is not composed into a native driver at window open: the
+/// composition succeeds, writes no native member / owner-leaf identity, and the chat is the
+/// run route's.
+#[test]
+fn the_packaged_app_never_composes_the_one_mac_native_model() {
+    let scratch = Scratch::new();
+    let state = scratch.0.join("state");
+    let revision = backend_mlx::admission::REVISION;
+    let snapshot = state
+        .join(format!("model-source-{}", &revision[..12]))
+        .join("models--Qwen--Qwen2.5-0.5B-Instruct/snapshots")
+        .join(revision);
+    std::fs::create_dir_all(&snapshot).unwrap();
+    for file in ["model.safetensors", "tokenizer.json"] {
+        std::fs::write(snapshot.join(file), b"not a model").unwrap();
+    }
+    let composed = packaged_core(&state);
+    let private = state.join("v02-node/private");
+    let native_identities: Vec<_> = ["member", "owner-leaf"]
+        .into_iter()
+        .filter(|name| private.join(name).exists())
+        .collect();
+    let (core, cleanup) = composed.expect("the packaged app composes");
+    let state_reply = chat(&core, "/chat/api/state", serde_json::json!({}));
+    quit(cleanup);
+    assert_eq!(
+        native_identities,
+        Vec::<&str>::new(),
+        "the packaged app composed the one-Mac native driver"
+    );
+    assert_eq!(state_reply.0, 200, "{}", state_reply.1);
+    assert_eq!(state_reply.1["available"], false, "{}", state_reply.1);
+    assert_eq!(state_reply.1["model_id"], Value::Null, "{}", state_reply.1);
+}
+
 #[test]
 fn timing_admission_accepts_the_real_default_folder_shape_and_macos_temp_alias() {
     let scratch = Scratch::new();

@@ -870,10 +870,11 @@ fn stop_and_status_answer_while_every_admitted_slot_is_held() {
     assert_eq!(verdict, Ok(Poll::Verified));
 }
 
-// ---- REVIEW-lanePH1 finding 4: the chat state's model gate never starves status and Stop ----
+// ---- REVIEW-lanePH1 finding 4: a waiting chat state never starves status and Stop ----
 
-/// The packaged model gate held by the test: every `/chat/*` request waits inside it, as one
-/// waits for a native compose under the gate's lock, until released.
+/// The owner run's route held by the test: every chat state waits inside its `status` read (as
+/// one waits on the run) until released. Lane CHAT retargeted this from the retired one-Mac model
+/// gate: the packaged chat state now reads the run's route first.
 #[derive(Clone, Default)]
 struct HeldGate(Arc<(std::sync::Mutex<(bool, usize)>, std::sync::Condvar)>);
 impl HeldGate {
@@ -884,7 +885,7 @@ impl HeldGate {
             let left = deadline.saturating_duration_since(Instant::now());
             assert!(
                 !left.is_zero(),
-                "only {} requests reached the model gate",
+                "only {} requests reached the run route",
                 gate.1
             );
             gate = self.0.1.wait_timeout(gate, left).unwrap().0;
@@ -895,8 +896,8 @@ impl HeldGate {
         self.0.1.notify_all();
     }
 }
-impl node_service::desktop_host::ModelGate for HeldGate {
-    fn ready(&self) -> Result<(), PublicError> {
+impl api::chat_service::RunRoute for HeldGate {
+    fn status(&self) -> Option<Value> {
         let mut gate = self.0.0.lock().unwrap();
         gate.1 += 1;
         self.0.1.notify_all();
@@ -904,7 +905,13 @@ impl node_service::desktop_host::ModelGate for HeldGate {
             gate = self.0.1.wait(gate).unwrap();
         }
         gate.1 -= 1;
-        Ok(())
+        None
+    }
+    fn gateway(&self, _: &str) -> Option<Arc<dyn api::chat_service::RouteGateway>> {
+        None
+    }
+    fn model_id(&self) -> Option<String> {
+        None
     }
 }
 /// Releases the held gate however the test ends.
@@ -916,11 +923,10 @@ impl Drop for OpenGate {
 }
 /// v0.1.4's page server (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9) has no admitted cap:
 /// the page's status and its Stop answer whatever the chat state's handlers are doing. On the
-/// packaged window the chat state first waits for the model gate (a native compose under the
-/// gate's lock); with the page's four callbacks waiting there, the status and Stop still answer,
-/// neither with a capacity refusal.
+/// packaged window the chat state first reads the owner run's route; with the page's four
+/// callbacks waiting there, the status and Stop still answer, neither with a capacity refusal.
 #[test]
-fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
+fn status_and_stop_answer_while_the_chat_state_waits_for_the_run() {
     use desktop::{channel::Request, lifecycle::Cleanup};
     let node = NodeService::new(
         Arc::new(FailsAtOnce),
@@ -931,7 +937,8 @@ fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
     let gate = HeldGate::default();
     let open = OpenGate(gate.clone());
     let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
-        .gated(Arc::new(gate.clone()));
+        .with_chat_run(Arc::new(gate.clone()), None)
+        .unwrap();
     let source = node_service::app_host::ModelSource::new(
         private.to_path_buf(),
         Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
@@ -982,7 +989,7 @@ fn status_and_stop_answer_while_the_chat_state_waits_for_the_model() {
                     reply.1["error"].as_str(),
                     Some("desktop_callback_capacity" | "native_service_capacity")
                 )),
-            "{path} refused for capacity while the chat state waits for the model: {reply:?}"
+            "{path} refused for capacity while the chat state waits for the run: {reply:?}"
         );
     }
     drop(open);

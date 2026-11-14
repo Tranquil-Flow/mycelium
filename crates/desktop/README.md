@@ -246,11 +246,12 @@ signs, notarizes, registers or launches anything, and its tests refuse any bundl
   (`cargo build --release -p node-service --features packaged --bin mycelium`), not this crate's
   `src/bin/mycelium.rs` (a core-less shell kept as the test double for entry/launch-wiring tests).
   It routes like v0.1.4, admits the OS and the pinned payload, then serves the unchanged UI over
-  SLICE-1's node service (`node_service::packaged`): the pinned Qwen2.5-0.5B is looked up in the
-  state root's v0.1.4 `model-source-*` layout, where the window's `/api/model/download` puts it
-  (until it is prepared the chat answers 503 `model_not_installed`; then the native service is
-  composed over it without a relaunch), private state and per-launch evidence live under
-  `<state>/v02-node/`. The same executable is the
+  SLICE-1's node service (`node_service::packaged`): the window's `/api/model/download` puts the
+  pinned run model in the state root's v0.1.4 `model-source-*` layout; every `/chat/*` request goes
+  through the shipped chat service over the owner run's route (lane CHAT, owner ruling 14 Nov:
+  one chat path, as v0.1.4; no one-Mac native chat is composed, whatever is on disk, and with no
+  serving run the chat answers `chat_not_ready`); private state and v0.2's evidence (the per-chat
+  timing file `chat-timing.jsonl`) live under `<state>/v02-node/`. The same executable is the
   node's member/owner-leaf worker (re-executed with `member|owner-leaf`), admitted first. It links
   `libmlxc` through `@executable_path/../Frameworks` only. Probe hooks do not exist in it: the
   test-only `qualification-probe` feature (scratch bundles for `bundle_chat`) is the only way to
@@ -412,11 +413,15 @@ admission until `package-pins.json` is regenerated from the switched genuine man
   Qwen2 system/user/assistant envelope; the node takes finished ChatML. The packaged chat did not
   wrap, and the page trims the probe's ChatML, so the model began with a whitespace token
   (round 9's `answer_text` was `"\n\n"`). `node_service::chat_template` now wraps at the chat edge
-  (seam note `L11-evidence/round10/seam-node-service.md`). `bundle_chat` asserts the oracle-equal
-  answer (`tests/support/chat_answer.rs`, fixture `tests/fixtures/chat-answer-oracle.json`,
-  FX-L11-chat-answer): the recorded tokens and text must equal v0.1.4's greedy answer for the first
-  16 tokens (text-exact prefix when fewer are recorded); a whitespace-only answer is refused. Fast
-  tests: `tests/chat_answer_oracle.rs`.
+  (seam note `L11-evidence/round10/seam-node-service.md`). The oracle-equal answer is checked
+  offline only, by `tests/chat_answer_oracle.rs` (`tests/support/chat_answer.rs`, fixture
+  `tests/fixtures/chat-answer-oracle.json`, FX-L11-chat-answer): the recorded tokens and text must
+  equal v0.1.4's greedy answer for the first 16 tokens (text-exact prefix when fewer are recorded);
+  a whitespace-only answer is refused. Since lane CHAT, `bundle_chat` checks the shipped bundle's
+  route chat with no run serving: the page's not-ready state, an action refused on the chat
+  channel, a send refused `chat_not_ready`, an unknown request's events refused
+  `chat_request_unknown`, then the exact-pid Apple Event Quit, `L11_CLEANUP:Verified` and no
+  native identity, evidence or child left; it no longer generates or checks an answer.
 
 ### Quit allowance, menu / Command-Q, LaunchServices launch and reopen (round 12)
 
