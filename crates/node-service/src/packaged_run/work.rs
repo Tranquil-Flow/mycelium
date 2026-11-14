@@ -395,8 +395,28 @@ impl Work {
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
         // One transport per run, read from this Mac's interfaces as the run starts its work.
         let resolved = self.host.network.resolve_run_network("owner_run");
+        // No single private network here while a joined Mac is in the run: refused by name now,
+        // before the local worker starts or anything is dialed (lane LAN round 2, F6).
+        if let Some(reason) = resolved.local_only
+            && state
+                .participants
+                .iter()
+                .any(|node| Some(node) != state.local_node.as_ref())
+        {
+            let (code, message) = crate::packaged_work::owner_network_refusal(reason);
+            return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
         let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
+        // The first advertised address the run's transport refuses: its refusal is named below.
+        let refused_at = std::cell::Cell::new(None);
+        let admits = |address: std::net::SocketAddr| {
+            let admitted = network.allows(address);
+            if !admitted {
+                refused_at.set(Some(address));
+            }
+            admitted
+        };
         let until = env.now() + span(BudgetId::Slices)?.as_secs_f64();
         let verified = loop {
             if env.stopped() || self.stopped.load(Ordering::SeqCst) {
@@ -419,7 +439,7 @@ impl Work {
                         self.owner.public(),
                         &state.run_id,
                         &state.deployment_id,
-                        &|a| network.allows(a),
+                        &admits,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>();
@@ -428,7 +448,15 @@ impl Work {
                 Err(e) if e.code == "member_work_unavailable" => {
                     env.progress("member_work_unavailable");
                 }
-                Err(e) => return Err(refused(e.code)),
+                Err(e) => match refused_at.get() {
+                    Some(address) if e.code == "member_work_address_refused" => {
+                        let (code, message) = network.address_refusal(address);
+                        return Err(
+                            owner_run::OwnerRunError::with(code, Some(&message), None).into()
+                        );
+                    }
+                    _ => return Err(refused(e.code)),
+                },
             }
             if env.now() >= until {
                 return Err(refused("member_work_unavailable"));

@@ -142,14 +142,39 @@ impl WorkNetwork {
 /// found no single private network (`reason`, an [`api::lan_interface`] refusal) while a joined
 /// Mac is in the run: it is refused before anything is dialed.
 pub fn owner_network_refusal(reason: &str) -> (&'static str, String) {
-    ("owner_work_network_unavailable", reason.to_owned())
+    use api::lan_interface::{
+        AMBIGUOUS_PRIVATE_INTERFACES, NO_PRIVATE_ADDRESS, ONLY_BRIDGE_INTERFACES,
+    };
+    let why = match reason {
+        NO_PRIVATE_ADDRESS => "it has no private network address",
+        AMBIGUOUS_PRIVATE_INTERFACES => {
+            "it is on more than one private network and cannot tell which one the joined Mac \
+             shares (its default route is a VPN, or there is none)"
+        }
+        ONLY_BRIDGE_INTERFACES => {
+            "its only private network is one it hosts for virtual machines or Internet Sharing, \
+             which the joined Mac is not on"
+        }
+        _ => "it could not read its network interfaces",
+    };
+    (
+        "owner_work_network_unavailable",
+        format!(
+            "This Mac cannot work with the joined Mac: {why} ({reason}). Connect both Macs to \
+             the same Wi-Fi or Ethernet network, turn off any VPN on this Mac, and start again."
+        ),
+    )
 }
 impl NetworkChoice {
+    /// A joined Mac's advertised work address this run's transport may dial: loopback for a
+    /// loopback-only run; otherwise an address the policy admits, of the bound address's family
+    /// (the run holds ONE socket of that family, which cannot reach the other one).
     pub fn allows(&self, address: std::net::SocketAddr) -> bool {
         match &self.0 {
             None => address.ip().is_loopback(),
-            Some((_, policy)) => {
-                policy.allows(address.ip())
+            Some((bound, policy)) => {
+                bound.is_ipv4() == address.is_ipv4()
+                    && policy.allows(address.ip())
                     && policy
                         .peer_hosts()
                         .is_none_or(|hosts| hosts.contains(&address.ip()))
@@ -159,7 +184,39 @@ impl NetworkChoice {
     /// The refusal (code, plain message) for a joined Mac's advertised work address this run's
     /// transport does not admit ([`NetworkChoice::allows`] false), named before any dial.
     pub fn address_refusal(&self, refused: std::net::SocketAddr) -> (&'static str, String) {
-        ("member_work_address_refused", refused.to_string())
+        let ip = refused.ip();
+        let again = "Connect both Macs to the same Wi-Fi or Ethernet network, turn off any VPN \
+                     on the joined Mac, and start again.";
+        match &self.0 {
+            Some((bound, _)) if ip.is_loopback() => (
+                "member_work_network_mismatch",
+                format!(
+                    "The joined Mac offers its work only on its own loopback address ({ip}): it \
+                     found no single private network to use. This Mac works on {bound}. {again}"
+                ),
+            ),
+            Some((bound, _)) if bound.is_ipv4() != ip.is_ipv4() => (
+                "member_work_family_mismatch",
+                format!(
+                    "The joined Mac offers its work only at {ip} and this Mac works on {bound}: \
+                     one uses IPv4 and the other IPv6, so they cannot reach each other. {again}"
+                ),
+            ),
+            None if !ip.is_loopback() => (
+                "member_work_network_mismatch",
+                format!(
+                    "The joined Mac offers its work on the network at {ip}, but this Mac's work \
+                     transport is on its own loopback address only. {again}"
+                ),
+            ),
+            _ => (
+                "member_work_address_refused",
+                format!(
+                    "The joined Mac offers its work at {ip}, which is not a private network \
+                     address this Mac may use. {again}"
+                ),
+            ),
+        }
     }
 }
 #[cfg(test)]
