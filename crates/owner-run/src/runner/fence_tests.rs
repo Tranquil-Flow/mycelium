@@ -122,12 +122,14 @@ fn a_stop_before_the_fence_skips_the_commit() {
 }
 
 /// A run whose first step publishes inside the fence: the commit announces, then parks until the
-/// test releases it. Every later step fails the run, so the run ends on its own.
+/// test releases it. Every later step fails the run, so the run ends on its own; with
+/// `hold_until_stop` the publishing step instead waits for the run's Stop after publishing.
 struct Publishing {
     announced: Arc<AtomicBool>,
     entered: mpsc::Sender<()>,
     release: mpsc::Receiver<()>,
     outcome: mpsc::Sender<Result<(), StepError>>,
+    hold_until_stop: bool,
 }
 impl Chain for Publishing {
     fn new_run(&mut self, _: &str, _: &str, _: Reason, _: Option<&Value>, _: Option<&Value>) {}
@@ -152,6 +154,10 @@ impl Chain for Publishing {
             json!("http://127.0.0.1:4385"),
         );
         assert!(self.outcome.send(result.clone()).is_ok(), "test listens");
+        if self.hold_until_stop && result.is_ok() {
+            while !env.pause(Timing::registered().poll.as_secs_f64()) {}
+            return Err(StepError::Stopped);
+        }
         result
     }
     fn teardown(&mut self, _: bool, _: &mut dyn StepEnv) -> Result<(), String> {
@@ -176,6 +182,7 @@ fn a_status_snapshot_never_shows_the_serving_announcement_without_its_origin() {
             entered: entered_tx,
             release: release_rx,
             outcome: outcome_tx,
+            hold_until_stop: false,
         }),
         Box::new(|| Identity {
             run_id: "origin-run".into(),
@@ -217,4 +224,50 @@ fn a_status_snapshot_never_shows_the_serving_announcement_without_its_origin() {
         "a status read after the announcement carries its origin: {snapshot}"
     );
     assert!(run_held, "the run lock is held across the publication");
+}
+
+/// Proves: B-RUN-10 (REVIEW-laneSRV SRV-8, behaviour, not mechanism: a real `Runner::stop()` issued
+/// while the serving commit is parked lands AFTER the publication, as `OwnerRun.stop` waits for
+/// `owner._lock` that the commit holds (demo_chain.py:1075-1097, owner_run.py:275-282): the step's
+/// publication is `Ok`, and the Stop's own answer already carries the origin.)
+#[test]
+fn a_concurrent_stop_lands_after_the_parked_publication() {
+    let announced = Arc::new(AtomicBool::new(false));
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel::<()>();
+    let (outcome_tx, outcome) = mpsc::channel();
+    let runner = Runner::spawn(
+        Box::new(Publishing {
+            announced,
+            entered: entered_tx,
+            release: release_rx,
+            outcome: outcome_tx,
+            hold_until_stop: true,
+        }),
+        Box::new(|| Identity {
+            run_id: "stop-run".into(),
+            deployment_id: "stop-deployment".into(),
+        }),
+        Arc::new(SystemClocks::new()),
+        Timing::registered(),
+    )
+    .expect("runner");
+    runner.start("start", None).expect("start");
+    entered.recv_timeout(patience()).expect("commit entered");
+    let run_held = matches!(runner.shared.run.try_lock(), Err(TryLockError::WouldBlock));
+    let answer = std::thread::scope(|scope| {
+        let stopper = scope.spawn(|| runner.stop());
+        release.send(()).expect("commit waits for release");
+        stopper.join().expect("stopper")
+    });
+    let published = outcome.recv_timeout(patience()).expect("the step ended");
+    runner.close();
+    assert!(run_held, "the commit was parked under the run lock");
+    assert_eq!(published, Ok(()), "the parked publication completes");
+    assert_eq!(answer["state"], "stopping", "{answer}");
+    assert_eq!(
+        answer["registry_origin"],
+        json!("http://127.0.0.1:4385"),
+        "the Stop landed after the publication: {answer}"
+    );
 }
