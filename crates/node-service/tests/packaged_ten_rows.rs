@@ -65,7 +65,18 @@ const CHAT_TOKENS: u64 = 32;
 /// The member's consent: the disk and memory this Mac offers, and the worker wall.
 const STORAGE: u64 = 8_000_000_000;
 const MEMORY: u64 = 8_589_934_592;
-const WALL_SECONDS: u64 = 3600;
+/// The joined Mac's chosen worker wall. 600 s, the wall the owner's own contributor grants itself
+/// (`owner_ports::grant_self_consent`, `MemberChosenWall`): a longer member wall makes the compile
+/// give the owner's own worker the proposal's longer wall (`chain_compile::admit`), above its own
+/// grant, and row 6 refuses `member_wall_cap_below_share` (REPORT-laneTEN D4;
+/// `MYCELIUM_TEN_MEMBER_WALL=3600` reproduces it).
+fn wall_seconds() -> u64 {
+    std::env::var("MYCELIUM_TEN_MEMBER_WALL")
+        .ok()
+        .map_or(600, |v| {
+            v.parse().expect("MYCELIUM_TEN_MEMBER_WALL in seconds")
+        })
+}
 
 fn oracle() -> Value {
     serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap()
@@ -158,6 +169,7 @@ fn descendants() -> Vec<(u32, u32, u64, String)> {
             let rss = it.next()?.parse().ok()?;
             Some((pid, ppid, rss, it.collect::<Vec<_>>().join(" ")))
         })
+        .filter(|r: &(u32, u32, u64, String)| !r.3.starts_with("/bin/ps "))
         .collect();
     let mut ours = vec![std::process::id()];
     let mut found = Vec::new();
@@ -256,11 +268,44 @@ fn launch(
         run,
     )
     .unwrap();
-    cleanup.bind_clock(Instant::now()).unwrap();
+    let origin = Instant::now();
+    cleanup.bind_clock(origin).unwrap();
+    ORIGINS.lock().unwrap().push((state.to_owned(), origin));
     Mac {
         core,
         cleanup,
         state: state.to_owned(),
+    }
+}
+/// Each host's Quit clock origin (bound at launch, as the shell binds it at window start).
+static ORIGINS: Mutex<Vec<(PathBuf, Instant)>> = Mutex::new(Vec::new());
+/// The window's Quit: `begin` with the Quit allowance counted from NOW on the clock bound at launch
+/// (`ServiceCleanup::begin` adds its span to that origin), then poll until it settles.
+fn quit(mut mac: Mac) -> Result<Poll, desktop::lifecycle::CleanupError> {
+    let origin = ORIGINS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(state, _)| *state == mac.state)
+        .map(|(_, origin)| *origin)
+        .expect("launched here");
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let began = Instant::now();
+    mac.cleanup.begin(Span::from_millis(
+        origin.elapsed().as_millis() as u64 + allowance.millis(),
+    ))?;
+    loop {
+        match mac.cleanup.poll() {
+            Ok(Poll::Pending) => {
+                assert!(
+                    began.elapsed()
+                        < Duration::from_millis(allowance.millis()) + millis(B::OwnerPoll),
+                    "the packaged core did not quit within its allowance"
+                );
+                std::thread::sleep(millis(B::OwnerPoll) / 5);
+            }
+            other => return other,
+        }
     }
 }
 fn private_dir(base: &Path, name: &str) -> PathBuf {
@@ -333,7 +378,7 @@ fn join_body(member: &Mac, link: &str) -> Value {
         "consent": consent(STORAGE),
         "standing_consent": {"acknowledged": true, "disclosure_digest": digest,
             "caps": {"storage_bytes": STORAGE, "max_memory_bytes": MEMORY,
-                     "max_wall_seconds": WALL_SECONDS, "max_commands": 5000}},
+                     "max_wall_seconds": wall_seconds(), "max_commands": 5000}},
         "join": link,
     })
 }
@@ -459,8 +504,9 @@ fn ten_rows(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<Value
             last = state.clone();
         }
         let member_status = member.status();
-        let card = json!({"join_flow": member_status["join_flow"], "work": member_status["member_work"],
-            "standing": member_status["standing"]});
+        let card = json!({"demo_target": member_status["demo_target"],
+            "acquisition": member_status["acquisition"], "leave": member_status["leave"],
+            "renewal_error": member_status["renewal_error"]});
         if card != last_member {
             ev.append(
                 &format!("{run}-member-status.jsonl"),
@@ -469,17 +515,43 @@ fn ten_rows(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<Value
             last_member = card;
         }
         let steps = state["steps"].as_array().cloned().unwrap_or_default();
-        while done < steps.len() && steps[done]["state"] == "done" {
-            for later in &steps[done + 1..] {
-                if later["state"] == "done" {
-                    return Err(format!("row order broken: {state}"));
-                }
-            }
+        let finished_in_order = steps.iter().take_while(|s| s["state"] == "done").count();
+        if steps[finished_in_order..]
+            .iter()
+            .any(|s| s["state"] == "done")
+        {
+            return Err(format!("row order broken: {state}"));
+        }
+        // Rows that finished between two polls of the page share this poll's wall.
+        let in_this_poll = finished_in_order.saturating_sub(done);
+        while done < finished_in_order {
             ev.row(json!({"row": format!("{run} row {} {}", done + 1, steps[done]["name"].as_str().unwrap_or("?")),
                 "result": "passed", "wall_ms": row_began.elapsed().as_millis() as u64,
-                "since_start_ms": ms(began), "status_line": status_line(&steps[done])}));
+                "since_start_ms": ms(began), "status_line": status_line(&steps[done]),
+                "rows_seen_done_in_one_poll": in_this_poll}));
             done += 1;
             row_began = Instant::now();
+            // Once the run's work is composed (row 6), and again before serving (row 9), the
+            // page's chat must still refuse: no route is offered before the run serves.
+            if done == 6 || done == 9 {
+                let (code, answer) = chat_call(
+                    owner,
+                    "POST",
+                    "/chat/api/send",
+                    &json!({"prompt": PROMPT, "max_new_tokens": 4}),
+                );
+                ev.note(
+                    &format!("{run}_chat_before_serving_row{done}"),
+                    json!({"code": code, "answer": answer}),
+                );
+                // The run may reach serving between the status read and this call: only a 200
+                // while a fresh status still is not serving is a route offered too early.
+                if code == 200 && owner.status()["owner_run"]["state"] != "serving" {
+                    return Err(format!(
+                        "{run}: the chat route was offered before the run served (after row {done}): {answer}"
+                    ));
+                }
+            }
         }
         match state["state"].as_str() {
             Some("serving") if done >= 9 => {
@@ -677,7 +749,7 @@ fn stop_row(
     );
     let allowance = Duration::from_millis(
         B::EffectiveStopAllowance
-            .wall_span(Span::from_millis(WALL_SECONDS * 1000), Entries::new(2))
+            .wall_span(Span::from_millis(wall_seconds() * 1000), Entries::new(2))
             .unwrap()
             .millis(),
     );
@@ -823,9 +895,11 @@ fn ten_rows_with_the_real_model_on_the_lan() {
     }
     // Quit both hosts (owner first: its Quit stops its run), then no worker is left, by pid.
     let began = Instant::now();
+    // The gate's own tokenizer helper (not the app's) ends first.
+    drop(codec);
     let before = descendants();
-    let owner_quit = owner.mac.quit();
-    let member_quit = member.quit();
+    let owner_quit = quit(owner.mac);
+    let member_quit = quit(member);
     let left: Vec<_> = before
         .iter()
         .filter(|r| alive(r.0))
@@ -846,9 +920,11 @@ fn ten_rows_with_the_real_model_on_the_lan() {
             "Quit: owner={owner_quit:?} member={member_quit:?} left={left:?}"
         ));
     }
-    drop(codec);
     drop(repository);
-    std::fs::remove_dir_all(&base).unwrap_or_default();
+    // A failed gate keeps both state roots for the report; a passed one removes them.
+    if failures.is_empty() {
+        std::fs::remove_dir_all(&base).unwrap_or_default();
+    }
     ev.note("end", json!({"failures": failures}));
     assert!(failures.is_empty(), "{failures:#?}");
 }
