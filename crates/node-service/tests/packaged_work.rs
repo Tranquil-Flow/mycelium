@@ -187,6 +187,7 @@ fn the_app_default_work_transport_follows_this_macs_private_address() {
             up: true,
             loopback,
             point_to_point,
+            bridge: false,
         };
     let root = std::env::temp_dir().join(format!(
         "lan-default-config-{}",
