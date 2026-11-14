@@ -194,6 +194,36 @@ fn route_graph_admits_through_the_live_factory_and_binds_qualification() {
     );
     assert_eq!(service.placement_status().unwrap(), baseline);
 }
+/// Lane TEN (ten-row gate, real model, run `gate7-wd2`): every page chat on a serving joined route
+/// ended `chat_http_post_inference_400_workload_not_qualified`. The chat service submits the
+/// v0.1.4 chat's profile (`chat_service.rs:309`, chat.py:124: `interactive_chat_v1` /
+/// `interactive`); the route's coordinator knew only a profile named `interactive`, the id every
+/// route test (and the startup challenge) submits. The oracle's live coordinator answers the
+/// chat's profile (`mycelium_m16_runtime.py:1247-1251` @ f4e366e9).
+#[test]
+fn the_route_admits_the_profile_the_chat_service_submits() {
+    let message = controlled_message();
+    let runtime = api::m16_route::runtime(
+        &message,
+        Arc::new(Clock),
+        Arc::new(Clock),
+        Arc::new(Ids::default()),
+    )
+    .unwrap();
+    let dispatched = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let service = M16Requests::new(
+        runtime,
+        Arc::new(Controlled(message.clone())),
+        Box::new(Never(dispatched.clone())),
+        Config::new(16, 4, 0.0).unwrap(),
+    )
+    .unwrap();
+    let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":4,
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
+        "qualification":route::qualification(&message).unwrap()});
+    let accepted = service.submit(doc).map(|_| ()).map_err(|e| e.code);
+    assert_eq!(accepted, Ok(()));
+}
 #[test]
 fn hop_frames_bind_request_position_and_placement() {
     let message = controlled_message();
