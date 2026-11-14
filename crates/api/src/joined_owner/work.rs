@@ -432,7 +432,7 @@ struct Flow {
     transferred_all: bool,
     /// The run's epoch was retired while the run serves on (named code; ruling 23).
     retired: Option<&'static str>,
-    /// `workflow.status()['startup']` (`_startup`, demo_chain.py:1024-1043, 1090-1094): only what
+    /// `workflow.status()['startup']` (`_startup`, demo_chain.py:1030-1042, 1091-1094): only what
     /// the run really knows about its route's startup. The joined route has no startup route
     /// challenge, so it never claims `startup_qualification_complete` or a deployment count.
     startup: Option<Value>,
@@ -661,7 +661,7 @@ impl OwnerWork {
             && compiled_epoch(state).is_some()
             && !self.stop.load(Ordering::SeqCst)
     }
-    /// The serving publication (demo_chain.py:1056-1097): the announcement is validated and
+    /// The serving publication (demo_chain.py:1058-1097): the announcement is validated and
     /// serialised first, outside every lock ([`prepare_serving`]); then, inside the owner run's
     /// Stop `fence` and under this workflow's lock ([`Shared::commit_serving`]), the re-checks and
     /// the in-memory commit to `exchange`. A refusal publishes nothing.

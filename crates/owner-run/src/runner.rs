@@ -255,8 +255,10 @@ impl Shared {
 }
 
 /// A chain call's `RunContext`: the run context `context` (a machine generation) it was made for.
-/// Once a newer context replaced it, its event reads set and its progress, results and
-/// diagnostics stay with it (owner_run.py:96-105, 334-337): nothing reaches the newer context.
+/// Once a newer context replaced it, its event reads set (its own `stop_event`,
+/// owner_run.py:96) and its progress, results and diagnostics are dropped: nothing reaches the
+/// newer context and nothing is kept for the old one (v0.1.4 drops only its progress,
+/// :334-337; see the departure noted in `drive`).
 struct Env<'a> {
     shared: &'a Shared,
     context: u64,
@@ -792,9 +794,15 @@ fn drive(shared: &Shared, chain: &mut dyn Chain) {
                 });
                 if !current {
                     // A newer context replaced this one while its step ran (an async rebuild's
-                    // join expired, then a Start): the old thread's `finally` still tears its own
-                    // context down (owner_run.py:440-446), with every write kept in that context.
-                    // A failure is recorded in that context only, which no status shows.
+                    // join expired, then a Start). DELIBERATE DEPARTURE from v0.1.4: there the old
+                    // thread's step end and `finally` write the NEW run's machine unguarded
+                    // (`_steps[name]['state'] = 'done'`, owner_run.py:425, the next step
+                    // `active`, :408-410; `_state = 'stopping'`, :446-448; `stopped`/`failed`,
+                    // :361), so v0.1.4 lets the old call write into the new run. Here the machine
+                    // hears nothing of a replaced context: its teardown still runs, every write it
+                    // makes is dropped (`Env::current`) and a teardown failure is only logged.
+                    // Required by the lane SRV round-2 brief (item 1); the decision is ledger row
+                    // 20 of GOAL-2026-11-14-v02-ten-rows.md.
                     if let Err(class) = chain.teardown(failed, &mut Env { shared, context }) {
                         eprintln!("owner run: replaced context teardown failed ({class})");
                     }

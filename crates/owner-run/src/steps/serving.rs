@@ -4,9 +4,9 @@
 //!
 //! The host lends its workflow through [`WorkPort`]: `workflow_state` is `workflow.status()`,
 //! `serving_identity` is `needs_identity(workflow)` / `current(workflow)` (:988-1004) and
-//! `commit_serving` is the lifecycle-fenced publication (:1056-1097). Only the fenced branch is
+//! `commit_serving` is the lifecycle-fenced publication (:1058-1097). Only the fenced branch is
 //! ported: every production host owns its workflow, so the oracle's observational branch for an
-//! injected legacy double (:1049-1055) has no Rust caller.
+//! injected legacy double (:1048-1057) has no Rust caller.
 use super::exchange::{Announcement, ReportsPort, publish_participants, truthy};
 use super::progress_wait::{Wait, progress_wait_with_observer};
 use super::publish::{ServingIdentity, WorkPort, failure_code, require_mapping};
@@ -300,7 +300,7 @@ pub fn run_serving_step(
         reports,
         run,
         &wait,
-        // `up()` (:1011-1018): a failed or stopped workflow first, then its identity, then
+        // `up()` (:1015-1022): a failed or stopped workflow first, then its identity, then
         // `api_running`.
         &mut |_, _| {
             let status = serving_status(*workflow.borrow_mut())?;
@@ -312,9 +312,9 @@ pub fn run_serving_step(
             }
             Ok(status.get("state") == Some(&json!("api_running")))
         },
-        // `observed()` (:1002-1010): state and error code, plus the verified token count of the
+        // `observed()` (:1005-1014): state and error code, plus the verified token count of the
         // run's OWN workflow when it is an exact integer in 1..=4096 (bools and floats are not).
-        // Only strictly new verified indices renew the wait (:1019-1020).
+        // Only strictly new verified indices renew the wait (:1023-1024).
         &mut || {
             let status = serving_status(*workflow.borrow_mut())?;
             let mut view = json!({
@@ -335,7 +335,7 @@ pub fn run_serving_step(
         },
     )?;
     let workflow = workflow.into_inner();
-    // :1021-1023: the workflow may have changed or gone while the wait returned.
+    // :1027-1029: the workflow may have changed or gone while the wait returned.
     if matches!(
         workflow.serving_identity(state)?,
         ServingIdentity::Absent | ServingIdentity::Changed
@@ -344,7 +344,7 @@ pub fn run_serving_step(
     }
     let status = serving_status(workflow)?;
     let startup = sub_mapping(&status, "startup")?;
-    // :1024-1043: `api_running` only means the API is up; the startup route challenge must have
+    // :1030-1042: `api_running` only means the API is up; the startup route challenge must have
     // qualified the route (two-Mac run 14 served with no qualified route).
     if startup.get("startup_qualification_complete") != Some(&Value::Bool(true))
         || nonzero(startup.get("unavailable_deployment_count"))
@@ -358,7 +358,7 @@ pub fn run_serving_step(
         ));
         return Err(OwnerRunError::new("route_qualification_failed").into());
     }
-    // :1044-1047: the supervisor's `http://127.0.0.1:<port>/`; chat and status carry the bare
+    // :1043-1046: the supervisor's `http://127.0.0.1:<port>/`; chat and status carry the bare
     // origin. `startup.get('url') or ctx.state.get('registry_origin')`, stripped only if a string.
     let origin = startup
         .get("url")
@@ -370,7 +370,7 @@ pub fn run_serving_step(
         Value::String(s) => Value::String(s.trim_end_matches('/').to_owned()),
         other => other,
     };
-    // :1058-1063: `ctx.state['model']` and the announcement are prepared before any lock, in the
+    // :1058-1066: `ctx.state['model']` and the announcement are prepared before any lock, in the
     // source's order: the model, then `dict(work_limits)`, then the per-node rows.
     let model = state.model.as_ref().ok_or_else(|| exception("KeyError"))?;
     let work_limits = announcement_limits(state.work_limits.as_ref())?;
@@ -385,7 +385,7 @@ pub fn run_serving_step(
         manifest_digest: model.manifest_digest.clone(),
         per_node,
     };
-    // :1064-1097: the Stop check, the workflow re-checks, the in-memory commit and
+    // :1074-1097: the Stop check, the workflow re-checks, the in-memory commit and
     // `ctx.result['registry_origin']` under the owner's fence and the host's workflow lock;
     // nothing is published when any of them refuses.
     workflow.commit_serving(state, &announcement, work_limits.as_ref(), &mut |commit| {

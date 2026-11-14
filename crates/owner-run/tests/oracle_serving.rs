@@ -406,7 +406,7 @@ const FENCE_WRITERS: [&str; 7] = [
 /// Proves: B-RUN-10 (the serving step against the executed v0.1.4 step for the round-2 cases: a
 /// present workflow whose status is not a mapping raises `AttributeError` on its first, waiting or
 /// post-wait read (demo_chain.py:1007, 1017, 1030; ASRV-05); an identity that changes after the
-/// wait's success fails the post-wait recheck (:1021-1023; SRV-5); and the FENCED branch over the
+/// wait's success fails the post-wait recheck (:1027-1029; SRV-5); and the FENCED branch over the
 /// real ManagedServingWorkflow and RunExchange publishes `dict(work_limits)` and
 /// `{node: dict(extra) for node, extra in (per_node or {}).items()}` with the source's exception
 /// classes (run_exchange.py:167-176; ASRV-07), or nothing.)

@@ -105,7 +105,7 @@ fn the_packaged_probes_answer_from_the_run_state_when_the_workflow_is_gone() {
 
 /// Proves: B-RUN-10 (REVIEW-laneSRV ASRV-06: the announcement is prepared, with its exchange clock
 /// read and its validation, before the resident lock is taken, as v0.1.4 prepares before
-/// `app.guard` (demo_chain.py:1056-1074): a refused preparation returns while another holder keeps
+/// `app.guard` (demo_chain.py:1058-1074): a refused preparation returns while another holder keeps
 /// the resident lock.)
 #[test]
 fn the_serving_announcement_is_prepared_before_the_resident_lock() {

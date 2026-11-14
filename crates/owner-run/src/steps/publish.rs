@@ -31,9 +31,9 @@ pub trait WorkPort {
     fn serving_identity(&mut self, _state: &RunState) -> Result<ServingIdentity, StepError> {
         Err(super::not_ported("serving"))
     }
-    /// The lifecycle-fenced publication of `_step_serving` (`demo_chain.py:1056-1098`).
+    /// The lifecycle-fenced publication of `_step_serving` (`demo_chain.py:1058-1098`).
     /// First, outside every lock, whatever may call out or serialise (the exchange lookup and
-    /// `prepare_announcement`, :1056-1063); then, inside `fence` (the owner run's Stop fence,
+    /// `prepare_announcement`, :1058-1066); then, inside `fence` (the owner run's Stop fence,
     /// [`crate::chain::StepEnv::fenced`]) and under the host's own workflow lock, re-check that
     /// this workflow is still the run's, `api_running`, not stopped, still bound to this run
     /// (`serving_workflow_identity_changed`) and that its LIVE startup qualified the route
