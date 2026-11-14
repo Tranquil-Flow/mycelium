@@ -17,11 +17,18 @@ use std::sync::{Arc, Mutex};
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/oracle_serving_r19.json")).unwrap()
 }
+/// Lane SRV round 2: read-count status frames, an identity change after the wait, and the FENCED
+/// branch over the real `ManagedServingWorkflow` and `RunExchange` (probe `serving_probe.py r20`).
+fn fixture_r20() -> Value {
+    serde_json::from_str(include_str!("fixtures/oracle_serving_r20.json")).unwrap()
+}
 #[derive(Default)]
 struct Record {
     time: f64,
     calls: Vec<Value>,
     clocks: Vec<Value>,
+    /// What the fenced commit published: the announcement's phase, limits and per-node rows.
+    committed: Option<Value>,
 }
 struct Env {
     rec: Arc<Mutex<Record>>,
@@ -126,6 +133,8 @@ struct Workflow {
     reads: usize,
     /// What the fenced commit answers (`None`: commits).
     fence: Option<&'static str>,
+    /// `app._chain_epoch` reads after the `epoch_flip_after_status_read`-th status read.
+    epoch_reads_after: usize,
 }
 fn is_int(v: &Value) -> bool {
     v.is_i64() || v.is_u64()
@@ -148,6 +157,15 @@ impl WorkPort for Workflow {
             return Err(StepError::Exception {
                 class: "RuntimeError".into(),
             });
+        }
+        if self.spec["fenced"] == true {
+            // The real ManagedServingWorkflow.status() (workflow.py:237-247), api_running.
+            return Ok(json!({"state": "api_running", "error_code": null,
+                "startup": self.spec["startup"], "challenge_progress": null,
+                "readiness_source": "registry_api"}));
+        }
+        if let Some(reads) = self.spec["workflow_reads"].as_array() {
+            return Ok(reads[self.reads.min(reads.len()) - 1].clone());
         }
         Ok(frame(&self.spec["workflow"], rec.time))
     }
@@ -174,7 +192,15 @@ impl WorkPort for Workflow {
         if !needs {
             return Ok(ServingIdentity::NotNeeded);
         }
-        let app_epoch = frame(&spec["app_epoch"], self.rec.lock().unwrap().time);
+        let mut app_epoch = frame(&spec["app_epoch"], self.rec.lock().unwrap().time);
+        if let Some(flip) = spec["epoch_flip_after_status_read"].as_u64()
+            && self.reads as u64 >= flip
+        {
+            self.epoch_reads_after += 1;
+            if self.epoch_reads_after > 1 {
+                app_epoch = json!(app_epoch.as_i64().unwrap() + 1);
+            }
+        }
         let current = is_int(&ctx_epoch)
             && is_int(&compiled["epoch"])
             && is_int(&app_epoch)
@@ -209,6 +235,8 @@ impl WorkPort for Workflow {
                 .per_node
                 .as_ref()
                 .map(|rows| Value::Object(rows.iter().cloned().collect::<serde_json::Map<_, _>>()));
+            self.rec.lock().unwrap().committed = Some(json!({"phase": a.phase,
+                "work_limits": work_limits, "per_node": per_node.clone().unwrap_or(json!({}))}));
             self.rec.lock().unwrap().calls.push(json!(["announce", {
                 "phase": a.phase, "run_id": a.run_id, "deployment_id": a.deployment_id,
                 "model": model, "slice_mode": a.slice_mode, "manifest_digest": a.manifest_digest,
@@ -225,8 +253,14 @@ fn state_of(spec: &Value) -> RunState {
     state.participants = serde_json::from_value(s["participants"].clone()).unwrap();
     state.compile_state = (!s["compile_state"].is_null()).then(|| s["compile_state"].clone());
     state.layers = serde_json::from_value(s["layers"].clone()).unwrap();
-    state.work_limits = (!s["work_limits"].is_null()).then(|| s["work_limits"].clone());
-    state.work_nodes = (!s["work_nodes"].is_null()).then(|| s["work_nodes"].clone());
+    let absent = |key: &str| {
+        s[key].is_null()
+            || spec["absent"]
+                .as_array()
+                .is_some_and(|a| a.contains(&json!(key)))
+    };
+    state.work_limits = (!absent("work_limits")).then(|| s["work_limits"].clone());
+    state.work_nodes = (!absent("work_nodes")).then(|| s["work_nodes"].clone());
     state.registry_origin = (!s["registry_origin"].is_null()).then(|| s["registry_origin"].clone());
     let digest = s["manifest_digest"].as_str().unwrap();
     let prepared = PreparedSource {
@@ -283,6 +317,7 @@ fn run(spec: &Value, fence: Option<&'static str>) -> Ran {
         rec: rec.clone(),
         reads: 0,
         fence,
+        epoch_reads_after: 0,
     };
     let mut reports = Exchange {
         spec: spec.clone(),
@@ -335,6 +370,81 @@ fn serving_matches_executed_oracle() {
         assert_eq!(rec.time, case["time"].as_f64().unwrap(), "{name}: elapsed");
         println!("SERVING-CASE-PASS {name}");
     }
+}
+/// The fenced cases whose `at_guard` writer lands between the post-wait read and the fence: the
+/// oracle's outcomes are pinned on the production fences, not on this double:
+/// owner Stop / replaced context -> `stopped`, owner not running -> identity changed:
+/// `owner-run` `runner::fence_tests` and `runner::replaced_tests`; workflow Stop, state, replacement
+/// and live startup: `api` `joined_owner::work::serving_fence_tests`.
+const FENCE_WRITERS: [&str; 7] = [
+    "fenced-owner-stop-at-guard",
+    "fenced-owner-replaced-at-guard",
+    "fenced-owner-not-running-at-guard",
+    "fenced-workflow-stop-at-guard",
+    "fenced-workflow-stopped-at-guard",
+    "fenced-startup-unqualified-at-guard",
+    "fenced-workflow-replaced-at-guard",
+];
+/// Proves: B-RUN-10 (the serving step against the executed v0.1.4 step for the round-2 cases: a
+/// present workflow whose status is not a mapping raises `AttributeError` on its first, waiting or
+/// post-wait read (demo_chain.py:1007, 1017, 1030; ASRV-05); an identity that changes after the
+/// wait's success fails the post-wait recheck (:1021-1023; SRV-5); and the FENCED branch over the
+/// real ManagedServingWorkflow and RunExchange publishes `dict(work_limits)` and
+/// `{node: dict(extra) for node, extra in (per_node or {}).items()}` with the source's exception
+/// classes (run_exchange.py:167-176; ASRV-07), or nothing.)
+#[test]
+fn serving_matches_executed_oracle_round_two() {
+    let fixture = fixture_r20();
+    assert_eq!(
+        fixture["oracle"],
+        "f4e366e98a1f705dfaf182897044500d290dbd7f"
+    );
+    let cases = fixture["cases"].as_object().unwrap();
+    assert_eq!(cases.len(), 57);
+    let mut replayed = 0;
+    let mut differ = Vec::new();
+    for (name, case) in cases {
+        if FENCE_WRITERS.contains(&name.as_str()) {
+            continue;
+        }
+        let ran = run(&case["spec"], None);
+        let rec = ran.rec.lock().unwrap();
+        let mut fields = vec![
+            ("outcome", ran.outcome.clone(), case["outcome"].clone()),
+            ("result", ran.env.result.clone(), case["result"].clone()),
+            ("progress", rle(&ran.env.progress), case["progress"].clone()),
+            (
+                "publishes",
+                rle(&ran.env.publishes),
+                case["publishes"].clone(),
+            ),
+        ];
+        if case["spec"]["fenced"] == true {
+            let committed = rec
+                .committed
+                .clone()
+                .unwrap_or(json!({"phase": "idle", "work_limits": null, "per_node": {}}));
+            fields.push(("announcement", committed, case["announcement"].clone()));
+        } else {
+            fields.push(("calls", rle(&rec.calls), case["calls"].clone()));
+            fields.push(("clocks", rle(&rec.clocks), case["clocks"].clone()));
+            fields.push(("time", json!(rec.time), case["time"].clone()));
+        }
+        for (field, rust, oracle) in fields {
+            if rust != oracle {
+                differ.push(format!("{name}: {field}: rust {rust} oracle {oracle}"));
+            }
+        }
+        replayed += 1;
+        println!("SERVING-R20-CASE-RAN {name}");
+    }
+    assert_eq!(replayed, 50);
+    assert!(
+        differ.is_empty(),
+        "{} differences:\n{}",
+        differ.len(),
+        differ.join("\n")
+    );
 }
 /// Proves: B-RUN-10 (the fenced commit, `demo_chain.py:1081-1094`: a workflow that changed or lost its
 /// qualification between the wait and the publication refuses; nothing is announced, no route origin
@@ -414,6 +524,7 @@ fn a_stop_before_the_fence_ends_the_step_stopped() {
         rec: rec.clone(),
         reads: 0,
         fence: None,
+        epoch_reads_after: 0,
     };
     let mut reports = Exchange {
         spec: spec.clone(),
