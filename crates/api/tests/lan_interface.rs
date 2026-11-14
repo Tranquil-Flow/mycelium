@@ -253,8 +253,35 @@ fn two_private_networks_without_a_usable_default_route_are_refused_by_name() {
     );
 }
 
-/// Proves: LAN-A2 (one network with several address classes: IPv4 before IPv6 unique-local,
-/// RFC 1918 before IPv4 link-local; same link, so no guess between networks).
+/// Proves: LAN-R2-A2 (two private IPv4 addresses on ONE interface are as ambiguous as two
+/// interfaces, whatever their classes: an RFC 1918 alias beside a link-local address may be a
+/// network the other Mac does not share, so neither wins by class).
+#[test]
+fn two_ipv4_addresses_on_one_interface_without_a_usable_default_route_are_refused_by_name() {
+    let ambiguous = Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES);
+    for addresses in [
+        [up("en0", "169.254.3.4"), up("en0", "10.0.0.7")],
+        [up("en0", "10.0.0.7"), up("en0", "169.254.3.4")],
+        [up("en0", "10.0.0.7"), up("en0", "192.168.1.9")],
+    ] {
+        assert_eq!(chosen(&addresses, None), ambiguous, "{addresses:?}");
+    }
+    // Still refused with IPv6 unique-local addresses beside them.
+    assert_eq!(
+        chosen(
+            &[
+                up("en0", "169.254.3.4"),
+                up("en0", "fd00::5"),
+                up("en0", "10.0.0.7")
+            ],
+            None
+        ),
+        ambiguous
+    );
+}
+
+/// Proves: LAN-A2 and LAN-R2-A2 (one interface with ONE IPv4 address and IPv6 unique-local ones:
+/// the IPv4 address, a family preference of the one-family transport, not proof of one network).
 #[test]
 fn one_network_prefers_ipv4_over_ipv6_unique_local() {
     assert_eq!(
@@ -270,8 +297,15 @@ fn one_network_prefers_ipv4_over_ipv6_unique_local() {
         Selection::Lan(ip("169.254.3.4"))
     );
     assert_eq!(
-        chosen(&[up("en0", "169.254.3.4"), up("en0", "10.0.0.7")], None),
-        Selection::Lan(ip("10.0.0.7"))
+        chosen(
+            &[
+                up("en0", "fd00::5"),
+                up("en0", "192.168.178.20"),
+                up("en0", "fd00::6")
+            ],
+            None
+        ),
+        Selection::Lan(ip("192.168.178.20"))
     );
 }
 
