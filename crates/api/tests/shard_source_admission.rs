@@ -701,3 +701,86 @@ fn held_storage_while_serving_a_chunk_cannot_hold_the_sources_close() {
         "the chunk read was not held across close (the test did not reach its state)"
     );
 }
+
+/// Proves: R2-3 (serving ends at the job's absolute deadline: a recipient that keeps its served
+/// connection busy past it is cut off there, the connection closed `source_deadline`, and the job
+/// answers `source_serve_deadline`; the wall is shortened through the constructor, nothing else).
+#[test]
+fn a_recipient_that_keeps_the_connection_busy_is_cut_off_at_the_jobs_deadline() {
+    let pair = Pair::new();
+    let (recipe, file, objects) = pair.material();
+    let wall = B::RouterClose.span(Entries::ZERO).unwrap();
+    let source = ShardSource::start_with_wall(
+        pair.seed.coordinator.clone(),
+        objects,
+        pair.owner.join("journal"),
+        direct_lan(),
+        None,
+        wall,
+    )
+    .unwrap();
+    let mut flooded: Option<Result<(u64, Option<(u64, Vec<u8>)>), String>> = None;
+    let mut member = Member {
+        root: pair.member_root.clone(),
+        receive: Box::new(|command| {
+            let source = source_address(command);
+            let secret = pair.recipient.clone();
+            let (ended_tx, ended) = mpsc::channel();
+            let flooder = std::thread::spawn(move || {
+                let outcome = Client::new().with(secret, &source, |rt, connection| {
+                    let mut answered = 0u64;
+                    // Invalid requests, each answered with a refusal, never idle, until the
+                    // source ends the connection.
+                    while exchange(rt, connection, b"not a request").is_ok() {
+                        answered += 1;
+                    }
+                    let closed = match connection.close_reason() {
+                        Some(ConnectionError::ApplicationClosed(close)) => {
+                            Some((close.error_code.into_inner(), close.reason.to_vec()))
+                        }
+                        _ => None,
+                    };
+                    (answered, closed)
+                });
+                ended_tx.send(outcome).is_ok()
+            });
+            // The job's wall from its start, plus one RouterClose of margin.
+            let within = span(B::RouterClose) + span(B::RouterClose);
+            flooded = Some(
+                ended
+                    .recv_timeout(within)
+                    .expect("serving the busy recipient ended at the job's deadline"),
+            );
+            assert!(flooder.join().unwrap());
+            Ok(json!({"received_bytes": 0}))
+        }),
+        reply: None,
+    };
+    let done = transfer(
+        &source,
+        &pair.seed.coordinator,
+        &mut member,
+        &pair.registration,
+        "lan-source-deadline",
+        &file,
+        &recipe,
+        span(B::RouterClose),
+    );
+    drop(member);
+    let closed = source.close();
+    let (answered, close) = flooded.expect("the member's receive ran").unwrap();
+    assert!(
+        answered >= 1,
+        "the recipient was served before the deadline"
+    );
+    assert_eq!(
+        close,
+        Some((0, b"source_deadline".to_vec())),
+        "the source closed the connection at the job's deadline"
+    );
+    assert_eq!(
+        done.err().map(|e| e.0),
+        Some("source_serve_deadline".to_owned())
+    );
+    assert!(closed.is_ok(), "{closed:?}");
+}

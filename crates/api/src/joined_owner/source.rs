@@ -123,7 +123,26 @@ impl ShardSource {
         lan: Option<(IpAddr, LanPolicy)>,
         pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
     ) -> Result<Self, Refusal> {
-        let wall = budget(B::MemberChosenWall)?;
+        Self::start_with_wall(
+            authority,
+            objects,
+            journal,
+            lan,
+            pinned,
+            budget(B::MemberChosenWall)?,
+        )
+    }
+    /// [`Self::start_with_objects`] with each job's absolute wall (the app: `MemberChosenWall`)
+    /// given: the deadline its admission, accept and serving end at. A test shortens it to reach
+    /// that deadline; no product path passes anything else.
+    pub fn start_with_wall(
+        authority: Arc<seed::Coordinator>,
+        objects: PathBuf,
+        journal: PathBuf,
+        lan: Option<(IpAddr, LanPolicy)>,
+        pinned: Option<Arc<runtime::artifact_journal::PinnedObjects>>,
+        wall: budgets::Span,
+    ) -> Result<Self, Refusal> {
         let close = budget(B::RouterClose)?;
         let fence = B::ArtifactMaxFence
             .count()
