@@ -20,6 +20,7 @@ use crate::{
     app_host,
     joined_shard::{native, route},
     m16_route::{Codec, RouteHandle, SeedMembers},
+    run_exchange::{Announce, RunExchange},
 };
 use budgets::{BudgetId as B, Entries, Span};
 use owner_run::{
@@ -27,7 +28,12 @@ use owner_run::{
     chain::{PortError, StepError},
     machine::{CeilingProbe, EXECUTION_CEILING_CODE, MonitorProbe},
     state::RunState,
-    steps::{activate::ActivationPort, publish::WorkPort, slices::SlicesPort},
+    steps::{
+        activate::ActivationPort,
+        exchange::Announcement,
+        publish::{Fence, ServingIdentity, WorkPort},
+        slices::SlicesPort,
+    },
 };
 use runtime::iroh_host::LanPolicy;
 use serde_json::{Value, json};
@@ -425,6 +431,10 @@ struct Flow {
     transferred_all: bool,
     /// The run's epoch was retired while the run serves on (named code; ruling 23).
     retired: Option<&'static str>,
+    /// `workflow.status()['startup']` (`_startup`, demo_chain.py:1024-1043, 1090-1094): only what
+    /// the run really knows about its route's startup. The joined route has no startup route
+    /// challenge, so it never claims `startup_qualification_complete` or a deployment count.
+    startup: Option<Value>,
 }
 struct Shared {
     flow: Mutex<Flow>,
@@ -449,7 +459,17 @@ impl Shared {
             "transferred":flow.transferred,"epoch":flow.epoch,"gateway":flow.gateway,
             "serve_reports":flow.serve_reports,"route_expires_at":flow.expires_at,
             "cleanup_error":flow.cleanup_error,"member_cleanup":flow.member_cleanup,
-            "shards_transferred":flow.transferred_all,"epoch_retired":flow.retired})
+            "shards_transferred":flow.transferred_all,"epoch_retired":flow.retired,
+            "startup":flow.startup})
+    }
+    /// The serving fence (stub).
+    fn commit_serving(
+        &self,
+        _stop: &AtomicBool,
+        _current: impl FnOnce() -> bool,
+        _publish: impl FnOnce(),
+    ) -> Result<(), &'static str> {
+        Err(owner_run::steps::NOT_PORTED_CODE)
     }
 }
 /// A closed code survives as the workflow's error code, anything else is
@@ -508,6 +528,10 @@ pub struct OwnerWork {
     returned: Vec<WorkMember>,
     /// The run's stage admission (taken by the worker at start).
     admission: Option<Box<dyn Admission>>,
+    /// The run this workflow belongs to (`Plan::run_id`, `Plan::deployment_id`).
+    run: (String, String),
+    /// The owner's run exchange the `serving` announcement is committed to.
+    exchange: Option<Arc<RunExchange>>,
 }
 impl OwnerWork {
     /// The port for `members` (in stage order) and `plan`; nothing starts until
@@ -532,6 +556,7 @@ impl OwnerWork {
         let skew = super::span(B::PyMyceliumMembershipContractsMaxClockSkewSecondsL31)?;
         let cancels = members.iter().map(|m| m.cancel.clone()).collect();
         let admission: Box<dyn Admission> = Box::new(Proven::new(coordinator.clone()));
+        let run = (plan.run_id.clone(), plan.deployment_id.clone());
         Ok(Self {
             seed: epoch::seed_members(&coordinator),
             coordinator,
@@ -555,6 +580,7 @@ impl OwnerWork {
                     member_cleanup: Vec::new(),
                     transferred_all: false,
                     retired: None,
+                    startup: None,
                 }),
                 changed: Condvar::new(),
             }),
@@ -578,7 +604,29 @@ impl OwnerWork {
             thread: None,
             returned: Vec::new(),
             admission: Some(admission),
+            run,
+            exchange: None,
         })
+    }
+    /// Commit the run's `serving` announcement to `exchange` (the owner's run exchange).
+    pub fn with_exchange(mut self, exchange: Arc<RunExchange>) -> Self {
+        self.exchange = Some(exchange);
+        self
+    }
+    /// `needs_identity` / `current` (stub).
+    pub fn serving_identity_of(&self, _state: &RunState) -> Result<ServingIdentity, StepError> {
+        Err(owner_run::steps::not_ported("serving"))
+    }
+    /// The fenced serving publication (stub).
+    pub fn commit_serving_on(
+        &self,
+        _state: &RunState,
+        _exchange: &RunExchange,
+        _announcement: &Announcement,
+        _work_limits: Option<&Value>,
+        _fence: Fence<'_>,
+    ) -> Result<(), StepError> {
+        Err(owner_run::steps::not_ported("serving"))
     }
     /// Retain compiler admission-time objects until the source thread has joined.
     pub fn with_objects(mut self, objects: Arc<runtime::artifact_journal::PinnedObjects>) -> Self {
@@ -700,7 +748,7 @@ impl OwnerWork {
     /// do not replace/drop it to simulate successful Stop. Drop synchronously
     /// joins as a final custody safeguard and is not a bounded Stop API.
     pub fn teardown(&mut self) -> Result<(), String> {
-        signal_stop(&self.stop, &self.stop_at);
+        signal_stop(&self.shared, &self.stop, &self.stop_at);
         self.commands.take();
         if let Some(start) = self.start.take() {
             self.returned.extend(start.members);
@@ -891,7 +939,7 @@ impl OwnerWork {
             self.stop_at.clone(),
         );
         move || {
-            signal_stop(&stop, &stop_at);
+            signal_stop(&shared, &stop, &stop_at);
             // While serving, the epoch's close (teardown) ends the members' serves.
             if !serving.load(Ordering::SeqCst) {
                 for cancel in &cancels {
@@ -1007,7 +1055,7 @@ impl Drop for OwnerWork {
     }
 }
 /// The run's Stop: set the flag every wait polls and remember when (the exit's ONE deadline).
-fn signal_stop(stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
+fn signal_stop(_shared: &Shared, stop: &AtomicBool, at: &Mutex<Option<Instant>>) {
     at.lock()
         .unwrap_or_else(|p| p.into_inner())
         .get_or_insert_with(Instant::now);
@@ -1653,4 +1701,145 @@ pub fn ceiling_reached(state: &RunState, now: f64) -> CeilingProbe {
         return CeilingProbe::Code(None);
     }
     CeilingProbe::Code(Some(EXECUTION_CEILING_CODE.into()))
+}
+
+#[cfg(test)]
+mod serving_fence_tests {
+    //! The serving publication's workflow fence (`with workflow._lock:` at demo_chain.py:1081-1097
+    //! @ f4e366e9) over the real `Shared`, with the publication parked on a channel (no sleeps).
+    use super::*;
+    use std::sync::TryLockError;
+
+    fn shared(state: &'static str, startup: Option<Value>) -> Arc<Shared> {
+        Arc::new(Shared {
+            flow: Mutex::new(Flow {
+                state,
+                error: None,
+                version: 0,
+                transferred: Vec::new(),
+                epoch: 1,
+                route: None,
+                gateway: None,
+                serve_reports: Vec::new(),
+                expires_at: None,
+                cleanup_error: None,
+                member_cleanup: Vec::new(),
+                transferred_all: true,
+                retired: None,
+                startup,
+            }),
+            changed: Condvar::new(),
+        })
+    }
+    /// A startup that qualified the route, as `run_registry_server` reports it (supervisor.py:4416-4423).
+    fn qualified(unavailable: Value) -> Option<Value> {
+        Some(json!({"startup_qualification_complete":true,
+            "unavailable_deployment_count":unavailable,"url":"http://127.0.0.1:4385/"}))
+    }
+    fn patience() -> Duration {
+        super::super::span(B::WorkerStartup).expect("registered budget")
+    }
+
+    /// Proves: B-RUN-10 (the re-checks and the publication run under the workflow lock: while the
+    /// publication is held, nothing else can take that lock, so a Stop, a failure or a replaced run
+    /// cannot land between the check and the publication).
+    #[test]
+    fn the_serving_publication_holds_the_workflow_lock_from_check_to_commit() {
+        let shared = shared(RUNNING, qualified(json!(0)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let worker = shared.clone();
+        let flag = stop.clone();
+        let commit = std::thread::spawn(move || {
+            let mut published = false;
+            let result = worker.commit_serving(
+                &flag,
+                || true,
+                || {
+                    entered_tx.send(()).expect("test receives the entry");
+                    published = release_rx.recv_timeout(patience()).is_ok();
+                },
+            );
+            (result, published)
+        });
+        let entered = entered_rx.recv_timeout(patience());
+        let excluded = matches!(shared.flow.try_lock(), Err(TryLockError::WouldBlock));
+        release_tx.send(()).expect("publication waits for release");
+        let (result, published) = commit.join().expect("commit thread");
+        assert!(entered.is_ok(), "the qualified run publishes: {result:?}");
+        assert!(excluded, "the workflow lock is held across the publication");
+        assert_eq!(result, Ok(()));
+        assert!(published);
+    }
+
+    /// Proves: B-RUN-10 (the run's Stop is written under the same workflow lock, so the fence sees
+    /// it: after the stopper ran, the publication refuses `serving_workflow_identity_changed` and
+    /// publishes nothing, demo_chain.py:1082-1089).
+    #[test]
+    fn a_signalled_stop_is_seen_by_the_fence_and_publishes_nothing() {
+        let shared = shared(RUNNING, qualified(json!(0)));
+        let stop = AtomicBool::new(false);
+        let at = Mutex::new(None);
+        let before = shared.lock().version;
+        signal_stop(&shared, &stop, &at);
+        assert!(
+            shared.lock().version > before,
+            "the Stop is a workflow-lock write"
+        );
+        let mut published = false;
+        let result = shared.commit_serving(&stop, || true, || published = true);
+        assert_eq!(result, Err("serving_workflow_identity_changed"));
+        assert!(!published);
+    }
+
+    /// Proves: B-RUN-10 (the fence re-checks the LIVE workflow, demo_chain.py:1082-1094: not
+    /// `api_running` or no longer the run's -> identity changed; a startup that did not qualify the
+    /// route, or none at all (the joined route has no startup challenge) -> route_qualification_failed;
+    /// only a qualified startup publishes, once).
+    #[test]
+    fn the_fence_rechecks_the_live_state_and_startup() {
+        let stop = AtomicBool::new(false);
+        let cases: [(&'static str, Option<Value>, bool, Result<(), &str>); 7] = [
+            (
+                STARTING,
+                qualified(json!(0)),
+                true,
+                Err("serving_workflow_identity_changed"),
+            ),
+            (
+                STOPPED,
+                qualified(json!(0)),
+                true,
+                Err("serving_workflow_identity_changed"),
+            ),
+            (
+                RUNNING,
+                qualified(json!(0)),
+                false,
+                Err("serving_workflow_identity_changed"),
+            ),
+            (RUNNING, None, true, Err("route_qualification_failed")),
+            (
+                RUNNING,
+                Some(json!({"url":"http://127.0.0.1:1/"})),
+                true,
+                Err("route_qualification_failed"),
+            ),
+            (
+                RUNNING,
+                qualified(json!(1)),
+                true,
+                Err("route_qualification_failed"),
+            ),
+            (RUNNING, qualified(json!(false)), true, Ok(())),
+        ];
+        for (state, startup, current, want) in cases {
+            let shared = shared(state, startup.clone());
+            let mut published = 0;
+            let result = shared.commit_serving(&stop, || current, || published += 1);
+            assert_eq!(result, want, "{state} {startup:?} {current}");
+            assert_eq!(published, usize::from(want.is_ok()), "{state} {startup:?}");
+        }
+    }
 }

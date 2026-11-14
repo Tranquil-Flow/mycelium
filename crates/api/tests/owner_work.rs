@@ -29,6 +29,7 @@ use api::{
     member::Session,
     peer,
     preferences::{resource_policy, standing_consent},
+    run_exchange::RunExchange,
     schema::PublicError,
 };
 use budgets::{BudgetId as B, Entries, Span};
@@ -37,7 +38,12 @@ use owner_run::{
     chain::{PortError, StepError},
     machine::{CeilingProbe, MonitorProbe},
     state::RunState,
-    steps::{activate::ActivationPort, publish::WorkPort, slices::SlicesPort},
+    steps::{
+        activate::ActivationPort,
+        exchange::Announcement,
+        publish::{ServingIdentity, WorkPort},
+        slices::SlicesPort,
+    },
 };
 use protocol::{artifact_grant::ChunkRequest, identity::Identity};
 use runtime::{
@@ -1896,6 +1902,106 @@ fn a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member() {
             seen.compute
         );
     }
+}
+
+/// The run state the serving step reads for the work port's run (`Swarm::plan`'s ids), compiled at
+/// epoch 0 as the compile step leaves it.
+fn serving_state(run: &str) -> RunState {
+    let mut state = RunState::new(run, "12345678-1234-5678-9234-abcdefabcdef", Reason::Start);
+    state.compile_state = Some(json!({"epoch":0}));
+    state.chain_compile_state = Some(json!({"epoch":0,"state":"compiled"}));
+    state
+}
+/// `_announce(ctx, 'serving', work_limits=, per_node=)` for the serving run.
+fn serving_announcement(state: &RunState) -> Announcement {
+    Announcement {
+        phase: "serving".into(),
+        run_id: state.run_id.clone(),
+        deployment_id: state.deployment_id.clone(),
+        model_id: "Qwen/Qwen3-0.6B".into(),
+        resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+        slice_mode: true,
+        manifest_digest: protocol::canonical::digest(&json!("manifest")).unwrap(),
+        per_node: None,
+    }
+}
+fn phase(exchange: &RunExchange) -> Value {
+    exchange.announcement(None).to_value()["phase"].clone()
+}
+
+/// Proves: B-RUN-10 (the joined route's serving workflow, once `api_running`, reports what it really
+/// knows: its gateway as the startup `url`, no startup qualification and no verified-token count,
+/// because it runs no startup route challenge; the serving step therefore refuses
+/// `route_qualification_failed` at the fence and the `serving` announcement is never committed.
+/// It is the run's own workflow (same run, deployment and compiled epoch) until its Stop, after
+/// which the fence refuses `serving_workflow_identity_changed`). Model-free: controlled admission.
+#[test]
+fn a_serving_joined_route_never_claims_a_startup_qualification_it_did_not_run() {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let (work, members) = s.serving(plan, stage_scripts());
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    let exchange = Arc::new(RunExchange::new(Box::new(app_host::now)));
+    let mut work = work.with_exchange(exchange.clone());
+    let serving = activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    assert_eq!(
+        serving["startup"],
+        json!({"url": format!("http://{}/", gateway["addr"].as_str().unwrap())}),
+        "{serving}"
+    );
+    assert!(serving.get("challenge_progress").is_none(), "{serving}");
+
+    let state = serving_state("s4a-run");
+    assert_eq!(
+        work.serving_identity(&state),
+        Ok(ServingIdentity::Current),
+        "the run's own workflow"
+    );
+    assert_eq!(
+        work.serving_identity(&serving_state("another-run")),
+        Ok(ServingIdentity::Changed)
+    );
+    let mut uncompiled = serving_state("s4a-run");
+    uncompiled.chain_compile_state = Some(json!({"epoch":0,"state":"compiling"}));
+    assert_eq!(
+        work.serving_identity(&uncompiled),
+        Ok(ServingIdentity::Changed)
+    );
+
+    let announcement = serving_announcement(&state);
+    let limits = json!({"max_wall_seconds":60});
+    let mut fenced = 0;
+    let refused = work.commit_serving(&state, &announcement, Some(&limits), &mut |commit| {
+        fenced += 1;
+        commit()
+    });
+    assert!(
+        matches!(&refused, Err(StepError::Refused(e)) if e.code == "route_qualification_failed"),
+        "{refused:?}"
+    );
+    assert_eq!(fenced, 1, "the re-check ran inside the owner's Stop fence");
+    assert_eq!(phase(&exchange), "idle", "nothing announced");
+
+    let stopped = work.commit_serving(&state, &announcement, Some(&limits), &mut |_| {
+        Err(StepError::Stopped)
+    });
+    assert_eq!(stopped, Err(StepError::Stopped), "a Stop at the fence wins");
+    assert_eq!(phase(&exchange), "idle");
+
+    (work.stopper())();
+    assert_eq!(
+        work.serving_identity(&state),
+        Ok(ServingIdentity::Changed),
+        "a stopped workflow is no longer current"
+    );
+    let after = work.commit_serving(&state, &announcement, Some(&limits), &mut |commit| commit());
+    assert!(
+        matches!(&after, Err(StepError::Refused(e)) if e.code == "serving_workflow_identity_changed"),
+        "{after:?}"
+    );
+    assert_eq!(phase(&exchange), "idle");
+    work.teardown().unwrap();
 }
 
 /// EP2 item 1: Stop while chat 2 is in flight (its final stage held mid-step) closes the epoch
