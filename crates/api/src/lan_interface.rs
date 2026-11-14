@@ -25,10 +25,15 @@
 //!    no guess is made between networks. Bridges are set aside by their interface TYPE
 //!    (`IFT_BRIDGE`, the `AF_LINK` entry's `if_data.ifi_type` in the same `getifaddrs` list, never
 //!    the name): a VM or Internet Sharing bridge (`bridge100`, usually 192.168.64.1) is a network
-//!    this Mac hosts, not one the other Mac is on. Exactly one remaining interface: its address
-//!    (IPv4 before IPv6 unique-local on that one link; two addresses of the best class on it are
-//!    still ambiguous). Several interfaces: [`AMBIGUOUS_PRIVATE_INTERFACES`]. Only bridges:
-//!    [`ONLY_BRIDGE_INTERFACES`]. None: [`NO_PRIVATE_ADDRESS`].
+//!    this Mac hosts, not one the other Mac is on. Exactly one remaining interface with exactly
+//!    one IPv4 address (RFC 1918 or link-local): that address; without IPv4, exactly one IPv6
+//!    unique-local address: that one. Two IPv4 addresses on the one interface are ambiguous like
+//!    two interfaces (aliases can be different networks, and the other Mac may share only one:
+//!    LAN-R2-A2), as are two unique-local addresses. One IPv4 address beside IPv6 unique-local
+//!    ones resolves to the IPv4 address: that is a FAMILY preference (the work transport binds one
+//!    family), not proof that both addresses are one network. Several interfaces:
+//!    [`AMBIGUOUS_PRIVATE_INTERFACES`]. Only bridges: [`ONLY_BRIDGE_INTERFACES`]. None:
+//!    [`NO_PRIVATE_ADDRESS`].
 //! 4. A refusal is [`Selection::LocalOnly`] with its reason: the transport stays on 127.0.0.1, and
 //!    an owner run with a joined Mac refuses by that name before it dials anything.
 use runtime::iroh_host::LanPolicy;
@@ -113,11 +118,16 @@ pub fn select(addresses: &[InterfaceAddress], default_source: Option<IpAddr>) ->
     if shared.iter().any(|a| a.name != first.name) {
         return Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES);
     }
-    // One network: its best address class, if exactly one address has it.
-    let best = shared.iter().filter_map(|a| class(a.ip)).min();
-    let mut best = shared.iter().filter(|a| class(a.ip) == best);
-    match (best.next(), best.next()) {
-        (Some(only), None) => Selection::Lan(only.ip),
+    // One interface: its one IPv4 address, else its one IPv6 unique-local address (a family
+    // preference, module note). More than one in that family: no guess (LAN-R2-A2).
+    let ipv4: Vec<&&InterfaceAddress> = shared.iter().filter(|a| a.ip.is_ipv4()).collect();
+    let family = if ipv4.is_empty() {
+        shared.iter().collect()
+    } else {
+        ipv4
+    };
+    match family.as_slice() {
+        [only] => Selection::Lan(only.ip),
         _ => Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
     }
 }
