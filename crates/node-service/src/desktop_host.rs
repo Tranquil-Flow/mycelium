@@ -168,9 +168,9 @@ fn always_servable(request: &ServiceRequest) -> bool {
             )
     )
 }
-/// The always-servable callbacks the chat state cannot crowd out: its handler first waits for the
-/// packaged model gate (a native compose under the gate's lock), and v0.1.4's page server has no
-/// admitted cap at all (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9).
+/// The always-servable callbacks the chat state cannot crowd out: its handler first reads the
+/// owner run's route (`RunRoute::status`, which may wait on the run), and v0.1.4's page server has
+/// no admitted cap at all (a `ThreadingHTTPServer`, app.py:1940-2025 @ f4e366e9).
 fn control(request: &ServiceRequest) -> bool {
     always_servable(request) && request.target != "/chat/api/state"
 }
@@ -196,16 +196,9 @@ type Source = Result<Arc<dyn QualificationSource>, PublicError>;
 fn development_source(node: &NodeService) -> Source {
     router_port::DevelopmentRecord::of(node).map(|r| Arc::new(r) as Arc<dyn QualificationSource>)
 }
-/// What the packaged executable's chat waits for: the native service over a located model.
-pub trait ModelGate: Send + Sync {
-    /// `Ok` once the native driver is composed over the model; else the refusal `/chat/*` answers.
-    fn ready(&self) -> Result<(), PublicError>;
-}
 #[derive(Clone)]
 pub struct DesktopServices {
     node: NodeService,
-    /// The packaged executable's [`ModelGate`]; none in the development hosts (always composed).
-    model: Option<Arc<dyn ModelGate>>,
     /// The request gateway over the node service (its construction failure answers every send).
     serving: Result<Arc<Serving>, PublicError>,
     /// Every `POST /api/*`, in one action transaction at a time (v0.1.4's `app.guard`).
@@ -228,8 +221,10 @@ pub struct DesktopServices {
     /// v0.1.4's `ChatService._rate` windows (`chat_edge`), on this host's own monotonic clock.
     rate: Arc<Mutex<crate::chat_edge::RateWindow>>,
     /// The shipped `ChatService` over the owner run's route gateway (lane PH3b S5): once a run is
-    /// composed it answers every `/chat/*` route (lane S5F); without one the SLICE-1 native path
-    /// above answers.
+    /// composed it answers every `/chat/*` route (lane S5F). The packaged executable always
+    /// composes one (`packaged::compose`, lane CHAT); without one, only in the development shell
+    /// (`mycelium-node desktop`) and the tests that build these services bare, the SLICE-1 native
+    /// path above answers.
     chat_run: Option<api::chat_service::ChatService>,
     /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
     run_chats: Option<api::chat_service::RunChats>,
@@ -365,12 +360,6 @@ impl DesktopServices {
     pub fn publishing(&self) -> Option<Publishing> {
         self.publishing.clone()
     }
-    /// Every `/chat/*` request first asks `gate` (on its request thread, never the window's):
-    /// the packaged executable's chat waits for its native service over a prepared model.
-    pub fn gated(mut self, gate: Arc<dyn ModelGate>) -> Self {
-        self.model = Some(gate);
-        self
-    }
     /// Chat over the owner run's route gateway (lane PH3b S5, chat.py:211-500 @ f4e366e9): from now
     /// on `/chat/api/{state,send,events}` always go through the shipped `ChatService`, which answers
     /// `chat_not_ready` / `chat_warming_up` / `chat_switching_runs` itself while `run` does not serve
@@ -474,7 +463,6 @@ impl DesktopServices {
             publishing,
             product,
             node,
-            model: None,
             gate: Arc::new(Mutex::new(Gate {
                 closing: false,
                 tasks: Vec::new(),
@@ -521,12 +509,6 @@ impl DesktopServices {
             &format!("{}:{}", request.method, request.target),
         );
         if request.target.starts_with("/chat/") {
-            if self.routed_chat().is_none()
-                && let Some(Err(refusal)) = self.model.as_ref().map(|gate| gate.ready())
-            {
-                Self::complete_error(complete, refusal);
-                return;
-            }
             chat_boundary::handle(self, request, complete);
             return;
         }

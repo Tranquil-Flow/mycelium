@@ -508,23 +508,16 @@ fn with_a_run_composed_every_chat_route_answers_the_shipped_not_ready_codes() {
     quit(&host.services);
 }
 
-/// W2: a composed distributed run owns chat admission, even when the unrelated
-/// SLICE-1 local model is absent. Named RunRoute/gateway doubles; real desktop
-/// boundary and HTTP/SSE. No native model or driver is executed.
+/// W2: a composed distributed run owns chat admission with no local model at all (lane CHAT: the
+/// packaged app's one-Mac native model gate is retired, owner ruling 14 Nov). Named
+/// RunRoute/gateway doubles; real desktop boundary and HTTP/SSE. No native model or driver is
+/// executed.
 #[test]
-fn a_composed_run_bypasses_the_unrelated_native_model_gate() {
-    struct MissingLocalModel(AtomicUsize);
-    impl node_service::desktop_host::ModelGate for MissingLocalModel {
-        fn ready(&self) -> Result<(), PublicError> {
-            self.0.fetch_add(1, SeqCst);
-            Err(PublicError::new(503, "model_not_installed"))
-        }
-    }
+fn a_composed_run_answers_its_chat_without_any_local_model() {
     let fake = FakeGateway::start(Script::completed(&["Hel", "lo"]));
     let run = ScriptedRun::new(http(&fake), None);
-    let mut host = host_over(run.clone(), Arc::new(MustNotRun));
-    let gate = Arc::new(MissingLocalModel(AtomicUsize::new(0)));
-    host.services = host.services.gated(gate.clone());
+    let driver = Holds::default();
+    let host = host_over(run.clone(), Arc::new(driver.clone()));
     let idle = call(&host.services, "/chat/api/state", json!({}));
     let refused = call(
         &host.services,
@@ -540,11 +533,7 @@ fn a_composed_run_bypasses_the_unrelated_native_model_gate() {
     );
     let answer = (sent.0 == 200).then(|| until_done(&host.services, &sent.1["request_id"]));
     quit(&host.services);
-    assert_eq!(
-        idle.0, 200,
-        "the native gate hid idle run status: {:?}",
-        idle.1
-    );
+    assert_eq!(idle.0, 200, "idle run status: {:?}", idle.1);
     assert_eq!(idle.1["available"], false);
     assert_eq!(refused, (503, json!({"error":"chat_not_ready"})));
     assert_eq!(serving.0, 200, "{:?}", serving.1);
@@ -555,11 +544,7 @@ fn a_composed_run_bypasses_the_unrelated_native_model_gate() {
         (text.as_str(), &last["terminal"]),
         ("Hello", &json!("completed"))
     );
-    assert_eq!(
-        gate.0.load(SeqCst),
-        0,
-        "route chat must not even probe the native driver"
-    );
+    assert_eq!(driver.runs(), 0, "the route chat ran the native driver");
 }
 
 /// F3: a native chat and a route chat are never admitted together. At 5963027 the route send

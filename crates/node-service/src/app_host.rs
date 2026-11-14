@@ -91,11 +91,10 @@ struct Acquisitions {
 }
 /// The packaged process's model source: `DemoApp.acquisition` (`_open_acquisition`, app.py:649-672
 /// @ f4e366e9) over v0.1.4's `model-source-*` directories in the state root, beside the private
-/// `v02-node/`, where the packaged lookup (`packaged::locate_model`) reads, fetched through one
-/// repository transport, and `DemoApp._policy_observer`, this Mac's power, thermal state and
-/// network. Clones share one state: the packaged host opens, starts and cancels the attempts
-/// through `api::app_host`, the packaged core asks whether the pinned model was prepared and
-/// closes the acquisition at Quit.
+/// `v02-node/`, fetched through one repository transport, and `DemoApp._policy_observer`, this
+/// Mac's power, thermal state and network. Clones share one state: the packaged host opens, starts
+/// and cancels the attempts through `api::app_host`, and the packaged core closes the acquisition
+/// at Quit.
 #[derive(Clone)]
 pub struct ModelSource {
     sources: PathBuf,
