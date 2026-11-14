@@ -5,8 +5,10 @@
 //! lives here or in a host.
 //!
 //! Concurrency rules (B-RUN-17, CL-L10-08): the run lock protects the in-memory machine only; it is never
-//! held across a chain call, so a status read is answerable while a step waits. Lock order is `run`
-//! then `queue`. `status()` is the oracle's live `OwnerRun.status()` (ceiling, rollover and monitor
+//! held across a chain call, so a status read is answerable while a step waits. The one exception is
+//! the serving publication's short in-memory commit ([`StepEnv::fenced`]), which v0.1.4 also runs
+//! under `OwnerRun._lock`. Lock order is `run` then `queue`. `status()` is the oracle's live
+//! `OwnerRun.status()` (ceiling, rollover and monitor
 //! checks, then the snapshot); `snapshot()` is `status_snapshot()` (never ticks anything).
 #[cfg(test)]
 mod fence_tests;
@@ -229,24 +231,33 @@ impl StepEnv for Env<'_> {
     fn record_exception(&mut self, code: &str, class: &str) {
         lock(&self.shared.run).record_exception(code, class);
     }
-    /// The stop event is held across `commit` (`OwnerRun.stop` writes under the lock the oracle's
-    /// commit holds, demo_chain.py:1073-1080). Lock order: dispatch takes run -> queue -> stop
-    /// event; this takes the stop event -> the host's own locks, and no host lock holder ever
-    /// takes the run, queue or stop event lock, so neither waits on the other.
+    /// One transaction for the publication and its result (`demo_chain.py:1074-1097`): the Stop
+    /// check, `commit` and `ctx.result[key] = value` all run under the run lock, the lock
+    /// `OwnerRun.stop` and every status snapshot take (owner_run.py:194, 275-282), so a Stop or a
+    /// status read lands before the check or after the result, never between the announcement and
+    /// its origin.
+    ///
+    /// Lock order (one order everywhere; `->` = acquired while holding):
+    ///   host outer lock (the packaged resident workflow, the oracle's `app.guard`) -> run ->
+    ///   stop event (read and released) -> host workflow lock -> exchange lock.
+    ///   Stop / start / rebuild / close / the driver: run -> queue -> stop event.
+    ///   `RunnerView::while_inactive` callbacks: run -> exchange lock.
+    /// No holder of the queue, the stop event, a host workflow lock or the exchange lock ever
+    /// takes the run lock, and nothing holding the run lock takes the host outer lock. Never take
+    /// the run lock while holding the stop event: that inverts dispatch's order (ABBA).
     fn fenced(
         &mut self,
         commit: &mut dyn FnMut() -> Result<(), StepError>,
         key: &str,
         value: Value,
     ) -> Result<(), StepError> {
-        let set = lock(&self.shared.stop.set);
-        if *set {
+        let mut run = lock(&self.shared.run);
+        if self.shared.stop.is_set() {
             return Err(StepError::Stopped);
         }
-        let result = commit();
-        drop(set);
-        result?;
-        self.set_result(key, value);
+        commit()?;
+        run.set_result(key, value);
+        drop(run);
         Ok(())
     }
     fn pause(&mut self, seconds: f64) -> bool {

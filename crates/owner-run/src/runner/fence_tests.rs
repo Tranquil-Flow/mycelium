@@ -42,9 +42,11 @@ fn patience() -> Duration {
     Duration::from_secs_f64(Timing::registered().rebuild_join)
 }
 
-/// Proves: B-RUN-10 (while the serving commit runs, the owner's Stop cannot be set: the stop event
-/// is held across the commit, so a Stop lands before the checks or after the publication, never
-/// between them; the run and queue locks stay free for status reads).
+/// Proves: B-RUN-10 (while the serving commit runs, the owner's Stop cannot land: the run lock,
+/// which every Stop takes first (`OwnerRun.stop` writes under `OwnerRun._lock`, owner_run.py:275-282)
+/// is held across the commit, as v0.1.4 holds `owner._lock` across it (demo_chain.py:1075-1097),
+/// so a Stop lands before the checks or after the publication, never between them; the queue
+/// stays free).
 #[test]
 fn a_stop_cannot_land_inside_the_serving_commit() {
     let shared = shared();
@@ -65,13 +67,12 @@ fn a_stop_cannot_land_inside_the_serving_commit() {
         )
     });
     entered_rx.recv_timeout(patience()).expect("commit entered");
-    let stop_excluded = matches!(shared.stop.set.try_lock(), Err(TryLockError::WouldBlock));
-    let run_free = shared.run.try_lock().is_ok();
+    let stop_excluded = matches!(shared.run.try_lock(), Err(TryLockError::WouldBlock));
     let queue_free = shared.queue.try_lock().is_ok();
     release_tx.send(()).expect("commit waits for release");
     let result = commit.join().expect("commit thread");
     assert!(stop_excluded, "a Stop must wait for the serving commit");
-    assert!(run_free && queue_free, "status stays answerable");
+    assert!(queue_free, "the commit holds no queue lock");
     assert_eq!(result, Ok(()));
 }
 
