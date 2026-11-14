@@ -9,9 +9,15 @@
 //! (2) verifies the object and establishes journal genesis BEFORE the grant is
 //! issued (issuing first trips the source's ledger-reset fence), (3) issues the
 //! seed-signed offer naming this source's key (and, on LAN, its signed
-//! addresses), (4) serves exactly that offer to one connection while the member
-//! receives and verifies, and returns the member's receipt. Bytes, recipes and
-//! offers are all produced elsewhere and verified on both sides here.
+//! addresses), (4) serves exactly that offer to one connection from the
+//! offer's recipient carrier key while the member receives and verifies, and
+//! returns the member's receipt. Only that key is admitted (direct LAN: by the
+//! host before its handshake completes; LocalOnly: by the accepted connection's
+//! key); any other or failed handshake is closed unserved and the job keeps
+//! accepting until its own absolute deadline. Serving ends at that deadline or
+//! at `close`, whichever comes first, so no peer can hold `close`. Bytes,
+//! recipes and offers are all produced elsewhere and verified on both sides
+//! here.
 use super::link::{MemberLink, Refusal};
 use crate::{app_host, joined_shard};
 use budgets::{BudgetId as B, Entries};
@@ -19,7 +25,7 @@ use protocol::identity::Identity;
 use runtime::{
     artifact_journal::{DurableConfig, DurableObjects},
     iroh_artifact_source::ArtifactService,
-    iroh_host::{LanPolicy, LoopbackHost},
+    iroh_host::{LAN_KEY_REFUSED, LanPolicy, LoopbackHost},
     sidecar_artifact::{grant_limits, serve_limits},
 };
 use serde_json::{Value, json};
@@ -59,6 +65,8 @@ pub struct ShardSource {
     lan: bool,
     /// Set by `close`; the source thread serves nothing once it is set.
     closing: Arc<AtomicBool>,
+    /// Woken by `close`: a connection being served is closed at once.
+    stopping: Arc<tokio::sync::Notify>,
     /// The source thread is (about to be) blocked accepting a member.
     accepting: Arc<AtomicBool>,
 }
@@ -97,8 +105,9 @@ impl ShardSource {
         let on_lan = lan.is_some();
         let poll = budget(B::OwnerPoll)?;
         let closing = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::new(tokio::sync::Notify::new());
         let accepting = Arc::new(AtomicBool::new(false));
-        let (stop, waiting) = (closing.clone(), accepting.clone());
+        let (stop, stopped, waiting) = (closing.clone(), stopping.clone(), accepting.clone());
         let (ready_tx, ready_rx) = mpsc::channel();
         let (jobs, inbox) = mpsc::channel::<Job>();
         let thread = std::thread::Builder::new()
@@ -201,6 +210,13 @@ impl ShardSource {
                                 let store = admitted
                                     .remove(&hash)
                                     .ok_or_else(|| refusal("source_object_not_admitted"))?;
+                                // The one key this job serves: the recipient carrier the
+                                // seed-signed offer names (JoinedSource::new checks the offer).
+                                let recipient: iroh::EndpointId = offer["message"]["grant"]
+                                    ["message"]["recipient_endpoint_id"]
+                                    .as_str()
+                                    .and_then(|key| key.parse().ok())
+                                    .ok_or_else(|| refusal("joined_shard_invalid"))?;
                                 let wrapped = joined_shard::JoinedSource::new(
                                     authority.clone(),
                                     offer,
@@ -220,6 +236,12 @@ impl ShardSource {
                                 )
                                 .map_err(|e| refusal(format!("source_service_failed:{e:?}")))?;
                                 let end = until(wall)?;
+                                // LAN-A1: direct LAN refuses every other key at the handshake.
+                                if on_lan {
+                                    host.admit_peer_ids(&[recipient]).map_err(|e| {
+                                        refusal(format!("source_admission_failed:{e:?}"))
+                                    })?;
+                                }
                                 // F4: `close` wakes this wait (LocalOnly: it dials the
                                 // source once; direct LAN: slices of OwnerPoll, whose
                                 // in-flight handshakes carry over to the next accept).
@@ -235,16 +257,27 @@ impl ShardSource {
                                         false => end,
                                     };
                                     match host.accept(&clock, slice) {
-                                        Err(transport::Error::Expired)
-                                            if on_lan
-                                                && end.remaining(clock.monotonic()).is_ok() =>
-                                        {
-                                            continue;
+                                        Ok(connection) if connection.remote_id() == recipient => {
+                                            break Ok(connection);
                                         }
-                                        other => {
-                                            break other.map_err(|e| {
-                                                refusal(format!("source_accept_failed:{e:?}"))
-                                            });
+                                        // LocalOnly admits any key (and the close wake):
+                                        // closed unserved, the job goes on.
+                                        Ok(connection) => {
+                                            connection.close(
+                                                LAN_KEY_REFUSED.into(),
+                                                b"lan_key_refused",
+                                            );
+                                        }
+                                        // A slice ended, or a refused or failed handshake:
+                                        // retried until the job's own absolute deadline.
+                                        Err(
+                                            transport::Error::Expired
+                                            | transport::Error::Authentication,
+                                        ) if end.remaining(clock.monotonic()).is_ok() => {}
+                                        Err(e) => {
+                                            break Err(refusal(format!(
+                                                "source_accept_failed:{e:?}"
+                                            )));
                                         }
                                     }
                                 };
@@ -253,8 +286,27 @@ impl ShardSource {
                                     return Err(refusal("source_closed"));
                                 }
                                 let connection = accepted?;
-                                rt.block_on(service.serve_connection(connection))
-                                    .map_err(|e| refusal(format!("source_serve_failed:{e:?}")))
+                                // Serving ends at the job's deadline or at `close`: a peer
+                                // that keeps the connection busy cannot hold either.
+                                let left = end
+                                    .remaining(clock.monotonic())
+                                    .map(|span| Duration::from_millis(span.millis()))
+                                    .unwrap_or(Duration::ZERO);
+                                let served = connection.clone();
+                                rt.block_on(async {
+                                    tokio::select! {
+                                        outcome = service.serve_connection(connection) => outcome
+                                            .map_err(|e| refusal(format!("source_serve_failed:{e:?}"))),
+                                        () = stopped.notified() => {
+                                            served.close(0u32.into(), b"source_closed");
+                                            Err(refusal("source_closed"))
+                                        }
+                                        () = tokio::time::sleep(left) => {
+                                            served.close(0u32.into(), b"source_deadline");
+                                            Err(refusal("source_serve_deadline"))
+                                        }
+                                    }
+                                })
                             })();
                             if done.send(result).is_err() {
                                 eprintln!("joined owner source: serve waiter gone");
@@ -279,6 +331,7 @@ impl ShardSource {
             key: Value::Null,
             lan: on_lan,
             closing,
+            stopping,
             accepting,
         };
         let (endpoint, addrs, key) = match ready.and_then(|r| r) {
@@ -318,6 +371,8 @@ impl ShardSource {
     }
     fn shutdown(&mut self) -> Result<(), Refusal> {
         self.closing.store(true, Ordering::SeqCst);
+        // A connection being served is closed now (a stored permit if none is served yet).
+        self.stopping.notify_one();
         self.jobs.take();
         if !self.lan && self.accepting.load(Ordering::SeqCst) {
             self.wake();
