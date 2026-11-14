@@ -18,7 +18,7 @@ fn held_helper(mode: &str) {
             "p".into()
         };
         let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":prompt,"max_new_tokens":CHAT_TOKENS,
-            "workload_profile_id":"interactive","qos_class":"interactive","qualification":gateway["qualification"]});
+            "workload_profile_id":"interactive_chat_v1","qos_class":"interactive","qualification":gateway["qualification"]});
         sse_client::http(
             gateway_addr(&gateway),
             "POST",

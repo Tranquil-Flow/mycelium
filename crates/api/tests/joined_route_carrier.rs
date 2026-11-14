@@ -522,7 +522,7 @@ fn signed_route_as(
 }
 fn submission(message: &Value, max_new_tokens: u64) -> Value {
     json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":max_new_tokens,
-        "workload_profile_id":"interactive","qos_class":"interactive",
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
         "qualification":route::qualification(message).unwrap()})
 }
 impl Route {
@@ -1221,7 +1221,7 @@ fn bearer(e: &Epoch) -> String {
 }
 fn post(e: &Epoch, max_new_tokens: u64) -> (u16, Value) {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":max_new_tokens,
-        "workload_profile_id":"interactive","qos_class":"interactive",
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
         "qualification":route::qualification(e.host().message()).unwrap()});
     sse_client::http(
         e.addr(),

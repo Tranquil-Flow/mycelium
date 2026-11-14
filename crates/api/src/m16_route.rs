@@ -2057,7 +2057,12 @@ pub fn runtime(
     build_live_m16_runtime(FactoryInputs {
         graph,
         devices,
-        workload_profiles: BTreeMap::from([("interactive".into(), "interactive".into())]),
+        // The live coordinator's profiles (`build_live_m16_runtime`, mycelium_m16_runtime.py:1247-1251
+        // @ f4e366e9): the chat submits `interactive_chat_v1` (chat.py:124, `chat_service`).
+        workload_profiles: BTreeMap::from([
+            ("interactive_chat_v1".into(), "interactive".into()),
+            ("sustained_batch_v1".into(), "batch".into()),
+        ]),
         clock,
         lease_clock,
         id_source: ids,

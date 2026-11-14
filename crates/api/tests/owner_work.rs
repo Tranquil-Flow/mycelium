@@ -1751,7 +1751,7 @@ fn gateway_addr(gateway: &Value) -> std::net::SocketAddr {
 /// Submit one chat on the run's gateway (`POST /v1/inference`).
 fn post(gateway: &Value) -> (u16, Value) {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":CHAT_TOKENS,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":gateway["qualification"]});
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive","qualification":gateway["qualification"]});
     sse_client::http(
         gateway_addr(gateway),
         "POST",

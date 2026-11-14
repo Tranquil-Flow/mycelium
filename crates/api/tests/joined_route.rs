@@ -164,7 +164,7 @@ fn route_graph_admits_through_the_live_factory_and_binds_qualification() {
     let mut stale = message.clone();
     stale["stages"][1]["proof_digest"] = json!(digest("other-proof"));
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":4,
-        "workload_profile_id":"interactive","qos_class":"interactive",
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
         "qualification":route::qualification(&stale).unwrap()});
     assert_eq!(
         service.submit(doc.clone()).err().unwrap().code,
@@ -340,7 +340,7 @@ fn gateway_stream(gap: std::time::Duration, budget: std::time::Duration, connect
         }
     });
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":"p","max_new_tokens":32,
-        "workload_profile_id":"interactive","qos_class":"interactive",
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
         "qualification":route::qualification(&message).unwrap()});
     let (status, accepted) = sse_client::http(addr, "POST", "/v1/inference", "", &doc.to_string());
     assert_eq!(status, 202, "{accepted}");

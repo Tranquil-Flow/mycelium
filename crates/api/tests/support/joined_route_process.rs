@@ -181,7 +181,7 @@ struct Running {
 }
 fn submit(e: &Epoch) -> Running {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":NEW_TOKENS,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":e.host().qualification().unwrap()});
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive","qualification":e.host().qualification().unwrap()});
     let auth = format!("Authorization: Bearer {}\r\n", e.bearer());
     let posted = Instant::now();
     let (status, accepted) = http(e.addr(), "POST", "/v1/inference", &auth, &doc.to_string());
@@ -206,7 +206,7 @@ fn submit(e: &Epoch) -> Running {
 /// N3: a spent or retired single-use epoch admits no further request.
 fn assert_epoch_retired(e: &Epoch, phase: &str) {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":1,
-        "workload_profile_id":"interactive","qos_class":"interactive",
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive",
         "qualification":route::qualification(e.host().message()).unwrap()});
     let auth = format!("Authorization: Bearer {}\r\n", e.bearer());
     let (status, refused) = http(e.addr(), "POST", "/v1/inference", &auth, &doc.to_string());
@@ -604,7 +604,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
     );
     assert_eq!(withdrawn["reason"], "member_leave");
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":1,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":route::qualification(e.host().message()).unwrap()});
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive","qualification":route::qualification(e.host().message()).unwrap()});
     let (status, refused) = http(
         e.addr(),
         "POST",
@@ -809,7 +809,7 @@ fn spawn_member(root: &std::path::Path) -> (MemberProcess, String) {
 }
 fn post_chat(addr: SocketAddr, bearer: &str, qualification: &Value, tokens: usize) -> Running {
     let doc = json!({"protocol":"mycelium.request_gateway.v2","prompt":PROMPT,"max_new_tokens":tokens,
-        "workload_profile_id":"interactive","qos_class":"interactive","qualification":qualification});
+        "workload_profile_id":"interactive_chat_v1","qos_class":"interactive","qualification":qualification});
     let auth = format!("Authorization: Bearer {bearer}\r\n");
     let posted = Instant::now();
     let (status, accepted) = http(addr, "POST", "/v1/inference", &auth, &doc.to_string());

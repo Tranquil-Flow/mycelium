@@ -473,7 +473,10 @@ impl M16Requests {
         prompt: &[u32],
         max_new_tokens: u64,
     ) -> Result<Accepted, PublicError> {
-        const PROFILE: &str = "interactive";
+        // The chat's own profile and class (chat.py:124): the challenge is admitted as a product
+        // request is.
+        const PROFILE: &str = "interactive_chat_v1";
+        const QOS: &str = "interactive";
         // `infer`: `max_new_tokens < 1` is invalid (route.py:4621-4628); the workflow counts at
         // most 4096 challenge tokens (workflow.py:206).
         if prompt.is_empty() || !(1..=4096).contains(&max_new_tokens) {
@@ -500,7 +503,7 @@ impl M16Requests {
         if s.admission_attempts >= sh.config.max_sessions {
             return Err(error("m16_admission_attempt_budget_exhausted"));
         }
-        let p = sh.host.prepare_tokens(prompt, max_new_tokens, PROFILE)?;
+        let p = sh.host.prepare_tokens(prompt, max_new_tokens, QOS)?;
         if !registry::valid_request_id(&p.context.request_id) {
             return Err(error("invalid_request_id"));
         }
@@ -510,7 +513,7 @@ impl M16Requests {
         if s.entries.contains_key(&p.context.request_id) {
             return Err(error("duplicate_request_id"));
         }
-        if p.context.qos_class != PROFILE
+        if p.context.qos_class != QOS
             || Some(p.context.max_new_tokens.clone()) != PyReal::from_json(&json!(max_new_tokens))
             || p.context.prompt_token_ids.len() != prompt.len()
         {
