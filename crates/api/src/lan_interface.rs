@@ -60,9 +60,15 @@ fn class(ip: IpAddr) -> Option<u8> {
 
 /// The pure selection rule (module note). `default_source` is the address the default route
 /// would send from, if the routing table has one.
-pub fn select(_addresses: &[InterfaceAddress], _default_source: Option<IpAddr>) -> Selection {
-    // RED scaffold: the rule is not written yet.
-    Selection::LocalOnly(NO_PRIVATE_ADDRESS)
+pub fn select(addresses: &[InterfaceAddress], default_source: Option<IpAddr>) -> Selection {
+    addresses
+        .iter()
+        .filter(|a| a.up && !a.loopback && !a.point_to_point && admitted(a.ip))
+        .filter_map(|a| Some((default_source != Some(a.ip), class(a.ip)?, &a.name, a.ip)))
+        .min()
+        .map_or(Selection::LocalOnly(NO_PRIVATE_ADDRESS), |(.., ip)| {
+            Selection::Lan(ip)
+        })
 }
 
 /// The source address the kernel would use for the default route, or none. A UDP `connect` only

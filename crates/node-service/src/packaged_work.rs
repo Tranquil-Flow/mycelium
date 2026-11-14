@@ -44,9 +44,9 @@ pub enum WorkNetwork {
     ThisMac,
 }
 impl Default for WorkNetwork {
-    /// RED scaffold: still loopback-only.
+    /// The app's own ([`WorkNetwork::ThisMac`]).
     fn default() -> Self {
-        Self::loopback()
+        Self::ThisMac
     }
 }
 impl WorkNetwork {
@@ -72,10 +72,15 @@ impl WorkNetwork {
                 };
                 (choice.clone(), name)
             }
-            Self::ThisMac => {
-                let _ = read;
-                (NetworkChoice::default(), "local_only:not_resolved".into())
-            }
+            Self::ThisMac => match read() {
+                api::lan_interface::Selection::Lan(ip) => (
+                    NetworkChoice(Some((ip, LanPolicy::private_only()))),
+                    format!("lan:{ip}"),
+                ),
+                api::lan_interface::Selection::LocalOnly(reason) => {
+                    (NetworkChoice::default(), format!("local_only:{reason}"))
+                }
+            },
         }
     }
 }
