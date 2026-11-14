@@ -1,0 +1,854 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+//! Lane TEN: the hermetic ten-row gate. Two PACKAGED hosts in this one test process, each the
+//! shipped app's own composition (`packaged::core_with_run`, the function `core_with_native_program`
+//! calls) over its own private state root, driven through the window's callbacks as the page drives
+//! them. The joined Mac enrols through the real join path (relay window, claim, approve, poll).
+//! Nothing is replaced except:
+//!
+//! * the run's OBSERVE PORT, by the named [`observe_test_double::HostIdentityTestDouble`]
+//!   (decision U4 / ruling 14: one Mac cannot give two host identities; the double wraps the real
+//!   observation backend and rewrites only each hello answer's `host_id` / `boot_id`);
+//! * the model repository's ORIGIN: a loopback server over this Mac's cached Hugging Face snapshot
+//!   (`support/cached_repository.rs`); the acquisition downloads, hashes and verifies every byte;
+//! * the relay: the external provider on a loopback proxy (no `cloudflared`), as every packaged
+//!   pair test; the seed's control plane therefore runs on loopback, while the WORK transport
+//!   (member control, shard source, route carrier) is the app default, bound to this Mac's private
+//!   LAN address (`WorkNetwork::ThisMac`, `api::lan_interface::select`);
+//! * the native program: the packaged `mycelium` executable runs its `native-worker` role only
+//!   inside an admitted bundle and has no `tokenize` role, so the run's `NativeProgram` is the
+//!   development `mycelium-node` (features `metal`) named by `MYCELIUM_TEN_NATIVE_BINARY`, pinned
+//!   here by its own bytes exactly as bundle admission pins the shipped executable.
+//!
+//! Real: native workers on Metal with the cached Qwen3-0.6B, the compiler and its challenge, the
+//! work transport on the LAN, the startup challenge, the chat service and the run's route.
+//!
+//! Run (one model test at a time; see REPORT-laneTEN.md):
+//! `cargo test --offline -p node-service --features "packaged desktop-shell" --test packaged_ten_rows
+//!  ten_rows_with_the_real_model_on_the_lan -- --exact --ignored --nocapture --test-threads 1`
+#![cfg(feature = "desktop-shell")]
+#[path = "support/cached_repository.rs"]
+mod cached;
+#[path = "support/packaged_macs.rs"]
+mod macs;
+#[path = "support/host_identity_double.rs"]
+mod observe_test_double;
+#[path = "support/packaged_repository.rs"]
+mod repository;
+use api::m16_route::Codec as _;
+use budgets::{BudgetId as B, Entries, Span};
+use desktop::{
+    channel::{ORIGIN, Request},
+    lifecycle::{Cleanup, Poll},
+};
+use macs::{
+    Mac, Owner, PUBLIC, Permissive, approve_and_join, consent, free_port, listening, millis,
+    private,
+};
+use node_service::{
+    packaged::{self, RunConfig},
+    packaged_network::{JoinSeams, NetworkConfig},
+};
+use serde_json::{Value, json};
+use std::{
+    io::Write as _,
+    os::unix::fs::DirBuilderExt,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+/// The recorded reference prompt (the packed oracle's 35 `prompt_ids`, the same text the joined
+/// route tests send: `crates/api/tests/support/joined_route_process.rs:30`).
+const PROMPT: &str = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nExplain how rain forms and why plants need it. Give a detailed answer.<|im_end|>\n<|im_start|>assistant\n";
+/// Tokens the gate's chat asks for (the joined route tests compare 32 with the reference).
+const CHAT_TOKENS: u64 = 32;
+/// The member's consent: the disk and memory this Mac offers, and the worker wall.
+const STORAGE: u64 = 8_000_000_000;
+const MEMORY: u64 = 8_589_934_592;
+const WALL_SECONDS: u64 = 3600;
+
+fn oracle() -> Value {
+    serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap()
+}
+/// `row` with `key` set to `value`.
+fn with(mut row: Value, key: &str, value: Value) -> Value {
+    row[key] = value;
+    row
+}
+fn ms(since: Instant) -> u64 {
+    since.elapsed().as_millis() as u64
+}
+
+// ---------------------------------------------------------------- evidence -----------------
+
+/// The run directory (`MYCELIUM_TEN_RUN_DIR`): every line the gate writes lands here at once.
+#[derive(Clone)]
+struct Evidence {
+    dir: PathBuf,
+    began: Instant,
+    rows: Arc<Mutex<Vec<Value>>>,
+}
+impl Evidence {
+    fn open() -> Self {
+        let dir = PathBuf::from(
+            std::env::var_os("MYCELIUM_TEN_RUN_DIR")
+                .expect("MYCELIUM_TEN_RUN_DIR names this run's evidence directory"),
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        Self {
+            dir,
+            began: Instant::now(),
+            rows: Arc::default(),
+        }
+    }
+    fn append(&self, file: &str, line: &Value) {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.dir.join(file))
+            .unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+    fn note(&self, what: &str, value: Value) {
+        let line = json!({"t_ms": ms(self.began), "what": what, "value": value});
+        println!("TEN {line}");
+        self.append("events.jsonl", &line);
+    }
+    /// One table row (row 1-10, chat, Stop, second run, Quit), rewritten as a whole each time.
+    fn row(&self, row: Value) {
+        println!("TEN ROW {row}");
+        let mut rows = self.rows.lock().unwrap();
+        rows.push(row);
+        let mut table = String::from(
+            "| # | row | result | wall ms | page status line |\n|---|---|---|---|---|\n",
+        );
+        for (i, r) in rows.iter().enumerate() {
+            table.push_str(&format!(
+                "| {} | {} | {} | {} | {} |\n",
+                i + 1,
+                r["row"].as_str().unwrap_or_default(),
+                r["result"].as_str().unwrap_or_default(),
+                r["wall_ms"],
+                r["status_line"].to_string().replace('|', "/")
+            ));
+        }
+        std::fs::write(self.dir.join("rows.md"), table).unwrap();
+        std::fs::write(
+            self.dir.join("rows.json"),
+            serde_json::to_vec_pretty(&*rows).unwrap(),
+        )
+        .unwrap();
+    }
+}
+
+// ------------------------------------------------------------- processes -------------------
+
+/// `(pid, ppid, rss_kib, command)` of every descendant of this test process.
+fn descendants() -> Vec<(u32, u32, u64, String)> {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-A", "-o", "pid=,ppid=,rss=,command="])
+        .output()
+        .unwrap();
+    let rows: Vec<(u32, u32, u64, String)> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let pid = it.next()?.parse().ok()?;
+            let ppid = it.next()?.parse().ok()?;
+            let rss = it.next()?.parse().ok()?;
+            Some((pid, ppid, rss, it.collect::<Vec<_>>().join(" ")))
+        })
+        .collect();
+    let mut ours = vec![std::process::id()];
+    let mut found = Vec::new();
+    loop {
+        let more: Vec<_> = rows
+            .iter()
+            .filter(|r| ours.contains(&r.1) && !ours.contains(&r.0))
+            .cloned()
+            .collect();
+        if more.is_empty() {
+            return found;
+        }
+        ours.extend(more.iter().map(|r| r.0));
+        found.extend(more);
+    }
+}
+fn alive(pid: u32) -> bool {
+    std::process::Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+/// Kills every descendant still alive when the gate unwinds (a failed row must not leave a
+/// native worker holding the GPU); by pid, recorded before the kill.
+struct Reaper(Evidence);
+impl Drop for Reaper {
+    fn drop(&mut self) {
+        let left = descendants();
+        if !left.is_empty() {
+            self.0.note(
+                "reaper_killed",
+                json!(
+                    left.iter()
+                        .map(|r| json!({"pid":r.0,"command":r.3}))
+                        .collect::<Vec<_>>()
+                ),
+            );
+        }
+        for (pid, ..) in left {
+            std::process::Command::new("/bin/kill")
+                .args(["-KILL", &pid.to_string()])
+                .status()
+                .unwrap_or_default();
+        }
+    }
+}
+/// This process's sockets (`lsof -i`), for the work transport's address.
+fn sockets() -> Vec<String> {
+    let out = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-nP", "-a", "-i", "-p", &std::process::id().to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .skip(1)
+        .map(str::to_owned)
+        .collect()
+}
+fn lan_ip() -> String {
+    let out = std::process::Command::new("/usr/sbin/ipconfig")
+        .args(["getifaddr", "en0"])
+        .output()
+        .unwrap();
+    let ip = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let parsed: std::net::Ipv4Addr = ip.parse().expect("en0 has an IPv4 address");
+    assert!(parsed.is_private(), "en0 is not a private address: {ip}");
+    if let Ok(expected) = std::env::var("MYCELIUM_LAN_IP") {
+        assert_eq!(ip, expected, "MYCELIUM_LAN_IP");
+    }
+    ip
+}
+
+// ------------------------------------------------------------------- hosts -----------------
+
+fn native_program(binary: &Path) -> api::native_compiler::NativeProgram {
+    let bytes = std::fs::read(binary).unwrap();
+    api::native_compiler::NativeProgram {
+        binary: binary.canonicalize().unwrap(),
+        expected: api::compiled_handoff::Pin {
+            bytes: bytes.len() as u64,
+            sha256: protocol::canonical::sha256_prefixed(&bytes)[7..].to_owned(),
+        },
+    }
+}
+fn launch(
+    state: &Path,
+    repository: &cached::CachedRepository,
+    network: NetworkConfig,
+    run: RunConfig,
+) -> Mac {
+    let (core, mut cleanup) = packaged::core_with_run(
+        state,
+        repository.transport(),
+        Arc::new(Permissive),
+        network,
+        run,
+    )
+    .unwrap();
+    cleanup.bind_clock(Instant::now()).unwrap();
+    Mac {
+        core,
+        cleanup,
+        state: state.to_owned(),
+    }
+}
+fn private_dir(base: &Path, name: &str) -> PathBuf {
+    let state = base.join(name);
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&state)
+        .unwrap();
+    state
+}
+/// The app's own network composition (work transport: this Mac's private LAN address), with the
+/// relay client lookup finding nothing (`provider: external` only; never a `cloudflared`).
+fn app_network() -> NetworkConfig {
+    let production = NetworkConfig::default().hooks;
+    NetworkConfig {
+        hooks: Arc::new(move || {
+            let mut hooks = production();
+            hooks.binary = Arc::new(|| None);
+            hooks
+        }),
+        ..NetworkConfig::default()
+    }
+}
+/// The page's run-model picker: Qwen3-0.6B (ruling 28: the only two-Mac model).
+fn choose_qwen3(mac: &Mac) {
+    let chosen = mac.post("/api/run-model", json!({"choice": "qwen3-0.6b"}));
+    assert_eq!(chosen.0, 200, "run-model: {}", chosen.1);
+}
+/// `/api/model/download` of the cached snapshot until this Mac's acquisition prepared it.
+fn prepare_model(mac: &Mac, ev: &Evidence, who: &str) {
+    let began = Instant::now();
+    let grant = json!({"consent": {"download_acknowledged": true,
+        "max_download_bytes": 4_000_000_000u64, "storage_limit_bytes": STORAGE}});
+    let started = mac.post("/api/model/download", grant);
+    assert_eq!(started.0, 200, "download: {}", started.1);
+    let source = format!("model-source-{}", &cached::COMMIT[..12]);
+    let deadline = Instant::now() + millis(B::VerifyStall);
+    let status = loop {
+        let s: Value = std::fs::read(mac.state.join(&source).join("status.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or(Value::Null);
+        if matches!(
+            s["state"].as_str(),
+            Some("prepared" | "failed" | "cancelled")
+        ) {
+            break s;
+        }
+        assert!(Instant::now() < deadline, "{who} model: {s}");
+        std::thread::sleep(millis(B::OwnerPoll));
+    };
+    ev.note(&format!("{who}_model_prepared"), json!({"ms": ms(began), "status": status,
+        "page": mac.status()["model_status"], "policy_error": mac.status()["acquisition_policy_error"]}));
+    assert_eq!(status["state"], "prepared", "{who}: {status}");
+}
+fn admit_hello_program(mac: &Mac) {
+    let config = std::env::var("MYCELIUM_BOOTSTRAP_TEST_CONFIG")
+        .expect("MYCELIUM_BOOTSTRAP_TEST_CONFIG names the admitted hello helper");
+    let document: Value = serde_json::from_slice(&std::fs::read(config).unwrap()).unwrap();
+    api::preferences::private_state::store(
+        &private(&mac.state).join("bootstrap-program.json"),
+        &document,
+        api::preferences::private_state::private_json_limit().unwrap(),
+    )
+    .unwrap();
+}
+fn join_body(member: &Mac, link: &str) -> Value {
+    let digest = member.status()["join_flow"]["standing_disclosure"]["digest"].clone();
+    json!({
+        "consent": consent(STORAGE),
+        "standing_consent": {"acknowledged": true, "disclosure_digest": digest,
+            "caps": {"storage_bytes": STORAGE, "max_memory_bytes": MEMORY,
+                     "max_wall_seconds": WALL_SECONDS, "max_commands": 5000}},
+        "join": link,
+    })
+}
+/// The packaged owner (relay on a loopback proxy, swarm, Qwen3-0.6B prepared, open code) and a
+/// packaged member joined to it through the real join path with its own prepared model.
+fn pair(
+    base: &Path,
+    repository: &cached::CachedRepository,
+    run: RunConfig,
+    ev: &Evidence,
+) -> (Owner, Mac) {
+    let sidecar = repository::sidecar_file(base);
+    let state = private_dir(base, "owner");
+    let before = listening();
+    let mac = launch(&state, repository, app_network(), run);
+    let proxy = free_port();
+    let started = mac.post(
+        "/api/network/start",
+        json!({"relay_acknowledged": true, "max_seconds": 1800, "provider": "external",
+               "public_origin": PUBLIC, "proxy_port": proxy}),
+    );
+    assert_eq!(started.0, 200, "network start: {}", started.1);
+    let created = mac.post(
+        "/api/create",
+        json!({"consent": consent(api::model_catalog::storage_consent_ceiling())}),
+    );
+    assert_eq!(created.0, 200, "create: {}", created.1);
+    choose_qwen3(&mac);
+    prepare_model(&mac, ev, "owner");
+    admit_hello_program(&mac);
+    let opened = mac.post("/api/pair/window/open", json!({"ttl_seconds": 600}));
+    assert_eq!(opened.1["state"], "open", "{}", opened.1);
+    let seed: Vec<u16> = listening()
+        .into_iter()
+        .filter(|p| *p != proxy && !before.contains(p))
+        .collect();
+    assert_eq!(seed.len(), 1, "one owner seed listener: {seed:?}");
+    let ca = std::fs::read(private(&state).join("seed-rs/tls/ca.pem")).unwrap();
+    let seams = JoinSeams {
+        join_base: Some(format!("http://127.0.0.1:{proxy}")),
+        member_seed: api::seed::SeedOptions {
+            ca_pem: Some(ca),
+            connect_to: Some(format!("127.0.0.1:{}", seed[0]).parse().unwrap()),
+            server_name: Some("127.0.0.1".into()),
+        },
+    };
+    let owner = Owner {
+        link: opened.1["join_link"].as_str().unwrap().to_owned(),
+        window_id: opened.1["window_id"].clone(),
+        mac,
+        proxy,
+        seams,
+    };
+    let member = launch(
+        &private_dir(base, "member"),
+        repository,
+        NetworkConfig {
+            seams: owner.seams.clone(),
+            sidecar: Some(sidecar),
+            ..app_network()
+        },
+        RunConfig::default(),
+    );
+    choose_qwen3(&member);
+    let waiting = member.post("/api/join/window", join_body(&member, &owner.link));
+    assert_eq!(waiting.0, 200, "join: {}", waiting.1);
+    approve_and_join(&owner, &member);
+    // No download is asked of the joined Mac: its own agent starts the announced model's
+    // acquisition at the descriptors step (`_ensure_whole_model`, demo_target.py:543-612;
+    // `member_agent::whole_model`), as the shipped app does.
+    admit_hello_program(&member);
+    (owner, member)
+}
+
+// -------------------------------------------------------------------- rows -----------------
+
+/// Each row's registered budget (budgets::table, demo_chain.py:259-264 @ f5bfb709), the limit of
+/// the gate's wait for that row once it is running.
+fn row_budget(step: &str) -> Duration {
+    match step {
+        "model" => millis(B::ModelSelection) + millis(B::VerifyStall),
+        "contributor" => millis(B::Descriptors),
+        "descriptors" => millis(B::Descriptors) + millis(B::DescriptorMargin),
+        "observe" => millis(B::InitialCleanup) * 2 + millis(B::Bootstrap) + millis(B::Collect),
+        "compile" => millis(B::Compile),
+        "slices" => millis(B::Slices),
+        "publish" => millis(B::Publish),
+        "targets" => millis(B::Targets),
+        "activate" => millis(B::Targets),
+        "serving" => millis(B::Serving),
+        other => panic!("unknown step {other}"),
+    }
+}
+/// The status line the page shows for a step (run.js: label, then the step's detail).
+fn status_line(step: &Value) -> Value {
+    json!({"label": step["label"], "state": step["state"], "detail": step["detail"]})
+}
+/// Start pressed: wait on the page's status for each of the ten rows to reach its done state in
+/// order, one row's registered budget at a time. Ok(()) once the run reads `serving`; Err(the
+/// failure line) at the first row that failed or overran its budget.
+fn ten_rows(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<Value, String> {
+    let (code, started) = owner.post("/api/demo/start", json!({}));
+    ev.note(
+        &format!("{run}_start"),
+        json!({"code": code, "answer": started}),
+    );
+    if code != 200 {
+        return Err(format!("start refused {code}: {started}"));
+    }
+    let began = Instant::now();
+    let mut done = 0usize;
+    let mut row_began = Instant::now();
+    let mut last = Value::Null;
+    let mut last_member = Value::Null;
+    loop {
+        let status = owner.status();
+        let state = status["owner_run"].clone();
+        if state != last {
+            ev.append(
+                &format!("{run}-owner-status.jsonl"),
+                &json!({"t_ms": ms(began), "owner_run": state}),
+            );
+            last = state.clone();
+        }
+        let member_status = member.status();
+        let card = json!({"join_flow": member_status["join_flow"], "work": member_status["member_work"],
+            "standing": member_status["standing"]});
+        if card != last_member {
+            ev.append(
+                &format!("{run}-member-status.jsonl"),
+                &json!({"t_ms": ms(began), "member": member_status}),
+            );
+            last_member = card;
+        }
+        let steps = state["steps"].as_array().cloned().unwrap_or_default();
+        while done < steps.len() && steps[done]["state"] == "done" {
+            for later in &steps[done + 1..] {
+                if later["state"] == "done" {
+                    return Err(format!("row order broken: {state}"));
+                }
+            }
+            ev.row(json!({"row": format!("{run} row {} {}", done + 1, steps[done]["name"].as_str().unwrap_or("?")),
+                "result": "passed", "wall_ms": row_began.elapsed().as_millis() as u64,
+                "since_start_ms": ms(began), "status_line": status_line(&steps[done])}));
+            done += 1;
+            row_began = Instant::now();
+        }
+        match state["state"].as_str() {
+            Some("serving") if done >= 9 => {
+                if done == 9 {
+                    ev.row(json!({"row": format!("{run} row 10 serving"), "result": "passed",
+                        "wall_ms": row_began.elapsed().as_millis() as u64, "since_start_ms": ms(began),
+                        "status_line": status_line(&steps[9]), "run_state": "serving"}));
+                }
+                ev.note(
+                    &format!("{run}_serving"),
+                    json!({"total_ms": ms(began), "owner_run": state}),
+                );
+                return Ok(state);
+            }
+            Some("failed" | "stopped") => {
+                let at = steps.get(done).cloned().unwrap_or(Value::Null);
+                ev.row(json!({"row": format!("{run} row {} {}", done + 1, at["name"].as_str().unwrap_or("?")),
+                    "result": "failed", "wall_ms": row_began.elapsed().as_millis() as u64,
+                    "since_start_ms": ms(began), "status_line": status_line(&at),
+                    "error_code": state["error_code"], "failed_step": state["failed_step"],
+                    "cleanup_errors": state["cleanup_errors"]}));
+                return Err(format!(
+                    "run {run} ended {} at row {} ({}): error_code={} failed_step={} detail={}",
+                    state["state"],
+                    done + 1,
+                    at["name"],
+                    state["error_code"],
+                    state["failed_step"],
+                    at["detail"]
+                ));
+            }
+            _ => {}
+        }
+        if let Some(step) = steps.get(done).and_then(|s| s["name"].as_str())
+            && row_began.elapsed() > row_budget(step)
+        {
+            ev.row(json!({"row": format!("{run} row {} {step}", done + 1), "result": "failed",
+                "wall_ms": row_began.elapsed().as_millis() as u64, "status_line": status_line(&steps[done]),
+                "error_code": "gate_row_budget_exceeded"}));
+            return Err(format!(
+                "row {} ({step}) overran its registered budget: {state}",
+                done + 1
+            ));
+        }
+        // The page's own refresh: poll the status again one fifth of an owner poll later.
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    }
+}
+
+// -------------------------------------------------------------------- chat -----------------
+
+fn chat_call(mac: &Mac, method: &str, path: &str, body: &Value) -> (u16, Value) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    mac.core.submit(
+        Request {
+            window: "main".into(),
+            method: method.into(),
+            uri: format!("{ORIGIN}{path}"),
+            headers: vec![
+                ("x-mycelium-chat".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(body).unwrap(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let reply = rx.recv_timeout(millis(B::WorkerStartup) * 2).unwrap();
+    (
+        reply.status,
+        serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
+    )
+}
+/// One page chat: send, then the events loop (chat.js) until done. The pieces as the page shows
+/// them, with each piece's arrival time from the send.
+fn chat(mac: &Mac, ev: &Evidence, label: &str, tokens: u64) -> (Value, Vec<(String, u64)>) {
+    let (_, state) = chat_call(mac, "POST", "/chat/api/state", &json!({}));
+    ev.note(&format!("{label}_chat_state_before"), state);
+    let posted = Instant::now();
+    let (status, sent) = chat_call(
+        mac,
+        "POST",
+        "/chat/api/send",
+        &json!({"prompt": PROMPT, "max_new_tokens": tokens}),
+    );
+    ev.note(
+        &format!("{label}_chat_send"),
+        json!({"status": status, "answer": sent}),
+    );
+    if status != 200 {
+        return (json!({"send_status": status, "send": sent}), Vec::new());
+    }
+    let mut pieces = Vec::new();
+    let mut after = json!(0);
+    // chat's own deadlines: 30 s to the first token, 10 s per token (inherited by the route).
+    let end = posted
+        + millis(B::WorkerStartup)
+        + Duration::from_secs(10) * tokens as u32
+        + millis(B::WorkerStartup);
+    loop {
+        let (status, page) = chat_call(
+            mac,
+            "POST",
+            "/chat/api/events",
+            &json!({"request_id": sent["request_id"], "after": after}),
+        );
+        if status != 200 {
+            return (json!({"events_status": status, "events": page}), pieces);
+        }
+        for t in page["tokens"].as_array().into_iter().flatten() {
+            pieces.push((t.as_str().unwrap_or_default().to_owned(), ms(posted)));
+        }
+        after = page["next"].clone();
+        if page["done"] == true {
+            return (page, pieces);
+        }
+        if Instant::now() > end {
+            return (json!({"gate": "chat_never_ended", "last": page}), pieces);
+        }
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    }
+}
+/// The reference's first `n` tokens as the page shows them: one decoded piece per token, by the
+/// product tokenizer helper over the cached tokenizer.
+fn reference_pieces(codec: &api::joined_owner::codec::NativeCodec, n: usize) -> Vec<String> {
+    let reference: Vec<u32> =
+        serde_json::from_value(oracle()["recorded"]["tokens"].clone()).unwrap();
+    reference[..n]
+        .iter()
+        .map(|t| codec.decode(*t).unwrap())
+        .collect()
+}
+fn chat_row(
+    mac: &Mac,
+    ev: &Evidence,
+    label: &str,
+    codec: &api::joined_owner::codec::NativeCodec,
+) -> Result<(), String> {
+    let (last, pieces) = chat(mac, ev, label, CHAT_TOKENS);
+    let got: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
+    let expected = reference_pieces(codec, CHAT_TOKENS as usize);
+    let ttft = pieces.first().map(|p| p.1);
+    let row = json!({"row": format!("{label} chat"), "wall_ms": pieces.last().map(|p| p.1),
+        "ttft_ms": ttft, "pieces": got.len(), "status_line": {"terminal": last["terminal"], "error": last["error"]},
+        "last": last});
+    if last["terminal"] == "completed" && got == expected {
+        ev.row(with(row, "result", json!("passed")));
+        return Ok(());
+    }
+    ev.note(
+        &format!("{label}_chat_mismatch"),
+        json!({"got": got, "expected": expected}),
+    );
+    ev.row(with(row, "result", json!("failed")));
+    // Diagnostic only (not the row): a chat that fits the route's KV context (prompt + 4).
+    let (small, small_pieces) = chat(mac, ev, &format!("{label}_diagnostic_4"), 4);
+    ev.note(
+        &format!("{label}_diagnostic_4"),
+        json!({"last": small, "got": small_pieces.iter().map(|p| &p.0).collect::<Vec<_>>(),
+            "expected": reference_pieces(codec, 4)}),
+    );
+    Err(format!(
+        "chat {label}: terminal={} error={} pieces={}",
+        last["terminal"],
+        last["error"],
+        got.len()
+    ))
+}
+
+// ---------------------------------------------------------------- the gate -----------------
+
+/// The native workers of a serving run: this process's descendants running the native program's
+/// `native-worker` role, with their resident memory.
+fn workers(binary: &Path) -> Vec<(u32, u64)> {
+    let name = binary.to_string_lossy().into_owned();
+    descendants()
+        .into_iter()
+        .filter(|r| r.3.contains(&name) && r.3.contains("native-worker"))
+        .map(|r| (r.0, r.2))
+        .collect()
+}
+fn stop_row(
+    owner: &Owner,
+    member: &Mac,
+    ev: &Evidence,
+    run: &str,
+    binary: &Path,
+    lan: &str,
+) -> Result<(), String> {
+    let pids = workers(binary);
+    let began = Instant::now();
+    let (code, answer) = owner.mac.post("/api/demo/stop", json!({}));
+    ev.note(
+        &format!("{run}_stop_pressed"),
+        json!({"code": code, "answer": answer, "workers": pids}),
+    );
+    let allowance = Duration::from_millis(
+        B::EffectiveStopAllowance
+            .wall_span(Span::from_millis(WALL_SECONDS * 1000), Entries::new(2))
+            .unwrap()
+            .millis(),
+    );
+    let state = loop {
+        let state = owner.mac.status()["owner_run"].clone();
+        if matches!(state["state"].as_str(), Some("stopped" | "failed")) {
+            break state;
+        }
+        if began.elapsed() > allowance {
+            break json!({"gate": "stop_allowance_exceeded", "last": state});
+        }
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    };
+    let stopped_ms = ms(began);
+    let (_, page) = chat_call(&owner.mac, "POST", "/chat/api/state", &json!({}));
+    let (send_code, send) = chat_call(
+        &owner.mac,
+        "POST",
+        "/chat/api/send",
+        &json!({"prompt": PROMPT, "max_new_tokens": 4}),
+    );
+    // Workers and transport: gone within the router's close once the run reads stopped.
+    let close = Instant::now() + millis(B::RouterClose) + millis(B::CancelAndCleanup);
+    let (left, lan_sockets) = loop {
+        let left: Vec<u32> = pids.iter().map(|p| p.0).filter(|p| alive(*p)).collect();
+        let lan_sockets: Vec<String> = sockets().into_iter().filter(|s| s.contains(lan)).collect();
+        if (left.is_empty() && lan_sockets.is_empty()) || Instant::now() > close {
+            break (left, lan_sockets);
+        }
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    };
+    let row = json!({"row": format!("{run} Stop"), "wall_ms": stopped_ms, "status_line": {"run": state["state"],
+        "error_code": state["error_code"], "chat_state": page, "send_after_stop": [send_code, send]},
+        "workers_left": left, "lan_sockets_left": lan_sockets, "workers_gone_ms": ms(began),
+        "member_card": member.status()["member_work"]});
+    let ok = state["state"] == "stopped"
+        && state["error_code"].is_null()
+        && left.is_empty()
+        && lan_sockets.is_empty()
+        && !pids.is_empty()
+        && send_code != 200;
+    ev.row(with(
+        row,
+        "result",
+        json!(if ok { "passed" } else { "failed" }),
+    ));
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "Stop {run}: {state} left={left:?} lan={lan_sockets:?} page={page}"
+        ))
+    }
+}
+
+#[test]
+#[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_NATIVE_BINARY, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
+fn ten_rows_with_the_real_model_on_the_lan() {
+    let ev = Evidence::open();
+    let _reaper = Reaper(ev.clone());
+    let lan = lan_ip();
+    let binary = PathBuf::from(
+        std::env::var_os("MYCELIUM_TEN_NATIVE_BINARY")
+            .expect("MYCELIUM_TEN_NATIVE_BINARY = mycelium-node built with --features metal"),
+    );
+    let program = native_program(&binary);
+    ev.note("setup", json!({"lan": lan, "native_program": {"binary": program.binary, "sha256": program.expected.sha256,
+        "bytes": program.expected.bytes}, "member_native_env": std::env::var("MYCELIUM_COMPILER_NATIVE_BINARY").ok(),
+        "pid": std::process::id()}));
+    // The product tokenizer helper over the cached tokenizer: the reference prompt's 35 ids and
+    // the decode of the reference tokens (ledger row 46).
+    let tokenizer = cached::snapshot_dir().join("tokenizer.json");
+    let codec = api::joined_owner::codec::NativeCodec::start(&program.binary, &tokenizer).unwrap();
+    let prompt_ids = codec.encode(PROMPT).unwrap();
+    assert_eq!(
+        json!(prompt_ids),
+        oracle()["recorded"]["workload"]["prompt_ids"],
+        "the reference prompt's ids"
+    );
+    ev.note(
+        "tokenizer",
+        json!({"prompt_ids": prompt_ids.len(), "challenge_decoded": reference_pieces(&codec, 4)}),
+    );
+
+    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "ten-{}",
+        node_service::service::random_id().unwrap()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&base)
+        .unwrap();
+    ev.note("state_root", json!(base));
+    let repository = cached::CachedRepository::start();
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(repository::sidecar_file(&base)),
+            native_program: Some(program.clone()),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+        &ev,
+    );
+    ev.note(
+        "paired",
+        json!({"served_bytes": repository.served_bytes(), "sockets": sockets()}),
+    );
+
+    let mut failures = Vec::new();
+    for run in ["run1", "run2"] {
+        match ten_rows(&owner.mac, &member, &ev, run) {
+            Ok(_) => {
+                let at_serving = workers(&binary);
+                ev.note(&format!("{run}_workers_at_serving"), json!({"workers": at_serving,
+                    "lan_sockets": sockets().into_iter().filter(|s| s.contains(&lan)).collect::<Vec<_>>(),
+                    "loopback_udp": sockets().into_iter().filter(|s| s.contains("UDP") && s.contains("127.0.0.1")).collect::<Vec<_>>()}));
+                if let Err(e) = chat_row(&owner.mac, &ev, run, &codec) {
+                    failures.push(e);
+                }
+                if let Err(e) = stop_row(&owner, &member, &ev, run, &binary, &lan) {
+                    failures.push(e);
+                }
+            }
+            Err(e) => {
+                ev.note(&format!("{run}_stopped_at"), json!(e));
+                failures.push(e);
+                // The run is over; Stop anyway so the next Start begins from a stopped run.
+                let (code, answer) = owner.mac.post("/api/demo/stop", json!({}));
+                ev.note(
+                    &format!("{run}_stop_after_failure"),
+                    json!({"code": code, "answer": answer}),
+                );
+                if run == "run1"
+                    && std::env::var_os("MYCELIUM_TEN_SECOND_RUN_AFTER_FAILURE").is_none()
+                {
+                    ev.row(json!({"row": "run2", "result": "not reached", "wall_ms": null, "status_line": null}));
+                    break;
+                }
+            }
+        }
+    }
+    // Quit both hosts (owner first: its Quit stops its run), then no worker is left, by pid.
+    let began = Instant::now();
+    let before = descendants();
+    let owner_quit = owner.mac.quit();
+    let member_quit = member.quit();
+    let left: Vec<_> = before
+        .iter()
+        .filter(|r| alive(r.0))
+        .map(|r| json!({"pid": r.0, "command": r.3}))
+        .collect();
+    let after = descendants();
+    let ok = owner_quit == Ok(Poll::Verified)
+        && member_quit == Ok(Poll::Verified)
+        && left.is_empty()
+        && after.is_empty();
+    ev.row(
+        json!({"row": "Quit", "result": if ok {"passed"} else {"failed"}, "wall_ms": ms(began),
+        "status_line": {"owner": format!("{owner_quit:?}"), "member": format!("{member_quit:?}")},
+        "children_before": before.len(), "left": left, "descendants_after": after.len()}),
+    );
+    if !ok {
+        failures.push(format!(
+            "Quit: owner={owner_quit:?} member={member_quit:?} left={left:?}"
+        ));
+    }
+    drop(codec);
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    ev.note("end", json!({"failures": failures}));
+    assert!(failures.is_empty(), "{failures:#?}");
+}
