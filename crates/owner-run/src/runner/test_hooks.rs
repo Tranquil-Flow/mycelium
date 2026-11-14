@@ -4,8 +4,9 @@
 //! - [`Blocked`]: which threads found a watched lock HELD when they came to take it. A reader
 //!   recorded there cannot have read before the holder released the lock, so a test can prove a
 //!   status read or a Stop is waiting behind a parked commit before it releases the commit.
-//! - [`Gate`]: parks every thread with a given name before it takes a given lock, until the
-//!   test releases that thread (the rebuild watcher, whose loop starts with the run lock).
+//! - [`Gate`]: parks every thread with a given name each time it comes to take a given lock,
+//!   until the test lets it pass once ([`Gate::pass`]) or for good ([`Gate::free`]) (the
+//!   rebuild watcher, which takes the run lock to check and again to expire).
 //!
 //! Both are keyed by the lock's address and removed (and every parked thread released) when the
 //! test's guard drops, also while a failing assertion unwinds.
@@ -22,8 +23,11 @@ struct Hooks {
 struct GateState {
     lock: usize,
     name: String,
-    parked: Vec<ThreadId>,
-    released: Vec<ThreadId>,
+    /// Every arrival at the gate, in order (a thread that comes back arrives again).
+    arrivals: Vec<ThreadId>,
+    /// One pass per entry.
+    passes: Vec<ThreadId>,
+    freed: Vec<ThreadId>,
 }
 
 fn hooks() -> &'static (Mutex<Hooks>, Condvar) {
@@ -37,21 +41,36 @@ fn address<T>(lock: &Mutex<T>) -> usize {
     std::ptr::from_ref(lock).addr()
 }
 
+/// The gate `me` is held at before taking the lock at `at`, unless it was freed there.
+fn gate_of<'h>(
+    hooks: &'h mut Hooks,
+    at: usize,
+    me: &std::thread::Thread,
+) -> Option<&'h mut GateState> {
+    hooks
+        .gates
+        .iter_mut()
+        .find(|g| g.lock == at && me.name() == Some(g.name.as_str()) && !g.freed.contains(&me.id()))
+}
+
 /// Called by [`super::lock`] before it blocks on `lock`.
 pub(super) fn before_lock<T>(lock: &Mutex<T>) {
     let at = address(lock);
     let me = std::thread::current();
     let (_, changed) = hooks();
     let mut hooks = state();
-    let gated = |hooks: &Hooks| {
-        hooks.gates.iter().position(|g| {
-            g.lock == at && me.name() == Some(g.name.as_str()) && !g.released.contains(&me.id())
-        })
-    };
-    if let Some(index) = gated(&hooks) {
-        hooks.gates[index].parked.push(me.id());
+    if let Some(gate) = gate_of(&mut hooks, at, &me) {
+        gate.arrivals.push(me.id());
         changed.notify_all();
-        while gated(&hooks).is_some() {
+        loop {
+            // Gone (dropped) or freed: go on. A pass is used up by this one acquisition.
+            let Some(gate) = gate_of(&mut hooks, at, &me) else {
+                break;
+            };
+            if let Some(at) = gate.passes.iter().position(|t| *t == me.id()) {
+                gate.passes.remove(at);
+                break;
+            }
             hooks = changed.wait(hooks).unwrap_or_else(PoisonError::into_inner);
         }
     }
@@ -108,8 +127,8 @@ impl Drop for Blocked {
     }
 }
 
-/// Parks every thread named `name` before it takes `lock`, until released; dropping the guard
-/// releases them all.
+/// Parks every thread named `name` each time it comes to take `lock`; dropping the guard lets
+/// them all go.
 pub(super) struct Gate(usize, String);
 impl Gate {
     pub(super) fn close<T>(lock: &Mutex<T>, name: &str) -> Self {
@@ -117,19 +136,21 @@ impl Gate {
         state().gates.push(GateState {
             lock: at,
             name: name.into(),
-            parked: Vec::new(),
-            released: Vec::new(),
+            arrivals: Vec::new(),
+            passes: Vec::new(),
+            freed: Vec::new(),
         });
         Self(at, name.into())
     }
-    /// The first `count` threads parked at this gate, in arrival order, within `patience`.
-    pub(super) fn parked(&self, count: usize, patience: Duration) -> Option<Vec<ThreadId>> {
+    /// The first `count` arrivals at this gate, in order, once there are that many (within
+    /// `patience`).
+    pub(super) fn arrivals(&self, count: usize, patience: Duration) -> Option<Vec<ThreadId>> {
         let mine = |g: &GateState| g.lock == self.0 && g.name == self.1;
         if !wait_until(patience, |hooks| {
             hooks
                 .gates
                 .iter()
-                .any(|g| mine(g) && g.parked.len() >= count)
+                .any(|g| mine(g) && g.arrivals.len() >= count)
         }) {
             return None;
         }
@@ -137,19 +158,27 @@ impl Gate {
             .gates
             .iter()
             .find(|g| mine(g))
-            .map(|g| g.parked[..count].to_vec())
+            .map(|g| g.arrivals[..count].to_vec())
     }
-    /// Let `thread` go on (it is never parked here again).
-    pub(super) fn release(&self, thread: ThreadId) {
+    fn update(&self, f: impl FnOnce(&mut GateState)) {
         let mut hooks = state();
         if let Some(gate) = hooks
             .gates
             .iter_mut()
             .find(|g| g.lock == self.0 && g.name == self.1)
         {
-            gate.released.push(thread);
+            f(gate);
         }
+        drop(hooks);
         hooks_changed();
+    }
+    /// Let `thread` take the lock once; it is parked again when it comes back.
+    pub(super) fn pass(&self, thread: ThreadId) {
+        self.update(|gate| gate.passes.push(thread));
+    }
+    /// Let `thread` go on for good.
+    pub(super) fn free(&self, thread: ThreadId) {
+        self.update(|gate| gate.freed.push(thread));
     }
 }
 fn hooks_changed() {
