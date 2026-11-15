@@ -13,35 +13,7 @@ fn composed(f: &mut Fixture) -> (PackagedChainPorts, RunState, Env) {
         .work
         .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
         .unwrap();
-    let wall = BudgetId::MemberChosenWall
-        .span(Entries::ZERO)
-        .unwrap()
-        .millis()
-        / 1000;
-    state.proposal = Some(json!({"max_combined_rss_bytes":2_147_483_648u64,
-        "max_additional_disk_bytes":4_000_000_000u64,"max_wall_seconds":wall}));
-    use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
-    state.model = Some(ModelStepOutput {
-        forced_slice: false,
-        model_id: "Qwen/Qwen3-0.6B".into(),
-        resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
-        manifest_digest: "sha256:00".into(),
-        slice_mode: true,
-        choice: None,
-        prepared: PreparedSource {
-            model: PreparedModel {
-                model_id: "Qwen/Qwen3-0.6B".into(),
-                resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
-                architecture: "qwen3".into(),
-                label: "constructor-only inert source fixture".into(),
-                choice: None,
-                shape_registered: true,
-                owner_storage_need: 0,
-            },
-            manifest_digest: "sha256:00".into(),
-            source_bytes: json!(0),
-        },
-    });
+    ready_for_slices(&mut state);
     (ports, state, env)
 }
 
@@ -206,4 +178,195 @@ fn probe_the_natural_contributor_renewal_window() {
             "renew_ms_max":at(1.0),"registrations":calls,"renewing":refused})
     );
     ports.close_work().unwrap();
+}
+
+/// A stage plan as large as the real one: one shard per participant of `bytes` (a multiple of
+/// 64 MiB), segments of 64 MiB, the fixture's recipe with its files replaced. The bytes are one
+/// random MiB repeated (the first byte of each segment names the stage); every recipe hash is computed here (segments in memory, the whole file by
+/// `/usr/bin/openssl`, outside this crate's dependencies).
+fn big_plan(
+    f: &Fixture,
+    state: &RunState,
+    bytes: u64,
+) -> (Plan, Arc<runtime::artifact_journal::PinnedObjects>) {
+    use std::io::Write;
+    const SEGMENT: u64 = 64 << 20;
+    assert!(bytes > 0 && bytes % SEGMENT == 0, "{bytes}");
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let objects = f.root.join("stage-shards");
+    fs::create_dir(&objects).unwrap();
+    let block = app_host::random(1 << 20).unwrap();
+    let mut segment: Vec<u8> = block.repeat((SEGMENT >> 20) as usize);
+    let (mut files, mut plans) = (Map::new(), Map::new());
+    for (i, node) in state.participants.iter().enumerate() {
+        // Distinct bytes per stage: two equal objects would be one content address.
+        segment[0] = i as u8;
+        let segment_digest = protocol::canonical::sha256_prefixed(&segment);
+        let name = format!("flk-stage-{i}.safetensors");
+        let path = objects.join(&name);
+        let mut out = fs::File::create(&path).unwrap();
+        for _ in 0..bytes / SEGMENT {
+            out.write_all(&segment).unwrap();
+        }
+        out.sync_all().unwrap();
+        drop(out);
+        let digest = std::process::Command::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256", "-r"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let hex = String::from_utf8(digest.stdout).unwrap();
+        let content = format!("sha256:{}", hex.split_whitespace().next().unwrap());
+        let segments: Vec<Value> = (0..bytes / SEGMENT)
+            .map(|k| json!({"offset":k * SEGMENT,"length":SEGMENT,"sha256":segment_digest}))
+            .collect();
+        let row = json!({"content_digest":content,"path":format!("deployment/{name}"),
+            "size_bytes":bytes});
+        let mut recipe = case["node_plans"][format!("node-{i}")].clone();
+        recipe["node_id"] = json!(node);
+        recipe["files"] = json!([{"content_digest":content,"path":format!("deployment/{name}"),
+            "segments":segments,"size_bytes":bytes}]);
+        recipe["download_bytes"] = json!(bytes);
+        recipe["inline_bytes"] = json!(0);
+        recipe.as_object_mut().unwrap().remove("node_plan_digest");
+        recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+        files.insert(node.clone(), json!([row]));
+        plans.insert(node.clone(), recipe);
+    }
+    let objects = objects::view(&f.root, &json!({"node_files":files})).unwrap();
+    (
+        Plan {
+            run_id: state.run_id.clone(),
+            deployment_id: state.deployment_id.clone(),
+            model: json!({"model_id":"Qwen/Qwen3-0.6B","resolved_commit":"c1899de289a04d12100db370d81485cdf75e47ca","manifest_digest":"sha256:00"}),
+            document: json!({"node_files":files,"node_slice_plans":plans}),
+            objects: objects.path,
+            journal: f.root.join("journal"),
+            ranges: state
+                .participants
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.clone(), [14 * i as u64, 14 * (i as u64 + 1)]))
+                .collect(),
+            tokens: 39,
+            forbidden_source: f.root.join("snapshot"),
+            worker_walls: state.worker_wall_limits.clone(),
+            owner_root: f.root.join("owner"),
+            challenge: None,
+        },
+        objects.pinned,
+    )
+}
+
+/// Lane FLK repeat probe (not a gate): rows 6 and 7 of the ten-row gate without a model. Both
+/// packaged hosts in this process, the work transport on loopback or (with `MYCELIUM_LAN_IP`
+/// and `MYCELIUM_FLK_LAN=1`) on this Mac's LAN interface as in the gate; a stage shard per host of
+/// `MYCELIUM_FLK_SHARD_MIB` MiB (default 896, the real stages are ~905 MB); the slices step
+/// pushes both; the publish step's production admission (`Proven`: `prepare_native` on both
+/// members at once, each verifying its 896 MiB) then refuses by name, because no native program
+/// is configured here. Prints one `FLK_OUTCOME` line: the rows reached, their walls and codes.
+/// Any control code (`control_*`), `member_work_renewing` or a staging timeout is a reproduction.
+#[test]
+#[ignore = "probe: lane FLK repeat harness (large push, real prepare_native, no model)"]
+fn probe_rows_6_and_7_with_a_real_sized_push() {
+    let mib: u64 = std::env::var("MYCELIUM_FLK_SHARD_MIB")
+        .ok()
+        .map_or(896, |v| v.parse().unwrap());
+    let mut f = if std::env::var("MYCELIUM_FLK_LAN").is_ok_and(|v| v == "1") {
+        let ip = lan_ip();
+        Fixture::on(WorkNetwork::Fixed(NetworkChoice(Some((
+            ip,
+            runtime::iroh_host::LanPolicy::private_only(),
+        )))))
+    } else {
+        Fixture::new()
+    };
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let mut state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    let begun = Instant::now();
+    let plan = big_plan(&f, &state, mib << 20);
+    let plan_ms = begun.elapsed().as_millis();
+    let begun = Instant::now();
+    ports
+        .work
+        .compose(&state, plan, Arc::new(NoCodec), &mut env)
+        .unwrap();
+    ready_for_slices(&mut state);
+    let slices = ports.slices();
+    let six = owner_run::steps::slices::run_slices_step(
+        &mut env,
+        slices.reports,
+        slices.slices,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    );
+    let six_ms = begun.elapsed().as_millis();
+    let code = |r: &Result<(), StepError>| match r {
+        Ok(()) => Value::Null,
+        Err(StepError::Refused(e)) => json!(e.code),
+        Err(other) => json!(format!("{other:?}")),
+    };
+    let mut outcome = json!({"mib":mib,"plan_ms":plan_ms,"row6_ms":six_ms,"row6":code(&six)});
+    if six.is_ok() {
+        let begun = Instant::now();
+        // The joined Mac's own agent reports its share (the handoff test's tick).
+        let until = Instant::now() + span(BudgetId::RouterClose).unwrap() * 15;
+        while ports.work.shares_ready().is_err() && Instant::now() < until {
+            f.agent.tick(&f.member);
+        }
+        let publication = ports.publication();
+        let seven = owner_run::steps::publish::run_publish_step(
+            &mut env,
+            publication.reports,
+            publication.workflow,
+            &mut state,
+            span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+        );
+        outcome["row7_ms"] = json!(begun.elapsed().as_millis());
+        outcome["row7"] = code(&seven);
+        outcome["workflow"] = ports.work.workflow_state().unwrap_or(Value::Null);
+    }
+    let begun = Instant::now();
+    let closed = ports.close_work();
+    outcome["close_ms"] = json!(begun.elapsed().as_millis());
+    outcome["close"] = json!(format!("{closed:?}"));
+    eprintln!("FLK_OUTCOME {outcome}");
+}
+
+/// The proposal and the model the slices and publish steps read (as the handoff test sets them).
+fn ready_for_slices(state: &mut RunState) {
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.proposal = Some(json!({"max_combined_rss_bytes":2_147_483_648u64,
+        "max_additional_disk_bytes":4_000_000_000u64,"max_wall_seconds":wall}));
+    use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
+    state.model = Some(ModelStepOutput {
+        forced_slice: false,
+        model_id: "Qwen/Qwen3-0.6B".into(),
+        resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+        manifest_digest: "sha256:00".into(),
+        slice_mode: true,
+        choice: None,
+        prepared: PreparedSource {
+            model: PreparedModel {
+                model_id: "Qwen/Qwen3-0.6B".into(),
+                resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+                architecture: "qwen3".into(),
+                label: "constructor-only inert source fixture".into(),
+                choice: None,
+                shape_registered: true,
+                owner_storage_need: 0,
+            },
+            manifest_digest: "sha256:00".into(),
+            source_bytes: json!(0),
+        },
+    });
 }
