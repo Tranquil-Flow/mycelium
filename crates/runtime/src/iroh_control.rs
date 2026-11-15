@@ -115,13 +115,15 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
                 let (target,pin)=self.host.dial_target(request.peer).map_err(|_| ControlError("invalid_control_destination"))?;
                 let connecting=Instant::now();
                 let connection=match timeout_at(deadline,endpoint.connect(target,transport::Channel::NodeControl.alpn())).await {
-                    Ok(Ok(connection))=>connection,
+                    Ok(Ok(connection))=>{ connect_succeeded(request.peer); connection }
                     failed=>{
                         let code=if failed.is_err() {"control_connect_timeout"} else {"control_connect_failed"};
-                        connect_failure(code,endpoint,request.peer,call,began.elapsed(),connecting.elapsed(),wait);
-                        if let (Some(dropped),Some(refused))=(self.host.lan_dropped_datagrams(),self.host.lan_refused_datagrams()) {
-                            eprintln!("{code} target={} lan_filter dropped_in={dropped} refused_out={refused} learned={:?}",request.peer.id.fmt_short(),self.host.lan_learned_hosts());
-                        }
+                        // The direct-LAN filters' counters ride on the same (rate-limited) line.
+                        let lan=match (self.host.lan_dropped_datagrams(),self.host.lan_refused_datagrams()) {
+                            (Some(dropped),Some(refused))=>format!(" lan_filter dropped_in={dropped} refused_out={refused} learned={:?}",self.host.lan_learned_hosts()),
+                            _=>String::new(),
+                        };
+                        connect_failure(code,endpoint,request.peer,call,began.elapsed(),connecting.elapsed(),wait,&lan);
                         return Err(ControlError(code));
                     }
                 };
@@ -168,28 +170,57 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
         })
     }
 }
-/// One line per control connect failure (lane FLK): who was dialled (short public endpoint id,
-/// never key material), from which local sockets to which signed addresses, this client's call
-/// number, the time since the call began and the time spent in the connect itself, and the call's
-/// whole allowance.
+/// A control connect failure (lane FLK): who was dialled (short public endpoint id, never key
+/// material), from which local sockets to which signed addresses, this client's call number, the
+/// time since the call began and the time spent in the connect itself, and the call's whole
+/// allowance. Rate-limited per dialled endpoint and code ([`crate::repeats`], FLK-05): the first
+/// failure at once, then at most one summary line per period with the latest fields and counts.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn connect_failure(
-    code: &str,
+    code: &'static str,
     endpoint: &iroh::Endpoint,
     peer: &EndpointAddr,
     call: u64,
     elapsed: std::time::Duration,
     connecting: std::time::Duration,
     allowance: std::time::Duration,
+    extra: &str,
 ) {
     let remote: Vec<_> = peer.ip_addrs().collect();
-    eprintln!(
-        "{code} target={} local={:?} remote={remote:?} call={call} elapsed_ms={} connect_ms={} allowance_ms={}",
-        peer.id.fmt_short(),
+    let target = peer.id.fmt_short().to_string();
+    let fields = format!(
+        "local={:?} remote={remote:?} call={call} elapsed_ms={} connect_ms={} allowance_ms={}{extra}",
         endpoint.bound_sockets(),
         elapsed.as_millis(),
         connecting.as_millis(),
         allowance.as_millis()
     );
+    let now = std::time::Instant::now();
+    let mut repeats = connect_repeats();
+    repeats.forget_idle(now);
+    if let Some(line) = repeats.line((target.clone(), code), now, &format!("{code} target={target}"), &fields) {
+        eprintln!("{line}");
+    }
+}
+/// A control connect to `peer` succeeded: one outcome line per code it had failed with.
+pub(crate) fn connect_succeeded(peer: &EndpointAddr) {
+    let target = peer.id.fmt_short().to_string();
+    let now = std::time::Instant::now();
+    for ((_, code), outcome) in connect_repeats().ended_where(|key| key.0 == target, now) {
+        eprintln!(
+            "{code} target={target} outcome=connected failures={} over_ms={}",
+            outcome.failures, outcome.over_ms
+        );
+    }
+}
+/// The process's control connect failures, per dialled endpoint and code.
+fn connect_repeats() -> std::sync::MutexGuard<'static, crate::repeats::Repeats<(String, &'static str)>> {
+    static REPEATS: std::sync::OnceLock<std::sync::Mutex<crate::repeats::Repeats<(String, &'static str)>>> =
+        std::sync::OnceLock::new();
+    REPEATS
+        .get_or_init(|| std::sync::Mutex::new(crate::repeats::Repeats::new(crate::repeats::period())))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 pub(crate) fn current_authority(
     authority: &ControlAuthority,

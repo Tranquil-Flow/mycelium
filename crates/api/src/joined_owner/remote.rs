@@ -232,6 +232,20 @@ fn drive(
     let mut pending: VecDeque<(u64, String, Instant)> = VecDeque::new();
     // Result polls sent per pending operation (a failed poll's line names its attempt).
     let mut polls: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+    // Failed result polls per operation, rate-limited (lane FLK, FLK-05): the first at once, then
+    // at most one summary per period, and one outcome line when the operation ends.
+    let mut failed_polls = runtime::repeats::Repeats::<u64>::new(runtime::repeats::period());
+    let member = remote.addr.id.fmt_short().to_string();
+    let poll_outcome = |failed: &mut runtime::repeats::Repeats<u64>, id: u64, name: &str, outcome: &str| {
+        if let Some(line) = failed.outcome_line(
+            &id,
+            Instant::now(),
+            &format!("member result poll {id} ({name}) member={member}"),
+            outcome,
+        ) {
+            eprintln!("{line}");
+        }
+    };
     loop {
         let next = if pending.is_empty() {
             commands.recv().ok()
@@ -302,6 +316,7 @@ fn drive(
                     }
                     pending.pop_front();
                     polls.remove(&id);
+                    poll_outcome(&mut failed_polls, id, &name, "finished");
                     send(
                         if name == "accept" && reply["ok"] == true && remote.enrolled.is_none() {
                             json!({"ok":false,"code":"member_registration_key_missing"})
@@ -312,15 +327,24 @@ fn drive(
                 }
                 Ok(_) => {}
                 Err(code) => {
-                    eprintln!(
-                        "member result poll {id} ({name}): {code} member={} attempt={attempt} operation_ms={}",
-                        remote.addr.id.fmt_short(),
-                        began.elapsed().as_millis()
-                    );
+                    if let Some(line) = failed_polls.line(
+                        id,
+                        Instant::now(),
+                        &format!("member result poll {id} ({name}): {code}"),
+                        &format!(
+                            "member={} attempt={attempt} operation_ms={}",
+                            remote.addr.id.fmt_short(),
+                            began.elapsed().as_millis()
+                        ),
+                    ) {
+                        eprintln!("{line}");
+                    }
                     if began.elapsed() >= budgets.wall {
                         polls.remove(&id);
                         pending.pop_front();
-                        send(json!({"ok":false,"code":format!("control_call_failed:{code}")}));
+                        let code = format!("control_call_failed:{code}");
+                        poll_outcome(&mut failed_polls, id, &name, &code);
+                        send(json!({"ok":false,"code":code}));
                         continue;
                     }
                 }
@@ -328,6 +352,7 @@ fn drive(
             if pending.front().is_some_and(|p| p.0 == id) && began.elapsed() >= budgets.wall {
                 polls.remove(&id);
                 pending.pop_front();
+                poll_outcome(&mut failed_polls, id, &name, "member_operation_wall_exceeded");
                 send(json!({"ok":false,"code":"member_operation_wall_exceeded"}));
             }
         }

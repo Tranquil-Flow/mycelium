@@ -347,7 +347,10 @@ impl<C: Clock + Send + Sync + 'static> Shared<C> {
             )
             .await
             {
-                Ok(Ok(connection)) => connection,
+                Ok(Ok(connection)) => {
+                    crate::iroh_control::connect_succeeded(&address);
+                    connection
+                }
                 failed => {
                     let code = if failed.is_err() {
                         "control_connect_timeout"
@@ -362,6 +365,7 @@ impl<C: Clock + Send + Sync + 'static> Shared<C> {
                         began.elapsed(),
                         connecting.elapsed(),
                         call_timeout,
+                        "",
                     );
                     return Err(code);
                 }

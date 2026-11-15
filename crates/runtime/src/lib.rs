@@ -45,6 +45,7 @@ pub mod observe_owner;
 pub mod prefill_watch;
 pub mod published;
 pub mod relay;
+pub mod repeats;
 #[cfg(unix)]
 pub mod relay_process;
 pub mod rollover;
