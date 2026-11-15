@@ -147,6 +147,16 @@ fn inside_an_admitted_bundle_the_tokenize_role_answers_as_mycelium_node_does() {
         std::process::id()
     ));
     std::fs::create_dir(&dir).unwrap();
+    /// The staged bundle goes whatever the outcome (its payload copies are APFS clones).
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            if let Err(e) = std::fs::remove_dir_all(&self.0) {
+                eprintln!("staged bundle cleanup failed: {e}");
+            }
+        }
+    }
+    let _scratch = Scratch(dir.clone());
     let exe = staged::stage(Path::new(EXE), &staged::payload_app(), &dir);
     let tokenizer = Path::new(&std::env::var_os("HOME").unwrap())
         .join(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots")
@@ -216,5 +226,4 @@ fn inside_an_admitted_bundle_the_tokenize_role_answers_as_mycelium_node_does() {
         assert!(!output.status.success(), "{args:?}");
         assert!(stderr.contains("no_arguments_accepted"), "{args:?}: {stderr}");
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
