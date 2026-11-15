@@ -17,14 +17,203 @@ fn composed(f: &mut Fixture) -> (PackagedChainPorts, RunState, Env) {
     (ports, state, env)
 }
 
+/// What a renewal does when it reaches its put-back (lane FLK patch 2).
+#[derive(Clone, Copy, PartialEq)]
+enum AtPutBack {
+    /// Waits there until the test releases it: the renewal is in flight for as long as the test
+    /// needs (its take and its seed round trip have run).
+    Hold,
+    /// Its thread dies there: the Session never comes back (FLK-02).
+    Panic,
+}
+/// Met once by a renewal thread that took its Session and is about to put it back; the take, the
+/// signed heartbeat and the seed's answer are the product's own (`owner_ports::renew_contributor`,
+/// `app_host::renew_member`). Never released by elapsed time: a test that fails before its release
+/// drops the sender and the renewal proceeds.
+struct Gate {
+    mode: AtPutBack,
+    met: AtomicBool,
+    entered: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+impl Gate {
+    fn new(
+        mode: AtPutBack,
+    ) -> (
+        Arc<Self>,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered, at_gate) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let gate = Arc::new(Self {
+            mode,
+            met: AtomicBool::new(false),
+            entered: Mutex::new(Some(entered)),
+            release: Mutex::new(Some(released)),
+        });
+        (gate, at_gate, release)
+    }
+    fn meet(&self) {
+        if self.met.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(entered) = lock(&self.entered).take() {
+            drop(entered.send(()));
+        }
+        match self.mode {
+            AtPutBack::Hold => {
+                if let Some(released) = lock(&self.release).take() {
+                    // Err only when the test dropped its sender: proceed either way.
+                    drop(released.recv());
+                }
+            }
+            AtPutBack::Panic => panic!("lane FLK: the renewal thread dies between take and put-back"),
+        }
+    }
+}
+/// The bound a test waits for a renewal thread to reach its gate (failure detection only, never
+/// a release): one renewal pass on the wire (`Network::await_renewal_pass`).
+fn gate_bound() -> Duration {
+    span(BudgetId::PyMyceliumA13MacosPeerRemotemacmemberInitTimeoutL117).unwrap() * 2
+}
+/// The owner's host as `owner_ports::renew_contributor` sees it, meeting `gate` on the first state
+/// acquisition while the contributor's Session is out: its put-back.
+#[derive(Clone)]
+struct HeldContributor {
+    host: PackagedRun,
+    gate: Arc<Gate>,
+}
+impl owner_ports::RunHost for HeldContributor {
+    type Managed = crate::packaged_run::Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut api::owner_ports::RunView<'_, Self::Managed>) -> R) -> R {
+        let out = lock(&self.host.run)
+            .contributor
+            .as_ref()
+            .is_some_and(|m| m.session.is_none());
+        if out {
+            self.gate.meet();
+        }
+        self.host.with(f)
+    }
+    fn bootstrap_lifecycle(&self) -> Arc<Mutex<()>> {
+        self.host.bootstrap_lifecycle()
+    }
+    fn membership_current(&self) -> bool {
+        self.host.membership_current()
+    }
+    fn admit_contributor(&self, root: &Path) -> Result<(), PublicError> {
+        self.host.admit_contributor(root)
+    }
+    fn close_contributor(&self) -> Result<(), PublicError> {
+        self.host.close_contributor()
+    }
+    fn resource_check(&self) -> Option<&'static str> {
+        self.host.resource_check()
+    }
+    fn acquisition(&self) -> Option<api::acquisition::Acquisition> {
+        self.host.acquisition()
+    }
+    fn bootstrap(
+        &self,
+        node: &str,
+        run: &str,
+        deployment: &str,
+        offer: &str,
+    ) -> Result<(), api::installation_descriptor::Failure> {
+        self.host.bootstrap(node, run, deployment, offer)
+    }
+    fn sidecar(&self) -> Result<PathBuf, api::installation_descriptor::Failure> {
+        self.host.sidecar()
+    }
+}
+/// The owner's contributor renewal (`owner_ports::renew_contributor`, the product's pass) on its
+/// own thread, stopped at its put-back as `mode` says; returns once it is there.
+fn contributor_renewal(
+    f: &Fixture,
+    mode: AtPutBack,
+) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
+    let (gate, at_gate, release) = Gate::new(mode);
+    let held = HeldContributor {
+        host: f.host.clone(),
+        gate,
+    };
+    let renewal = std::thread::spawn(move || owner_ports::renew_contributor(&held));
+    at_gate
+        .recv_timeout(gate_bound())
+        .expect("the contributor renewal took its Session and reached its put-back");
+    (renewal, release)
+}
+/// The joined Mac's authority as `app_host::renew_member` sees it, meeting `gate` on the first
+/// state acquisition while its Session is out for the renewal: its put-back.
+struct HeldMember {
+    authority: Arc<Mutex<Authority>>,
+    network: Arc<Network>,
+    gate: Arc<Gate>,
+}
+impl HeldMember {
+    fn meet_at_put_back(&self) {
+        let out = {
+            let a = lock(&self.authority);
+            a.session.is_none() && a.session_view.is_some()
+        };
+        if out {
+            self.gate.meet();
+        }
+    }
+}
+impl app_host::Cell for HeldMember {
+    type Managed = crate::packaged_run::Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut app_host::HostView<'_, Self::Managed>) -> R) -> R {
+        self.meet_at_put_back();
+        self.network.cell(&self.authority).with(f)
+    }
+    fn try_with<R>(
+        &self,
+        f: impl FnOnce(&mut app_host::HostView<'_, Self::Managed>) -> R,
+    ) -> Option<R> {
+        self.meet_at_put_back();
+        self.network.cell(&self.authority).try_with(f)
+    }
+    fn member_seed_options(&self) -> api::seed::SeedOptions {
+        self.network.cell(&self.authority).member_seed_options()
+    }
+}
+/// The joined Mac's renewal (`app_host::renew_member`, the pass `Network::renew_member` runs) on its
+/// own thread, stopped at its put-back as `mode` says; returns once it is there.
+fn member_renewal(
+    f: &Fixture,
+    mode: AtPutBack,
+) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
+    let (gate, at_gate, release) = Gate::new(mode);
+    let held = HeldMember {
+        authority: f.member_authority.clone(),
+        network: f.network.clone(),
+        gate,
+    };
+    let renewal = std::thread::spawn(move || app_host::renew_member(&held));
+    at_gate
+        .recv_timeout(gate_bound())
+        .expect("the joined Mac's renewal took its Session and reached its put-back");
+    (renewal, release)
+}
+/// The rest of `Network::renew_member` after its pass: the work session follows the authority, and
+/// a membership no longer current closes the work.
+fn member_renewal_tail(f: &Fixture) {
+    f.network.sync_work_session(&f.member_authority);
+    if crate::packaged_network::membership_state(&f.member_authority).as_deref() != Some("current")
+    {
+        f.network.close_work();
+    }
+}
+
 /// The packaged run's reports, except that its work announcement runs while the owner's own
-/// contributor is in the middle of a renewal: exactly the state `owner_ports::renew_contributor`
-/// holds for the length of one seed heartbeat (`owner_ports.rs:299` takes the Session out,
-/// `:319-325` puts it back after `peer::renew`). The hold is released after the announcement
-/// returned, whatever it answered.
+/// contributor is in the middle of a renewal: the product's `owner_ports::renew_contributor` runs on
+/// its own thread and is held at its put-back (Session out, its seed round trip done) for the
+/// length of the announcement, then released whatever the announcement answered.
 struct RenewalInFlight<'a> {
     inner: &'a mut dyn ReportsPort,
-    host: PackagedRun,
+    fixture: &'a Fixture,
     /// The announcement's own answer, as the step saw it.
     announced: Option<Result<(), String>>,
 }
@@ -36,21 +225,16 @@ impl ReportsPort for RenewalInFlight<'_> {
         self.inner.announce(a)
     }
     fn announce_work(&mut self, a: &Announcement, limits: &Value) -> Result<(), StepError> {
-        let session = self.host.with(|c| {
-            c.run
-                .contributor
-                .as_mut()
-                .expect("the contributor step enrolled the owner's own worker")
-                .session
-                .take()
-        });
-        assert!(session.is_some(), "a live Session to hold");
+        let (renewal, release) = contributor_renewal(self.fixture, AtPutBack::Hold);
         let answer = self.inner.announce_work(a, limits);
-        self.host.with(|c| {
-            let member = c.run.contributor.as_mut().expect("still enrolled");
-            assert!(member.session.is_none(), "nothing else put a Session back");
-            member.session = session;
-        });
+        drop(release.send(()));
+        renewal.join().expect("the renewal pass returned");
+        assert!(
+            self.fixture
+                .host
+                .with(|c| c.run.contributor.as_ref().expect("still enrolled").session.is_some()),
+            "the renewal put its Session back"
+        );
         self.announced = Some(match &answer {
             Ok(()) => Ok(()),
             Err(StepError::Refused(e)) => Err(e.code.clone()),
@@ -90,11 +274,10 @@ impl ReportsPort for RenewalInFlight<'_> {
 fn the_slices_step_survives_a_contributor_renewal_in_flight_at_its_work_announcement() {
     let mut f = Fixture::new();
     let (mut ports, mut state, mut env) = composed(&mut f);
-    let host = f.host.clone();
     let slices = ports.slices();
     let mut reports = RenewalInFlight {
         inner: slices.reports,
-        host,
+        fixture: &f,
         announced: None,
     };
     let outcome = owner_run::steps::slices::run_slices_step(
@@ -444,20 +627,12 @@ fn ready_for_slices(state: &mut RunState) {
 fn a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service() {
     let mut f = Fixture::new();
     let (mut ports, mut state, mut env) = composed(&mut f);
-    // `app_host::renew_member`'s flight on the joined Mac, exactly: Session out, its view kept.
-    let session = {
-        let mut a = lock(&f.member_authority);
-        let session = a.session.take().expect("the joined Mac is a member");
-        a.session_view = Some((session.generation(), session.lease_expires_at()));
-        session
-    };
+    // `app_host::renew_member`'s flight on the joined Mac: the product's pass, held at its put-back.
+    let (renewal, release) = member_renewal(&f, AtPutBack::Hold);
     f.agent.tick(&f.member);
-    {
-        let mut a = lock(&f.member_authority);
-        a.session_view = None;
-        a.session = Some(session);
-    }
-    f.network.sync_work_session(&f.member_authority);
+    drop(release.send(()));
+    renewal.join().expect("the renewal pass returned");
+    member_renewal_tail(&f);
     // The standing loop's next pass, after the renewal (as on the gate's joined Mac).
     f.agent.tick(&f.member);
     let slices = ports.slices();
@@ -474,6 +649,67 @@ fn a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service() 
         outcome.is_ok(),
         "the push to the members failed after the joined Mac's standing pass during its renewal: \
          {outcome:?}; workflow error {}; close {closed:?}",
+        flow["error_code"]
+    );
+}
+
+/// Lane FLK patch 2, FLK-01 (REVIEW-laneFLK-astra.md, "exact surviving interleaving"). The joined
+/// Mac's standing pass reads its acceptor context in several separately locked observations
+/// (`PackagedMember::accept_context`: the membership state, the renewal marker, the live binding,
+/// the work session). A renewal that takes the Session after the pass read "current" and "not
+/// renewing" but before it read the binding leaves the pass with no binding and no fallback:
+/// `MemberAgent` closes the work service, the next pass opens a new one at a new address, and the
+/// owner's run keeps dialling the old one. Here the product's renewal (`app_host::renew_member`)
+/// starts exactly inside the pass (after its membership state was read) and is held at its
+/// put-back until the pass returned. The run's work service must survive.
+#[test]
+fn a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_work_service() {
+    let mut f = Fixture::new();
+    let (mut ports, mut state, mut env) = composed(&mut f);
+    let started: Arc<Mutex<Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>)>>> =
+        Arc::default();
+    {
+        let (authority, network, started) = (
+            f.member_authority.clone(),
+            f.network.clone(),
+            started.clone(),
+        );
+        *lock(&f.member.inside_accept_context) = Some(Box::new(move || {
+            let (gate, at_gate, release) = Gate::new(AtPutBack::Hold);
+            let held = HeldMember {
+                authority,
+                network,
+                gate,
+            };
+            let renewal = std::thread::spawn(move || app_host::renew_member(&held));
+            at_gate
+                .recv_timeout(gate_bound())
+                .expect("the joined Mac's renewal took its Session inside the standing pass");
+            *lock(&started) = Some((renewal, release));
+        }));
+    }
+    f.agent.tick(&f.member);
+    let (renewal, release) = lock(&started)
+        .take()
+        .expect("the standing pass read its acceptor context, and the renewal started inside it");
+    drop(release.send(()));
+    renewal.join().expect("the renewal pass returned");
+    member_renewal_tail(&f);
+    f.agent.tick(&f.member);
+    let slices = ports.slices();
+    let outcome = owner_run::steps::slices::run_slices_step(
+        &mut env,
+        slices.reports,
+        slices.slices,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    );
+    let flow = ports.work.workflow_state().unwrap_or(Value::Null);
+    let closed = ports.close_work();
+    assert!(
+        outcome.is_ok(),
+        "the push to the members failed after a renewal began inside the joined Mac's standing \
+         pass: {outcome:?}; workflow error {}; close {closed:?}",
         flow["error_code"]
     );
 }

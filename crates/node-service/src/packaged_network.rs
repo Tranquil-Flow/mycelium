@@ -815,6 +815,10 @@ pub struct PackagedMember {
     seams: MemberSeams,
     lifecycle: Arc<Mutex<()>>,
     slot: Mutex<MemberSlot>,
+    /// TEST ONLY (lane FLK, FLK-01): run once inside [`MemberHost::accept_context`], after it
+    /// read this Mac's membership state, so a test can start a renewal exactly there.
+    #[cfg(test)]
+    pub(crate) inside_accept_context: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl PackagedMember {
     pub fn new(
@@ -828,6 +832,8 @@ impl PackagedMember {
             seams,
             lifecycle: Arc::default(),
             slot: Mutex::default(),
+            #[cfg(test)]
+            inside_accept_context: Mutex::default(),
         })
     }
     fn state(&self) -> api::member_agent::HostState {
@@ -916,6 +922,10 @@ impl api::member_agent::MemberHost for PackagedMember {
         // renewal closed this Mac's work service (`member_agent` closes work without a binding),
         // and the owner's run kept dialling the closed address (lane FLK, rows 6-7).
         let renewing = lock(&self.authority).session_view.is_some();
+        #[cfg(test)]
+        if let Some(hook) = lock(&self.inside_accept_context).take() {
+            hook();
+        }
         let binding = current
             .then(|| {
                 app_host::membership_binding(&self.network.cell(&self.authority)).or_else(|| {
