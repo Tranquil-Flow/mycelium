@@ -875,6 +875,85 @@ fn a_contributor_renewal_past_its_deadline_leaves_no_snapshot_in_use() {
     );
 }
 
+/// Lane FLK patch 3, FLK2-01 (REVIEW-laneFLK-p2-astra.md). A healthy contributor renewal whose
+/// thread is held past its flight deadline (its seed round trip answered, not yet put back) must
+/// not end the owner's local work Service: the base (`c20d4b40`) kept the lease-bounded admission
+/// cell whenever the contributor's Session was out. Crosses the real boundary: the slices step
+/// announced the work (the local Service runs, phase `work`); the Service's operation loop is held
+/// before its next idle admission (`packaged_work::operations`); the flight is aged past its
+/// deadline without acquiring the host; the slices wait's report tick (`Reports::tick_local`:
+/// `Service::report`, then `host.with` to submit it) is the next acquisition; only then is the
+/// loop let through its admission; then the renewal lands. The loop must have admitted, and the
+/// Service must still serve a further report and registration.
+#[test]
+fn an_overdue_contributor_renewal_that_lands_late_keeps_the_owners_local_work_service() {
+    let mut f = Fixture::new();
+    let (mut ports, mut state, mut env) = composed(&mut f);
+    let network = ports.work.run_network();
+    let slices = ports.slices();
+    owner_run::steps::slices::run_slices_step(
+        &mut env,
+        slices.reports,
+        slices.slices,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    )
+    .expect("the slices step announced the work");
+    let reported = lock(&ports.work.resident)
+        .local
+        .as_ref()
+        .expect("the owner's local work Service runs")
+        .report();
+    assert!(
+        matches!(reported, Ok(Some(_))),
+        "the local Service reports in the work phase: {reported:?}"
+    );
+    let (arrived, go, admitted) = lock(&ports.work.resident)
+        .local
+        .as_ref()
+        .unwrap()
+        .hold_next_admission();
+    arrived
+        .recv_timeout(gate_bound())
+        .expect("the local Service's operation loop reached its next admission");
+    let (renewal, release) = contributor_renewal(&f, AtPutBack::Hold);
+    // Aged without an acquisition of the host: the report tick below is the next one.
+    lock(&f.host.run)
+        .contributor
+        .as_mut()
+        .unwrap()
+        .flight
+        .as_mut()
+        .expect("the renewal recorded its flight")
+        .deadline = Instant::now();
+    ports.slices().reports.tick_local();
+    go.send(()).unwrap_or(());
+    let admission = admitted
+        .recv_timeout(gate_bound())
+        .unwrap_or_else(|_| Err("no admission answered".into()));
+    // The other overdue reader is unchanged: the registration still refuses, as at the base.
+    let registration = ports.work.local(&network);
+    release.send(()).unwrap_or(());
+    renewal.join().expect("the late renewal pass returned");
+    let report = lock(&ports.work.resident)
+        .local
+        .as_ref()
+        .map(crate::packaged_work::Service::report);
+    let after = ports.work.local(&network);
+    let closed = ports.close_work();
+    assert!(
+        code(&registration) == "member_work_renewing"
+            && admission.is_ok()
+            && matches!(report, Some(Ok(Some(_))))
+            && code(&after) == "ok",
+        "past its deadline the registration answered {} (base: member_work_renewing); the local \
+         Service's admission after the report tick answered {admission:?}; after the late put-back \
+         its report {report:?} and the registration {} (close {closed:?})",
+        code(&registration),
+        code(&after)
+    );
+}
+
 /// Lane FLK patch 2, FLK-02 (joined side): past its deadline the joined Mac's renewal flight no
 /// longer lends its snapshot's binding (the next standing pass closes the work service, as the
 /// base did without a Session); its late put-back lands and the binding is back.

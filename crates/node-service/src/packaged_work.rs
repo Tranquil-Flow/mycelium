@@ -223,6 +223,16 @@ impl NetworkChoice {
 }
 #[cfg(test)]
 type ReceiveHook = Box<dyn FnOnce(&work::Operation) + Send>;
+/// Test-only (lane FLK patch 3): the operation loop's next idle admission (`shared.live()` at the
+/// top of `operations`) waits at `go` after signalling `arrived`, then reports its answer on
+/// `admitted`. A test thereby orders that admission after whatever it does in between, with no
+/// sleep: the loop cannot sample the work-session cell while it is held.
+#[cfg(test)]
+pub(crate) struct AdmissionHold {
+    arrived: mpsc::Sender<()>,
+    go: mpsc::Receiver<()>,
+    admitted: mpsc::Sender<Result<()>>,
+}
 struct Shared {
     root: PathBuf,
     session: SessionCell,
@@ -234,6 +244,8 @@ struct Shared {
     status: work::Status,
     #[cfg(test)]
     receive_hook: Mutex<Option<ReceiveHook>>,
+    #[cfg(test)]
+    admission_hold: Mutex<Option<AdmissionHold>>,
     /// Test-only fault injection: panic immediately before the custody handoff.
     #[cfg(test)]
     panic_handoff: AtomicBool,
@@ -296,6 +308,26 @@ impl Service {
     pub(crate) fn on_receive(&self, hook: ReceiveHook) {
         *self.shared.receive_hook.lock().unwrap() = Some(hook);
     }
+    /// Test-only (lane FLK patch 3): hold the operation loop at its next idle admission. Returns
+    /// (`arrived`: the loop is held before `live()`, `go`: let it admit, `admitted`: its answer).
+    #[cfg(all(test, feature = "desktop-shell"))]
+    pub(crate) fn hold_next_admission(
+        &self,
+    ) -> (
+        mpsc::Receiver<()>,
+        mpsc::Sender<()>,
+        mpsc::Receiver<Result<()>>,
+    ) {
+        let (arrived, at_admission) = mpsc::channel();
+        let (go, released) = mpsc::channel();
+        let (admitted, answer) = mpsc::channel();
+        *self.shared.admission_hold.lock().unwrap() = Some(AdmissionHold {
+            arrived,
+            go: released,
+            admitted,
+        });
+        (at_admission, go, answer)
+    }
     /// Test-only: the member loop panics immediately before handing its custody object back,
     /// so a regression exercises the real unwind instead of a simulated error return.
     #[cfg(all(test, feature = "desktop-shell"))]
@@ -350,6 +382,8 @@ impl Service {
             ),
             #[cfg(test)]
             receive_hook: Mutex::new(None),
+            #[cfg(test)]
+            admission_hold: Mutex::new(None),
             #[cfg(test)]
             panic_handoff: AtomicBool::new(false),
             stop: AtomicBool::new(false),
@@ -677,7 +711,23 @@ fn operations(
             if shared.stop.load(Ordering::SeqCst) {
                 break;
             }
-            shared.live()?;
+            #[cfg(test)]
+            let hold = shared
+                .admission_hold
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            #[cfg(test)]
+            if let Some(hold) = &hold {
+                hold.arrived.send(()).unwrap_or(());
+                hold.go.recv().unwrap_or(());
+            }
+            let admitted = shared.live();
+            #[cfg(test)]
+            if let Some(hold) = hold {
+                hold.admitted.send(admitted.clone()).unwrap_or(());
+            }
+            admitted?;
             let operation = match requests.recv_timeout(duration(B::OwnerPoll)?) {
                 Ok(operation) => operation?,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
