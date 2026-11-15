@@ -11,7 +11,6 @@
   "unchanged": {
     "chat.css": "5dce5ce7198071e9186a65ecb02cf1277fa3c492a255af5c6bba91c0c8e7b7dd",
     "chat.html": "68ae69a0e7225a301b1ee349fbd6ed4ecca8699e6f759c69b53770e7774b8463",
-    "chat.js": "7200b21c023a5e1800ca8d5d547f7ad3dc2cc0209cf3bee2081e293958bb4e91",
     "run.js": "300684580a99adaa9254888015a83a17a3a77e07f9b56b7bb30f5593efa96f84",
     "swarm.js": "1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe"
   },
@@ -22,7 +21,7 @@
     },
     "index.html": {
       "sha256": "3cadc4acee9ec291151ce79a3a577a226e2e99749f6724057692fb0264d37444",
-      "reason": "Adopts the site's dark Green token set and the background renderer's layout rules; the header mark is 56px with the wordmark block vertically centred, disclosures are real text buttons, and (v0.2 copy) the hero no longer claims the device has 'earned' anything at onboarding: it now reads 'add your first device, and see exactly what it shares\u2014and what stays yours', which drops the single-platform wording for a product that will run on other devices too."
+      "reason": "Adopts the site's dark Green token set and the background renderer's layout rules; the header mark is 56px with the wordmark block vertically centred, disclosures are real text buttons, and (v0.2 copy) the hero no longer claims the device has 'earned' anything at onboarding: it now reads 'add your first device, and see exactly what it shares—and what stays yours', which drops the single-platform wording for a product that will run on other devices too."
     },
     "style.css": {
       "sha256": "36faf6b13553383071768167e81eac5b34e9c237123e1fba52d5f0cb42a86d2d",
@@ -31,6 +30,10 @@
     "mycelium-field.js": {
       "sha256": "3b4e895e79b0efa5526854f1e16f00d74395f9f38eb0a4017a62867f96eacaee",
       "reason": "Was carried verbatim from mycelium_swarm_directory/web. The life layer's 128 px tiles left whole colonies clipped as squares: a tile first painted while its neighbourhood was empty kept `cands = false` for good, so strands that grew into it later were never drawn there and terminated on the tile edge. Candidates are now recomputed until a tile has held a strand and boxes are tested with a 2 px bleed, the hero's page-anchored composite fades in over its own first 200 px (the raster is a rectangle, so it read as a knife-cut under the header), and the life tiles fade their part of that same band."
+    },
+    "chat.js": {
+      "sha256": "57e71956a8ca38f5e51ce226d5a1352b24a320a0c42289b0bceddc0ecdd5dce7",
+      "reason": "Lane CAP (owner ruling 15 Nov): the stage capacity is the model's 4,096-token serving context, and a prompt the page accepts (2,000 characters) can be up to 8,000 tokens with the byte-level tokenizer, so the route can refuse it (joined_route_context_exceeds_worker). The chat service names that refusal chat_context_too_long; this script gains its message and appends the context from the chat state's limits.context_tokens instead of showing the route's internal code. The page's own limits are unchanged."
     }
   },
   "added": {

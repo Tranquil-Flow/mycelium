@@ -28,7 +28,6 @@ const MESSAGES = {
   chat_rate_limited:'You sent several prompts this minute. Wait a little.',
   chat_swarm_rate_limited:'The room sent many prompts this minute. Wait a little.',
   chat_prompt_too_long:'That prompt is too long (2,000 characters at most).',
-  chat_context_too_long:'That prompt and the answer you asked for do not fit the model’s context. Shorten the prompt or ask for fewer tokens.',
   request_cleanup_unproven:'The swarm could not confirm node cleanup in time. Try again in a moment.',
 };
 // Codes that end a request after text was already produced, where that text stands as the answer.
@@ -38,9 +37,7 @@ const NOTES = {
 function finishedText(text, error) {
   if (!error) return text;
   if (text && NOTES[error]) return `${text}\n[note: ${NOTES[error]}]`;
-  const context = error === 'chat_context_too_long' && state?.limits?.context_tokens;
-  const limit = context ? ` (at most ${context} tokens: prompt plus answer)` : '';
-  return (text ? text + '\n' : '') + `[stopped: ${MESSAGES[error] || error}${limit}]`;
+  return (text ? text + '\n' : '') + `[stopped: ${MESSAGES[error] || error}]`;
 }
 function servedText(list) {
   if (!list || !list.length) return '';
