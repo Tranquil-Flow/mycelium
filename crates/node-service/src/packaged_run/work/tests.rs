@@ -4,6 +4,7 @@
 //! Constructor-only source plan and refusing native admission.
 use super::*;
 mod chat_route;
+mod flake;
 mod regressions;
 mod serving_q;
 mod serving_r2;
