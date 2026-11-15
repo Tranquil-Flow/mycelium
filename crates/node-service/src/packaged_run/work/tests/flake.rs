@@ -159,7 +159,7 @@ fn a_failed_contributor_renewal_puts_the_session_back() {
 }
 
 /// Lane FLK probe (not a gate): the natural renewal window, with no injected hold. A thread runs
-/// the real `owner_ports::renew_contributor` back to back (the product runs it every 20 s) while
+/// the real `owner_ports::renew_contributor` once a second (the product runs it every 20 s) while
 /// this thread re-registers the owner's local worker the way the work announcement does
 /// (`Work::local`). Prints the renewal durations and how many registrations answered
 /// `member_work_renewing`; a product run's chance per announcement is about (renewal time / 20 s).
