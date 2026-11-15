@@ -68,6 +68,10 @@ pub struct ModelContract {
     pub source_representation: String,
     pub runtime_dtype: String,
     pub runtime_quantization: String,
+    /// The model contract's serving context in tokens (`api::model_catalog::Model::
+    /// serving_context_tokens`): what the memory plan charges KV for and what every stage is
+    /// prepared for (carried to the stages by [`BuildRequest::serving_context_tokens`]).
+    pub serving_context_tokens: u64,
 }
 
 /// Split and resource policies (`layer_split.policy_for_runtime`, `model_resources` constants), pinned data
@@ -251,6 +255,9 @@ pub struct BuildRequest {
     pub managed_layer_ranges: Vec<[usize; 2]>,
     /// The compiled split document (`layer-split.json`).
     pub layer_split: Value,
+    /// The serving context this compile planned every stage's memory for, in tokens: the
+    /// capacity each stage is prepared for, so a stage holds exactly what the compile charged.
+    pub serving_context_tokens: u64,
 }
 
 /// What the host's builder and workflow returned (the thread body after `build`).
@@ -578,6 +585,7 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
             node_ids,
             managed_layer_ranges: ranges,
             layer_split: split.clone(),
+            serving_context_tokens: input.policy.resources.context_tokens,
         },
         model: m.clone(),
         epoch: input.epoch,

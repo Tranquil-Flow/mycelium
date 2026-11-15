@@ -65,6 +65,15 @@ fn challenge_tokens(reference: &Value) -> Result<usize, StepError> {
         .ok_or_else(|| refused("native_reference_invalid"))?;
     Ok(prompt.len() + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS)
 }
+/// Tokens every stage is prepared for (lane CAP, owner ruling 15 Nov): the serving context the
+/// compile planned each stage's memory for, carried by its builder request.
+fn stage_tokens(
+    request: &planner::chain_compile::BuildRequest,
+    reference: &Value,
+) -> Result<usize, StepError> {
+    let _ = request;
+    challenge_tokens(reference)
+}
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
 /// the local Service whose control loop those links reach. Unresolved owners stay retained.
@@ -335,7 +344,7 @@ impl Work {
             let oracle: Value =
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
-            let tokens = challenge_tokens(&oracle)?;
+            let tokens = stage_tokens(request, &oracle)?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
@@ -981,6 +990,61 @@ mod challenge_tokens_tests {
             prompt + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS
         );
         assert!(reference.get("workload").is_none(), "no top-level workload");
+    }
+}
+
+#[cfg(test)]
+mod stage_tokens_tests {
+    //! Lane CAP: a stage is prepared for the serving context the compile planned (the model
+    //! contract's, 4,096 for the demo model), never for the startup check's own length (35 + 4),
+    //! which left no room for any product chat (`joined_route_context_exceeds_worker`, D6). The
+    //! startup check stays one request inside that capacity.
+    fn request(context: u64) -> planner::chain_compile::BuildRequest {
+        planner::chain_compile::BuildRequest {
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            deployment_id: "d".into(),
+            route_label: "a13",
+            stage_sharded: false,
+            compilation_cache_key: "k".into(),
+            node_ids: vec!["a".into(), "b".into()],
+            managed_layer_ranges: vec![[0, 19], [19, 28]],
+            layer_split: serde_json::json!({}),
+            serving_context_tokens: context,
+        }
+    }
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap()
+    }
+    #[test]
+    fn every_stage_is_prepared_for_the_compiles_serving_context() {
+        let model = api::model_catalog::find(
+            "Qwen/Qwen3-0.6B",
+            "c1899de289a04d12100db370d81485cdf75e47ca",
+        )
+        .expect("the demo model is registered");
+        let contract = api::owner_compiler::model_contract(model);
+        assert_eq!(contract.serving_context_tokens, 4096);
+        let tokens = super::stage_tokens(&request(contract.serving_context_tokens), &oracle())
+            .expect("the startup check fits the context");
+        assert_eq!(tokens, 4096, "the contract's context, not the startup check's length");
+        // Whatever the compile planned is what the stage gets (no second figure).
+        assert_eq!(super::stage_tokens(&request(1000), &oracle()).unwrap(), 1000);
+    }
+    #[test]
+    fn a_context_that_cannot_hold_the_startup_check_is_refused_by_name() {
+        let challenge = super::challenge_tokens(&oracle()).unwrap();
+        assert_eq!(challenge, 39, "the recorded 35 prompt ids plus 4");
+        assert_eq!(
+            super::stage_tokens(&request(challenge as u64), &oracle()).unwrap(),
+            challenge
+        );
+        let refused = super::stage_tokens(&request(challenge as u64 - 1), &oracle())
+            .expect_err("the startup check does not fit");
+        assert!(
+            format!("{refused:?}").contains("startup_challenge_exceeds_context"),
+            "{refused:?}"
+        );
     }
 }
 

@@ -11,6 +11,10 @@ use planner::chain_compile::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+/// The oracle's `DEMO_CONTEXT_TOKENS` (model_resources.py:76 @ f4e366e9): the context every fixture
+/// case was computed with. The product reads the model contract's own figure.
+const ORACLE_CONTEXT_TOKENS: u64 = 4096;
+
 fn fixture() -> Value {
     serde_json::from_str(include_str!("fixtures/chain-compile.json")).unwrap()
 }
@@ -117,6 +121,9 @@ fn replay(name: &str, rec: &Value) -> Result<(), String> {
         source_representation: p["source_representation"].as_str().unwrap().into(),
         runtime_dtype: p["runtime_dtype"].as_str().unwrap().into(),
         runtime_quantization: p["runtime_quantization"].as_str().unwrap().into(),
+        // The oracle's `DEMO_CONTEXT_TOKENS` (model_resources.py:76), which its fixtures were
+        // computed with; the product reads it from the model contract.
+        serving_context_tokens: ORACLE_CONTEXT_TOKENS,
     };
     let policy = ChainPolicy::pinned();
     let context_members: Vec<Value> = i["context_members"].as_array().unwrap().clone();
@@ -539,4 +546,129 @@ fn compile_state_for_two_three_and_more_member_fleets_equals_the_oracle() {
         100,
     );
     assert!(feasible >= 100);
+}
+
+/// `prepare` over a recorded case's inputs with the model contract's serving context set to
+/// `context`: the compile's memory plan and its builder request, without the oracle comparison.
+fn prepare_case(rec: &Value, context: u64) -> Result<PreparedCompile, Refusal> {
+    let i = &rec["inputs"];
+    let nodes = strings(&i["nodes"]);
+    let local = i["local_node"].as_str();
+    let now = i["now"].as_f64().unwrap();
+    let grant = i["grant"].as_object().map(|g| GrantCaps {
+        storage_bytes: g.get("storage_bytes").and_then(Value::as_u64),
+        max_memory_bytes: g.get("max_memory_bytes").and_then(Value::as_u64),
+        max_wall_seconds: g.get("max_wall_seconds").and_then(Value::as_u64),
+    });
+    let device = &i["local_device"];
+    let local_record = local.map(|n| LocalRecord {
+        node_id: n,
+        memory_bytes: device["memory_bytes"].as_u64().unwrap(),
+        available_storage_bytes: device.get("available_storage_bytes"),
+        generation: &i["current_members"][n]["generation"],
+        grant: grant.clone(),
+        policy_storage_bytes: i["policy"]["storage_bytes"].as_u64(),
+    });
+    let records =
+        member_capability_records(&nodes, local_record.as_ref(), &i["joined_reports"], now);
+    let object = |v: &Value| -> BTreeMap<String, Value> {
+        v.as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    };
+    let (facts, current) = (object(&i["facts"]), object(&i["current_members"]));
+    let hosts = strings(&i["observation_hosts"]);
+    let p = &i["prepared"];
+    let model = ModelContract {
+        model_id: p["model_id"].as_str().unwrap().into(),
+        resolved_commit: p["resolved_commit"].as_str().unwrap().into(),
+        source_representation: p["source_representation"].as_str().unwrap().into(),
+        runtime_dtype: p["runtime_dtype"].as_str().unwrap().into(),
+        runtime_quantization: p["runtime_quantization"].as_str().unwrap().into(),
+        serving_context_tokens: context,
+    };
+    let policy = ChainPolicy::pinned();
+    let context_members: Vec<Value> = i["context_members"].as_array().unwrap().clone();
+    prepare(&PrepareInput {
+        owner_ready: i["owner_ready"].as_bool().unwrap(),
+        observation_hosts: Some(&hosts),
+        facts: &facts,
+        already_started: i["already_started"].as_bool().unwrap(),
+        resource_denied: i["resource_denied"].as_bool().unwrap(),
+        model: &model,
+        manifest_digest: p["manifest_digest"].as_str().unwrap(),
+        manifest: &p["manifest"],
+        source_bytes: p["source_bytes"].as_u64(),
+        context_members: &context_members,
+        current_members: &current,
+        records: Some(&records),
+        owner_node_id: local,
+        slice_staging: false,
+        slice_mode: i["slice_mode"].as_bool().unwrap(),
+        keys: &i["keys"],
+        deployment_id: i["deployment_id"].as_str().unwrap(),
+        epoch: i["epoch"].as_u64().unwrap(),
+        now,
+        policy: &policy,
+    })
+}
+
+/// Lane CAP (owner ruling 15 Nov): the compile charges every stage's KV memory for the MODEL
+/// CONTRACT's serving context, and its builder request carries that same figure to the stages, so a
+/// stage is prepared for exactly what the compile planned. At the oracle's 4,096 the compile state
+/// is the oracle's (every case above); at half of it, every planned stage's `kv_bytes` halves and
+/// the request names the half, which no figure pinned elsewhere in the planner could produce.
+#[test]
+fn the_compile_plans_and_requests_the_model_contracts_serving_context() {
+    let doc = fixture();
+    let mut checked = 0;
+    for (name, rec) in doc["cases"].as_object().unwrap() {
+        let a = &rec["inputs"]["adapter"];
+        if rec["build_calls"].as_array().unwrap().len() != 1
+            || a["block_build"] == true
+            || a["build_raises"] == true
+            || !rec["compile_state"]["resource_plan"]["members"].is_array()
+        {
+            continue;
+        }
+        let planned = rec["compile_state"]["resource_plan"]["members"]
+            .as_array()
+            .unwrap();
+        let Ok(at_oracle) = prepare_case(rec, ORACLE_CONTEXT_TOKENS) else {
+            continue;
+        };
+        assert_eq!(
+            at_oracle.request.serving_context_tokens, ORACLE_CONTEXT_TOKENS,
+            "{name}"
+        );
+        let half = prepare_case(rec, ORACLE_CONTEXT_TOKENS / 2)
+            .unwrap_or_else(|r| panic!("{name}: half the context refused {r:?}"));
+        assert_eq!(
+            half.request.serving_context_tokens,
+            ORACLE_CONTEXT_TOKENS / 2,
+            "{name}: the builder request carries the contract's context"
+        );
+        let out = BuildOutput {
+            operator_plan_digest: a["operator_plan_digest"].as_str().unwrap().into(),
+            physical_host_ids: strings(&a["physical_host_ids"]),
+            cache_hit: a["cache_hit"].as_bool().unwrap(),
+            build_seconds: a["build_seconds"].as_f64().unwrap(),
+            slice_plan_digest: Some(String::new()),
+            node_slice_plan_digests: Some(BTreeMap::new()),
+        };
+        let state = half.finish(&out);
+        let rows = state["resource_plan"]["members"].as_array().unwrap();
+        assert_eq!(rows.len(), planned.len(), "{name}");
+        for (row, oracle) in rows.iter().zip(planned) {
+            assert_eq!(
+                row["kv_bytes"].as_u64().unwrap() * 2,
+                oracle["kv_bytes"].as_u64().unwrap(),
+                "{name}: kv_bytes follows the contract's context: {row} vs {oracle}"
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 20, "only {checked} cases reached the builder");
 }

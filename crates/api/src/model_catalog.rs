@@ -21,6 +21,12 @@ const RESIDENT_FACTOR: (u128, u128) = (501, 1000);
 /// float32 KV element size (every registered contract).
 const KV_BYTES_PER_ELEMENT: u128 = 4;
 const DEMO_CONTEXT_TOKENS: u128 = 4096;
+/// The serving context of every registered model today, in tokens: one request's prompt plus its
+/// new tokens. v0.1.4's `DEMO_CONTEXT_TOKENS` (model_resources.py:72-76 @ f4e366e9: a 2,000-character
+/// prompt, a template under 100 tokens and 256 new tokens, rounded up to 4,096). Owner ruling 15 Nov:
+/// the stage capacity is this per-model setting; raising it is a contract value plus the memory
+/// consent that covers it, not a code change.
+const SERVING_CONTEXT_TOKENS: u64 = 4096;
 /// Largest guard limit a member may run under, as a share of its RAM.
 const MEMBER_PEAK_MEMORY_FRACTION: (u128, u128) = (3, 4);
 const MEMORY_CAP_CHOICES: [(u128, u128); 3] = [(1, 2), (5, 8), (3, 4)];
@@ -55,6 +61,8 @@ pub struct Model {
     pub resolved_commit: &'static str,
     shape: Shape,
     anchor: Option<Anchor>,
+    /// Tokens one request may hold on every stage (prompt plus new tokens).
+    serving_context_tokens: u64,
 }
 
 /// `serving.REGISTERED_MODELS` order: candidate, A9 route, Qwen3 0.6B / 8B / 14B.
@@ -82,6 +90,7 @@ static REGISTERED: [Model; 5] = [
             member_disk_bytes: 11_297_336_366,
             owner_storage_bytes: 23_052_975_062,
         }),
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen2.5-0.5B-Instruct",
@@ -102,6 +111,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-0.6B",
@@ -122,6 +132,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: true,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-8B",
@@ -142,6 +153,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-14B",
@@ -162,6 +174,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
 ];
 
@@ -173,6 +186,11 @@ impl Model {
     /// `ModelContract.architecture` (`_MODEL_ARCHITECTURES`, default `qwen2`).
     pub fn architecture(&self) -> &'static str {
         crate::serving_source::architecture(self)
+    }
+    /// The serving context of this model's contract, in tokens: the one source the compile's
+    /// memory plan, every stage's prepare and the route's refusal read.
+    pub fn serving_context_tokens(&self) -> u64 {
+        self.serving_context_tokens
     }
 }
 /// `run_model.choice_for_model(model).name`: the picker choice that pins this model (the 7B candidate has none).
