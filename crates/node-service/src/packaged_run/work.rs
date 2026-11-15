@@ -92,7 +92,50 @@ fn check_stage_memory(
     records: Option<&Value>,
     tokens: usize,
 ) -> Result<(), StepError> {
-    let _ = (request, records, tokens);
+    use crate::native_selection::{Profile, stage_reservation};
+    let total = request
+        .managed_layer_ranges
+        .iter()
+        .map(|r| r[1])
+        .max()
+        .and_then(|end| u32::try_from(end).ok())
+        .ok_or_else(|| refused("compiler_run_changed"))?;
+    let context = u32::try_from(tokens).map_err(|_| refused("model_serving_context_invalid"))?;
+    for (node, range) in request.node_ids.iter().zip(&request.managed_layer_ranges) {
+        let Some(consent) = records
+            .and_then(|r| r[node.as_str()]["caps"]["max_memory_bytes"].as_u64())
+        else {
+            continue;
+        };
+        let (start, end) = (
+            u32::try_from(range[0]).map_err(|_| refused("compiler_run_changed"))?,
+            u32::try_from(range[1]).map_err(|_| refused("compiler_run_changed"))?,
+        );
+        let needed = stage_reservation(
+            &request.model_id,
+            Profile::PackedInt8,
+            start..end,
+            total,
+            context,
+        )
+        .map_err(|e| {
+            eprintln!("stage_reservation_refused:{e}");
+            refused("native_stage_unsupported")
+        })?;
+        if needed > consent {
+            let message = format!(
+                "Mac {node} consents to {consent} bytes of memory, but its stage (layers {start}-{}) \
+                 needs {needed} bytes for the model's {context}-token serving context",
+                end - 1
+            );
+            return Err(owner_run::OwnerRunError::with(
+                "stage_memory_consent_below_context",
+                Some(&message),
+                None,
+            )
+            .into());
+        }
+    }
     Ok(())
 }
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
@@ -366,6 +409,7 @@ impl Work {
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
             let tokens = stage_tokens(request, &oracle)?;
+            check_stage_memory(request, state.member_records.as_ref(), tokens)?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
