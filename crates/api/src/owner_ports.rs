@@ -340,9 +340,12 @@ pub fn renew_contributor<H: RunHost>(host: &H) {
             random_hex: &random_hex,
             seed: &options,
         };
-        if let Err(error) = crate::peer::renew(&dir, true, Some(&mut session), &env) {
-            eprintln!("contributor renew: {}", error.code);
-            refused = crate::renewal::membership_refused(error.code).then_some(error.code);
+        if let Err(failure) = crate::peer::renew_with_origin(&dir, true, Some(&mut session), &env)
+        {
+            eprintln!("contributor renew: {}", failure.error.code);
+            // Only the seed's own refusal keeps the Session out (FLK2-02); a code raised on this
+            // Mac (a lease the local wall clock reads as past) puts it back, as at the base.
+            refused = crate::renewal::membership_refused(&failure).then_some(failure.error.code);
         }
     }
     flight.land(session, refused);

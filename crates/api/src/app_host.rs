@@ -1041,17 +1041,19 @@ pub fn renew_member(cell: &impl Cell) {
                 random_hex: &random_hex,
                 seed: &options,
             };
-            crate::peer::renew(&root, true, Some(&mut session), &env)
+            crate::peer::renew_with_origin(&root, true, Some(&mut session), &env)
         }
-        Err(error) => Err(error),
+        Err(error) => Err(crate::renewal::Failure::local(error)),
     };
-    if let Err(error) = &renewed {
-        eprintln!("member renew: {}", error.code);
+    if let Err(failure) = &renewed {
+        eprintln!("member renew: {}", failure.error.code);
     }
+    // Only the seed's own refusal keeps the Session out (FLK2-02); a code raised on this Mac (a
+    // lease the local wall clock reads as past) puts it back, as at the base.
     let refused = renewed
         .as_ref()
         .err()
-        .is_some_and(|error| crate::renewal::membership_refused(error.code));
+        .is_some_and(crate::renewal::membership_refused);
     flight.land(session, refused, renewed.is_ok());
 }
 /// A joined target's renewal flight, owned by [`renew_member`] from its take to its put-back
