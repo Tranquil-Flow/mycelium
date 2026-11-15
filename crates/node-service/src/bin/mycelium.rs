@@ -5,7 +5,8 @@
 //! window over SLICE-1's node service. The same executable is the node's member / owner-leaf
 //! worker: the owner re-executes `current_exe()` with `member|owner-leaf <launch> <state>`,
 //! and each worker passes the same admission first. The member agent re-executes it once more as
-//! `native-worker` (the compute child, RU-020).
+//! `native-worker` (the compute child, RU-020), and the run's route codec as
+//! `tokenize <tokenizer.json>` (the tokenizer helper, `api::joined_owner::codec::NativeCodec`).
 //!
 //! No probe, script or dev flag exists here. `qualification-probe` (test builds only) swaps
 //! the final window call for one that carries the chat-driver script.
@@ -75,6 +76,14 @@ fn native_worker() -> Result<(), String> {
     package::admit_worker(&manifest()?)?;
     node_service::native::native_worker().map_err(|e| format!("worker:{e}"))
 }
+/// The route codec's tokenizer helper (lane BND, REPORT-laneTEN D1): `tokenize <tokenizer.json>`,
+/// the line protocol on stdin/stdout `mycelium-node tokenize` serves. The packaged run starts it
+/// with the admitted program (`PinnedCodec` -> `NativeCodec::start`), which in a bundle is this
+/// executable; the same admission as every other worker role precedes the tokenizer load.
+fn tokenize(tokenizer: &str) -> Result<(), String> {
+    package::admit_worker(&manifest()?)?;
+    node_service::tokenize::serve(Path::new(tokenizer)).map_err(|e| format!("tokenize:{e}"))
+}
 fn run() -> Result<(), String> {
     let manifest = manifest()?;
     let budget = desktop::lifecycle::quit_allowance().map_err(|e| format!("budget:{e:?}"))?;
@@ -121,6 +130,8 @@ fn main() -> ExitCode {
         Some(worker(&argv))
     } else if argv.len() == 2 && argv[1] == "native-worker" {
         Some(native_worker())
+    } else if argv.len() == 3 && argv[1] == "tokenize" {
+        Some(tokenize(&argv[2]))
     } else {
         None
     };
