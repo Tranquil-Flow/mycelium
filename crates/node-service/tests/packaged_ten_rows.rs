@@ -782,9 +782,8 @@ fn measure_chats(mac: &Mac, ev: &Evidence, run: &str, binary: &Path) {
             break (last, pieces);
         };
         let ttft = pieces.first().map(|p| p.1);
-        let per_token = (pieces.len() > 1).then(|| {
-            (pieces.last().unwrap().1 - pieces[0].1) as f64 / (pieces.len() - 1) as f64
-        });
+        let per_token = (pieces.len() > 1)
+            .then(|| (pieces.last().unwrap().1 - pieces[0].1) as f64 / (pieces.len() - 1) as f64);
         let completed = last["terminal"] == "completed";
         ev.note(
             "measure_chat",
@@ -803,7 +802,10 @@ fn measure_chats(mac: &Mac, ev: &Evidence, run: &str, binary: &Path) {
             return;
         }
     }
-    ev.note("measure_end", json!({"after_chats": n, "all_completed": true}));
+    ev.note(
+        "measure_end",
+        json!({"after_chats": n, "all_completed": true}),
+    );
 }
 
 // ---------------------------------------------------------------- the gate -----------------

@@ -421,9 +421,10 @@ impl Work {
                         .flatten()
                         .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
                 } else {
-                    state.member_records.as_ref().and_then(|r| {
-                        r[node]["caps"]["max_memory_bytes"].as_u64()
-                    })
+                    state
+                        .member_records
+                        .as_ref()
+                        .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
                 }
             };
             check_stage_memory(request, &consent, tokens)?;
@@ -1109,9 +1110,15 @@ mod stage_tokens_tests {
         assert_eq!(contract.serving_context_tokens, 4096);
         let tokens = super::stage_tokens(&request(contract.serving_context_tokens), &oracle())
             .expect("the startup check fits the context");
-        assert_eq!(tokens, 4096, "the contract's context, not the startup check's length");
+        assert_eq!(
+            tokens, 4096,
+            "the contract's context, not the startup check's length"
+        );
         // Whatever the compile planned is what the stage gets (no second figure).
-        assert_eq!(super::stage_tokens(&request(1000), &oracle()).unwrap(), 1000);
+        assert_eq!(
+            super::stage_tokens(&request(1000), &oracle()).unwrap(),
+            1000
+        );
     }
     #[test]
     fn a_context_that_cannot_hold_the_startup_check_is_refused_by_name() {
@@ -1198,7 +1205,11 @@ mod stage_memory_tests {
     fn a_stage_whose_consent_cannot_cover_the_context_is_refused_by_name_at_slices() {
         let owner_first = request([[0, 19], [19, 28]]);
         assert_eq!(
-            code(check(&owner_first, &records(Some(OWNER), Some(JOINED)), 4096)),
+            code(check(
+                &owner_first,
+                &records(Some(OWNER), Some(JOINED)),
+                4096
+            )),
             "stage_memory_consent_below_context"
         );
         let mut swapped = request([[19, 28], [0, 19]]);
@@ -1214,7 +1225,11 @@ mod stage_memory_tests {
             "ok"
         );
         assert_eq!(
-            code(check(&owner_first, &records(Some(JOINED), Some(JOINED)), 4096)),
+            code(check(
+                &owner_first,
+                &records(Some(JOINED), Some(JOINED)),
+                4096
+            )),
             "ok"
         );
         // No cap in the record: the stage's own prepare is the check.
