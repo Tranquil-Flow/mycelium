@@ -85,11 +85,11 @@ fn stage_tokens(
 /// context (`native_selection::stage_reservation`, the figure the stage's prepare holds against
 /// `max_memory_bytes`). Known as soon as the compile assigned the ranges, so a consent that cannot
 /// cover it is refused here, at the slices step, by name and before any shard is pushed, never at
-/// the stage's prepare or the first chat. A member whose record carries no memory cap is left to
-/// its own prepare's check.
+/// the stage's prepare or the first chat. `consent(node)` is the memory the stage's own prepare
+/// will hold the worker to; a node without one is left to that prepare's check.
 fn check_stage_memory(
     request: &planner::chain_compile::BuildRequest,
-    records: Option<&Value>,
+    consent: &dyn Fn(&str) -> Option<u64>,
     tokens: usize,
 ) -> Result<(), StepError> {
     use crate::native_selection::{Profile, stage_reservation};
@@ -102,9 +102,7 @@ fn check_stage_memory(
         .ok_or_else(|| refused("compiler_run_changed"))?;
     let context = u32::try_from(tokens).map_err(|_| refused("model_serving_context_invalid"))?;
     for (node, range) in request.node_ids.iter().zip(&request.managed_layer_ranges) {
-        let Some(consent) = records
-            .and_then(|r| r[node.as_str()]["caps"]["max_memory_bytes"].as_u64())
-        else {
+        let Some(consent) = consent(node) else {
             continue;
         };
         let (start, end) = (
@@ -409,7 +407,26 @@ impl Work {
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
             let tokens = stage_tokens(request, &oracle)?;
-            check_stage_memory(request, state.member_records.as_ref(), tokens)?;
+            // The memory each stage's prepare holds its worker to (`NativeShard::memory_limit`):
+            // the owner's own stage, its contributor's standing grant (the compile's records
+            // carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's, its signed
+            // report's caps (`joined_member::planning_caps` = its standing consent).
+            let contributor = self
+                .host
+                .with(|c| owner_ports::contributor_dir(&c.authority.root));
+            let consent = |node: &str| {
+                if state.local_node.as_deref() == Some(node) {
+                    api::preferences::standing_consent::load(&contributor)
+                        .ok()
+                        .flatten()
+                        .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
+                } else {
+                    state.member_records.as_ref().and_then(|r| {
+                        r[node]["caps"]["max_memory_bytes"].as_u64()
+                    })
+                }
+            };
+            check_stage_memory(request, &consent, tokens)?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
@@ -1140,6 +1157,17 @@ mod stage_memory_tests {
         let caps = |m: Option<u64>| m.map_or(json!({}), |m| json!({"max_memory_bytes": m}));
         json!({"owner": {"caps": caps(owner)}, "joined": {"caps": caps(joined)}})
     }
+    fn check(
+        request: &planner::chain_compile::BuildRequest,
+        records: &Value,
+        tokens: usize,
+    ) -> Result<(), StepError> {
+        check_stage_memory(
+            request,
+            &|node| records[node]["caps"]["max_memory_bytes"].as_u64(),
+            tokens,
+        )
+    }
     fn code(result: Result<(), StepError>) -> String {
         match result {
             Ok(()) => "ok".into(),
@@ -1170,28 +1198,28 @@ mod stage_memory_tests {
     fn a_stage_whose_consent_cannot_cover_the_context_is_refused_by_name_at_slices() {
         let owner_first = request([[0, 19], [19, 28]]);
         assert_eq!(
-            code(check_stage_memory(&owner_first, Some(&records(Some(OWNER), Some(JOINED))), 4096)),
+            code(check(&owner_first, &records(Some(OWNER), Some(JOINED)), 4096)),
             "stage_memory_consent_below_context"
         );
         let mut swapped = request([[19, 28], [0, 19]]);
         swapped.node_ids = vec!["joined".into(), "owner".into()];
         assert_eq!(
-            code(check_stage_memory(&swapped, Some(&records(Some(OWNER), Some(JOINED))), 4096)),
+            code(check(&swapped, &records(Some(OWNER), Some(JOINED)), 4096)),
             "stage_memory_consent_below_context",
             "the owner's 9 layers at 4,096 (5.99 GB) do not fit 4 GB either"
         );
         // The startup check's own 39 tokens fit both, and a joined Mac's 8 GiB covers either range.
         assert_eq!(
-            code(check_stage_memory(&owner_first, Some(&records(Some(OWNER), Some(JOINED))), 39)),
+            code(check(&owner_first, &records(Some(OWNER), Some(JOINED)), 39)),
             "ok"
         );
         assert_eq!(
-            code(check_stage_memory(&owner_first, Some(&records(Some(JOINED), Some(JOINED))), 4096)),
+            code(check(&owner_first, &records(Some(JOINED), Some(JOINED)), 4096)),
             "ok"
         );
         // No cap in the record: the stage's own prepare is the check.
         assert_eq!(
-            code(check_stage_memory(&owner_first, Some(&records(None, Some(JOINED))), 4096)),
+            code(check(&owner_first, &records(None, Some(JOINED)), 4096)),
             "ok"
         );
     }
