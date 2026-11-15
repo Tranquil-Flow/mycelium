@@ -210,6 +210,16 @@ pub fn find(model_id: &str, resolved_commit: &str) -> Option<&'static Model> {
         .iter()
         .find(|m| m.model_id == model_id && m.resolved_commit == resolved_commit)
 }
+/// The serving context of the registered contract with this model id (ids are unique in the
+/// catalog), for a reader that knows only the run's model id (the chat page's `limits`).
+pub fn serving_context_for(model_id: &str) -> Option<u64> {
+    let mut matching = REGISTERED.iter().filter(|m| m.model_id == model_id);
+    let model = matching.next()?;
+    matching
+        .next()
+        .is_none()
+        .then_some(model.serving_context_tokens)
+}
 /// `serving._RUN_MODEL_NAMES`: the environment override accepts `candidate` as well.
 pub fn by_run_model_name(name: &str) -> Option<&'static Model> {
     let index = match name {
