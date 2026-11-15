@@ -370,3 +370,56 @@ fn ready_for_slices(state: &mut RunState) {
         },
     });
 }
+
+/// Lane FLK, rows 6 and 7 `control_connect_timeout` (gate9 run 2: one at the start of the joined
+/// Mac's transfer, `owner_work_failed: control_call_failed:control_connect_timeout`; mut3: every
+/// result poll of the joined Mac's `prepare_native` for 280 s). In both runs, and in no passing
+/// run, the joined Mac started a NEW member work service during the step
+/// (`l11_work_network:... role=member_work` between compile and the failure): its old one, whose
+/// control and carrier addresses the owner verified when the run composed, was closed, so every
+/// later owner call dialled an address nothing accepts on any more.
+///
+/// The joined Mac's renewal loop (every 20 s) takes its Session out for one seed heartbeat
+/// (`app_host::renew_member`, `session.take()` + `session_view`). Its standing pass (every 2 s)
+/// reads the acceptor context's membership binding from that live Session only
+/// (`packaged_network.rs` `accept_context` -> `app_host::membership_binding`), finds none, and
+/// closes the work service (`member_agent.rs` "let Some(binding) = &context.binding else {
+/// host.close_work(); return; }"), silently. The next pass starts a new one at a new address.
+/// A standing pass during the joined Mac's renewal must not end the run's work.
+#[test]
+fn a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service() {
+    let mut f = Fixture::new();
+    let (mut ports, mut state, mut env) = composed(&mut f);
+    // `app_host::renew_member`'s flight on the joined Mac, exactly: Session out, its view kept.
+    let session = {
+        let mut a = lock(&f.member_authority);
+        let session = a.session.take().expect("the joined Mac is a member");
+        a.session_view = Some((session.generation(), session.lease_expires_at()));
+        session
+    };
+    f.agent.tick(&f.member);
+    {
+        let mut a = lock(&f.member_authority);
+        a.session_view = None;
+        a.session = Some(session);
+    }
+    f.network.sync_work_session(&f.member_authority);
+    // The standing loop's next pass, after the renewal (as on the gate's joined Mac).
+    f.agent.tick(&f.member);
+    let slices = ports.slices();
+    let outcome = owner_run::steps::slices::run_slices_step(
+        &mut env,
+        slices.reports,
+        slices.slices,
+        &mut state,
+        span(BudgetId::OwnerPoll).unwrap().as_secs_f64(),
+    );
+    let flow = ports.work.workflow_state().unwrap_or(Value::Null);
+    let closed = ports.close_work();
+    assert!(
+        outcome.is_ok(),
+        "the push to the members failed after the joined Mac's standing pass during its renewal: \
+         {outcome:?}; workflow error {}; close {closed:?}",
+        flow["error_code"]
+    );
+}

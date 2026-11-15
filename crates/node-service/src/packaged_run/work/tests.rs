@@ -110,6 +110,9 @@ struct Fixture {
     host: PackagedRun,
     network: Arc<Network>,
     member: Arc<PackagedMember>,
+    /// The joined Mac's authority (lane FLK: its renewal flight is reproduced on it; `network`
+    /// above is the joined Mac's network).
+    member_authority: Arc<Mutex<Authority>>,
     agent: MemberAgent<PackagedMember>,
     remote: String,
 }
@@ -231,8 +234,9 @@ impl Fixture {
                 ..Default::default()
             },
         );
+        let member_authority = Arc::new(Mutex::new(authority));
         let member = PackagedMember::new(
-            Arc::new(Mutex::new(authority)),
+            member_authority.clone(),
             network.clone(),
             MemberSeams {
                 closed: Box::new(|| false),
@@ -248,6 +252,7 @@ impl Fixture {
             host,
             network,
             member,
+            member_authority,
             agent: MemberAgent::default(),
             remote,
         }
