@@ -839,13 +839,11 @@ impl<H: RunHost> ReportsPort for OwnerPorts<H> {
             })
             .collect()
     }
+    /// The owner's authority node, from where it is stable: `owner_node` is recorded with the owner's
+    /// membership, not read from `owner_session`, which `app_host::renew_owner` takes out for every
+    /// heartbeat (lane FLK, FLK-03: the owner's row then counted as a joined Mac).
     fn own_node_id(&mut self) -> Option<String> {
-        self.host.with(|c| {
-            c.authority
-                .owner_session
-                .as_ref()
-                .map(|s| s.node_id().to_owned())
-        })
+        self.host.with(|c| c.authority.owner_node.clone())
     }
     fn member_identity(&mut self, node: &str) -> Value {
         let member = self

@@ -578,6 +578,10 @@ pub struct Authority<M: ManagedSlot = Unmanaged> {
     pub seed: Option<Arc<SeedRuntime<M>>>,
     /// The owner's own live membership (`DemoAuthority.member`), renewed by `DemoApp._renew_loop`.
     pub owner_session: Option<crate::member::Session>,
+    /// The node id of `owner_session`, kept while the renewal has that Session out on the wire: it
+    /// is set and cleared only with the membership itself (seed start, join, stop), never by a
+    /// renewal, so the owner's own node is known during a heartbeat (lane FLK, FLK-03).
+    pub owner_node: Option<String>,
     /// `RemoteMacMember._member`: the live membership session a first acceptance leaves.
     pub session: Option<crate::member::Session>,
     /// `(generation, lease_expires_at)` of `session` while the renewal loop has it out on the wire, so the
@@ -653,6 +657,7 @@ impl<M: ManagedSlot> Authority<M> {
             windows: Arc::new(PairingWindows::system()),
             seed: None,
             owner_session: None,
+            owner_node: None,
             recorded: crate::app_status::Recorded::default(),
         })
     }
@@ -862,12 +867,17 @@ pub fn open_owner_seed(cell: &impl Cell) -> Result<(), PublicError> {
     }
     cell.try_with(|c| {
         c.seed = Some(runtime);
+        c.owner_node = owner_node(started.session.as_ref());
         c.owner_session = started.session;
         c.running = true;
     })
     .ok_or_else(failure)
 }
 
+/// The owner's own node id, recorded beside the owner's Session when it is installed.
+fn owner_node(session: Option<&crate::member::Session>) -> Option<String> {
+    session.map(|s| s.node_id().to_owned())
+}
 /// `authority.status().get('swarm_created')`.
 pub fn swarm_created(cell: &impl Cell) -> bool {
     cell.with(|c| c.owner_authority().is_some())
@@ -903,6 +913,7 @@ pub fn stop_authority(cell: &impl Cell) {
     let seed = cell.with(|c| {
         c.running = false;
         c.owner_session = None;
+        c.owner_node = None;
         c.seed.take()
     });
     if let Some(seed) = seed {
@@ -1184,6 +1195,7 @@ fn join_own_swarm(
 ) -> Result<Json, PublicError> {
     let session = owner_collapse(root, runtime, swarm_id, storage)?;
     cell.with(|c| {
+        c.owner_node = owner_node(session.as_ref());
         c.owner_session = session;
         c.running = true;
         Ok(c.owner_authority()
