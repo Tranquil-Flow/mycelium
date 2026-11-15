@@ -436,7 +436,22 @@ fn control_loop_inner(
     );
     let mut last = 0u64;
     let mut admitted: Option<iroh::EndpointId> = None;
+    // Direct LAN: the receive filter's drops and the pre-send filter's refusals, reported when
+    // they change (an owner Initial dropped before iroh is a connect that can only time out).
+    let mut filtered = (0u64, 0u64);
     while !stop.load(Ordering::SeqCst) {
+        if let (Some(dropped), Some(refused)) =
+            (host.lan_dropped_datagrams(), host.lan_refused_datagrams())
+            && (dropped, refused) != filtered
+        {
+            eprintln!(
+                "member_control_filter endpoint={short} dropped_in={dropped} (+{}) refused_out={refused} (+{}) learned={:?}",
+                dropped.saturating_sub(filtered.0),
+                refused.saturating_sub(filtered.1),
+                host.lan_learned_hosts()
+            );
+            filtered = (dropped, refused);
+        }
         // Direct LAN: the transport admits only the announced key; a new pin replaces it. A
         // cleared pin keeps the last key at the transport while no command is admitted.
         if let OwnerTrust::Announced(_) = trust

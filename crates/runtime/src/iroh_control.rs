@@ -119,6 +119,9 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
                     failed=>{
                         let code=if failed.is_err() {"control_connect_timeout"} else {"control_connect_failed"};
                         connect_failure(code,endpoint,request.peer,call,began.elapsed(),connecting.elapsed(),wait);
+                        if let (Some(dropped),Some(refused))=(self.host.lan_dropped_datagrams(),self.host.lan_refused_datagrams()) {
+                            eprintln!("{code} target={} lan_filter dropped_in={dropped} refused_out={refused} learned={:?}",request.peer.id.fmt_short(),self.host.lan_learned_hosts());
+                        }
                         return Err(ControlError(code));
                     }
                 };
