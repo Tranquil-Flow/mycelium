@@ -835,14 +835,16 @@ fn a_joined_renewal_the_seed_refuses_ends_the_binding_at_once() {
     );
 }
 
-/// Lane FLK patch 2, FLK-02: a contributor renewal that outlives its deadline (its thread slow or
-/// stuck past the renewal's own request allowance, `api::renewal::allowance`) counts as lost. The
-/// flight is held at its put-back and its deadline is aged to now (a clock read, not a sleep):
-/// before the deadline the registration stands on the snapshot; after it the registration refuses
-/// as at the base and the local admission holds no snapshot; the late put-back of that same
-/// flight still lands, and the registration succeeds again.
+/// Lane FLK patch 2, FLK-02, as patch 3 (FLK2-01) restates it: a contributor renewal that outlives
+/// its deadline (its thread slow or stuck past the renewal's own request allowance,
+/// `api::renewal::allowance`) no longer stands in for the REGISTRATION. The flight is held at its
+/// put-back and its deadline is aged to now (a clock read, not a sleep): before the deadline the
+/// registration stands on the snapshot; after it the registration refuses as at the base, while
+/// the resident admission cell keeps the lease-bounded snapshot as the base kept it (the flight is
+/// still recorded: neither landed nor unwound nor refused); the late put-back of that same flight
+/// still lands, and the registration succeeds again.
 #[test]
-fn a_contributor_renewal_past_its_deadline_leaves_no_snapshot_in_use() {
+fn a_contributor_renewal_past_its_deadline_refuses_the_registration_and_keeps_the_resident_cell() {
     let mut f = Fixture::new();
     let (mut ports, _state, _env) = composed(&mut f);
     let network = ports.work.run_network();
@@ -865,7 +867,7 @@ fn a_contributor_renewal_past_its_deadline_leaves_no_snapshot_in_use() {
     let after = ports.work.local(&network);
     let closed = ports.close_work();
     assert!(
-        code(&during) == "ok" && code(&overdue) == "member_work_renewing" && !held
+        code(&during) == "ok" && code(&overdue) == "member_work_renewing" && held
             && code(&after) == "ok",
         "in flight {}, past its deadline {} (snapshot held {held}), after the late put-back {} \
          (close {closed:?})",
