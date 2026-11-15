@@ -944,3 +944,78 @@ fn a_late_contributor_put_back_never_overwrites_a_newer_flight() {
          the new one (Session in, no flight) {landed:?}"
     );
 }
+
+/// The owner's authority as `app_host::renew_owner` sees it (the owner's renewal loop runs it over
+/// the authority's own lock), meeting `gate` on the first acquisition while its `owner_session` is
+/// out: its put-back.
+struct HeldOwner {
+    authority: Arc<Mutex<Authority>>,
+    gate: Arc<Gate>,
+}
+impl HeldOwner {
+    fn meet_at_put_back(&self) {
+        let out = {
+            let a = lock(&self.authority);
+            a.owner_session.is_none() && a.seed.is_some()
+        };
+        if out {
+            self.gate.meet();
+        }
+    }
+}
+impl app_host::Cell for HeldOwner {
+    type Managed = crate::packaged_run::Managed;
+    fn with<R>(&self, f: impl FnOnce(&mut app_host::HostView<'_, Self::Managed>) -> R) -> R {
+        self.meet_at_put_back();
+        app_host::Cell::with(&*self.authority, f)
+    }
+    fn try_with<R>(
+        &self,
+        f: impl FnOnce(&mut app_host::HostView<'_, Self::Managed>) -> R,
+    ) -> Option<R> {
+        self.meet_at_put_back();
+        app_host::Cell::try_with(&*self.authority, f)
+    }
+}
+
+/// Lane FLK patch 2, FLK-03. The owner's authority renews its own membership every 20 s
+/// (`app_host::renew_owner` takes `owner_session` out for one heartbeat). The run's reports answer
+/// the owner's own node from that slot (`OwnerPorts::own_node_id`), so during the heartbeat they
+/// answer none and `exchange::remote_members` no longer excludes the owner's authority row: the
+/// descriptors step expects a phantom joined Mac (`descriptors.rs:391`) and a rollover's member
+/// check answers `rollover_members_changed` (`exchange.rs:124-151`). With the owner's renewal held
+/// at its put-back, the joined Macs are exactly the real one and the rollover binding still holds.
+#[test]
+fn the_owners_own_node_is_no_joined_mac_while_the_owners_authority_renews() {
+    use owner_run::steps::exchange::{check_rollover_members, remote_members};
+    let mut f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let state = run_state(&mut f, &ports);
+    let local = state.local_node.clone().unwrap();
+    let wall = app_host::now();
+    let before = remote_members(&mut ports.reports, &local, wall);
+    // The rollover binding as the descriptors step records it (`descriptors.rs:503-510`).
+    let mut members = Map::new();
+    for node in [&local, &f.remote] {
+        members.insert(node.clone(), ports.reports.member_identity(node));
+    }
+    let binding = json!({"members": members});
+    let (gate, at_gate, release) = Gate::new(AtPutBack::Hold);
+    let held = HeldOwner {
+        authority: f.host.authority.clone(),
+        gate,
+    };
+    let renewal = std::thread::spawn(move || app_host::renew_owner(&held));
+    at_gate
+        .recv_timeout(gate_bound())
+        .expect("the owner's renewal took its Session and reached its put-back");
+    let during = remote_members(&mut ports.reports, &local, wall);
+    let rollover = check_rollover_members(&mut ports.reports, &local, wall, &binding);
+    release.send(()).unwrap_or(());
+    renewal.join().expect("the owner's renewal pass returned");
+    assert!(
+        before == vec![f.remote.clone()] && during == before && rollover.is_ok(),
+        "joined Macs before {before:?}, during the owner's renewal {during:?}; rollover check \
+         {rollover:?}"
+    );
+}
