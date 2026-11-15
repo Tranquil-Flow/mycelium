@@ -76,6 +76,8 @@ pub struct NetworkConfig {
     /// time a work service or an owner run starts ([`crate::packaged_work::WorkNetwork::ThisMac`]);
     /// a test or caller that passes a [`crate::packaged_work::WorkNetwork::Fixed`] choice keeps it.
     pub work_network: crate::packaged_work::WorkNetwork,
+    /// The stage-worker program the composition admitted (lane BND).
+    pub native_program: Option<api::native_compiler::NativeProgram>,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -87,6 +89,7 @@ impl Default for NetworkConfig {
             sidecar: None,
             device_memory_bytes: None,
             work_network: crate::packaged_work::WorkNetwork::default(),
+            native_program: None,
         }
     }
 }

@@ -23,6 +23,8 @@ mod process;
 mod route_process;
 #[path = "support/sse_client.rs"]
 mod sse_client;
+#[path = "support/stage_program.rs"]
+mod stage_program;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Pair {
     root: PathBuf,
@@ -746,4 +748,128 @@ fn owner_admission_refuses_a_member_key_claim_the_seed_row_does_not_hold() {
     }
     seed.close();
     fs::remove_dir_all(&root).unwrap();
+}
+
+/// Lane BND (REPORT-laneTEN D2, review F2): a custody given the composition's admitted program
+/// launches THAT program, while the development variables name another valid, pinned executable.
+#[test]
+fn the_stage_program_is_the_admitted_one_whatever_the_environment_names() {
+    let dir = stage_program::scratch("explicit");
+    let environment = stage_program::script(&dir, "environment");
+    stage_program::script(&dir, "admitted");
+    let launched = stage_program::run_child("stage_program_child", "explicit", &dir, &environment);
+    assert_eq!(launched, ["admitted"], "exactly the admitted program ran once");
+    fs::remove_dir_all(&dir).unwrap();
+}
+/// Lane BND: the admitted program keeps its pin. Bytes that changed after admission refuse
+/// `native_binary_changed` before any launch (neither program runs).
+#[test]
+fn an_admitted_stage_program_whose_bytes_changed_refuses_before_launch() {
+    let dir = stage_program::scratch("changed");
+    let environment = stage_program::script(&dir, "environment");
+    stage_program::script(&dir, "admitted");
+    let launched = stage_program::run_child("stage_program_child", "changed", &dir, &environment);
+    assert!(launched.is_empty(), "nothing may launch: {launched:?}");
+    fs::remove_dir_all(&dir).unwrap();
+}
+/// Lane BND: bytes that never matched the pin (an unadmitted binary) refuse the same way.
+#[test]
+fn an_unadmitted_stage_program_refuses_before_launch() {
+    let dir = stage_program::scratch("unadmitted");
+    let environment = stage_program::script(&dir, "environment");
+    stage_program::script(&dir, "admitted");
+    let launched =
+        stage_program::run_child("stage_program_child", "unadmitted", &dir, &environment);
+    assert!(launched.is_empty(), "nothing may launch: {launched:?}");
+    fs::remove_dir_all(&dir).unwrap();
+}
+/// Lane BND: a composition with no admitted program refuses `native_binary_pin_required`; the
+/// environment is never consulted in its place.
+#[test]
+fn no_admitted_stage_program_refuses_and_never_reads_the_environment() {
+    let dir = stage_program::scratch("none");
+    let environment = stage_program::script(&dir, "environment");
+    let launched = stage_program::run_child("stage_program_child", "none", &dir, &environment);
+    assert!(launched.is_empty(), "nothing may launch: {launched:?}");
+    fs::remove_dir_all(&dir).unwrap();
+}
+#[test]
+#[ignore = "child of the *_stage_program_* tests (development variables set)"]
+fn stage_program_child() {
+    let case = std::env::var(stage_program::CASE).unwrap();
+    let dir = PathBuf::from(std::env::var_os(stage_program::DIR).unwrap());
+    let admitted = dir.join("admitted");
+    let program = match case.as_str() {
+        "none" => None,
+        "unadmitted" => {
+            let mut program = stage_program::admitted(&admitted);
+            program.expected.sha256 = stage_program::sha256(&dir.join("environment"));
+            Some(program)
+        }
+        _ => Some(stage_program::admitted(&admitted)),
+    };
+    let p = Pair::new();
+    let offer = p.offer();
+    let mut shard = joined_shard::JoinedShard::begin(
+        &p.member_root,
+        &p.session,
+        &p.signer,
+        &p.carrier,
+        &offer,
+        app_host::now(),
+    )
+    .unwrap();
+    let (_, _, bytes) = p.material();
+    shard
+        .write_chunk(
+            0,
+            &bytes,
+            &p.session,
+            &p.signer,
+            &p.carrier,
+            app_host::now(),
+        )
+        .unwrap();
+    shard
+        .verify(&p.session, &p.signer, &p.carrier, &app_host::now)
+        .unwrap();
+    let mut native = joined_shard::native::NativeShard::try_with_program(shard, program)
+        .map_err(|refused| refused.0)
+        .unwrap();
+    if case == "changed" {
+        // Same length and mode, other bytes: only the hash can tell.
+        let text = fs::read_to_string(&admitted).unwrap().replace("exit 3", "exit 4");
+        fs::write(&admitted, text).unwrap();
+    }
+    let error = native
+        .prepare(
+            [0, 14],
+            64,
+            "00112233445566778899aabbccddeeff",
+            &p.signer,
+            &|| {
+                p.session
+                    .shard_identity(&p.signer, app_host::now())
+                    .map_err(|_| api::compiler_inputs::Error("test_member_invalid"))
+            },
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            &p.root,
+        )
+        .unwrap_err();
+    eprintln!("stage program case {case} refused: {}", error.0);
+    match case.as_str() {
+        "explicit" => assert!(
+            !matches!(
+                error.0,
+                "native_binary_pin_required" | "native_binary_changed" | "native_path_invalid"
+            ),
+            "the admitted program was not launched: {}",
+            error.0
+        ),
+        "changed" | "unadmitted" => assert_eq!(error.0, "native_binary_changed"),
+        "none" => assert_eq!(error.0, "native_binary_pin_required"),
+        other => panic!("unknown case {other}"),
+    }
+    assert_eq!(native.worker_pid(), None, "no live worker remains");
+    native.discard().unwrap();
 }

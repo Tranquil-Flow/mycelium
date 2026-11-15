@@ -9,6 +9,7 @@ mod serving_q;
 mod serving_r2;
 mod serving_r3;
 mod serving_r3b;
+mod stage_program;
 use crate::{
     packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember},
     packaged_work::{NetworkChoice, WorkNetwork},
@@ -147,6 +148,15 @@ impl Fixture {
     }
     /// The owner's work transport over `owner`, the joined Mac's over `member`.
     fn on_each(owner_work: WorkNetwork, member_work: WorkNetwork) -> Self {
+        Self::with_programs(owner_work, member_work, None, None)
+    }
+    /// [`Fixture::on_each`] with the stage-worker program each host's composition admitted.
+    fn with_programs(
+        owner_work: WorkNetwork,
+        member_work: WorkNetwork,
+        owner_program: Option<api::native_compiler::NativeProgram>,
+        member_program: Option<api::native_compiler::NativeProgram>,
+    ) -> Self {
         let work = member_work;
         let root = std::env::temp_dir().join(format!(
             "s4cb2-owner-{}",
@@ -160,6 +170,7 @@ impl Fixture {
             &owner,
             NetworkConfig {
                 work_network: owner_work,
+                native_program: owner_program,
                 ..NetworkConfig::default()
             },
         );
@@ -227,6 +238,7 @@ impl Fixture {
                     ..Default::default()
                 },
                 work_network: work,
+                native_program: member_program,
                 ..Default::default()
             },
         );

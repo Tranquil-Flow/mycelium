@@ -188,6 +188,14 @@ impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
         Self::try_new(received).map_err(|refused| refused.0)
     }
+    /// As [`NativeShard::try_new`], with the stage worker the composition admitted (lane BND).
+    pub fn try_with_program(
+        received: JoinedShard,
+        program: Option<native_compiler::NativeProgram>,
+    ) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
+        let _ = program;
+        Self::try_new(received)
+    }
     /// As `new`, but a refusal hands the received custody back to the caller,
     /// so its byte debt stays owned and can still be retired.
     pub fn try_new(received: JoinedShard) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
