@@ -20,7 +20,6 @@ const GROUP_FIXED_BYTES: u128 = 1 << 30;
 const RESIDENT_FACTOR: (u128, u128) = (501, 1000);
 /// float32 KV element size (every registered contract).
 const KV_BYTES_PER_ELEMENT: u128 = 4;
-const DEMO_CONTEXT_TOKENS: u128 = 4096;
 /// The serving context of every registered model today, in tokens: one request's prompt plus its
 /// new tokens. v0.1.4's `DEMO_CONTEXT_TOKENS` (model_resources.py:72-76 @ f4e366e9: a 2,000-character
 /// prompt, a template under 100 tokens and 256 new tokens, rounded up to 4,096). Owner ruling 15 Nov:
@@ -299,7 +298,7 @@ fn whole_member(model: &Model) -> Member {
     let stage = shape.whole_stage_bytes();
     let resident = ceil_ratio(stage, RESIDENT_FACTOR);
     let kv_per_layer = 2 * shape.kv_heads * shape.head_dim * KV_BYTES_PER_ELEMENT;
-    let kv = shape.num_layers * kv_per_layer * DEMO_CONTEXT_TOKENS;
+    let kv = shape.num_layers * kv_per_layer * u128::from(model.serving_context_tokens);
     let (peak, disk_need, basis) = match &model.anchor {
         Some(a) => (a.group_peak_bytes, a.member_disk_bytes, "measured"),
         None => (

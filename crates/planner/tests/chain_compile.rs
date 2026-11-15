@@ -660,12 +660,24 @@ fn the_compile_plans_and_requests_the_model_contracts_serving_context() {
         };
         let state = half.finish(&out);
         let rows = state["resource_plan"]["members"].as_array().unwrap();
-        assert_eq!(rows.len(), planned.len(), "{name}");
-        for (row, oracle) in rows.iter().zip(planned) {
+        // KV bytes per layer and token of this case's model, from the oracle's own plan at 4,096.
+        let layers = |r: &Value| r["end"].as_u64().unwrap() - r["start"].as_u64().unwrap();
+        let per_layer_token =
+            planned[0]["kv_bytes"].as_u64().unwrap() / layers(&planned[0]) / ORACLE_CONTEXT_TOKENS;
+        for oracle in planned {
             assert_eq!(
-                row["kv_bytes"].as_u64().unwrap() * 2,
                 oracle["kv_bytes"].as_u64().unwrap(),
-                "{name}: kv_bytes follows the contract's context: {row} vs {oracle}"
+                layers(oracle) * per_layer_token * ORACLE_CONTEXT_TOKENS,
+                "{name}"
+            );
+        }
+        // The split may move with the smaller memory need; every planned stage's KV is charged
+        // for the contract's context over its own layers.
+        for row in rows {
+            assert_eq!(
+                row["kv_bytes"].as_u64().unwrap(),
+                layers(row) * per_layer_token * (ORACLE_CONTEXT_TOKENS / 2),
+                "{name}: kv_bytes follows the contract's context: {row}"
             );
         }
         checked += 1;

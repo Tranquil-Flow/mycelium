@@ -76,20 +76,39 @@ pub struct ModelContract {
 
 /// Split and resource policies (`layer_split.policy_for_runtime`, `model_resources` constants), pinned data
 /// `data/chain-policy.json`. TODO(L1): replace by budget-registry declarations.
+///
+/// The resource policy holds every constant EXCEPT the serving context: that is the model
+/// contract's ([`ModelContract::serving_context_tokens`], lane CAP), so the memory plan and the
+/// stages' prepared capacity read one figure.
 #[derive(Debug, Clone)]
 pub struct ChainPolicy {
     split: BTreeMap<String, SplitPolicy>,
-    resources: ResourcePolicy,
+    /// `data/chain-policy.json` `resources`, which names no `context_tokens`.
+    resources: Map<String, Value>,
 }
 impl ChainPolicy {
     pub fn pinned() -> Self {
         let doc: Value = serde_json::from_str(include_str!("../data/chain-policy.json"))
             .expect("chain-policy.json is valid");
-        Self {
+        let policy = Self {
             split: serde_json::from_value(doc["split"].clone()).expect("pinned split policies"),
-            resources: serde_json::from_value(doc["resources"].clone())
+            resources: doc["resources"]
+                .as_object()
+                .cloned()
                 .expect("pinned resource policy"),
-        }
+        };
+        assert!(
+            !policy.resources.contains_key("context_tokens"),
+            "the serving context is the model contract's, never a second pinned figure"
+        );
+        policy.resources(1).expect("pinned resource policy");
+        policy
+    }
+    /// The resource policy for one model contract's serving context.
+    fn resources(&self, context_tokens: u64) -> Option<ResourcePolicy> {
+        let mut resources = self.resources.clone();
+        resources.insert("context_tokens".into(), json!(context_tokens));
+        serde_json::from_value(Value::Object(resources)).ok()
     }
 }
 
@@ -503,13 +522,19 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
         .split
         .get(&m.runtime_quantization)
         .ok_or_else(|| Refusal::code("model_resources_quantization_unsupported"))?;
+    // The memory plan charges KV for the model contract's serving context, the capacity every
+    // stage is then prepared for (the builder request below carries the same figure).
+    let resources = Some(m.serving_context_tokens)
+        .filter(|tokens| *tokens > 0)
+        .and_then(|tokens| input.policy.resources(tokens))
+        .ok_or_else(|| Refusal::code("model_serving_context_invalid"))?;
     let label = spec.shape.label.clone();
     let members =
         members_from_document(&Value::Array(rows)).map_err(|e| refuse_error(&e, &label))?;
     let planned = placement::plan_members(
         &spec,
         split_policy,
-        &input.policy.resources,
+        &resources,
         &members,
         &m.runtime_quantization,
         input.slice_mode,
@@ -585,7 +610,7 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
             node_ids,
             managed_layer_ranges: ranges,
             layer_split: split.clone(),
-            serving_context_tokens: input.policy.resources.context_tokens,
+            serving_context_tokens: m.serving_context_tokens,
         },
         model: m.clone(),
         epoch: input.epoch,

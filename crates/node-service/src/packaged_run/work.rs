@@ -66,13 +66,20 @@ fn challenge_tokens(reference: &Value) -> Result<usize, StepError> {
     Ok(prompt.len() + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS)
 }
 /// Tokens every stage is prepared for (lane CAP, owner ruling 15 Nov): the serving context the
-/// compile planned each stage's memory for, carried by its builder request.
+/// compile planned each stage's memory for, carried by its builder request; never the startup
+/// check's own length, which left no room for any product chat. The startup check stays one
+/// request inside that capacity: a context that cannot hold it is refused here, by name, before
+/// any stage is prepared.
 fn stage_tokens(
     request: &planner::chain_compile::BuildRequest,
     reference: &Value,
 ) -> Result<usize, StepError> {
-    let _ = request;
-    challenge_tokens(reference)
+    let capacity = usize::try_from(request.serving_context_tokens)
+        .map_err(|_| refused("model_serving_context_invalid"))?;
+    if challenge_tokens(reference)? > capacity {
+        return Err(refused("startup_challenge_exceeds_context"));
+    }
+    Ok(capacity)
 }
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
