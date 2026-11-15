@@ -713,3 +713,129 @@ fn a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_wor
         flow["error_code"]
     );
 }
+
+/// The run's local work-session cell after one more acquisition of the host (whoever acquires
+/// next maintains it, `PackagedRun::with`): whether the owner's local worker still admits on it.
+fn local_snapshot_held(f: &Fixture, ports: &PackagedChainPorts) -> bool {
+    let cell = lock(&ports.work.resident).local_session.clone();
+    f.host.with(|_| ());
+    lock(&cell).is_some()
+}
+fn code(result: &Result<(), StepError>) -> String {
+    match result {
+        Ok(()) => "ok".into(),
+        Err(StepError::Refused(e)) => e.code.clone(),
+        Err(other) => format!("{other:?}"),
+    }
+}
+
+/// Lane FLK patch 2, FLK-02 (owner side). A contributor renewal whose thread dies between its take
+/// and its put-back (`owner_ports::renew_contributor`) never brings the Session back. At the base
+/// (`c20d4b40`) the owner's local registration then refused (`Work::local`: no Session,
+/// `member_work_renewing`); patch 1 lets it register on the preceding snapshot until that lease
+/// expires (up to the 300 s seed lease). A renewal that never comes back must not leave its
+/// snapshot in use: the registration refuses as at the base, and the local worker's admission
+/// cell no longer holds the old Session.
+#[test]
+fn a_contributor_renewal_whose_thread_dies_leaves_no_snapshot_in_use() {
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let network = ports.work.run_network();
+    let (renewal, _release) = contributor_renewal(&f, AtPutBack::Panic);
+    assert!(renewal.join().is_err(), "the renewal thread died at its put-back");
+    let local = ports.work.local(&network);
+    let held = local_snapshot_held(&f, &ports);
+    let closed = ports.close_work();
+    assert!(
+        code(&local) == "member_work_renewing" && !held,
+        "after the contributor's renewal thread died: the registration answered {}, the local \
+         admission still holds the old Session: {held} (close {closed:?})",
+        code(&local)
+    );
+}
+
+/// Lane FLK patch 2, FLK-02 (joined side). The joined Mac's renewal thread dies between its take and
+/// its put-back (`app_host::renew_member`; the network's tail never runs). At the base the next
+/// standing pass found no binding and closed the work service; patch 1 keeps reading the
+/// preceding snapshot through the stale `session_view` marker until the lease expires. The pass
+/// must find no binding, as at the base.
+#[test]
+fn a_joined_renewal_whose_thread_dies_leaves_no_snapshot_in_use() {
+    use api::member_agent::MemberHost;
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let (renewal, _release) = member_renewal(&f, AtPutBack::Panic);
+    assert!(renewal.join().is_err(), "the renewal thread died at its put-back");
+    let binding = f.member.accept_context().and_then(|c| c.binding);
+    let closed = ports.close_work();
+    assert!(
+        binding.is_none(),
+        "after the joined Mac's renewal thread died, its standing pass still binds {binding:?} \
+         (close {closed:?})"
+    );
+}
+
+/// Lane FLK patch 2, FLK-02: a renewal the seed REFUSES (here the contributor's generation was
+/// fenced, `Coordinator::advance_member_generation` to STOPPED: the operator's revocation; the
+/// seed answers `seed_message_mismatch`) ends the fallback at once, not at the old lease's end. Patch 1 and the base put the refused Session back
+/// (`owner_ports.rs:319-325`) and the run's work cell kept it, so the local worker went on
+/// admitting on it until its lease expired; the registration must refuse by name at once (not
+/// `member_work_renewing`, which `compose` would retry for the whole slices budget).
+#[test]
+fn a_contributor_renewal_the_seed_refuses_ends_the_snapshot_at_once() {
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let network = ports.work.run_network();
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let (node, generation) = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        (m.node.clone(), m.session.as_ref().unwrap().generation().unwrap())
+    });
+    seed.coordinator
+        .advance_member_generation(&node, generation, "STOPPED")
+        .unwrap();
+    owner_ports::renew_contributor(&f.host);
+    let held = local_snapshot_held(&f, &ports);
+    let local = ports.work.local(&network);
+    let closed = ports.close_work();
+    eprintln!("FLK02_REFUSED local={} held={held} close={closed:?}", code(&local));
+    assert!(
+        !held && local.is_err() && code(&local) != "member_work_renewing",
+        "after the seed refused the contributor's renewal: the local admission still holds the old \
+         Session: {held}; the registration answered {}",
+        code(&local)
+    );
+}
+
+/// Lane FLK patch 2, FLK-02 (joined side): the joined Mac's renewal that the seed refuses because
+/// its generation was fenced. The seed answers `seed_message_mismatch` (its row no longer has this
+/// Session's generation, `protocol/src/seed_members.rs:1069-1078`), which records no terminal
+/// disposition (`handoff::peer_translate` passes it through), so the base and patch 1 put the
+/// refused Session back and stay `current`, binding and serving until the old lease ends. The
+/// fallback must end at once: right after that renewal the membership is not current and the
+/// standing pass finds no binding.
+#[test]
+fn a_joined_renewal_the_seed_refuses_ends_the_binding_at_once() {
+    use api::member_agent::MemberHost;
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let generation = lock(&f.member_authority)
+        .session
+        .as_ref()
+        .unwrap()
+        .generation()
+        .unwrap();
+    seed.coordinator
+        .advance_member_generation(&f.remote, generation, "STOPPED")
+        .unwrap();
+    f.network.renew_member(&f.member_authority);
+    let state = crate::packaged_network::membership_state(&f.member_authority);
+    let binding = f.member.accept_context().and_then(|c| c.binding);
+    let closed = ports.close_work();
+    assert!(
+        state.as_deref() != Some("current") && binding.is_none(),
+        "after the seed refused the joined Mac's renewal: membership {state:?}, binding {binding:?} \
+         (close {closed:?})"
+    );
+}
