@@ -12,13 +12,18 @@ use std::os::unix::fs::PermissionsExt;
 
 const DIR: &str = "MYCELIUM_BND_PACKAGED_STAGE_DIR";
 
+/// A stage "worker" that records `name`, then waits (at most 20 s) until BOTH stages have launched
+/// before it exits: the owner's admission fails the publish at the first stage's refusal and
+/// cancels the other's pending prepare, so a worker that exits at once can end the run before
+/// the second stage launched (seen once: marker `["owner"]`).
 fn script(dir: &Path, name: &str) -> PathBuf {
     let path = dir.join(name);
+    let marker = dir.join("launched.txt");
     fs::write(
         &path,
         format!(
-            "#!/bin/sh\necho {name} >> '{}'\nexit 3\n",
-            dir.join("launched.txt").display()
+            "#!/bin/sh\necho {name} >> '{m}'\ni=0\nwhile [ \"$(wc -l < '{m}')\" -lt 2 ] && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done\nexit 3\n",
+            m = marker.display()
         ),
     )
     .unwrap();

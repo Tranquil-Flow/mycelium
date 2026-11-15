@@ -200,7 +200,10 @@ impl NativeShard {
         received: JoinedShard,
         program: Option<native_compiler::NativeProgram>,
     ) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
-        Self::try_selected(received, native_compiler::ProgramSelection::Explicit(program))
+        Self::try_selected(
+            received,
+            native_compiler::ProgramSelection::Explicit(program),
+        )
     }
     /// As `new`, but a refusal hands the received custody back to the caller,
     /// so its byte debt stays owned and can still be retired. The stage worker is the

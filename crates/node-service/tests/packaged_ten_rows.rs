@@ -872,12 +872,15 @@ fn ten_rows_with_the_real_model_on_the_lan() {
     let binary = staged::stage(&packaged, &staged::payload_app(), &base);
     let program = staged::admitted_program(&binary);
     assert_eq!(program.binary, binary);
-    ev.note("setup", json!({"lan": lan, "packaged_executable": packaged, "staged_executable": binary,
+    ev.note(
+        "setup",
+        json!({"lan": lan, "packaged_executable": packaged, "staged_executable": binary,
         "payload_app": staged::payload_app(), "native_program": {"binary": program.binary,
         "sha256": program.expected.sha256, "bytes": program.expected.bytes},
         "compiler_native_env": [std::env::var("MYCELIUM_COMPILER_NATIVE_BINARY").ok(),
             std::env::var("MYCELIUM_COMPILER_NATIVE_SHA256").ok()],
-        "pid": std::process::id()}));
+        "pid": std::process::id()}),
+    );
     // The product tokenizer helper (the packaged executable's `tokenize` role) over the cached
     // tokenizer: the reference prompt's 35 ids and the decode of the reference tokens (ledger row 46).
     let tokenizer = cached::snapshot_dir().join("tokenizer.json");

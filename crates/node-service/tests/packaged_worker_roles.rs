@@ -128,7 +128,10 @@ fn the_tokenize_role_takes_exactly_one_tokenizer() {
     for args in [&["tokenize"][..], &["tokenize", "a.json", "extra"][..]] {
         let (success, stderr) = run(args);
         assert!(!success, "{args:?}");
-        assert!(stderr.contains("no_arguments_accepted"), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("no_arguments_accepted"),
+            "{args:?}: {stderr}"
+        );
     }
 }
 
@@ -142,10 +145,10 @@ fn the_tokenize_role_takes_exactly_one_tokenizer() {
 #[test]
 #[ignore = "MYCELIUM_PINNED_PAYLOAD_APP (an app holding the pinned payload) + this Mac's cached Qwen3-0.6B"]
 fn inside_an_admitted_bundle_the_tokenize_role_answers_as_mycelium_node_does() {
-    let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "bnd-tokenize-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("bnd-tokenize-{}", std::process::id()));
     std::fs::create_dir(&dir).unwrap();
     /// The staged bundle goes whatever the outcome (its payload copies are APFS clones).
     struct Scratch(std::path::PathBuf);
@@ -207,9 +210,15 @@ fn inside_an_admitted_bundle_the_tokenize_role_answers_as_mycelium_node_does() {
     let (packaged, replies) = answers(&exe, false);
     let (node, _) = answers(Path::new(env!("CARGO_BIN_EXE_mycelium-node")), true);
     println!("BND tokenize packaged={packaged:?}");
-    assert_eq!(packaged, node, "the packaged role answers byte for byte as mycelium-node does");
+    assert_eq!(
+        packaged, node,
+        "the packaged role answers byte for byte as mycelium-node does"
+    );
     assert_eq!(replies.len(), 5, "{packaged}");
-    assert_eq!(replies[0]["ids"], oracle["recorded"]["workload"]["prompt_ids"]);
+    assert_eq!(
+        replies[0]["ids"],
+        oracle["recorded"]["workload"]["prompt_ids"]
+    );
     let pieces: Vec<&str> = replies[1..]
         .iter()
         .map(|r| r["text"].as_str().unwrap())
@@ -224,6 +233,9 @@ fn inside_an_admitted_bundle_the_tokenize_role_answers_as_mycelium_node_does() {
             .unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{args:?}");
-        assert!(stderr.contains("no_arguments_accepted"), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("no_arguments_accepted"),
+            "{args:?}: {stderr}"
+        );
     }
 }

@@ -758,7 +758,11 @@ fn the_stage_program_is_the_admitted_one_whatever_the_environment_names() {
     let environment = stage_program::script(&dir, "environment");
     stage_program::script(&dir, "admitted");
     let launched = stage_program::run_child("stage_program_child", "explicit", &dir, &environment);
-    assert_eq!(launched, ["admitted"], "exactly the admitted program ran once");
+    assert_eq!(
+        launched,
+        ["admitted"],
+        "exactly the admitted program ran once"
+    );
     fs::remove_dir_all(&dir).unwrap();
 }
 /// Lane BND: the admitted program keeps its pin. Bytes that changed after admission refuse
@@ -838,7 +842,9 @@ fn stage_program_child() {
         .unwrap();
     if case == "changed" {
         // Same length and mode, other bytes: only the hash can tell.
-        let text = fs::read_to_string(&admitted).unwrap().replace("exit 3", "exit 4");
+        let text = fs::read_to_string(&admitted)
+            .unwrap()
+            .replace("exit 3", "exit 4");
         fs::write(&admitted, text).unwrap();
     }
     let error = native

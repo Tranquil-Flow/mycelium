@@ -45,7 +45,8 @@ pub fn stage(executable: &Path, payload: &Path, under: &Path) -> PathBuf {
 }
 /// The staged executable's identity through the shipped startup path (`bin/mycelium.rs::run`):
 /// the manifest with the measured executable, OS + payload admission of the bundle, then
-/// `packaged::admitted_native_program` over the admitted bundle.
+/// `packaged::admitted_native_program` over the admitted bundle (used by `packaged_ten_rows`).
+#[allow(dead_code)]
 pub fn admitted_program(exe: &Path) -> api::native_compiler::NativeProgram {
     let manifest = desktop::package::with_measured_executable(payload_pins(), exe).unwrap();
     let verified = desktop::package::admit_bundle(
