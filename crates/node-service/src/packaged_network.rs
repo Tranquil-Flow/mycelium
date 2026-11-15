@@ -909,8 +909,22 @@ impl api::member_agent::MemberHost for PackagedMember {
     fn accept_context(&self) -> Option<api::member_agent::AcceptContext> {
         let root = lock(&self.authority).root.clone();
         let current = membership_state(&self.authority).as_deref() == Some("current");
+        // The renewal loop holds the live Session for one seed heartbeat
+        // (`app_host::renew_member`, `session_view` set meanwhile). For exactly that flight the
+        // work session keeps the preceding snapshot (`Network::sync_work_session`), the same
+        // membership: its binding stands in. Without it every standing pass that ran during a
+        // renewal closed this Mac's work service (`member_agent` closes work without a binding),
+        // and the owner's run kept dialling the closed address (lane FLK, rows 6-7).
+        let renewing = lock(&self.authority).session_view.is_some();
         let binding = current
-            .then(|| app_host::membership_binding(&self.network.cell(&self.authority)))
+            .then(|| {
+                app_host::membership_binding(&self.network.cell(&self.authority)).or_else(|| {
+                    renewing
+                        .then(|| lock(&self.network.work_session).clone())
+                        .flatten()
+                        .and_then(|held| held.binding())
+                })
+            })
             .flatten()
             .map(|b| {
                 json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
