@@ -225,6 +225,8 @@ impl NetworkChoice {
 type ReceiveHook = Box<dyn FnOnce(&work::Operation) + Send>;
 struct Shared {
     root: PathBuf,
+    /// [`Service::on_network`]'s admitted stage-worker program.
+    program: Option<api::native_compiler::NativeProgram>,
     session: SessionCell,
     signer: Arc<Identity>,
     identity: Value,
@@ -240,12 +242,16 @@ struct Shared {
     stop: AtomicBool,
 }
 impl Shared {
+    /// This member's custody: its stage worker is the admitted program, never the environment.
+    fn work(&self) -> work::Work {
+        work::Work::new(self.root.clone()).with_native_program(self.program.clone())
+    }
     fn live(&self) -> Result<()> {
         if self.stop.load(Ordering::SeqCst) {
             return Err("member_work_closed".into());
         }
         self.current(&self.signer).map_err(|e| e.0.to_owned())?;
-        let mut work = work::Work::new(self.root.clone());
+        let mut work = self.work();
         work.announced(
             &*self
                 .announcement
@@ -314,14 +320,21 @@ impl Service {
             signer,
             announcement,
             NetworkChoice::default(),
+            None,
         )
     }
+    /// The member work service on `network`. `program` is the stage worker the composition
+    /// admitted (`RunConfig::native_program`, lane BND): every stage prepare launches exactly it,
+    /// re-checked against its admitted pin; the development environment
+    /// (`MYCELIUM_COMPILER_NATIVE_BINARY`) has no effect here, and `None` refuses every prepare
+    /// `native_binary_pin_required`.
     pub fn on_network(
         root: PathBuf,
         session: SessionCell,
         signer: Arc<Identity>,
         announcement: VerifiedAnnouncement,
         network: NetworkChoice,
+        program: Option<api::native_compiler::NativeProgram>,
     ) -> Result<Self> {
         let identity = session
             .lock()
@@ -339,6 +352,7 @@ impl Service {
         let (dispatcher, requests) = work::Dispatcher::new()?;
         let shared = Arc::new(Shared {
             root,
+            program,
             session,
             signer,
             identity,
@@ -470,7 +484,7 @@ impl Service {
         if saved.as_ref() != Some(policy) {
             return Err("resource_policy_changed".into());
         }
-        let mut work = work::Work::new(self.shared.root.clone());
+        let mut work = self.shared.work();
         work.announced(
             &*self
                 .shared
@@ -671,7 +685,7 @@ fn operations(
     status: &work::Status,
     cleanup: &Mutex<Option<work::Work>>,
 ) -> Result<()> {
-    let mut work = work::Work::new(shared.root.clone());
+    let mut work = shared.work();
     let result = (|| {
         loop {
             if shared.stop.load(Ordering::SeqCst) {

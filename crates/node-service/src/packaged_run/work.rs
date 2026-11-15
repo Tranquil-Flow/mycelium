@@ -296,6 +296,7 @@ impl Work {
                     signer,
                     announcement,
                     network.clone(),
+                    self.host.network.native_program(),
                 )
                 .map_err(|e| refused(&e))?,
             );

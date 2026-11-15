@@ -189,7 +189,7 @@ pub(crate) enum ProgramSelection {
     Explicit(Option<NativeProgram>),
 }
 impl ProgramSelection {
-    fn resolve(&self, stopped: &dyn Fn() -> bool) -> Result<Option<Config>> {
+    pub(crate) fn resolve(&self, stopped: &dyn Fn() -> bool) -> Result<Option<Config>> {
         match self {
             Self::Environment => Config::from_environment_until(stopped),
             Self::Explicit(None) => Ok(None),
@@ -209,11 +209,9 @@ pub(crate) struct Config {
     pin: Pin,
 }
 impl Config {
-    pub(crate) fn from_environment() -> Result<Option<Self>> {
-        Self::from_environment_until(&|| false)
-    }
-    /// [`Self::from_environment`] whose binary hash consults `stopped` once
-    /// per read; a Stop refuses `compiler_stopped` before the pin finishes.
+    /// The development selection (`MYCELIUM_COMPILER_NATIVE_BINARY` + `_SHA256`), reached only
+    /// through [`ProgramSelection::Environment`]. Its binary hash consults `stopped` once per
+    /// read; a Stop refuses `compiler_stopped` before the pin finishes.
     pub(crate) fn from_environment_until(stopped: &dyn Fn() -> bool) -> Result<Option<Self>> {
         let Some(binary) = std::env::var_os("MYCELIUM_COMPILER_NATIVE_BINARY") else {
             return Ok(None);

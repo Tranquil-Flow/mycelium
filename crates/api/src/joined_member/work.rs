@@ -638,6 +638,8 @@ pub struct Work {
     require_share: bool,
     /// First prepare plus this member's then-consented wall; never renewed by another prepare.
     consent_deadline: Option<Instant>,
+    /// The executable this member's stage custody launches ([`Work::with_native_program`]).
+    program: crate::native_compiler::ProgramSelection,
 }
 fn consent_end(root: &Path, began: Instant) -> Result<Instant> {
     let consent = standing_consent::load(root)
@@ -662,7 +664,19 @@ impl Work {
             announced: None,
             require_share: true,
             consent_deadline: None,
+            program: crate::native_compiler::ProgramSelection::Environment,
         }
+    }
+    /// The packaged app's member (lane BND, REPORT-laneTEN D2): its stage worker is the program
+    /// the composition admitted, never the development environment (`Work::new` keeps
+    /// `MYCELIUM_COMPILER_NATIVE_BINARY` for the headless example and tests). `None` refuses
+    /// every native prepare `native_binary_pin_required`.
+    pub fn with_native_program(
+        mut self,
+        program: Option<crate::native_compiler::NativeProgram>,
+    ) -> Self {
+        self.program = crate::native_compiler::ProgramSelection::Explicit(program);
+        self
     }
     /// A member driven by its local operator (the example's CLI-pinned owner, no announcement):
     /// its native prepare is bounded by its own consent caps only.
@@ -946,7 +960,10 @@ impl Work {
         let request = &operation.request;
         if self.native.is_none() {
             // A refused custody hand-over keeps the received shard owned (F4).
-            match NativeShard::try_new(self.shard.take().ok_or("shard_required")?) {
+            match NativeShard::try_selected(
+                self.shard.take().ok_or("shard_required")?,
+                self.program.clone(),
+            ) {
                 Ok(compute) => self.native = Some(compute),
                 Err(refused) => {
                     let (error, received) = *refused;

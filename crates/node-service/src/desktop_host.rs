@@ -337,6 +337,13 @@ impl DesktopServices {
         network: crate::packaged_network::NetworkConfig,
         run: crate::packaged_run::RunConfig,
     ) -> Self {
+        // Bundle admission's program is the only stage-worker program of this host's work
+        // services (lane BND, REPORT-laneTEN D2): the owner's compiler, its own contributor and its
+        // member work all launch the same admitted executable.
+        let network = crate::packaged_network::NetworkConfig {
+            native_program: run.native_program.clone(),
+            ..network
+        };
         let host = PackagedHost::with_model_source(node.clone(), private.to_owned(), source)
             .with_network(network)
             .with_publisher(publisher)

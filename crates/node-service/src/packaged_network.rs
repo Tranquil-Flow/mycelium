@@ -76,7 +76,13 @@ pub struct NetworkConfig {
     /// time a work service or an owner run starts ([`crate::packaged_work::WorkNetwork::ThisMac`]);
     /// a test or caller that passes a [`crate::packaged_work::WorkNetwork::Fixed`] choice keeps it.
     pub work_network: crate::packaged_work::WorkNetwork,
-    /// The stage-worker program the composition admitted (lane BND).
+    /// The stage-worker program bundle admission captured (lane BND, REPORT-laneTEN D2): the
+    /// work services this host starts (a joined Mac's member work, the owner's own contributor)
+    /// launch exactly it for every stage, never `MYCELIUM_COMPILER_NATIVE_BINARY`. The app's
+    /// composition sets it from `RunConfig::native_program`
+    /// (`DesktopServices::packaged_with_run` overwrites whatever is here); only a test that builds a
+    /// [`Network`] itself sets it directly. `None`: every stage prepare refuses
+    /// `native_binary_pin_required`.
     pub native_program: Option<api::native_compiler::NativeProgram>,
 }
 impl Default for NetworkConfig {
@@ -119,6 +125,8 @@ pub struct Network {
     work: Mutex<Option<crate::packaged_work::Service>>,
     work_session: crate::packaged_work::SessionCell,
     work_network: crate::packaged_work::WorkNetwork,
+    /// [`NetworkConfig::native_program`].
+    native_program: Option<api::native_compiler::NativeProgram>,
     work_closed: AtomicBool,
     /// `_relay_is_serving` (app.py:770-777): raised by the run chain while an owner run is active, so
     /// a relay may extend its window only then. The packaged host has no swarm publisher yet, so the
@@ -157,6 +165,7 @@ impl Network {
             work: Mutex::default(),
             work_session: Arc::new(Mutex::new(None)),
             work_network: config.work_network,
+            native_program: config.native_program,
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
         })

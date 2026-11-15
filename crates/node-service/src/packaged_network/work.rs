@@ -23,6 +23,11 @@ impl Network {
     pub fn work_network(&self) -> &crate::packaged_work::WorkNetwork {
         &self.work_network
     }
+    /// The stage-worker program every work service of this host launches
+    /// ([`super::NetworkConfig::native_program`]).
+    pub(crate) fn native_program(&self) -> Option<api::native_compiler::NativeProgram> {
+        self.native_program.clone()
+    }
     pub fn close_work(&self) {
         let mut slot = lock(&self.work);
         let Some(mut work) = slot.take() else {
@@ -86,6 +91,7 @@ impl PackagedMember {
                 Arc::new(identity),
                 announcement,
                 self.network.resolve_work_network("member_work"),
+                self.network.native_program(),
             )?);
         }
         if self.network.work_closed.load(Ordering::SeqCst) || self.network.fenced() {

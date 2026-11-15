@@ -183,22 +183,36 @@ pub struct NativeShard {
     /// The last worker's guard verdict, or `worker_native_exited` for a worker
     /// that died by itself after its prepare began; kept after its cleanup.
     guard_failure: Option<Value>,
+    /// Which executable every prepare launches (lane BND): the composition's admitted program,
+    /// or the development environment for headless callers.
+    program: native_compiler::ProgramSelection,
 }
 impl NativeShard {
     pub fn new(received: JoinedShard) -> Result<Self> {
         Self::try_new(received).map_err(|refused| refused.0)
     }
-    /// As [`NativeShard::try_new`], with the stage worker the composition admitted (lane BND).
+    /// As [`NativeShard::try_new`], with the stage worker the composition admitted (lane BND,
+    /// REPORT-laneTEN D2): every prepare launches exactly `program`, re-checked against the
+    /// identity captured at admission (`native_binary_changed` if its bytes changed), and the
+    /// development environment is never consulted. `None` is an unavailable worker
+    /// (`native_binary_pin_required`), never permission to read the environment.
     pub fn try_with_program(
         received: JoinedShard,
         program: Option<native_compiler::NativeProgram>,
     ) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
-        let _ = program;
-        Self::try_new(received)
+        Self::try_selected(received, native_compiler::ProgramSelection::Explicit(program))
     }
     /// As `new`, but a refusal hands the received custody back to the caller,
-    /// so its byte debt stays owned and can still be retired.
+    /// so its byte debt stays owned and can still be retired. The stage worker is the
+    /// development selection (`MYCELIUM_COMPILER_NATIVE_BINARY` + `_SHA256`): headless and
+    /// example callers only; the packaged app uses [`NativeShard::try_with_program`].
     pub fn try_new(received: JoinedShard) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
+        Self::try_selected(received, native_compiler::ProgramSelection::Environment)
+    }
+    pub(crate) fn try_selected(
+        received: JoinedShard,
+        program: native_compiler::ProgramSelection,
+    ) -> std::result::Result<Self, Box<(Error, JoinedShard)>> {
         let caps = (|| {
             let consent = standing_consent::load(&received.root)
                 .map_err(|_| fail("joined_shard_consent_required"))?
@@ -228,6 +242,7 @@ impl NativeShard {
             memory_share: None,
             storage_share: None,
             guard_failure: None,
+            program,
         })
     }
     fn check(&self, current: &dyn Fn() -> Result<Value>) -> Result<()> {
@@ -365,7 +380,9 @@ impl NativeShard {
             "shard":{"protocol":shard::PROTOCOL,"node_id":m["member"]["node_id"],"range":range,
                 "transfer":m["transfer"],"recipe":m["recipe"],"recipe_digest":m["recipe"]["node_plan_digest"]}});
         validate_prepare(&self.received.offer, &prepare, &reference)?;
-        let config = native_compiler::Config::from_environment()
+        let config = self
+            .program
+            .resolve(&|| cancel.load(std::sync::atomic::Ordering::SeqCst))
             .map_err(native)?
             .ok_or(fail("native_binary_pin_required"))?;
         // MG2: the guard also holds the custody's staging folder to the
