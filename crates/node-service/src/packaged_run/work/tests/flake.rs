@@ -25,6 +25,8 @@ enum AtPutBack {
     Hold,
     /// Its thread dies there: the Session never comes back (FLK-02).
     Panic,
+    /// It proceeds at once: the wrapper only steps the renewal's clock (FLK2-02).
+    Pass,
 }
 /// Met once by a renewal thread that took its Session and is about to put it back; the take, the
 /// signed heartbeat and the seed's answer are the product's own (`owner_ports::renew_contributor`,
@@ -69,6 +71,7 @@ impl Gate {
                 }
             }
             AtPutBack::Panic => panic!("lane FLK: the renewal thread dies between take and put-back"),
+            AtPutBack::Pass => {}
         }
     }
 }
@@ -80,11 +83,13 @@ fn gate_bound() -> Duration {
     span(BudgetId::PyMyceliumA13MacosPeerRemotemacmemberInitTimeoutL117).unwrap() * 2
 }
 /// The owner's host as `owner_ports::renew_contributor` sees it, meeting `gate` on the first state
-/// acquisition while the contributor's Session is out: its put-back.
+/// acquisition while the contributor's Session is out: its put-back. Its renewal clock reads the
+/// wall clock `ahead` seconds forward (0 but in the FLK2-02 tests: a forward step of the clock).
 #[derive(Clone)]
 struct HeldContributor {
     host: PackagedRun,
     gate: Arc<Gate>,
+    ahead: f64,
 }
 impl owner_ports::RunHost for HeldContributor {
     type Managed = crate::packaged_run::Managed;
@@ -128,6 +133,9 @@ impl owner_ports::RunHost for HeldContributor {
     fn sidecar(&self) -> Result<PathBuf, api::installation_descriptor::Failure> {
         self.host.sidecar()
     }
+    fn renewal_clock(&self) -> f64 {
+        app_host::now() + self.ahead
+    }
 }
 /// The owner's contributor renewal (`owner_ports::renew_contributor`, the product's pass) on its
 /// own thread, stopped at its put-back as `mode` says; returns once it is there.
@@ -136,6 +144,7 @@ fn contributor_renewal(f: &Fixture, mode: AtPutBack) -> HeldRenewal {
     let held = HeldContributor {
         host: f.host.clone(),
         gate,
+        ahead: 0.0,
     };
     let renewal = std::thread::spawn(move || owner_ports::renew_contributor(&held));
     at_gate
@@ -144,11 +153,13 @@ fn contributor_renewal(f: &Fixture, mode: AtPutBack) -> HeldRenewal {
     (renewal, release)
 }
 /// The joined Mac's authority as `app_host::renew_member` sees it, meeting `gate` on the first
-/// state acquisition while its Session is out for the renewal: its put-back.
+/// state acquisition while its Session is out for the renewal: its put-back. Its renewal clock
+/// reads the wall clock `ahead` seconds forward (0 but in the FLK2-02 tests).
 struct HeldMember {
     authority: Arc<Mutex<Authority>>,
     network: Arc<Network>,
     gate: Arc<Gate>,
+    ahead: f64,
 }
 impl HeldMember {
     fn meet_at_put_back(&self) {
@@ -177,6 +188,9 @@ impl app_host::Cell for HeldMember {
     fn member_seed_options(&self) -> api::seed::SeedOptions {
         self.network.cell(&self.authority).member_seed_options()
     }
+    fn renewal_clock(&self) -> f64 {
+        app_host::now() + self.ahead
+    }
 }
 /// The joined Mac's renewal (`app_host::renew_member`, the pass `Network::renew_member` runs) on its
 /// own thread, stopped at its put-back as `mode` says; returns once it is there.
@@ -186,6 +200,7 @@ fn member_renewal(f: &Fixture, mode: AtPutBack) -> HeldRenewal {
         authority: f.member_authority.clone(),
         network: f.network.clone(),
         gate,
+        ahead: 0.0,
     };
     let renewal = std::thread::spawn(move || app_host::renew_member(&held));
     at_gate
@@ -675,6 +690,7 @@ fn a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_wor
                 authority,
                 network,
                 gate,
+                ahead: 0.0,
             };
             let renewal = std::thread::spawn(move || app_host::renew_member(&held));
             at_gate
@@ -981,6 +997,125 @@ fn a_joined_renewal_past_its_deadline_ends_the_binding() {
         during && overdue.is_none() && after,
         "binding in flight {during}, past its deadline {overdue:?}, after the late put-back \
          {after} (close {closed:?})"
+    );
+}
+
+/// What the seed itself recorded of a member's heartbeats (`Coordinator::member`): its last
+/// heartbeat sequence, last liveness and lease. Unchanged across a pass = the seed accepted no
+/// heartbeat in it.
+fn seed_heard(f: &Fixture, node: &str) -> (Value, Value, Value) {
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let row = seed.coordinator.member(node).unwrap();
+    (
+        row["last_heartbeat_sequence"].clone(),
+        row["last_liveness_at"].clone(),
+        row["lease_expires_at"].clone(),
+    )
+}
+/// The wall-clock step that puts a Session's saved lease in the past (one second beyond it).
+fn step_past(lease: f64) -> f64 {
+    lease - app_host::now() + 1.0
+}
+
+/// Lane FLK patch 3, FLK2-02 (owner side). The owner Mac's wall clock steps forward past the
+/// contributor's saved lease exactly while the product's renewal (`owner_ports::renew_contributor`)
+/// builds its heartbeat: `Session::build_heartbeat` raises `membership_lease_expired` LOCALLY,
+/// before any request (`member.rs:549-552`), which translates to `peer_member_expired`. The seed
+/// refused nothing, so the Session goes back, as at the base; with the clock correct again the
+/// next renewal succeeds and the contributor is current. No request reached the seed: the seed's
+/// record is unchanged by the stepped pass, and the next pass's heartbeat is the very next
+/// sequence (`Session::heartbeat` gives a sequence back only when the build fails, so the stepped
+/// pass built no envelope to send).
+#[test]
+fn a_contributor_renewal_under_a_clock_stepped_past_its_lease_puts_the_session_back() {
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let network = ports.work.run_network();
+    let (node, lease, root) = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        (
+            m.node.clone(),
+            m.session.as_ref().unwrap().lease_expires_at().unwrap(),
+            owner_ports::contributor_dir(&c.authority.root),
+        )
+    });
+    let before = seed_heard(&f, &node);
+    let stepped = HeldContributor {
+        host: f.host.clone(),
+        gate: Gate::new(AtPutBack::Pass).0,
+        ahead: step_past(lease),
+    };
+    owner_ports::renew_contributor(&stepped);
+    let between = seed_heard(&f, &node);
+    let (put_back, refused) = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        (m.session.is_some(), m.refused)
+    });
+    owner_ports::renew_contributor(&f.host);
+    let after = seed_heard(&f, &node);
+    let live = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        m.session.as_ref().map(|s| (s.generation(), s.lease_expires_at()))
+    });
+    let state = api::peer::status_membership(&root, live, app_host::now()).0;
+    let local = ports.work.local(&network);
+    let closed = ports.close_work();
+    assert!(
+        put_back
+            && refused.is_none()
+            && between == before
+            && after.0.as_u64() == before.0.as_u64().map(|n| n + 1)
+            && state == "current"
+            && code(&local) == "ok",
+        "after the stepped pass: Session put back {put_back}, refusal recorded {refused:?}, the \
+         seed's record {before:?} -> {between:?}; after the next pass: {after:?}, membership \
+         {state}, registration {} (close {closed:?})",
+        code(&local)
+    );
+}
+
+/// Lane FLK patch 3, FLK2-02 (joined side): the joined Mac's wall clock steps past its saved lease
+/// while the product's renewal (`app_host::renew_member`) builds its heartbeat. The local
+/// `membership_lease_expired` is no seed refusal: the Session goes back (the network's tail may
+/// close the work on the recorded `expired` disposition, as the base did), no request reached the
+/// seed, and with the clock correct again the next renewal (`Network::renew_member`) succeeds, the
+/// membership is current and the standing pass binds again.
+#[test]
+fn a_joined_renewal_under_a_clock_stepped_past_its_lease_puts_the_session_back() {
+    use api::member_agent::MemberHost;
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let lease = lock(&f.member_authority)
+        .session
+        .as_ref()
+        .unwrap()
+        .lease_expires_at()
+        .unwrap();
+    let before = seed_heard(&f, &f.remote);
+    let stepped = HeldMember {
+        authority: f.member_authority.clone(),
+        network: f.network.clone(),
+        gate: Gate::new(AtPutBack::Pass).0,
+        ahead: step_past(lease),
+    };
+    app_host::renew_member(&stepped);
+    member_renewal_tail(&f);
+    let between = seed_heard(&f, &f.remote);
+    let put_back = lock(&f.member_authority).session.is_some();
+    f.network.renew_member(&f.member_authority);
+    let after = seed_heard(&f, &f.remote);
+    let state = crate::packaged_network::membership_state(&f.member_authority);
+    let binding = f.member.accept_context().and_then(|c| c.binding).is_some();
+    let closed = ports.close_work();
+    assert!(
+        put_back
+            && between == before
+            && after.0.as_u64() == before.0.as_u64().map(|n| n + 1)
+            && state.as_deref() == Some("current")
+            && binding,
+        "after the stepped pass: Session put back {put_back}, the seed's record {before:?} -> \
+         {between:?}; after the next pass: {after:?}, membership {state:?}, binding {binding} \
+         (close {closed:?})"
     );
 }
 

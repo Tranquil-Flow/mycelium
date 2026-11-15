@@ -116,6 +116,11 @@ pub trait RunHost: Clone + Send + Sync + 'static {
     fn cleanup(&self, _node: &str, _request: &Value) -> Result<(), Failure> {
         Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
     }
+    /// The wall clock the contributor's membership renewal reads ([`crate::app_host::now`]). A
+    /// test host may step it (lane FLK patch 3: a local lease-expiry check is no seed refusal).
+    fn renewal_clock(&self) -> f64 {
+        crate::app_host::now()
+    }
 }
 
 /// `<root>/local-contributor`: the contributor's own state directory (identity, membership, consent).
@@ -328,9 +333,10 @@ pub fn renew_contributor<H: RunHost>(host: &H) {
     if let Ok((signer, _, _)) = identity(&dir) {
         let options = runtime.options();
         let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+        let clock = || host.renewal_clock();
         let env = crate::peer::JoinEnv {
             signer: &signer,
-            clock: &now,
+            clock: &clock,
             random_hex: &random_hex,
             seed: &options,
         };

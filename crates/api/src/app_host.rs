@@ -777,6 +777,11 @@ pub trait Cell {
     fn member_seed_options(&self) -> SeedOptions {
         SeedOptions::default()
     }
+    /// The wall clock a joined member's renewal ([`renew_member`]) reads ([`now`]). A test cell may
+    /// step it (lane FLK patch 3: a local lease-expiry check is no seed refusal).
+    fn renewal_clock(&self) -> f64 {
+        now()
+    }
 }
 /// An authority behind its own lock: no relay, nothing closes or leaves beside it (its host's
 /// own loop ends with the host), the public seed path for a joining member.
@@ -1029,9 +1034,10 @@ pub fn renew_member(cell: &impl Cell) {
         Ok((signer, _, _)) => {
             let options = cell.member_seed_options();
             let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+            let clock = || cell.renewal_clock();
             let env = crate::peer::JoinEnv {
                 signer: &signer,
-                clock: &now,
+                clock: &clock,
                 random_hex: &random_hex,
                 seed: &options,
             };
