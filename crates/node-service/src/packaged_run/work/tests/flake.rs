@@ -839,3 +839,108 @@ fn a_joined_renewal_the_seed_refuses_ends_the_binding_at_once() {
          (close {closed:?})"
     );
 }
+
+/// Lane FLK patch 2, FLK-02: a contributor renewal that outlives its deadline (its thread slow or
+/// stuck past the renewal's own request allowance, `api::renewal::allowance`) counts as lost. The
+/// flight is held at its put-back and its deadline is aged to now (a clock read, not a sleep):
+/// before the deadline the registration stands on the snapshot; after it the registration refuses
+/// as at the base and the local admission holds no snapshot; the late put-back of that same
+/// flight still lands, and the registration succeeds again.
+#[test]
+fn a_contributor_renewal_past_its_deadline_leaves_no_snapshot_in_use() {
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let network = ports.work.run_network();
+    let (renewal, release) = contributor_renewal(&f, AtPutBack::Hold);
+    let during = ports.work.local(&network);
+    f.host.with(|c| {
+        c.run
+            .contributor
+            .as_mut()
+            .unwrap()
+            .flight
+            .as_mut()
+            .expect("the renewal recorded its flight")
+            .deadline = Instant::now();
+    });
+    let overdue = ports.work.local(&network);
+    let held = local_snapshot_held(&f, &ports);
+    release.send(()).unwrap_or(());
+    renewal.join().expect("the late renewal pass returned");
+    let after = ports.work.local(&network);
+    let closed = ports.close_work();
+    assert!(
+        code(&during) == "ok" && code(&overdue) == "member_work_renewing" && !held
+            && code(&after) == "ok",
+        "in flight {}, past its deadline {} (snapshot held {held}), after the late put-back {} \
+         (close {closed:?})",
+        code(&during),
+        code(&overdue),
+        code(&after)
+    );
+}
+
+/// Lane FLK patch 2, FLK-02 (joined side): past its deadline the joined Mac's renewal flight no
+/// longer lends its snapshot's binding (the next standing pass closes the work service, as the
+/// base did without a Session); its late put-back lands and the binding is back.
+#[test]
+fn a_joined_renewal_past_its_deadline_ends_the_binding() {
+    use api::member_agent::MemberHost;
+    let mut f = Fixture::new();
+    let (mut ports, _state, _env) = composed(&mut f);
+    let (renewal, release) = member_renewal(&f, AtPutBack::Hold);
+    let during = f.member.accept_context().and_then(|c| c.binding).is_some();
+    lock(&f.member_authority)
+        .member_flight
+        .as_mut()
+        .expect("the renewal recorded its flight")
+        .deadline = Instant::now();
+    let overdue = f.member.accept_context().and_then(|c| c.binding);
+    release.send(()).unwrap_or(());
+    renewal.join().expect("the late renewal pass returned");
+    member_renewal_tail(&f);
+    let after = f.member.accept_context().and_then(|c| c.binding).is_some();
+    let closed = ports.close_work();
+    assert!(
+        during && overdue.is_none() && after,
+        "binding in flight {during}, past its deadline {overdue:?}, after the late put-back \
+         {after} (close {closed:?})"
+    );
+}
+
+/// Lane FLK patch 2, FLK-02: a late put-back never overwrites a newer state. While a contributor
+/// renewal is held out, the contributor is stopped and started again (a new Session) and the new
+/// contributor's own renewal takes ITS Session out. The old pass's put-back must not put the old
+/// Session into the new contributor (where the new pass's put-back would then find the slot full
+/// and drop the renewed one); the new pass lands its own.
+#[test]
+fn a_late_contributor_put_back_never_overwrites_a_newer_flight() {
+    let f = Fixture::new();
+    let (old, release_old) = contributor_renewal(&f, AtPutBack::Hold);
+    owner_ports::stop_local_contributor(&f.host).unwrap();
+    owner_ports::start_local_contributor(&f.host).unwrap();
+    let (new, release_new) = contributor_renewal(&f, AtPutBack::Hold);
+    let newer = f.host.with(|c| {
+        c.run
+            .contributor
+            .as_ref()
+            .and_then(|m| m.flight.as_ref().map(|flight| flight.id))
+    });
+    release_old.send(()).unwrap_or(());
+    old.join().expect("the old renewal pass returned");
+    let between = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        (m.session.is_some(), m.flight.as_ref().map(|flight| flight.id))
+    });
+    release_new.send(()).unwrap_or(());
+    new.join().expect("the new renewal pass returned");
+    let landed = f.host.with(|c| {
+        let m = c.run.contributor.as_ref().unwrap();
+        (m.session.is_some(), m.flight.is_none())
+    });
+    assert!(
+        newer.is_some() && between == (false, newer) && landed == (true, true),
+        "newer flight {newer:?}; after the old put-back (Session in, flight) {between:?}; after \
+         the new one (Session in, no flight) {landed:?}"
+    );
+}
