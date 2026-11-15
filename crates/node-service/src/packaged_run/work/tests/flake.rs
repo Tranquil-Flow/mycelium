@@ -191,7 +191,7 @@ fn big_plan(
 ) -> (Plan, Arc<runtime::artifact_journal::PinnedObjects>) {
     use std::io::Write;
     const SEGMENT: u64 = 64 << 20;
-    assert!(bytes > 0 && bytes % SEGMENT == 0, "{bytes}");
+    assert!(bytes > 0 && bytes.is_multiple_of(SEGMENT), "{bytes}");
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../../../planner/tests/fixtures/source-slices.json"
     ))
