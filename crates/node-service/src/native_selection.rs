@@ -37,6 +37,45 @@ pub struct Selection {
     pub reservation: budgets::Reservation,
 }
 
+/// The memory a stage worker reserves for `range` of `model_id` at `tokens` of context, before it
+/// opens anything: exactly the reservation [`select`] holds against the prepare's `memory` (the
+/// member's consent), which refuses `native_exceeds_assigned_memory` when it is larger. Lane CAP:
+/// the owner reads this same figure before it pushes any stage, so a consent that cannot cover the
+/// serving context is refused by name where it is first known, not at the stage's prepare.
+pub fn stage_reservation(
+    model_id: &str,
+    profile: Profile,
+    range: Range<u32>,
+    total: u32,
+    tokens: u32,
+) -> Result<u64> {
+    let embedding = range.start == 0;
+    let head = range.end == total;
+    let profile = match profile {
+        Profile::PackedInt8 => NumericsProfile::MlxPackedInt8,
+        Profile::ExplicitF32 => NumericsProfile::MlxExplicitF32,
+    };
+    let descriptor = match model_id {
+        "Qwen/Qwen3-0.6B" => admission::qwen3_descriptor(range, embedding, head, profile)?,
+        _ => return Err(Error::new(ErrorCode::Unsupported, "native-model")),
+    };
+    if total != admission::total_layers(&descriptor)? {
+        return Err(Error::new(ErrorCode::Binding, "native-model-total"));
+    }
+    let unbounded = u64::MAX / 4;
+    let limits = Limits {
+        weight_bytes: unbounded,
+        scratch_bytes: unbounded,
+        state_bytes: unbounded,
+        max_tokens: tokens,
+    };
+    Ok(admission::requirements(&descriptor, limits)?
+        .total()
+        .map_err(|_| Error::new(ErrorCode::ResourceCap, "native-resource-overflow"))?
+        .memory
+        .get())
+}
+
 /// Missing metadata is the legacy dense-only contract. Explicit metadata is
 /// never downgraded to that path, even when malformed or shape-compatible.
 pub fn select(

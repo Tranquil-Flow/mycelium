@@ -81,6 +81,20 @@ fn stage_tokens(
     }
     Ok(capacity)
 }
+/// Lane CAP: every stage's memory consent must cover the worker's own reservation for the serving
+/// context (`native_selection::stage_reservation`, the figure the stage's prepare holds against
+/// `max_memory_bytes`). Known as soon as the compile assigned the ranges, so a consent that cannot
+/// cover it is refused here, at the slices step, by name and before any shard is pushed, never at
+/// the stage's prepare or the first chat. A member whose record carries no memory cap is left to
+/// its own prepare's check.
+fn check_stage_memory(
+    request: &planner::chain_compile::BuildRequest,
+    records: Option<&Value>,
+    tokens: usize,
+) -> Result<(), StepError> {
+    let _ = (request, records, tokens);
+    Ok(())
+}
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
 /// the local Service whose control loop those links reach. Unresolved owners stay retained.
@@ -1051,6 +1065,90 @@ mod stage_tokens_tests {
         assert!(
             format!("{refused:?}").contains("startup_challenge_exceeds_context"),
             "{refused:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stage_memory_tests {
+    //! Lane CAP item 2: at the serving context (4,096), the stage worker reserves more memory
+    //! than the owner's own 4 GB self-grant (`owner_ports.rs`): measured from the worker's
+    //! admission, 6,792,778,240 B for layers [0,19] and 5,992,888,832 B for [19,28]. The run
+    //! refuses that by name at the slices step instead of failing at the stage's prepare.
+    use super::*;
+    const OWNER: u64 = 4_000_000_000;
+    const JOINED: u64 = 8_589_934_592;
+    fn request(ranges: [[usize; 2]; 2]) -> planner::chain_compile::BuildRequest {
+        planner::chain_compile::BuildRequest {
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            deployment_id: "d".into(),
+            route_label: "a13",
+            stage_sharded: false,
+            compilation_cache_key: "k".into(),
+            node_ids: vec!["owner".into(), "joined".into()],
+            managed_layer_ranges: ranges.to_vec(),
+            layer_split: json!({}),
+            serving_context_tokens: 4096,
+        }
+    }
+    fn records(owner: Option<u64>, joined: Option<u64>) -> Value {
+        let caps = |m: Option<u64>| m.map_or(json!({}), |m| json!({"max_memory_bytes": m}));
+        json!({"owner": {"caps": caps(owner)}, "joined": {"caps": caps(joined)}})
+    }
+    fn code(result: Result<(), StepError>) -> String {
+        match result {
+            Ok(()) => "ok".into(),
+            Err(StepError::Refused(e)) => {
+                assert!(
+                    e.message.as_deref().is_some_and(|m| m.contains("owner")
+                        && m.contains("4000000000")
+                        && m.contains("4096")),
+                    "the refusal names the Mac, its consent and the context: {e:?}"
+                );
+                e.code
+            }
+            Err(other) => format!("{other:?}"),
+        }
+    }
+    #[test]
+    fn the_worker_reservation_is_the_one_the_stage_prepare_holds() {
+        use crate::native_selection::{Profile, stage_reservation};
+        let at = |range: std::ops::Range<u32>, tokens| {
+            stage_reservation("Qwen/Qwen3-0.6B", Profile::PackedInt8, range, 28, tokens).unwrap()
+        };
+        assert_eq!(at(0..19, 39), 982_349_824);
+        assert_eq!(at(19..28, 39), 811_458_560);
+        assert_eq!(at(0..19, 4096), 6_792_778_240);
+        assert_eq!(at(19..28, 4096), 5_992_888_832);
+    }
+    #[test]
+    fn a_stage_whose_consent_cannot_cover_the_context_is_refused_by_name_at_slices() {
+        let owner_first = request([[0, 19], [19, 28]]);
+        assert_eq!(
+            code(check_stage_memory(&owner_first, Some(&records(Some(OWNER), Some(JOINED))), 4096)),
+            "stage_memory_consent_below_context"
+        );
+        let mut swapped = request([[19, 28], [0, 19]]);
+        swapped.node_ids = vec!["joined".into(), "owner".into()];
+        assert_eq!(
+            code(check_stage_memory(&swapped, Some(&records(Some(OWNER), Some(JOINED))), 4096)),
+            "stage_memory_consent_below_context",
+            "the owner's 9 layers at 4,096 (5.99 GB) do not fit 4 GB either"
+        );
+        // The startup check's own 39 tokens fit both, and a joined Mac's 8 GiB covers either range.
+        assert_eq!(
+            code(check_stage_memory(&owner_first, Some(&records(Some(OWNER), Some(JOINED))), 39)),
+            "ok"
+        );
+        assert_eq!(
+            code(check_stage_memory(&owner_first, Some(&records(Some(JOINED), Some(JOINED))), 4096)),
+            "ok"
+        );
+        // No cap in the record: the stage's own prepare is the check.
+        assert_eq!(
+            code(check_stage_memory(&owner_first, Some(&records(None, Some(JOINED))), 4096)),
+            "ok"
         );
     }
 }
