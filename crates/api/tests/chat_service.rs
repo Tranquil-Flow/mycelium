@@ -310,6 +310,32 @@ fn an_unqualified_route_fails_the_chat_chat_route_not_qualified() {
     assert_eq!(fake.seen(|s| s.posts.len()), 0);
 }
 
+/// Lane CAP item 3: a prompt the page accepts (at most 2,000 characters, at most 256 new tokens)
+/// can still exceed the route's serving context: byte-level BPE makes 2,000 characters up to
+/// 8,000 tokens. The route refuses it before any work (`400 joined_route_context_exceeds_worker`);
+/// the page then names the limit (`chat_context_too_long`, and the context in its `limits`)
+/// instead of showing the route's internal code.
+#[test]
+fn a_request_above_the_serving_context_is_refused_naming_the_limit() {
+    let mut script = Script::completed(&["x"]);
+    script.refuse_post = Some((400, "joined_route_context_exceeds_worker"));
+    let fake = FakeGateway::start(script);
+    let chat = service(run_over(http(&fake), Some(serving("run-1"))), None);
+    assert_eq!(
+        chat.state()["limits"]["context_tokens"],
+        json!(4096),
+        "the page states the model contract's serving context"
+    );
+    let sent = chat.send("local", prompt("hi", 256)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert!(tokens.is_empty());
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("failed"), &json!("chat_context_too_long"))
+    );
+    assert_eq!(fake.seen(|s| s.posts.len()), 1);
+}
+
 #[test]
 fn a_failed_terminal_keeps_the_routers_code_and_records_no_timing() {
     let root = root();

@@ -31,6 +31,9 @@ pub struct Script {
     pub end: End,
     /// `false`: the qualification answers 503 (no qualified route).
     pub qualified: bool,
+    /// `Some((status, code))`: `POST /v1/inference` refuses with `{"error": code}` (the route's
+    /// refusal before any work, e.g. `joined_route_context_exceeds_worker`).
+    pub refuse_post: Option<(u16, &'static str)>,
 }
 impl Script {
     pub fn completed(tokens: &[&'static str]) -> Self {
@@ -38,6 +41,7 @@ impl Script {
             tokens: tokens.to_vec(),
             end: End::Completed,
             qualified: true,
+            refuse_post: None,
         }
     }
     pub fn ending(tokens: &[&'static str], end: End) -> Self {
@@ -259,6 +263,10 @@ fn serve(stream: TcpStream, shared: &Shared, bearer: &str) {
             let id = format!("fake-request-{:04}", seen.posts.len());
             shared.changed.notify_all();
             drop(seen);
+            if let Some((status, code)) = script.refuse_post {
+                reply(&mut stream, status, &json!({ "error": code }));
+                return;
+            }
             reply(
                 &mut stream,
                 202,
