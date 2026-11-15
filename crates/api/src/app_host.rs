@@ -583,6 +583,9 @@ pub struct Authority<M: ManagedSlot = Unmanaged> {
     /// `(generation, lease_expires_at)` of `session` while the renewal loop has it out on the wire, so the
     /// status never flickers to "absent" during a heartbeat.
     pub session_view: Option<(Option<u64>, Option<f64>)>,
+    /// The renewal holding `session` out on the wire, if any (lane FLK, [`crate::renewal`]): only
+    /// while it stands in may a reader use the preceding snapshot in place of `session`.
+    pub member_flight: Option<crate::renewal::Flight>,
     /// What the app's loops and join recorded for its status (`renewal_error`, the standing
     /// consent's error, last offer and last report).
     pub recorded: crate::app_status::Recorded,
@@ -646,6 +649,7 @@ impl<M: ManagedSlot> Authority<M> {
             swarm,
             session: None,
             session_view: None,
+            member_flight: None,
             windows: Arc::new(PairingWindows::system()),
             seed: None,
             owner_session: None,
@@ -990,16 +994,24 @@ pub fn renew_member(cell: &impl Cell) {
             return Some(None);
         };
         c.session_view = Some((session.generation(), session.lease_expires_at()));
-        Some(Some((c.root.clone(), session)))
+        let flight = crate::renewal::Flight::begin();
+        let id = flight.id;
+        c.member_flight = Some(flight);
+        Some(Some((c.root.clone(), session, id)))
     }) else {
         return;
     };
-    let Some((root, session)) = taken else {
+    let Some((root, session, id)) = taken else {
         cell.try_with(|c| {
             c.recorded
                 .renewal(crate::app_status::RenewalPass::Renewed, true);
         });
         return;
+    };
+    let flight = MemberFlight {
+        cell,
+        id,
+        landed: false,
     };
     let mut session = session;
     let renewed = match identity(&root) {
@@ -1019,15 +1031,57 @@ pub fn renew_member(cell: &impl Cell) {
     if let Err(error) = &renewed {
         eprintln!("member renew: {}", error.code);
     }
-    cell.try_with(|c| {
-        c.session_view = None;
-        if c.session.is_none() {
-            c.session = Some(session);
+    let refused = renewed
+        .as_ref()
+        .err()
+        .is_some_and(|error| crate::renewal::membership_refused(error.code));
+    flight.land(session, refused, renewed.is_ok());
+}
+/// A joined target's renewal flight, owned by [`renew_member`] from its take to its put-back
+/// (lane FLK FLK-02, [`crate::renewal`]).
+struct MemberFlight<'a, C: Cell> {
+    cell: &'a C,
+    id: u64,
+    landed: bool,
+}
+impl<C: Cell> MemberFlight<'_, C> {
+    /// The put-back, only into this same flight (a late pass never overwrites a newer flight or a
+    /// Session installed meanwhile). A Session whose membership the seed refused is not put back.
+    /// The pass is recorded for the status as before.
+    fn land(mut self, session: crate::member::Session, refused: bool, renewed: bool) {
+        let id = self.id;
+        let put_back = self.cell.try_with(|c| {
+            if c.member_flight.as_ref().map(|f| f.id) == Some(id) {
+                c.member_flight = None;
+                c.session_view = None;
+                if c.session.is_none() && !refused {
+                    c.session = Some(session);
+                }
+            }
+            let running_open = c.running && !c.closed;
+            c.recorded.renewal(renewal_pass(renewed), running_open);
+        });
+        // Only once the put-back ran: an unwind inside it, or a poisoned authority that refused
+        // it, still ends the flight in `drop`.
+        self.landed = put_back.is_some();
+    }
+}
+impl<C: Cell> Drop for MemberFlight<'_, C> {
+    /// A pass that never reached its put-back (its thread unwinds): the flight ends without a
+    /// Session (no view, no snapshot standing in), as a missing Session was before the fallback.
+    fn drop(&mut self) {
+        if self.landed {
+            return;
         }
-        let running_open = c.running && !c.closed;
-        c.recorded
-            .renewal(renewal_pass(renewed.is_ok()), running_open);
-    });
+        let id = self.id;
+        // `with`, not `try_with`: a poisoned authority still yields, the flight must end.
+        self.cell.with(|c| {
+            if c.member_flight.as_ref().map(|f| f.id) == Some(id) {
+                c.member_flight = None;
+                c.session_view = None;
+            }
+        });
+    }
 }
 /// Target side of `authority.pair_request()`: one signed, recipient-keyed request, reused
 /// until it expires (authority.py:841-871).

@@ -229,15 +229,23 @@ impl RunHost for PackagedRun {
             relay_absent,
         });
         // Every contributor mutation (including the renewal's take/restore) passes this host.
-        // Keep the preceding lease-bounded snapshot only while its Session is in flight.
+        // Keep the preceding lease-bounded snapshot only while its Session is in a renewal flight
+        // that still stands in (lane FLK, `api::renewal`): a flight that unwound, ran past its
+        // deadline or was refused by the seed leaves no snapshot behind for the local worker.
         if let Some(cell) = &lock(&self.custody).work_session {
             let mut held = lock(cell);
             if closed || left || !authority.running || authority.target || run.contributor.is_none()
             {
                 *held = None;
-            } else if let Some(session) = run.contributor.as_ref().and_then(|m| m.session.as_ref())
-            {
-                *held = Some(session.clone());
+            } else if let Some(member) = run.contributor.as_ref() {
+                match &member.session {
+                    Some(session) => *held = Some(session.clone()),
+                    None if member
+                        .flight
+                        .as_ref()
+                        .is_some_and(api::renewal::Flight::stands_in) => {}
+                    None => *held = None,
+                }
             }
         }
         result

@@ -226,37 +226,47 @@ impl Work {
         &self.host
     }
     fn local(&self, network: &crate::packaged_work::NetworkChoice) -> Result<(), StepError> {
+        // The renewal loop holds the contributor's Session for one seed heartbeat
+        // (`owner_ports::renew_contributor`). For exactly that flight `PackagedRun::with` keeps
+        // the preceding lease-bounded snapshot in the run's work-session cell, which the local
+        // worker's own admission already reads; a registration reads it too, so a renewal in
+        // flight never fails the step that announces work (lane FLK, row 6). The Session, its
+        // flight and the snapshot are read in ONE acquisition (lane FLK patch 2): a flight that
+        // no longer stands in (unwound, past its deadline) answers `member_work_renewing` as a
+        // missing Session did before the fallback; a renewal the seed refused answers its code.
+        let cell = lock(&self.resident).local_session.clone();
         let (root, seed, session, signer, node) = self.host.with(|c| {
             let member = c
                 .run
                 .contributor
                 .as_ref()
                 .ok_or_else(|| refused("member_work_unavailable"))?;
+            let session = match &member.session {
+                Some(session) => session.clone(),
+                None if member
+                    .flight
+                    .as_ref()
+                    .is_some_and(api::renewal::Flight::stands_in) =>
+                {
+                    lock(&cell)
+                        .clone()
+                        .ok_or_else(|| refused("member_work_renewing"))?
+                }
+                None => {
+                    return Err(refused(member.refused.unwrap_or("member_work_renewing")));
+                }
+            };
             Ok::<_, StepError>((
                 owner_ports::contributor_dir(&c.authority.root),
                 c.authority
                     .seed
                     .clone()
                     .ok_or_else(|| refused("owner_exchange_unavailable"))?,
-                member.session.clone(),
+                session,
                 member.signer.clone(),
                 member.node.clone(),
             ))
         })?;
-        // The renewal loop holds the contributor's Session for one seed heartbeat
-        // (`owner_ports::renew_contributor`). For exactly that flight `PackagedRun::with` keeps
-        // the preceding lease-bounded snapshot in the run's work-session cell, which the local
-        // worker's own admission already reads; a registration reads it too, so a renewal in
-        // flight never fails the step that announces work (lane FLK, row 6). No snapshot (the
-        // contributor gone, the host closed or left): still `member_work_renewing`.
-        let session = match session {
-            Some(session) => session,
-            None => {
-                let cell = lock(&self.resident).local_session.clone();
-                let held = lock(&cell).clone();
-                held.ok_or_else(|| refused("member_work_renewing"))?
-            }
-        };
         let row = session
             .shard_identity(&signer, app_host::now())
             .map_err(|_| refused("joined_shard_member_changed"))?;

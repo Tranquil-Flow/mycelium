@@ -334,15 +334,25 @@ fn local_work_session_tracks_renewal_and_contributor_removal() {
         lock(&cell).is_some(),
         "local work must observe enrolled Session, not a lease-frozen clone"
     );
-    let session = f
-        .host
-        .with(|c| c.run.contributor.as_mut().unwrap().session.take());
+    // A renewal's take, as `owner_ports::renew_contributor` records it (lane FLK patch 2).
+    let session = f.host.with(|c| {
+        let m = c.run.contributor.as_mut().unwrap();
+        m.flight = Some(api::renewal::Flight::begin());
+        m.session.take()
+    });
     assert!(
         lock(&cell).is_some(),
         "renewal flight retains the lease-bounded snapshot"
     );
+    // The same Session out with no flight standing in (a renewal that unwound): no snapshot.
+    f.host.with(|c| c.run.contributor.as_mut().unwrap().flight = None);
+    assert!(
+        lock(&cell).is_none(),
+        "a Session out with no renewal flight leaves no snapshot in use"
+    );
     f.host
         .with(|c| c.run.contributor.as_mut().unwrap().session = session);
+    assert!(lock(&cell).is_some(), "the Session back is observed again");
     f.host.with(|c| c.run.contributor = None);
     assert!(
         lock(&cell).is_none(),

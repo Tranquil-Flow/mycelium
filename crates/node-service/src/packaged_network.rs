@@ -126,6 +126,15 @@ fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
     cell.lock().unwrap_or_else(PoisonError::into_inner)
 }
+/// A member renewal pass on the wire ([`Network::renew_member`]): ends on every exit, unwinding
+/// included, and wakes a leave waiting for it.
+struct RenewalPass<'a>(&'a Network);
+impl Drop for RenewalPass<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.renewing) = false;
+        self.0.renewed.notify_all();
+    }
+}
 /// `public_relay.status().get('public_origin')` as the library's authority view reads it.
 struct Origin(Option<String>);
 impl RelayOrigin for Origin {
@@ -251,26 +260,23 @@ impl Network {
     /// over this host's member cell (its seed path, `_left`).
     pub fn renew_member(&self, authority: &Mutex<Authority>) {
         // Marked before the pass reads `_left`: a leave that set it either sees this pass and
-        // waits for it, or this pass sees `_left` and does not start.
+        // waits for it, or this pass sees `_left` and does not start. Cleared by `RenewalPass`'s
+        // drop, so a pass that unwinds never leaves a leave waiting on it (lane FLK, FLK-02).
         *lock(&self.renewing) = true;
+        let _pass = RenewalPass(self);
         app_host::renew_member(&self.cell(authority));
         self.sync_work_session(authority);
         if membership_state(authority).as_deref() != Some("current") {
             self.close_work();
         }
-        *lock(&self.renewing) = false;
-        self.renewed.notify_all();
     }
     /// The leave's `disconnect` after `_left` (member_leave.py:237-252 @ f4e366e9: its
     /// `peer.set_contribution_enabled` takes the lock a renewal holds across its seed round
     /// trip): a pass already on the wire ends first, so no lease moves once the leave answered.
-    /// Bounded by the member seed's request budget (peer.py:117), its heartbeat and answer.
+    /// Bounded by the member seed's request budget (peer.py:117), its heartbeat and answer
+    /// (`api::renewal::allowance`, also a renewal flight's deadline).
     fn await_renewal_pass(&self) {
-        let bound = budgets::BudgetId::PyMyceliumA13MacosPeerRemotemacmemberInitTimeoutL117
-            .span(budgets::Entries::ZERO)
-            .map_or(std::time::Duration::ZERO, |span| {
-                std::time::Duration::from_millis(span.millis()) * 2
-            });
+        let bound = api::renewal::allowance();
         let renewing = lock(&self.renewing);
         let (renewing, _) = self
             .renewed
@@ -936,7 +942,13 @@ impl api::member_agent::MemberHost for PackagedMember {
             let binding = match &a.session {
                 _ if !current => None,
                 Some(session) => api::peer::membership_binding(Some(session)),
-                None if a.session_view.is_some() => {
+                // FLK-02: only a renewal flight that still stands in (not one that unwound or ran
+                // past its deadline: the base closed the work service then, and so does this).
+                None if a
+                    .member_flight
+                    .as_ref()
+                    .is_some_and(api::renewal::Flight::stands_in) =>
+                {
                     api::peer::membership_binding(lock(&self.network.work_session).as_ref())
                 }
                 None => None,
