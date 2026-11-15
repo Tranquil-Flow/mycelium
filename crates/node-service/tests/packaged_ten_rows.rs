@@ -3,27 +3,53 @@
 //! shipped app's own composition (`packaged::core_with_run`, the function `core_with_native_program`
 //! calls) over its own private state root, driven through the window's callbacks as the page drives
 //! them. The joined Mac enrols through the real join path (relay window, claim, approve, poll).
-//! Nothing is replaced except:
 //!
-//! * the run's OBSERVE PORT, by the named [`observe_test_double::HostIdentityTestDouble`]
-//!   (decision U4 / ruling 14: one Mac cannot give two host identities; the double wraps the real
-//!   observation backend and rewrites only each hello answer's `host_id` / `boot_id`);
+//! Native program (lane BND): the PACKAGED `mycelium` executable, for every role (the compiler's and
+//! every stage's `native-worker`, the route's `tokenize`). Its worker roles pass the shipped worker
+//! admission (`desktop::package::admit_worker`), which needs a bundle around the executable, so
+//! the gate stages one (`support/staged_bundle.rs`: the executable named by
+//! `MYCELIUM_TEN_PACKAGED_EXECUTABLE` as `Contents/MacOS/mycelium` plus exactly the pinned payload,
+//! copied from `MYCELIUM_PINNED_PAYLOAD_APP`) and takes the program's identity through the shipped
+//! startup path (`admit_bundle` + `packaged::admitted_native_program`). Both hosts get that one
+//! program as `RunConfig::native_program`, as `core_with_native_program` gives it. The gate REFUSES
+//! to run with `MYCELIUM_COMPILER_NATIVE_BINARY` / `_SHA256` set: no stage worker may come from the
+//! development environment (REPORT-laneTEN W-D2 is gone). `mycelium-node` is not used.
+//!
+//! EVERY substitution (REVIEW-laneTEN-astra F5):
+//!
+//! * host identity: the run's OBSERVE PORT is the named
+//!   [`observe_test_double::HostIdentityTestDouble`] (decision U4 / ruling 14: one Mac cannot give
+//!   two host identities; it wraps the real observation backend and rewrites only each hello
+//!   answer's `host_id` / `boot_id`);
 //! * the model repository's ORIGIN: a loopback server over this Mac's cached Hugging Face snapshot
 //!   (`support/cached_repository.rs`); the acquisition downloads, hashes and verifies every byte;
-//! * the relay: the external provider on a loopback proxy (no `cloudflared`), as every packaged
-//!   pair test; the seed's control plane therefore runs on loopback, while the WORK transport
-//!   (member control, shard source, route carrier) is the app default, bound to this Mac's private
-//!   LAN address (`WorkNetwork::ThisMac`, `api::lan_interface::select`);
-//! * the native program: the packaged `mycelium` executable runs its `native-worker` role only
-//!   inside an admitted bundle and has no `tokenize` role, so the run's `NativeProgram` is the
-//!   development `mycelium-node` (features `metal`) named by `MYCELIUM_TEN_NATIVE_BINARY`, pinned
-//!   here by its own bytes exactly as bundle admission pins the shipped executable.
+//! * the relay: the external provider on a loopback proxy (no `cloudflared`; the relay client lookup
+//!   answers none), as every packaged pair test; the seed's control plane therefore runs on
+//!   loopback, while the WORK transport (member control, shard source, route carrier) is the app
+//!   default, bound to this Mac's private LAN address (`WorkNetwork::ThisMac`);
+//! * the power / thermal / network observer: both hosts get `macs::Permissive` (always external
+//!   power, nominal thermal state, unmetered network), never this Mac's real readings;
+//! * the descriptor sidecar: `support/packaged_repository.rs::sidecar_file`, a generated
+//!   `#!/bin/sh` / `exit 1` stub named in the descriptors, never a real sidecar launch;
+//! * the bootstrap (hello) program: installed into each host's private state straight from the
+//!   document `MYCELIUM_BOOTSTRAP_TEST_CONFIG` names (`admit_hello_program`), not from a bundle;
+//! * entry: both hosts are composed by calling `core_with_run` and driven through the core's
+//!   callbacks, BELOW the shipped entry: no bundle admission of the window process, no launch
+//!   location check, no installer, no window, page or JavaScript;
+//! * the bundle around the native program is staged here (above): not installed under
+//!   `programs/<version>`, not signed, no `Info.plist`; the payload bytes are the pinned ones
+//!   (admission checks them) but come from another app's copy;
+//! * one Mac: both hosts, both stage workers and both state roots share this Mac, its GPU, disk
+//!   and LAN interface (the "LAN" path never leaves the Mac).
 //!
-//! Real: native workers on Metal with the cached Qwen3-0.6B, the compiler and its challenge, the
-//! work transport on the LAN, the startup challenge, the chat service and the run's route.
+//! Real: the packaged executable's worker and tokenizer roles on Metal with the cached
+//! Qwen3-0.6B, the compiler and its challenge, the work transport on the LAN address, the startup
+//! challenge, the chat service and the run's route.
 //!
-//! Run (one model test at a time; see REPORT-laneTEN.md):
-//! `cargo test --offline -p node-service --features "packaged desktop-shell" --test packaged_ten_rows
+//! Run (one model test at a time; see REPORT-laneBND.md for the exact command):
+//! `cargo build --offline --release -p node-service --features packaged --bin mycelium`, then
+//! `MYCELIUM_TEN_PACKAGED_EXECUTABLE=target/release/mycelium MYCELIUM_PINNED_PAYLOAD_APP=<app>
+//!  cargo test --offline -p node-service --features "packaged desktop-shell" --test packaged_ten_rows
 //!  ten_rows_with_the_real_model_on_the_lan -- --exact --ignored --nocapture --test-threads 1`
 #![cfg(feature = "desktop-shell")]
 #[path = "support/cached_repository.rs"]
@@ -34,6 +60,8 @@ mod macs;
 mod observe_test_double;
 #[path = "support/packaged_repository.rs"]
 mod repository;
+#[path = "support/staged_bundle.rs"]
+mod staged;
 use api::m16_route::Codec as _;
 use budgets::{BudgetId as B, Entries, Span};
 use desktop::{
@@ -65,11 +93,11 @@ const CHAT_TOKENS: u64 = 32;
 /// The member's consent: the disk and memory this Mac offers, and the worker wall.
 const STORAGE: u64 = 8_000_000_000;
 const MEMORY: u64 = 8_589_934_592;
-/// The joined Mac's chosen worker wall. 600 s, the wall the owner's own contributor grants itself
-/// (`owner_ports::grant_self_consent`, `MemberChosenWall`): a longer member wall makes the compile
-/// give the owner's own worker the proposal's longer wall (`chain_compile::admit`), above its own
-/// grant, and row 6 refuses `member_wall_cap_below_share` (REPORT-laneTEN D4;
-/// `MYCELIUM_TEN_MEMBER_WALL=3600` reproduces it).
+/// The joined Mac's chosen worker wall: 600 s unless `MYCELIUM_TEN_MEMBER_WALL` says otherwise (the
+/// member's own choice on its join page). The owner's own contributor grants itself 3600 s
+/// (`owner_ports::grant_self_consent`: the standing consent's maximum since REPORT-laneTEN D4,
+/// `815fa5d0`), at least the proposal's wall the compile gives the owner's local worker
+/// (`chain_compile::admit`, 1800 s), so a longer member wall no longer refuses row 6.
 fn wall_seconds() -> u64 {
     std::env::var("MYCELIUM_TEN_MEMBER_WALL")
         .ok()
@@ -244,16 +272,6 @@ fn lan_ip() -> String {
 
 // ------------------------------------------------------------------- hosts -----------------
 
-fn native_program(binary: &Path) -> api::native_compiler::NativeProgram {
-    let bytes = std::fs::read(binary).unwrap();
-    api::native_compiler::NativeProgram {
-        binary: binary.canonicalize().unwrap(),
-        expected: api::compiled_handoff::Pin {
-            bytes: bytes.len() as u64,
-            sha256: protocol::canonical::sha256_prefixed(&bytes)[7..].to_owned(),
-        },
-    }
-}
 fn launch(
     state: &Path,
     repository: &cached::CachedRepository,
@@ -388,6 +406,7 @@ fn pair(
     base: &Path,
     repository: &cached::CachedRepository,
     run: RunConfig,
+    program: &api::native_compiler::NativeProgram,
     ev: &Evidence,
 ) -> (Owner, Mac) {
     let sidecar = repository::sidecar_file(base);
@@ -440,7 +459,12 @@ fn pair(
             sidecar: Some(sidecar),
             ..app_network()
         },
-        RunConfig::default(),
+        // The same app on the joined Mac: its stage worker is the program its own startup
+        // admitted (`core_with_native_program`), never the development environment.
+        RunConfig {
+            native_program: Some(program.clone()),
+            ..RunConfig::default()
+        },
     );
     choose_qwen3(&member);
     let waiting = member.post("/api/join/window", join_body(&member, &owner.link));
@@ -817,21 +841,45 @@ fn stop_row(
 }
 
 #[test]
-#[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_NATIVE_BINARY, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
+#[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
 fn ten_rows_with_the_real_model_on_the_lan() {
     let ev = Evidence::open();
     let _reaper = Reaper(ev.clone());
+    // No stage worker may come from the development environment (REPORT-laneTEN W-D2).
+    for name in [
+        "MYCELIUM_COMPILER_NATIVE_BINARY",
+        "MYCELIUM_COMPILER_NATIVE_SHA256",
+    ] {
+        assert!(
+            std::env::var_os(name).is_none(),
+            "{name} is set: the gate runs the admitted program only"
+        );
+    }
     let lan = lan_ip();
-    let binary = PathBuf::from(
-        std::env::var_os("MYCELIUM_TEN_NATIVE_BINARY")
-            .expect("MYCELIUM_TEN_NATIVE_BINARY = mycelium-node built with --features metal"),
-    );
-    let program = native_program(&binary);
-    ev.note("setup", json!({"lan": lan, "native_program": {"binary": program.binary, "sha256": program.expected.sha256,
-        "bytes": program.expected.bytes}, "member_native_env": std::env::var("MYCELIUM_COMPILER_NATIVE_BINARY").ok(),
+    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "ten-{}",
+        node_service::service::random_id().unwrap()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&base)
+        .unwrap();
+    ev.note("state_root", json!(base));
+    // The packaged executable in a bundle staged around it, admitted as the shipped startup does.
+    let packaged = PathBuf::from(std::env::var_os("MYCELIUM_TEN_PACKAGED_EXECUTABLE").expect(
+        "MYCELIUM_TEN_PACKAGED_EXECUTABLE = the packaged `mycelium` (--features packaged --bin mycelium)",
+    ));
+    let binary = staged::stage(&packaged, &staged::payload_app(), &base);
+    let program = staged::admitted_program(&binary);
+    assert_eq!(program.binary, binary);
+    ev.note("setup", json!({"lan": lan, "packaged_executable": packaged, "staged_executable": binary,
+        "payload_app": staged::payload_app(), "native_program": {"binary": program.binary,
+        "sha256": program.expected.sha256, "bytes": program.expected.bytes},
+        "compiler_native_env": [std::env::var("MYCELIUM_COMPILER_NATIVE_BINARY").ok(),
+            std::env::var("MYCELIUM_COMPILER_NATIVE_SHA256").ok()],
         "pid": std::process::id()}));
-    // The product tokenizer helper over the cached tokenizer: the reference prompt's 35 ids and
-    // the decode of the reference tokens (ledger row 46).
+    // The product tokenizer helper (the packaged executable's `tokenize` role) over the cached
+    // tokenizer: the reference prompt's 35 ids and the decode of the reference tokens (ledger row 46).
     let tokenizer = cached::snapshot_dir().join("tokenizer.json");
     let codec = api::joined_owner::codec::NativeCodec::start(&program.binary, &tokenizer).unwrap();
     let prompt_ids = codec.encode(PROMPT).unwrap();
@@ -845,15 +893,6 @@ fn ten_rows_with_the_real_model_on_the_lan() {
         json!({"prompt_ids": prompt_ids.len(), "challenge_decoded": reference_pieces(&codec, 4)}),
     );
 
-    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "ten-{}",
-        node_service::service::random_id().unwrap()
-    ));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&base)
-        .unwrap();
-    ev.note("state_root", json!(base));
     let repository = cached::CachedRepository::start();
     let (owner, member) = pair(
         &base,
@@ -864,6 +903,7 @@ fn ten_rows_with_the_real_model_on_the_lan() {
             observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
             ..RunConfig::default()
         },
+        &program,
         &ev,
     );
     ev.note(
