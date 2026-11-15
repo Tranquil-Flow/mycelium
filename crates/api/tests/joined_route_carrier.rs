@@ -1312,6 +1312,44 @@ fn product_epoch_streams_chat_over_its_gateway_and_close_frees_the_port() {
         assert_eq!(report["ack_delivered"], true, "{report}");
     }
 }
+/// Lane CAP: the route admits a request only when its prompt plus its new tokens fit every
+/// stage's prepared capacity (the signed route's per-stage `tokens`, here 99; the codec yields 35
+/// ids). One token above it is refused by name before any work: no stage computes, the
+/// single-use epoch is not spent, and the request at exactly the capacity then streams in full.
+#[test]
+fn product_epoch_refuses_a_request_above_a_stages_capacity_by_name_before_any_work() {
+    let s = swarm();
+    let (epoch, members) = product_epoch(&s, &[5, 9, 3, 7]);
+    let capacity = epoch.host().message()["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stage| stage["tokens"].as_u64().unwrap())
+        .min()
+        .unwrap();
+    assert_eq!(capacity, 99, "the fixture's prepared capacity");
+    let prompt = 35;
+    let (status, refused) = post(&epoch, capacity - prompt + 1);
+    assert_eq!(
+        (status, refused["error"].as_str()),
+        (400, Some("joined_route_context_exceeds_worker")),
+        "{refused}"
+    );
+    let (_, rx, reader) = chat(&epoch, capacity - prompt);
+    let all = until_terminal(&rx, usize::MAX);
+    reader.join().unwrap();
+    assert_eq!(all.last().unwrap()["type"], "completed", "{all:?}");
+    assert_eq!(
+        token_ids(&all).len() as u64,
+        capacity - prompt,
+        "the request at exactly the capacity streams in full"
+    );
+    drop(epoch.close());
+    for m in members {
+        let report = m.thread.join().unwrap().unwrap();
+        assert_eq!(report["ack_delivered"], true, "{report}");
+    }
+}
 /// REVIEW-laneB16f FU1 (v0.1.4 parity, `request_gateway/service.py:349,458`): the
 /// epoch gateway caps ADMITTED requests (64, `gateway_capacity_exhausted`), not
 /// open connections. Connections that never send a request (no bearer needed)
