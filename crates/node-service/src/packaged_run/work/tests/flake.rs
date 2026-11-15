@@ -72,6 +72,8 @@ impl Gate {
         }
     }
 }
+/// A renewal thread stopped at its gate, and the sender that releases it.
+type HeldRenewal = (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>);
 /// The bound a test waits for a renewal thread to reach its gate (failure detection only, never
 /// a release): one renewal pass on the wire (`Network::await_renewal_pass`).
 fn gate_bound() -> Duration {
@@ -129,10 +131,7 @@ impl owner_ports::RunHost for HeldContributor {
 }
 /// The owner's contributor renewal (`owner_ports::renew_contributor`, the product's pass) on its
 /// own thread, stopped at its put-back as `mode` says; returns once it is there.
-fn contributor_renewal(
-    f: &Fixture,
-    mode: AtPutBack,
-) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
+fn contributor_renewal(f: &Fixture, mode: AtPutBack) -> HeldRenewal {
     let (gate, at_gate, release) = Gate::new(mode);
     let held = HeldContributor {
         host: f.host.clone(),
@@ -181,10 +180,7 @@ impl app_host::Cell for HeldMember {
 }
 /// The joined Mac's renewal (`app_host::renew_member`, the pass `Network::renew_member` runs) on its
 /// own thread, stopped at its put-back as `mode` says; returns once it is there.
-fn member_renewal(
-    f: &Fixture,
-    mode: AtPutBack,
-) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>) {
+fn member_renewal(f: &Fixture, mode: AtPutBack) -> HeldRenewal {
     let (gate, at_gate, release) = Gate::new(mode);
     let held = HeldMember {
         authority: f.member_authority.clone(),
@@ -666,8 +662,7 @@ fn a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service() 
 fn a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_work_service() {
     let mut f = Fixture::new();
     let (mut ports, mut state, mut env) = composed(&mut f);
-    let started: Arc<Mutex<Option<(std::thread::JoinHandle<()>, std::sync::mpsc::Sender<()>)>>> =
-        Arc::default();
+    let started: Arc<Mutex<Option<HeldRenewal>>> = Arc::default();
     {
         let (authority, network, started) = (
             f.member_authority.clone(),
