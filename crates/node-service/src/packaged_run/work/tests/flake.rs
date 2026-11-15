@@ -288,6 +288,50 @@ fn probe_rows_6_and_7_with_a_real_sized_push() {
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let mut state = run_state(&mut f, &ports);
     let mut env = Env { at: Instant::now() };
+    // With MYCELIUM_FLK_LOOPS=1 the hosts' own loops run beside the run, at the product's periods
+    // (`app_host.rs`: the owner's contributor renewal and the joined Mac's renewal every
+    // `RenewLoopSelfClosedWait` = 20 s, the joined Mac's standing pass every
+    // `StandingLoopSelfClosedWait` = 2 s); otherwise the test ticks the joined Mac's agent itself.
+    let loops = std::env::var("MYCELIUM_FLK_LOOPS").is_ok_and(|v| v == "1");
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut threads = Vec::new();
+    let agent = Arc::new(Mutex::new(std::mem::take(&mut f.agent)));
+    if loops {
+        let every = |id: BudgetId| span(id).unwrap();
+        let pace = |stop: &AtomicBool, period: Duration| {
+            // A loop's period only (as `HostLoop`'s `recv_timeout`); it decides no outcome.
+            let until = Instant::now() + period;
+            while !stop.load(Ordering::SeqCst) && Instant::now() < until {
+                std::thread::sleep(period.min(span(BudgetId::OwnerPoll).unwrap()));
+            }
+            !stop.load(Ordering::SeqCst)
+        };
+        let renew = every(BudgetId::PyMyceliumA13MacosAppDemoappRenewLoopSelfClosedWaitL917);
+        let standing = every(BudgetId::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203);
+        let (host, s1) = (f.host.clone(), stop.clone());
+        threads.push(std::thread::spawn(move || {
+            while pace(&s1, renew) {
+                owner_ports::renew_contributor(&host);
+            }
+        }));
+        let (network, authority, s2) =
+            (f.network.clone(), f.member_authority.clone(), stop.clone());
+        threads.push(std::thread::spawn(move || {
+            while pace(&s2, renew) {
+                network.renew_member(&authority);
+            }
+        }));
+        // The product's own standing pass (`packaged_network::standing_loop`), its own agent.
+        let (mut pass, s3) = (
+            crate::packaged_network::standing_loop(f.member.clone()),
+            stop.clone(),
+        );
+        threads.push(std::thread::spawn(move || {
+            while pace(&s3, standing) {
+                pass();
+            }
+        }));
+    }
     let begun = Instant::now();
     let plan = big_plan(&f, &state, mib << 20);
     let plan_ms = begun.elapsed().as_millis();
@@ -317,7 +361,11 @@ fn probe_rows_6_and_7_with_a_real_sized_push() {
         // The joined Mac's own agent reports its share (the handoff test's tick).
         let until = Instant::now() + span(BudgetId::RouterClose).unwrap() * 15;
         while ports.work.shares_ready().is_err() && Instant::now() < until {
-            f.agent.tick(&f.member);
+            if loops {
+                std::thread::sleep(span(BudgetId::OwnerPoll).unwrap());
+            } else {
+                lock(&agent).tick(&f.member);
+            }
         }
         let publication = ports.publication();
         let seven = owner_run::steps::publish::run_publish_step(
@@ -335,6 +383,12 @@ fn probe_rows_6_and_7_with_a_real_sized_push() {
     let closed = ports.close_work();
     outcome["close_ms"] = json!(begun.elapsed().as_millis());
     outcome["close"] = json!(format!("{closed:?}"));
+    outcome["loops"] = json!(loops);
+    stop.store(true, Ordering::SeqCst);
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    f.agent = std::mem::take(&mut *lock(&agent));
     eprintln!("FLK_OUTCOME {outcome}");
 }
 
