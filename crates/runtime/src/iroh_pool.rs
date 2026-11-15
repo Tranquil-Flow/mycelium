@@ -120,6 +120,8 @@ pub struct ControlCarrierLimits {
 struct ControlCarrier {
     slots: Arc<Semaphore>,
     max_response: usize,
+    /// Calls made through this carrier so far (a failure line names its call number).
+    calls: std::sync::atomic::AtomicU64,
 }
 /// Closes the call's connection on every exit path (sidecar.rs:1428-1436).
 struct ControlConnection(Connection);
@@ -324,6 +326,11 @@ impl<C: Clock + Send + Sync + 'static> Shared<C> {
             .checked_add(call_timeout)
             .ok_or("control_timeout_invalid")?;
         let still_bound = || locked(&self.state).peer_matches(destination, peer.generation);
+        let began = std::time::Instant::now();
+        let call = carrier
+            .calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
         let exchange = async {
             let _permit = tokio::time::timeout_at(deadline, carrier.slots.clone().acquire_owned())
                 .await
@@ -332,13 +339,33 @@ impl<C: Clock + Send + Sync + 'static> Shared<C> {
             if !still_bound() {
                 return Err("peer_rotated");
             }
-            let connection = tokio::time::timeout_at(
+            let connecting = std::time::Instant::now();
+            let connection = match tokio::time::timeout_at(
                 deadline,
-                self.endpoint.connect(address, Channel::NodeControl.alpn()),
+                self.endpoint
+                    .connect(address.clone(), Channel::NodeControl.alpn()),
             )
             .await
-            .map_err(|_| "control_connect_timeout")?
-            .map_err(|_| "control_connect_failed")?;
+            {
+                Ok(Ok(connection)) => connection,
+                failed => {
+                    let code = if failed.is_err() {
+                        "control_connect_timeout"
+                    } else {
+                        "control_connect_failed"
+                    };
+                    crate::iroh_control::connect_failure(
+                        code,
+                        &self.endpoint,
+                        &address,
+                        call,
+                        began.elapsed(),
+                        connecting.elapsed(),
+                        call_timeout,
+                    );
+                    return Err(code);
+                }
+            };
             let connection = ControlConnection(connection);
             if connection.0.remote_id().as_bytes() != &destination {
                 return Err("control_peer_mismatch");
@@ -1039,6 +1066,7 @@ impl<C: Clock + Send + Sync + 'static> PooledRouter<C> {
             .set(ControlCarrier {
                 slots: Arc::new(Semaphore::new(limits.concurrency)),
                 max_response: limits.max_response_bytes,
+                calls: std::sync::atomic::AtomicU64::new(0),
             })
             .is_ok()
     }
