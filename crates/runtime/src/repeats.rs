@@ -64,6 +64,9 @@ impl<K: Eq + Hash + Clone> Repeats<K> {
             return Some(Line::First);
         }
         entry.quiet += 1;
+        if now.saturating_duration_since(entry.printed) < self.period {
+            return None;
+        }
         let repeats = entry.quiet;
         entry.quiet = 0;
         entry.printed = now;
