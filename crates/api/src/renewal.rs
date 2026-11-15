@@ -40,7 +40,7 @@ impl Flight {
     }
     /// Whether the preceding snapshot may stand in for the Session this flight holds.
     pub fn stands_in(&self) -> bool {
-        true
+        Instant::now() < self.deadline
     }
 }
 
@@ -82,6 +82,9 @@ mod tests {
         assert_ne!(a.id, b.id);
         assert!(a.stands_in());
         assert!(a.deadline <= Instant::now() + allowance());
+        let mut aged = a.clone();
+        aged.deadline = Instant::now();
+        assert!(!aged.stands_in(), "past its deadline a flight no longer stands in");
     }
     #[test]
     fn only_a_seed_refusal_of_the_membership_counts_as_refused() {
